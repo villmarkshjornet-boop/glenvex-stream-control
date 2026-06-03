@@ -248,41 +248,77 @@ async function autoRyddKanaler() {
   sisteRyddUke = uke;
 
   const guild = client.guilds.cache.first();
-  if (!guild) return;
+  const chatKanal = finnChatKanal();
+  if (!guild || !chatKanal) return;
 
   const INAKTIV_DAGER = 60;
-  let slettet = 0;
+  const kandidater: { id: string; navn: string; dager: number }[] = [];
 
   for (const [, ch] of guild.channels.cache) {
     if (ch.type !== 0) continue;
     const kanal = ch as TextChannel;
-
     const erBeskyttet = BESKYTTEDE_KANALER.some(n => kanal.name.toLowerCase().includes(n));
     if (erBeskyttet) continue;
 
     try {
       const msgs = await kanal.messages.fetch({ limit: 1 });
       const siste = msgs.first();
-      if (!siste) {
-        await kanal.delete('Auto-rydding: aldri brukt');
-        slettet++;
-        continue;
-      }
-      const dager = Math.floor((Date.now() - siste.createdTimestamp) / 86_400_000);
+      const dager = siste
+        ? Math.floor((Date.now() - siste.createdTimestamp) / 86_400_000)
+        : 999;
       if (dager >= INAKTIV_DAGER) {
-        await kanal.delete(`Auto-rydding: inaktiv i ${dager} dager`);
-        slettet++;
+        kandidater.push({ id: kanal.id, navn: kanal.name, dager });
       }
     } catch {}
   }
 
-  if (slettet > 0) {
-    const chatKanal = finnChatKanal();
-    if (chatKanal) {
-      await chatKanal.send(`🗑️ Ukentlig opprydding fullført – slettet **${slettet}** inaktive kanal${slettet === 1 ? '' : 'er'}.`).catch(() => {});
-    }
-    addLog('info', `Auto-rydding: slettet ${slettet} kanaler`, 'OK');
+  if (kandidater.length === 0) return;
+
+  // Analyser med AI og varsle – ikke slett
+  const apiKey = process.env.OPENAI_API_KEY;
+  let analyse = '';
+  if (apiKey) {
+    const openai = new OpenAI({ apiKey });
+    const liste = kandidater.map(k => `#${k.navn} (${k.dager === 999 ? 'aldri brukt' : `${k.dager} dager inaktiv`})`).join(', ');
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: `Disse Discord-kanalene er inaktive i GLENVEX sitt community: ${liste}. Gi en kort norsk vurdering (maks 2 setninger) av hvilke som ikke trengs og bør fjernes. Vær konkret.` }],
+      max_tokens: 150,
+      temperature: 0.7,
+    });
+    analyse = res.choices[0]?.message?.content ?? '';
   }
+
+  const embed = new EmbedBuilder()
+    .setColor(0xff8800)
+    .setTitle('◆ Ukentlig kanal-analyse')
+    .setDescription(analyse || 'Følgende kanaler ser ut til å ikke være i bruk.')
+    .addFields(
+      kandidater.slice(0, 10).map(k => ({
+        name: `#${k.navn}`,
+        value: k.dager === 999 ? 'Aldri brukt' : `${k.dager} dager siden siste melding`,
+        inline: true,
+      }))
+    )
+    .setFooter({ text: 'Bruk /kanaler rydd for å slette • GLENVEX Stream Control' })
+    .setTimestamp();
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const batch = kandidater.slice(0, 25);
+  for (let i = 0; i < batch.length; i += 5) {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      batch.slice(i, i + 5).map(k =>
+        new ButtonBuilder()
+          .setCustomId(`slett_kanal_${k.id}`)
+          .setLabel(`Slett #${k.navn}`)
+          .setStyle(ButtonStyle.Danger)
+      )
+    );
+    rows.push(row);
+  }
+
+  await chatKanal.send({ embeds: [embed], components: rows });
+  addLog('info', `Kanal-analyse: ${kandidater.length} inaktive kanaler funnet`, 'OK');
 }
 
 // ─── Proaktive meldinger ─────────────────────────────────────────────────────
