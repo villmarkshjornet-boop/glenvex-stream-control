@@ -34,6 +34,7 @@ export default function RPManagerPage() {
   const [loadingBilde, setLoadingBilde] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [resultater, setResultater] = useState<string[] | null>(null);
+  const [feil, setFeil] = useState<string | null>(null);
   const [valgtKanaler, setValgtKanaler] = useState<Set<string>>(new Set());
   const [aktivTab, setAktivTab] = useState<'karakter' | 'server' | 'kanaler'>('karakter');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -54,21 +55,27 @@ export default function RPManagerPage() {
     setLoading(true);
     setGenerert(null);
     setResultater(null);
+    setFeil(null);
     try {
       const res = await fetch('/api/rp/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as Generert;
+      const tekst = await res.text();
+      if (!res.ok) {
+        setFeil(`API feil ${res.status}: ${tekst.slice(0, 200)}`);
+        return;
+      }
+      const data = JSON.parse(tekst) as Generert;
       setGenerert(data);
       setRedigert(data);
-      setValgtKanaler(new Set(data.kanalForslag.map(k => k.id)));
+      setValgtKanaler(new Set((data.kanalForslag ?? []).map(k => k.id)));
     } catch (e) {
-      alert('Feil ved generering: ' + (e as Error).message);
+      setFeil('Nettverksfeil: ' + (e as Error).message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function genererBilde() {
@@ -218,6 +225,12 @@ export default function RPManagerPage() {
             </span>
           ) : '◆ Generer innhold'}
         </button>
+
+        {feil && (
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400 font-mono">
+            ✗ {feil}
+          </div>
+        )}
       </div>
 
       {/* Forhåndsvisning */}
