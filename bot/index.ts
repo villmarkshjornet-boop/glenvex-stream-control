@@ -17,6 +17,7 @@ import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot } from './lib/twitchBot';
+import { topRaids, topGiftSubs } from './lib/eventTracker';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -366,6 +367,17 @@ async function sjekkUkentligStats() {
       kommentar = res.choices[0]?.message?.content ?? '';
     }
 
+    const raids = topRaids(3);
+    const giftSubs = topGiftSubs(3);
+
+    const raidTekst = raids.length > 0
+      ? raids.map((r, i) => `${i + 1}. **${r.username}** – ${r.viewers} seere`).join('\n')
+      : 'Ingen raids denne uken';
+
+    const giftSubTekst = giftSubs.length > 0
+      ? giftSubs.map((g, i) => `${i + 1}. **${g.username}** – ${g.count} subs`).join('\n')
+      : 'Ingen gift subs denne uken';
+
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
       .setTitle('📊 Ukentlig statistikk – GLENVEX')
@@ -374,6 +386,8 @@ async function sjekkUkentligStats() {
         { name: '👥 Følgere', value: stats.followerCount.toLocaleString(), inline: true },
         { name: '🎬 Clips', value: stats.clipCount.toString(), inline: true },
         { name: '🔴 Status', value: stream?.isLive ? 'LIVE NÅ' : 'Offline', inline: true },
+        { name: '🚨 Topp 3 raids', value: raidTekst, inline: false },
+        { name: '🎁 Topp gift-givers', value: giftSubTekst, inline: false },
         { name: '🏆 Topp clips', value: topClipsTekst, inline: false },
       )
       .setFooter({ text: `Uke ${uke} • GLENVEX Stream Control` })

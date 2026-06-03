@@ -10,6 +10,7 @@ const NAV = [
   { label: 'Kommandoer', href: '/kommandoer', icon: '≫' },
   { label: 'Markedsføring', href: '/markedsforing', icon: '⟐' },
   { label: 'AI Assistent', href: '/ai-assistent', icon: '◆' },
+  { label: 'Statistikk', href: '/statistikk', icon: '◎' },
   { label: 'Innstillinger', href: '/innstillinger', icon: '⚙' },
   { label: 'Logs', href: '/logs', icon: '▤' },
   { label: 'Systemstatus', href: '/systemstatus', icon: '⊛' },
