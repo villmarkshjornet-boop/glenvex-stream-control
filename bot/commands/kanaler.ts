@@ -73,7 +73,7 @@ async function handleAnalyse(interaction: ChatInputCommandInteraction) {
   const guild = interaction.guild!;
 
   const linjer: string[] = [];
-  const sorterte = Array.from(guild.channels.cache.values()).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const sorterte = Array.from(guild.channels.cache.values()).sort((a, b) => ((a as any).position ?? 0) - ((b as any).position ?? 0));
   for (const ch of sorterte) {
     if (ch.type === ChannelType.GuildCategory) {
       linjer.push(`[KATEGORI: ${ch.name}]`);
