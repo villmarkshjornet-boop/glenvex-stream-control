@@ -17,8 +17,8 @@ const MELDINGER = {
 
 export async function POST(req: NextRequest) {
   const { type, spill } = await req.json() as { type: '30min' | '15min' | 'live'; spill: string };
-  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
-  if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler' }, { status: 400 });
+  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID || process.env.DISCORD_LIVE_CHANNEL_ID;
+  if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler i Vercel env vars' }, { status: 400 });
 
   const apiKey = process.env.OPENAI_API_KEY;
   let melding = MELDINGER[type]?.(spill) ?? '';

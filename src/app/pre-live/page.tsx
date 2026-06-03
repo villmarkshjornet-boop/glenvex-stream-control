@@ -18,9 +18,9 @@ export default function PreLivePage() {
         body: JSON.stringify({ type, spill }),
       });
       const data = await res.json();
-      setResultater(prev => ({ ...prev, [type]: data.ok ? '✓ Sendt!' : '✗ Feil' }));
-    } catch {
-      setResultater(prev => ({ ...prev, [type]: '✗ Nettverksfeil' }));
+      setResultater(prev => ({ ...prev, [type]: data.ok ? '✓ Sendt!' : `✗ ${data.error ?? 'Feil'}` }));
+    } catch (e) {
+      setResultater(prev => ({ ...prev, [type]: `✗ ${(e as Error).message}` }));
     }
     setSending(null);
   }

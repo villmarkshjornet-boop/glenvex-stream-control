@@ -23,6 +23,7 @@ import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers } from './lib/memberTracker';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
+import { startDataApi } from './lib/dataApi';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -555,6 +556,7 @@ const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 
 client.once('clientReady', () => {
   startTwitchBot();
+  startDataApi(Number(process.env.PORT) || 4242);
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);
