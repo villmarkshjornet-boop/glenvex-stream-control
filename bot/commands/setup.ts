@@ -45,7 +45,7 @@ export const setupCommand = {
     const skipped: string[] = [];
 
     // Create categories first
-    const categoryNames = [...new Set(CHANNELS_TO_CREATE.map(c => c.category))];
+    const categoryNames = Array.from(new Set(CHANNELS_TO_CREATE.map(c => c.category)));
     const categoryMap: Record<string, string> = {};
 
     for (const catName of categoryNames) {
