@@ -70,7 +70,7 @@ export const setupCommand = {
 
     // Create channels
     for (const ch of CHANNELS_TO_CREATE) {
-      const cleanName = ch.name.replace(/[^\w\-・]/gu, '').toLowerCase();
+      const cleanName = ch.name.replace(/[^\w\-]/g, '').toLowerCase();
       const exists = guild.channels.cache.some(c => c.name === ch.name || c.name === cleanName);
 
       if (exists) {
