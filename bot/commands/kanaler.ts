@@ -158,7 +158,7 @@ async function handleRydd(interaction: ChatInputCommandInteraction) {
   const GRENSE_DAGER = 30;
   const inaktive: { id: string; name: string; days: number }[] = [];
 
-  for (const [, ch] of guild.channels.cache) {
+  for (const ch of Array.from(guild.channels.cache.values())) {
     if (ch.type !== ChannelType.GuildText) continue;
     const days = await inaktiveDager(ch as TextChannel);
     if (days >= GRENSE_DAGER) {
