@@ -19,7 +19,8 @@
     "openai": "^4.67.0",
     "react": "^18",
     "react-dom": "^18",
-    "tmi.js": "^1.8.5"
+    "tmi.js": "^1.8.5",
+    "twitter-api-v2": "^1.29.0"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
     type: 'rename' as const,
   }));
 
-  // Generer innhold parallelt
-  const [karakterRes, serverRes, bildeRes] = await Promise.all([
+  // Generer kun tekst (raskt) – bilde genereres separat for å unngå Vercel-timeout
+  const [karakterRes, serverRes] = await Promise.all([
     client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{
@@ -83,21 +83,14 @@ Format: Start med karakterens navn som tittel, deretter rolle, så en engasjeren
       max_tokens: 200,
       temperature: 0.8,
     }),
-    client.images.generate({
-      model: 'dall-e-3',
-      prompt: `GTA RP character portrait, cinematic dark style. Character: ${data.karakterNavn}, ${data.karakterRolle}. ${data.karakterBeskrivelse}. Norwegian RP server ${data.serverNavn}. Dark neon aesthetic, dramatic lighting, no text.`,
-      n: 1,
-      size: '1024x1024',
-      quality: 'standard',
-    }),
   ]);
 
   const generert: RPGenerert = {
     karakterIntro: karakterRes.choices[0]?.message?.content ?? '',
     serverOppdatering: serverRes.choices[0]?.message?.content ?? '',
     kanalForslag,
-    bildePrompt: `${data.karakterNavn} – ${data.karakterRolle}`,
-    bildeUrl: bildeRes.data?.[0]?.url ?? undefined,
+    bildePrompt: `${data.karakterNavn} – ${data.karakterRolle} – ${data.karakterBeskrivelse}`,
+    bildeUrl: undefined,
   };
 
   return NextResponse.json(generert);

@@ -18,6 +18,8 @@ import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot } from './lib/twitchBot';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
+import { tweetLiveNå } from './lib/twitter';
+import { innsendCommand } from './commands/innsend';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -37,7 +39,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
@@ -87,7 +89,8 @@ async function checkLive() {
       addLog('success', `Auto live-varsel postet: ${stream.title}`, 'OK');
       console.log(`  ✓ Live-varsel postet: ${stream.title}`);
 
-      // Analyser stream-tittel og foreslå endringer
+      // Tweet + stream-analyse parallelt
+      tweetLiveNå(stream).catch(() => {});
       await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });

@@ -30,6 +30,7 @@ export default function RPManagerPage() {
   const [generert, setGenerert] = useState<Generert | null>(null);
   const [redigert, setRedigert] = useState<Generert | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingBilde, setLoadingBilde] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [resultater, setResultater] = useState<string[] | null>(null);
   const [valgtKanaler, setValgtKanaler] = useState<Set<string>>(new Set());
@@ -58,6 +59,7 @@ export default function RPManagerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as Generert;
       setGenerert(data);
       setRedigert(data);
@@ -66,6 +68,21 @@ export default function RPManagerPage() {
       alert('Feil ved generering: ' + (e as Error).message);
     }
     setLoading(false);
+  }
+
+  async function genererBilde() {
+    if (!redigert) return;
+    setLoadingBilde(true);
+    try {
+      const res = await fetch('/api/rp/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: redigert.bildePrompt }),
+      });
+      const data = await res.json();
+      if (data.bildeUrl) setRedigert(prev => prev ? { ...prev, bildeUrl: data.bildeUrl } : prev);
+    } catch {}
+    setLoadingBilde(false);
   }
 
   async function publiser() {
@@ -224,12 +241,25 @@ export default function RPManagerPage() {
           <div className="p-5 space-y-4">
             {aktivTab === 'karakter' && (
               <>
-                {(opplastetBilde ?? redigert.bildeUrl) && (
+                {(opplastetBilde ?? redigert.bildeUrl) ? (
                   <img
                     src={opplastetBilde ?? redigert.bildeUrl}
                     alt="Karakterbilde"
                     className="w-full max-h-64 object-cover rounded-lg border border-g-border"
                   />
+                ) : (
+                  <button
+                    onClick={genererBilde}
+                    disabled={loadingBilde}
+                    className="w-full py-2 border border-dashed border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all"
+                  >
+                    {loadingBilde ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
+                        Genererer bilde med DALL-E...
+                      </span>
+                    ) : '◆ Generer karakterbilde med DALL-E'}
+                  </button>
                 )}
                 <textarea
                   value={redigert.karakterIntro}
