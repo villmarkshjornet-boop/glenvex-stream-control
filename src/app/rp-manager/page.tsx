@@ -14,6 +14,7 @@ interface Generert {
   serverOppdatering: string;
   kanalForslag: KanalForslag[];
   bildeUrl?: string;
+  bildePrompt?: string;
 }
 
 export default function RPManagerPage() {
