@@ -22,6 +22,7 @@ import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers } from './lib/memberTracker';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession } from './lib/streamHistory';
+import { tildeltRolle } from './lib/roleManager';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -579,6 +580,15 @@ client.on('messageCreate', async (message) => {
     const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
     if (xpResult?.leveledUp) {
       message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
+
+      // Tildel rolle basert på nytt level
+      if (message.guild && message.member) {
+        tildeltRolle(message.guild, message.member, xpResult.newLevel).then(rolleNavn => {
+          if (rolleNavn) {
+            message.channel.send(`🏅 **${message.author.displayName ?? message.author.username}** fikk rollen **@${rolleNavn}**! 👑`).catch(() => {});
+          }
+        }).catch(() => {});
+      }
     }
     // Smart velkomst (sjelden, for aktive membres)
     if (Math.random() < 0.05) {
