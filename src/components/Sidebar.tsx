@@ -11,6 +11,7 @@ const NAV = [
   { label: 'Markedsføring', href: '/markedsforing', icon: '⟐' },
   { label: 'AI Assistent', href: '/ai-assistent', icon: '◆' },
   { label: 'Statistikk', href: '/statistikk', icon: '◎' },
+  { label: 'RP Manager', href: '/rp-manager', icon: '◉' },
   { label: 'Innstillinger', href: '/innstillinger', icon: '⚙' },
   { label: 'Logs', href: '/logs', icon: '▤' },
   { label: 'Systemstatus', href: '/systemstatus', icon: '⊛' },
