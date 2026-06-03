@@ -102,7 +102,7 @@ export default function QuickActions({ twitchUrl, onRefresh }: Props) {
               disabled={loading}
               className={`flex flex-col items-center gap-2 p-3 rounded border text-xs font-semibold transition-all duration-150 ${
                 done
-                  ? (done as ActionResult).ok
+                  ? (done as unknown as ActionResult).ok
                     ? 'bg-g-green/10 border-g-green/30 text-g-green'
                     : 'bg-red-900/20 border-red-600/30 text-red-400'
                   : 'bg-g-bg border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green hover:bg-g-green/5'
