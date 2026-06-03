@@ -20,6 +20,8 @@ import { startTwitchBot } from './lib/twitchBot';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
+import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers } from './lib/memberTracker';
+import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession } from './lib/streamHistory';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -87,13 +89,15 @@ async function checkLive() {
       await postLiveEmbed(stream, settings);
       saveSettings({ lastNotifiedStreamId: stream.id });
       addLog('success', `Auto live-varsel postet: ${stream.title}`, 'OK');
-      console.log(`  ✓ Live-varsel postet: ${stream.title}`);
-
-      // Tweet + stream-analyse parallelt
+      startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
       tweetLiveNå(stream).catch(() => {});
       await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
+      await postPreLiveHype(stream.title ?? '', stream.game ?? '');
+    } else if (stream.isLive && stream.id) {
+      updateSession(stream.viewerCount ?? 0);
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
+      endSession(0);
     }
   } catch (error) {
     addLog('error', `Live-sjekk feil: ${(error as Error).message}`, 'ERROR');
@@ -328,6 +332,64 @@ async function autoRyddKanaler() {
 
 // ─── Proaktive meldinger ─────────────────────────────────────────────────────
 
+// ─── Pre-Live Hype ───────────────────────────────────────────────────────────
+
+async function postPreLiveHype(tittel: string, spill: string) {
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return;
+  try {
+    const openai = new OpenAI({ apiKey });
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: `GLENVEX starter stream nå med ${spill}: "${tittel}". Lag en kort hype-melding på norsk (maks 2 setninger, energisk, community-fokusert). Ingen emojis i starten.` }],
+      max_tokens: 80,
+      temperature: 0.9,
+    });
+    const melding = res.choices[0]?.message?.content ?? '';
+    if (melding) await kanal.send(`🔴 **GLENVEX ER LIVE!** ${melding}`);
+  } catch {}
+}
+
+// ─── Smart Velkomst tilbake ───────────────────────────────────────────────────
+
+async function smartVelkomst(userId: string, username: string, displayName: string) {
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+
+  const member = getMember(userId);
+  if (!member) return;
+
+  // Cooldown: ikke velkomst innen 24t
+  if (member.lastWelcomed) {
+    const siden = Date.now() - new Date(member.lastWelcomed).getTime();
+    if (siden < 24 * 60 * 60 * 1000) return;
+  }
+
+  // Kun for aktive membres (minst 5 meldinger)
+  if ((member.messages ?? 0) < 5) return;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return;
+
+  try {
+    const openai = new OpenAI({ apiKey });
+    const stats = `Meldinger: ${member.messages}, Subs: ${member.subs}, Streams sett: ${member.streamsWatched}, Level: ${member.level}`;
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: `Lag en kort, personlig velkomst-tilbake-melding på norsk for Discord-brukeren ${displayName}. Stats: ${stats}. Maks 1 setning, naturlig, ikke robotaktig.` }],
+      max_tokens: 60,
+      temperature: 0.9,
+    });
+    const melding = res.choices[0]?.message?.content ?? '';
+    if (melding) {
+      await kanal.send(melding);
+      setLastWelcomed(userId);
+    }
+  } catch {}
+}
+
 async function sendProaktivMelding() {
   const kanal = finnChatKanal();
   if (!kanal) return;
@@ -509,6 +571,20 @@ client.once('clientReady', () => {
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !client.user) return;
+
+  // XP for alle meldinger i guild
+  if (message.guild) {
+    upsertMember(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+    incrementChatMessages();
+    const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+    if (xpResult?.leveledUp) {
+      message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
+    }
+    // Smart velkomst (sjelden, for aktive membres)
+    if (Math.random() < 0.05) {
+      smartVelkomst(message.author.id, message.author.username, message.author.displayName ?? message.author.username).catch(() => {});
+    }
+  }
 
   const erTagget = message.mentions.has(client.user);
   const erIChatKanal = process.env.DISCORD_CHAT_CHANNEL_ID

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
