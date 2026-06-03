@@ -251,6 +251,46 @@ Maks 100 ord. Vær konkret.`,
 
 // ─── Auto-rydd inaktive kanaler ───────────────────────────────────────────────
 
+// ─── Auto-post streamplan ────────────────────────────────────────────────────
+
+async function autoPostStreamplan() {
+  const now = new Date();
+  if (now.getDay() !== 1) return; // Kun mandag
+  const uke = ukeNummer();
+  // Sjekk om vi allerede har postet denne uken
+  const cacheKey = `streamplan_uke_${uke}`;
+  if ((global as any)[cacheKey]) return;
+  (global as any)[cacheKey] = true;
+
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const planFil = path.join(process.cwd(), 'data', 'schedule.json');
+    if (!fs.existsSync(planFil)) return;
+
+    const plan = JSON.parse(fs.readFileSync(planFil, 'utf-8')) as any[];
+    const aktive = plan.filter((d: any) => d.aktiv);
+    if (aktive.length === 0) return;
+
+    const planTekst = aktive.map((d: any) => `**${d.dag}** kl. ${d.tid} – ${d.spill}${d.tittel ? ` – ${d.tittel}` : ''}`).join('\n');
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle('📅 Streamplan denne uken')
+      .setDescription(planTekst)
+      .setFooter({ text: 'GLENVEX Stream Control • Auto Streamplan' })
+      .setTimestamp();
+
+    await kanal.send({ embeds: [embed] });
+    addLog('success', `Streamplan postet automatisk uke ${uke}`, 'OK');
+  } catch (error) {
+    addLog('error', `Streamplan-post feil: ${(error as Error).message}`, 'ERROR');
+  }
+}
+
 async function autoRyddKanaler() {
   const now = new Date();
   if (now.getDay() !== 1) return; // Kun mandag
@@ -568,6 +608,7 @@ client.once('clientReady', () => {
   setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
+  setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
 });
 
 // ─── Meldingslytter ───────────────────────────────────────────────────────────

@@ -52,10 +52,11 @@ const NAV_GRUPPER = [
     ],
   },
   {
-    gruppe: 'VEKST',
+    gruppe: 'PARTNER & VEKST',
     items: [
+      { label: 'Partner Hub', href: '/partner-hub', icon: '◇' },
       { label: 'AI Command Center', href: '/ai-command-center', icon: '◆' },
-      { label: 'Sponsor Manager', href: '/sponsor-manager', icon: '◇' },
+      { label: 'Sponsor Manager', href: '/sponsor-manager', icon: '◎' },
       { label: 'Viewer Goals', href: '/viewer-goals', icon: '◎' },
       { label: 'Statistikk', href: '/statistikk', icon: '◎' },
     ],

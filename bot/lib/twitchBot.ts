@@ -217,6 +217,38 @@ export function startTwitchBot() {
     const melding = DISCORD_MELDINGER[Math.floor(Math.random() * DISCORD_MELDINGER.length)];
     client?.say(`#${KANAL}`, melding).catch(() => {});
   }, 5 * 60 * 1000);
+
+  // ─── Partner auto-promotering i Twitch-chat ───────────────────────────────
+
+  const PARTNER_INTERVAL_MS = 60 * 60 * 1000; // Hver time
+  let sistePartnerPromo = 0;
+
+  setInterval(async () => {
+    if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
+    sistePartnerPromo = Date.now();
+
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const fil = path.join(process.cwd(), 'data', 'partners.json');
+      if (!fs.existsSync(fil)) return;
+
+      const partners = JSON.parse(fs.readFileSync(fil, 'utf-8'));
+      const aktive = partners.filter((p: any) => p.aktiv);
+      if (aktive.length === 0) return;
+
+      // Velg partner basert på prioritet
+      const partner = aktive.sort((a: any, b: any) => b.prioritet - a.prioritet)[
+        Math.floor(Math.random() * Math.min(3, aktive.length))
+      ];
+
+      const melding = partner.rabattkode
+        ? `🤝 Sjekk ut ${partner.navn}! ${partner.beskrivelse} Bruk kode ${partner.rabattkode} for rabatt: ${partner.affiliateLink}`
+        : `🤝 Sponsored by ${partner.navn}: ${partner.beskrivelse} ${partner.affiliateLink}`;
+
+      client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
+    } catch {}
+  }, 15 * 60 * 1000);
 }
 
 export function stopTwitchBot() {
