@@ -16,6 +16,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
+import { startTwitchBot } from './lib/twitchBot';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -473,6 +474,7 @@ const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
 const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 
 client.once('clientReady', () => {
+  startTwitchBot();
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);

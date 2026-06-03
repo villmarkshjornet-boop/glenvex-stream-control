@@ -18,12 +18,14 @@
     "next": "^14.2.35",
     "openai": "^4.67.0",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "tmi.js": "^1.8.5"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/tmi.js": "^1.8.6",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "14.2.5",

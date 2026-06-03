@@ -189,13 +189,14 @@ export async function POST(req: NextRequest) {
       const nyKanal = await createRes.json() as any;
       resultater.push(`✓ Opprettet #${ch.navn}`);
 
-      // Publiser innhold hvis flagget
+      // Publiser innhold i bakgrunnen – ikke vent (unngår Vercel timeout)
       if (ch.publiser) {
-        await publiserKanalInnhold(nyKanal.id, ch, guildId);
-        resultater.push(`  ↳ Innhold publisert i #${ch.navn}`);
+        publiserKanalInnhold(nyKanal.id, ch, guildId).catch(() => {});
+        resultater.push(`  ↳ Innhold publiseres i #${ch.navn}...`);
       }
     } else {
-      resultater.push(`✗ Feil ved opprettelse av #${ch.navn}`);
+      const errBody = await createRes.text().catch(() => '');
+      resultater.push(`✗ Feil ved opprettelse av #${ch.navn}: ${createRes.status} ${errBody.slice(0, 60)}`);
     }
   }
 
