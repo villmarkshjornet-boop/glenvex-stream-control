@@ -11,13 +11,16 @@ interface Channel {
   parent_id?: string;
 }
 
-const CHANNEL_TYPES: Record<number, string> = {
-  0: 'Tekst',
-  2: 'Tale',
-  4: 'Kategori',
-  5: 'Kunngjøring',
-  15: 'Forum',
-};
+interface SlettAction { id: string; navn: string; }
+interface OpprettAction { navn: string; kategori?: string; emne?: string; publiser?: boolean; karakterInfo?: string; }
+interface RenameAction { id: string; fra: string; til: string; }
+
+interface Suggestions {
+  tekst: string;
+  slett: SlettAction[];
+  opprett: OpprettAction[];
+  rename: RenameAction[];
+}
 
 export default function DiscordPage() {
   const [guild, setGuild] = useState<GuildInfo | null>(null);
@@ -25,8 +28,15 @@ export default function DiscordPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [suggestions, setSuggestions] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestions | null>(null);
   const [loadingChannels, setLoadingChannels] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [executeResult, setExecuteResult] = useState<string[] | null>(null);
+
+  // Valgte handlinger
+  const [valgtSlett, setValgtSlett] = useState<Set<string>>(new Set());
+  const [valgtOpprett, setValgtOpprett] = useState<Set<number>>(new Set());
+  const [valgtRename, setValgtRename] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch('/api/status').then(r => r.json()).then(d => {
@@ -51,19 +61,52 @@ export default function DiscordPage() {
   async function hentKanaler() {
     setLoadingChannels(true);
     setSuggestions(null);
+    setExecuteResult(null);
+    setValgtSlett(new Set());
+    setValgtOpprett(new Set());
+    setValgtRename(new Set());
     try {
       const res = await fetch('/api/discord/channels');
       if (res.ok) {
         const data = await res.json();
         setChannels(data.channels ?? []);
-        setSuggestions(data.suggestions ?? null);
+        if (data.suggestions) {
+          setSuggestions(data.suggestions);
+          setValgtSlett(new Set(data.suggestions.slett?.map((s: SlettAction) => s.id) ?? []));
+          setValgtOpprett(new Set(data.suggestions.opprett?.map((_: any, i: number) => i) ?? []));
+          setValgtRename(new Set(data.suggestions.rename?.map((r: RenameAction) => r.id) ?? []));
+        }
       }
     } catch {}
     setLoadingChannels(false);
   }
 
+  async function utforEndringer() {
+    if (!suggestions) return;
+    setExecuting(true);
+    setExecuteResult(null);
+    try {
+      const res = await fetch('/api/discord/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slett: suggestions.slett.filter(s => valgtSlett.has(s.id)),
+          opprett: suggestions.opprett.filter((_, i) => valgtOpprett.has(i)),
+          rename: suggestions.rename.filter(r => valgtRename.has(r.id)),
+        }),
+      });
+      const data = await res.json();
+      setExecuteResult(data.resultater ?? []);
+      await hentKanaler();
+    } catch (e) {
+      setExecuteResult([`✗ Feil: ${(e as Error).message}`]);
+    }
+    setExecuting(false);
+  }
+
   const kategorier = channels.filter(c => c.type === 4);
-  const utenKategori = channels.filter(c => c.type !== 4 && !c.parent_id);
+
+  const harValgte = valgtSlett.size > 0 || valgtOpprett.size > 0 || valgtRename.size > 0;
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
@@ -99,16 +142,14 @@ export default function DiscordPage() {
             </div>
           </div>
         ) : (
-          <p className="text-xs text-g-muted">Ingen Discord-tilkobling. Sjekk DISCORD_BOT_TOKEN og DISCORD_GUILD_ID i .env</p>
+          <p className="text-xs text-g-muted">Ingen Discord-tilkobling.</p>
         )}
       </div>
 
       {/* Kanalstruktur + AI-forslag */}
       <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">
-            Kanalstruktur
-          </h2>
+          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">Kanalstruktur</h2>
           <button
             onClick={hentKanaler}
             disabled={loadingChannels}
@@ -124,52 +165,129 @@ export default function DiscordPage() {
         </div>
 
         {channels.length > 0 && (
-          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+          <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
             {kategorier.map(kat => (
               <div key={kat.id}>
-                <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mt-3 mb-1">
-                  {kat.name}
-                </p>
+                <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mt-3 mb-1">{kat.name}</p>
                 {channels
                   .filter(c => c.parent_id === kat.id)
                   .sort((a, b) => a.position - b.position)
                   .map(ch => (
-                    <div key={ch.id} className="flex items-center gap-2 py-1 pl-3">
-                      <span className="text-g-muted text-xs">
-                        {ch.type === 2 ? '🔊' : '#'}
-                      </span>
+                    <div key={ch.id} className="flex items-center gap-2 py-0.5 pl-3">
+                      <span className="text-g-muted text-xs">{ch.type === 2 ? '🔊' : '#'}</span>
                       <span className="text-xs text-g-text">{ch.name}</span>
-                      <span className="text-[10px] text-g-muted ml-auto">
-                        {CHANNEL_TYPES[ch.type] ?? ''}
-                      </span>
                     </div>
                   ))}
               </div>
             ))}
-            {utenKategori.map(ch => (
-              <div key={ch.id} className="flex items-center gap-2 py-1">
-                <span className="text-g-muted text-xs">#</span>
-                <span className="text-xs text-g-text">{ch.name}</span>
-              </div>
-            ))}
           </div>
         )}
 
+        {/* AI-forslag med checkboxer */}
         {suggestions && (
-          <div className="border-t border-g-border pt-4">
-            <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">
-              ◆ AI-forslag
-            </p>
-            <p className="text-xs text-g-text font-mono whitespace-pre-wrap leading-relaxed">
-              {suggestions}
-            </p>
-          </div>
-        )}
+          <div className="border-t border-g-border pt-4 space-y-4">
+            <p className="text-[10px] text-g-green uppercase tracking-widest font-bold">◆ AI-analyse</p>
+            <p className="text-xs text-g-muted leading-relaxed">{suggestions.tekst}</p>
 
-        {channels.length === 0 && !loadingChannels && (
-          <p className="text-xs text-g-muted">
-            Klikk "Hent + Analyser" for å se kanalstruktur og få AI-forslag.
-          </p>
+            {suggestions.slett?.length > 0 && (
+              <div>
+                <p className="text-[10px] text-red-400 uppercase tracking-widest font-bold mb-2">Bør slettes</p>
+                {suggestions.slett.map(s => (
+                  <label key={s.id} className="flex items-center gap-2 py-1 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={valgtSlett.has(s.id)}
+                      onChange={e => {
+                        const next = new Set(valgtSlett);
+                        e.target.checked ? next.add(s.id) : next.delete(s.id);
+                        setValgtSlett(next);
+                      }}
+                      className="accent-red-400"
+                    />
+                    <span className="text-xs text-g-text font-mono group-hover:text-red-400 transition-colors">#{s.navn}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {suggestions.rename?.length > 0 && (
+              <div>
+                <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold mb-2">Bør omdøpes</p>
+                {suggestions.rename.map(r => (
+                  <label key={r.id} className="flex items-center gap-2 py-1 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={valgtRename.has(r.id)}
+                      onChange={e => {
+                        const next = new Set(valgtRename);
+                        e.target.checked ? next.add(r.id) : next.delete(r.id);
+                        setValgtRename(next);
+                      }}
+                      className="accent-yellow-400"
+                    />
+                    <span className="text-xs text-g-text font-mono group-hover:text-yellow-400 transition-colors">
+                      #{r.fra} → #{r.til}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {suggestions.opprett?.length > 0 && (
+              <div>
+                <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">Bør opprettes</p>
+                {suggestions.opprett.map((o, i) => (
+                  <label key={i} className="flex items-start gap-2 py-1 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={valgtOpprett.has(i)}
+                      onChange={e => {
+                        const next = new Set(valgtOpprett);
+                        e.target.checked ? next.add(i) : next.delete(i);
+                        setValgtOpprett(next);
+                      }}
+                      className="accent-green-400 mt-0.5"
+                    />
+                    <div>
+                      <span className="text-xs text-g-text font-mono group-hover:text-g-green transition-colors">#{o.navn}</span>
+                      {o.kategori && <span className="text-[10px] text-g-muted ml-2">i {o.kategori}</span>}
+                      {o.emne && <p className="text-[10px] text-g-muted mt-0.5">{o.emne}</p>}
+                      {o.publiser && <span className="text-[10px] text-g-green">↳ Publiserer innhold automatisk</span>}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {harValgte && (
+              <button
+                onClick={utforEndringer}
+                disabled={executing}
+                className="w-full py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 hover:border-g-green/40 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all"
+              >
+                {executing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
+                    Utfører endringer...
+                  </span>
+                ) : `◆ Utfør valgte endringer (${valgtSlett.size + valgtOpprett.size + valgtRename.size})`}
+              </button>
+            )}
+
+            {executeResult && (
+              <div className="border border-g-border rounded p-3 space-y-1">
+                {executeResult.map((r, i) => (
+                  <p key={i} className={`text-xs font-mono ${r.startsWith('✓') ? 'text-g-green' : r.startsWith('  ↳') ? 'text-g-muted pl-3' : 'text-red-400'}`}>
+                    {r}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {channels.length === 0 && !loadingChannels && (
+              <p className="text-xs text-g-muted">Klikk "Hent + Analyser" for å se kanalstruktur og få AI-forslag.</p>
+            )}
+          </div>
         )}
       </div>
 
@@ -194,9 +312,6 @@ export default function DiscordPage() {
       {/* Test embed */}
       <div className="bg-g-card border border-g-border rounded-lg p-5">
         <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-3">Test Live Varsel</h2>
-        <p className="text-xs text-g-muted mb-4">
-          Sender en test-embed til live-kanalen. Krever at discordLiveChannelId er satt.
-        </p>
         <button
           onClick={testAlert}
           disabled={testing}
