@@ -12,7 +12,7 @@ import { addLog } from '@/lib/logger';
 import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@/lib/twitch';
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
-import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown } from './lib/aiPersonality';
+import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -257,8 +257,21 @@ client.on('messageCreate', async (message) => {
 
   try {
     await message.channel.sendTyping();
-    const svar = await generateChatReply(message.channelId, message.author.username, tekst);
-    if (svar) await message.reply(svar);
+    const svar: ChatReply = await generateChatReply(message.channelId, message.author.username, tekst);
+
+    if (svar.bildeUrl) {
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff41)
+        .setImage(svar.bildeUrl)
+        .setFooter({ text: 'GLENVEX Bot • AI-generert bilde' });
+
+      await message.reply({
+        content: svar.tekst ?? undefined,
+        embeds: [embed],
+      });
+    } else if (svar.tekst) {
+      await message.reply(svar.tekst);
+    }
   } catch (error) {
     addLog('error', `AI chat feil: ${(error as Error).message}`, 'ERROR');
   }

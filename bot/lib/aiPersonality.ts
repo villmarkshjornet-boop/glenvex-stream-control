@@ -5,6 +5,11 @@ interface Message {
   content: string;
 }
 
+export interface ChatReply {
+  tekst: string | null;
+  bildeUrl: string | null;
+}
+
 const history = new Map<string, Message[]>();
 const cooldowns = new Map<string, number>();
 const MAX_HISTORY = 14;
@@ -16,7 +21,8 @@ Personlighet:
 - Norsk, litt rå og direkte – som en gaming-kompis, ikke en kundeservice-robot
 - Mørk humor, gaming-sjargong, naturlig og ufiltrert tone
 - Genuint engasjert i folka i chatten – husk navn og hva de sier
-- Kjenner spillene GLENVEX spiller: GTA RP, Escape from Tarkov, FPS
+- Kjenner spillene GLENVEX spiller: GTA RP (Future RP), Escape from Tarkov, FPS
+- Kjenner karakteren Mats Haugland: politibetjent på Future RP, regelrytter, galning, kjøreglad, god skytter
 
 Dine oppgaver i samtaler:
 - Engasjer folk – still spørsmål, skryt av dem, kall dem ut (vennlig)
@@ -30,7 +36,18 @@ Regler:
 - Maks 2-3 setninger – vær punchline, ikke roman
 - Bruk emojis naturlig og sparsomt
 - Vær en faktisk kompis, ikke en bot
-- Si ikke at du er en AI med mindre noen spør direkte`;
+- Si ikke at du er en AI med mindre noen spør direkte
+- Hvis du ikke har OpenAI-tilgang, svar med en enkel norsk tekst uansett`;
+
+const BILDE_NOEKKELORD = [
+  'bilde', 'bild', 'bilde av', 'vis meg', 'generer', 'lag et bilde',
+  'image', 'show me', 'tegn', 'draw', 'foto', 'illustrasjon',
+];
+
+export function erBildeForespørsel(melding: string): boolean {
+  const lower = melding.toLowerCase();
+  return BILDE_NOEKKELORD.some(k => lower.includes(k));
+}
 
 export function isOnCooldown(userId: string): boolean {
   const last = cooldowns.get(userId);
@@ -41,20 +58,80 @@ export function setCooldown(userId: string): void {
   cooldowns.set(userId, Date.now());
 }
 
+async function genererBilde(client: OpenAI, prompt: string): Promise<string | null> {
+  try {
+    const response = await client.images.generate({
+      model: 'dall-e-3',
+      prompt: `${prompt}. Dark cinematic style, neon green accents, gaming aesthetic. Norwegian RP community GLENVEX.`,
+      n: 1,
+      size: '1024x1024',
+      quality: 'standard',
+    });
+    return response.data?.[0]?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateChatReply(
   channelId: string,
   username: string,
   message: string
-): Promise<string | null> {
+): Promise<ChatReply> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+
+  // Fallback uten OpenAI
+  if (!apiKey) {
+    return {
+      tekst: `Hei ${username}! Systemet er aktivert men AI-nøkkel mangler. Sjekk Railway-variabler. 🤖`,
+      bildeUrl: null,
+    };
+  }
 
   const client = new OpenAI({ apiKey });
-
   const hist = history.get(channelId) ?? [];
   hist.push({ role: 'user', content: `${username}: ${message}` });
 
+  const erBilde = erBildeForespørsel(message);
+
   try {
+    if (erBilde) {
+      // Generer bildeprompt fra samtalehistorikk
+      const promptRes = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'Lag en kort DALL-E bildeprompt på engelsk (maks 50 ord) basert på brukerens forespørsel. Kun prompt, ingen forklaring.' },
+          { role: 'user', content: `Bruker ber om: ${message}. Kontekst: GLENVEX gaming community, GTA RP, Mats Haugland politibetjent.` },
+        ],
+        max_tokens: 80,
+        temperature: 0.7,
+      });
+
+      const bildePrompt = promptRes.choices[0]?.message?.content ?? message;
+      const [bildeUrl, svarRes] = await Promise.all([
+        genererBilde(client, bildePrompt),
+        client.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...hist,
+            { role: 'user', content: 'Kommenter kort at du genererer bildet de ba om (1 setning, norsk).' },
+          ],
+          max_tokens: 80,
+          temperature: 0.9,
+        }),
+      ]);
+
+      const tekst = svarRes.choices[0]?.message?.content ?? null;
+      if (tekst) {
+        hist.push({ role: 'assistant', content: tekst });
+        history.set(channelId, hist.slice(-MAX_HISTORY));
+      }
+
+      return { tekst, bildeUrl };
+    }
+
+    // Vanlig tekstsvar
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...hist],
@@ -67,9 +144,13 @@ export async function generateChatReply(
       hist.push({ role: 'assistant', content: reply });
       history.set(channelId, hist.slice(-MAX_HISTORY));
     }
-    return reply;
-  } catch {
-    return null;
+
+    return { tekst: reply, bildeUrl: null };
+  } catch (err) {
+    return {
+      tekst: `Noe gikk galt der, prøv igjen 😅`,
+      bildeUrl: null,
+    };
   }
 }
 
