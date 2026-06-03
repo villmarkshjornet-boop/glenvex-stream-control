@@ -93,7 +93,8 @@ export default function QuickActions({ twitchUrl, onRefresh }: Props) {
         {actions.map((action) => {
           const result = results[action.key];
           const loading = result === 'loading';
-          const done = result && result !== 'loading';
+          const actionResult: ActionResult | null =
+            result !== undefined && result !== 'loading' ? result : null;
 
           return (
             <button
@@ -101,8 +102,8 @@ export default function QuickActions({ twitchUrl, onRefresh }: Props) {
               onClick={() => runAction(action.key, action.fn)}
               disabled={loading}
               className={`flex flex-col items-center gap-2 p-3 rounded border text-xs font-semibold transition-all duration-150 ${
-                done
-                  ? (done as unknown as ActionResult).ok
+                actionResult
+                  ? actionResult.ok
                     ? 'bg-g-green/10 border-g-green/30 text-g-green'
                     : 'bg-red-900/20 border-red-600/30 text-red-400'
                   : 'bg-g-bg border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green hover:bg-g-green/5'
@@ -114,9 +115,7 @@ export default function QuickActions({ twitchUrl, onRefresh }: Props) {
                 <span className="text-base">{action.icon}</span>
               )}
               <span className="text-center leading-tight">
-                {done && done !== 'loading'
-                  ? (done as ActionResult).message.slice(0, 20)
-                  : action.label}
+                {actionResult ? actionResult.message.slice(0, 20) : action.label}
               </span>
             </button>
           );

@@ -78,7 +78,7 @@ async function generatePromoImage(client: OpenAI, stream: StreamInfo): Promise<s
       size: '1024x1024',
       quality: 'standard',
     });
-    return response.data[0]?.url ?? undefined;
+    return response.data?.[0]?.url ?? undefined;
   } catch {
     return undefined;
   }
