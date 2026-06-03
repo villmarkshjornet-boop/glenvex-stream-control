@@ -1,5 +1,8 @@
-import { Client, GatewayIntentBits, Collection, Interaction, TextChannel } from 'discord.js';
-import { EmbedBuilder } from 'discord.js';
+import {
+  Client, GatewayIntentBits, Collection, Interaction,
+  TextChannel, EmbedBuilder, ActionRowBuilder, ButtonBuilder,
+  ButtonStyle, ThreadChannel, ButtonInteraction,
+} from 'discord.js';
 import { liveCommand } from './commands/live';
 import { twitchCommand } from './commands/twitch';
 import { promoCommand } from './commands/promo';
@@ -27,6 +30,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
   ],
 });
 
@@ -35,9 +39,16 @@ for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statu
   commands.set(cmd.data.name, cmd);
 }
 
-// Holder styr på hvilke clips som er postet og hvilken uke stats er postet
 const postedeClips = new Set<string>();
 let sisteStatsukeNr = -1;
+let sisteRyddUke = -1;
+
+// Kanaler som aldri skal slettes automatisk
+const BESKYTTEDE_KANALER = [
+  'live', 'chat', 'general', 'general', 'regler', 'rules', 'info',
+  'velkomst', 'welcome', 'kunngjøring', 'annonsering', 'bot-logs',
+  'nyheter', 'highlights', 'klipp',
+];
 
 // ─── Hjelpefunksjoner ────────────────────────────────────────────────────────
 
@@ -60,18 +71,22 @@ function ukeNummer(): number {
   return Math.ceil(((now.getTime() - start.getTime()) / 86_400_000 + start.getDay() + 1) / 7);
 }
 
-// ─── Live-sjekk ─────────────────────────────────────────────────────────────
+// ─── Live-sjekk med stream-analyse ───────────────────────────────────────────
 
 async function checkLive() {
   try {
     const settings = getSettings();
     if (!settings.autoPostLive) return;
     const stream = await getStreamInfo();
+
     if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId) {
       await postLiveEmbed(stream, settings);
       saveSettings({ lastNotifiedStreamId: stream.id });
       addLog('success', `Auto live-varsel postet: ${stream.title}`, 'OK');
       console.log(`  ✓ Live-varsel postet: ${stream.title}`);
+
+      // Analyser stream-tittel og foreslå endringer
+      await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
     }
@@ -80,56 +95,209 @@ async function checkLive() {
   }
 }
 
+// ─── Stream-kontekst analyse ─────────────────────────────────────────────────
+
+async function analyserStreamKontekst(tittel: string, spill: string) {
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return;
+
+  const combined = `${tittel} ${spill}`.toLowerCase();
+
+  // Detekter GTA RP / Future RP
+  const erFutureRP = combined.includes('future') || combined.includes('future rp') || combined.includes('frp');
+  const erGTARP = combined.includes('gta rp') || combined.includes('gtarp') || combined.includes('nopixel') || combined.includes('nxt') || combined.includes('rp');
+  const erTarkov = combined.includes('tarkov') || combined.includes('eft');
+
+  if (!erFutureRP && !erGTARP && !erTarkov) return;
+
+  try {
+    const openai = new OpenAI({ apiKey });
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `GLENVEX er nå live med tittel: "${tittel}" og spill: "${spill}".
+Lag en kort norsk melding (2 setninger) til Discord-chatten som:
+1. Nevner spillet/serveren naturlig
+2. Spør om de vil oppdatere Discord-strukturen for dette spillet (f.eks. legge til ${erFutureRP ? 'Future RP' : 'GTA RP'}-kanaler, fjerne utdaterte)
+
+Vær direkte og engasjerende.`,
+      }],
+      max_tokens: 120,
+      temperature: 0.8,
+    });
+
+    const melding = res.choices[0]?.message?.content ?? '';
+    if (!melding) return;
+
+    const serverNavn = erFutureRP ? 'Future RP' : erTarkov ? 'Escape from Tarkov' : 'GTA RP';
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle(`◆ Stream detektert – ${serverNavn}`)
+      .setDescription(melding)
+      .setFooter({ text: 'GLENVEX Stream Control • Smart Live-deteksjon' });
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`stream_opprett_karakter_${serverNavn.replace(/ /g, '_')}`)
+        .setLabel('Opprett karakter')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`stream_oppdater_discord_${serverNavn.replace(/ /g, '_')}`)
+        .setLabel('Oppdater Discord')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('stream_ignorer')
+        .setLabel('Ignorer')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    await kanal.send({ embeds: [embed], components: [row] });
+  } catch {}
+}
+
+// ─── Håndter stream-kontekst knapper ─────────────────────────────────────────
+
+async function handleStreamKnapp(interaction: ButtonInteraction) {
+  const { customId } = interaction;
+
+  if (customId === 'stream_ignorer') {
+    return interaction.update({ components: [] });
+  }
+
+  if (customId.startsWith('stream_opprett_karakter_')) {
+    const server = customId.replace('stream_opprett_karakter_', '').replace(/_/g, ' ');
+    await interaction.update({ components: [] });
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+
+    const openai = new OpenAI({ apiKey });
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `GLENVEX streamer ${server}. Foreslå 2-3 karakternavn og roller som passer for en norsk ${server}-server. Format: Navn – Rolle (1 linje per karakter). Norsk. Maks 50 ord.`,
+      }],
+      max_tokens: 100,
+      temperature: 0.9,
+    });
+
+    const forslag = res.choices[0]?.message?.content ?? '';
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle('◆ Karakterforslag')
+      .setDescription(`Her er noen karakterforslag for **${server}**:\n\n${forslag}\n\nVil du opprette en kanal for en av disse? Bruk \`/kanaler opprett\``)
+      .setFooter({ text: 'GLENVEX Stream Control' });
+
+    await interaction.followUp({ embeds: [embed], ephemeral: false });
+  }
+
+  if (customId.startsWith('stream_oppdater_discord_')) {
+    const server = customId.replace('stream_oppdater_discord_', '').replace(/_/g, ' ');
+    await interaction.update({ components: [] });
+
+    const guild = interaction.guild;
+    if (!guild) return;
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+
+    const openai = new OpenAI({ apiKey });
+    const kanaler = Array.from(guild.channels.cache.values())
+      .filter(c => c.type === 0)
+      .map((c: any) => `#${c.name}`)
+      .join(', ');
+
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Discord-server for GLENVEX streamer nå ${server}. Nåværende kanaler: ${kanaler}.
+Foreslå på norsk:
+1. Hvilke kanaler bør fjernes (utdaterte/irrelevante for ${server})?
+2. Hvilke kanaler bør legges til for ${server}?
+Maks 100 ord. Vær konkret.`,
+      }],
+      max_tokens: 150,
+      temperature: 0.7,
+    });
+
+    const forslag = res.choices[0]?.message?.content ?? '';
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle(`◆ Discord-oppdatering for ${server}`)
+      .setDescription(forslag + '\n\nBruk **Discord**-fanen i dashboardet for å utføre endringene.')
+      .setFooter({ text: 'GLENVEX Stream Control' });
+
+    await interaction.followUp({ embeds: [embed], ephemeral: false });
+  }
+}
+
+// ─── Auto-rydd inaktive kanaler ───────────────────────────────────────────────
+
+async function autoRyddKanaler() {
+  const now = new Date();
+  if (now.getDay() !== 1) return; // Kun mandag
+  const uke = ukeNummer();
+  if (uke === sisteRyddUke) return;
+  sisteRyddUke = uke;
+
+  const guild = client.guilds.cache.first();
+  if (!guild) return;
+
+  const INAKTIV_DAGER = 60;
+  let slettet = 0;
+
+  for (const [, ch] of guild.channels.cache) {
+    if (ch.type !== 0) continue;
+    const kanal = ch as TextChannel;
+
+    const erBeskyttet = BESKYTTEDE_KANALER.some(n => kanal.name.toLowerCase().includes(n));
+    if (erBeskyttet) continue;
+
+    try {
+      const msgs = await kanal.messages.fetch({ limit: 1 });
+      const siste = msgs.first();
+      if (!siste) {
+        await kanal.delete('Auto-rydding: aldri brukt');
+        slettet++;
+        continue;
+      }
+      const dager = Math.floor((Date.now() - siste.createdTimestamp) / 86_400_000);
+      if (dager >= INAKTIV_DAGER) {
+        await kanal.delete(`Auto-rydding: inaktiv i ${dager} dager`);
+        slettet++;
+      }
+    } catch {}
+  }
+
+  if (slettet > 0) {
+    const chatKanal = finnChatKanal();
+    if (chatKanal) {
+      await chatKanal.send(`🗑️ Ukentlig opprydding fullført – slettet **${slettet}** inaktive kanal${slettet === 1 ? '' : 'er'}.`).catch(() => {});
+    }
+    addLog('info', `Auto-rydding: slettet ${slettet} kanaler`, 'OK');
+  }
+}
+
 // ─── Proaktive meldinger ─────────────────────────────────────────────────────
 
 async function sendProaktivMelding() {
   const kanal = finnChatKanal();
   if (!kanal) return;
-  try {
-    await kanal.send(getProaktivMelding());
-  } catch {}
-}
-
-// ─── Automatisk clip-deling ──────────────────────────────────────────────────
-
-async function postTopClip() {
-  const kanal = finnChatKanal();
-  if (!kanal) return;
-
-  try {
-    const broadcasterId = await getBroadcasterId();
-    if (!broadcasterId) return;
-
-    const clips = await getTopClips(broadcasterId, 10);
-    const nyClip = clips.find(c => !postedeClips.has(c.id));
-    if (!nyClip) return;
-
-    postedeClips.add(nyClip.id);
-
-    const embed = new EmbedBuilder()
-      .setColor(0x00ff41)
-      .setTitle(`🎬 ${nyClip.title}`)
-      .setDescription(`En av ukens beste clips fra GLENVEX sin stream!\n\n👀 **${nyClip.viewCount}** visninger • ⏱️ ${Math.round(nyClip.duration)}s\n\n[Se clipsen her](${nyClip.url})`)
-      .setImage(nyClip.thumbnailUrl)
-      .setFooter({ text: 'GLENVEX Stream Control • Auto Clip' })
-      .setTimestamp();
-
-    await kanal.send({
-      content: '🔥 Har dere sett denne clipsen? Ta den videre hvis dere synes den er bra!',
-      embeds: [embed],
-    });
-
-    addLog('success', `Clip postet: ${nyClip.title}`, 'OK');
-  } catch (error) {
-    addLog('error', `Clip-post feil: ${(error as Error).message}`, 'ERROR');
-  }
+  try { await kanal.send(getProaktivMelding()); } catch {}
 }
 
 // ─── Ukentlig statistikk ─────────────────────────────────────────────────────
 
 async function sjekkUkentligStats() {
   const now = new Date();
-  if (now.getDay() !== 0) return; // Kun søndag
+  if (now.getDay() !== 0) return;
   const uke = ukeNummer();
   if (uke === sisteStatsukeNr) return;
   sisteStatsukeNr = uke;
@@ -154,10 +322,7 @@ async function sjekkUkentligStats() {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{
-          role: 'user',
-          content: `Du er GLENVEX BOT. Skriv én kort, energisk norsk setning (maks 15 ord) som oppsummerer denne uken for GLENVEX-communityet. Følgere: ${stats.followerCount}. Clips: ${stats.clipCount}. Vær hype og motiverende.`,
-        }],
+        messages: [{ role: 'user', content: `Du er GLENVEX BOT. Skriv én kort, energisk norsk setning (maks 15 ord) som oppsummerer uken. Følgere: ${stats.followerCount}. Clips: ${stats.clipCount}.` }],
         max_tokens: 60,
         temperature: 0.9,
       });
@@ -167,10 +332,10 @@ async function sjekkUkentligStats() {
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
       .setTitle('📊 Ukentlig statistikk – GLENVEX')
-      .setDescription(kommentar || 'Enda en uke i boken – takk for støtten!')
+      .setDescription(kommentar || 'Enda en uke i boken!')
       .addFields(
         { name: '👥 Følgere', value: stats.followerCount.toLocaleString(), inline: true },
-        { name: '🎬 Clips denne uken', value: stats.clipCount.toString(), inline: true },
+        { name: '🎬 Clips', value: stats.clipCount.toString(), inline: true },
         { name: '🔴 Status', value: stream?.isLive ? 'LIVE NÅ' : 'Offline', inline: true },
         { name: '🏆 Topp clips', value: topClipsTekst, inline: false },
       )
@@ -184,6 +349,34 @@ async function sjekkUkentligStats() {
   }
 }
 
+// ─── Clip-deling ─────────────────────────────────────────────────────────────
+
+async function postTopClip() {
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+  try {
+    const broadcasterId = await getBroadcasterId();
+    if (!broadcasterId) return;
+    const clips = await getTopClips(broadcasterId, 10);
+    const nyClip = clips.find(c => !postedeClips.has(c.id));
+    if (!nyClip) return;
+    postedeClips.add(nyClip.id);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle(`🎬 ${nyClip.title}`)
+      .setDescription(`👀 **${nyClip.viewCount}** visninger • ⏱️ ${Math.round(nyClip.duration)}s\n\n[Se clipsen her](${nyClip.url})`)
+      .setImage(nyClip.thumbnailUrl)
+      .setFooter({ text: 'GLENVEX Stream Control • Auto Clip' })
+      .setTimestamp();
+
+    await kanal.send({ content: '🔥 Har dere sett denne clipsen?', embeds: [embed] });
+    addLog('success', `Clip postet: ${nyClip.title}`, 'OK');
+  } catch (error) {
+    addLog('error', `Clip-post feil: ${(error as Error).message}`, 'ERROR');
+  }
+}
+
 // ─── Velkomstmelding ─────────────────────────────────────────────────────────
 
 client.on('guildMemberAdd', async (member) => {
@@ -191,20 +384,17 @@ client.on('guildMemberAdd', async (member) => {
   if (!kanal) return;
 
   const apiKey = process.env.OPENAI_API_KEY;
-  let velkomst = `Yo **${member.displayName}**, velkommen til GLENVEX sitt community! 🎮 Sjekk ut twitch.tv/glenvex og slå på varslinger – du vil ikke gå glipp av dette. Sig gjerne hei i chatten! 👋`;
+  let velkomst = `Hei **${member.displayName}**, velkommen til GLENVEX sitt community! Sjekk twitch.tv/glenvex og slå på varslinger.`;
 
   if (apiKey) {
     try {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{
-          role: 'system',
-          content: 'Du er GLENVEX BOT. Skriv en kort, varm og energisk velkomstmelding på norsk til et nytt Discord-medlem. Nevn at de bør følge twitch.tv/glenvex. Maks 2 setninger. Bruk brukernavnet.',
-        }, {
-          role: 'user',
-          content: `Nytt medlem: ${member.displayName}`,
-        }],
+        messages: [
+          { role: 'system', content: 'Du er GLENVEX BOT. Skriv en kort, varm og energisk velkomstmelding på norsk. Nevn twitch.tv/glenvex. Maks 2 setninger.' },
+          { role: 'user', content: `Nytt medlem: ${member.displayName}` },
+        ],
         max_tokens: 100,
         temperature: 0.9,
       });
@@ -212,17 +402,39 @@ client.on('guildMemberAdd', async (member) => {
     } catch {}
   }
 
+  try { await kanal.send(velkomst); } catch {}
+});
+
+// ─── Tråd-deltakelse ──────────────────────────────────────────────────────────
+
+client.on('threadCreate', async (thread: ThreadChannel) => {
   try {
-    await kanal.send(velkomst);
+    await thread.join();
+    const apiKey = process.env.OPENAI_API_KEY;
+    let melding = `Ny tråd – jeg er med! Hva diskuterer vi? 👀`;
+
+    if (apiKey) {
+      const openai = new OpenAI({ apiKey });
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: `Skriv en kort, engasjerende norsk hilsen (1 setning) for en ny Discord-tråd ved navn: "${thread.name}". Gaming-vibe, GLENVEX community.` }],
+        max_tokens: 60,
+        temperature: 0.9,
+      });
+      melding = res.choices[0]?.message?.content ?? melding;
+    }
+
+    await thread.send(melding);
   } catch {}
 });
 
 // ─── Schedulers ──────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL       = 2  * 60 * 1000;
-const PROAKTIV_INTERVAL   = 4  * 60 * 60 * 1000;
-const CLIP_INTERVAL       = 12 * 60 * 60 * 1000;
-const STATS_SJEKK_INTERVAL = 6 * 60 * 60 * 1000;
+const POLL_INTERVAL        = 2  * 60 * 1000;
+const PROAKTIV_INTERVAL    = 4  * 60 * 60 * 1000;
+const CLIP_INTERVAL        = 12 * 60 * 60 * 1000;
+const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
+const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 
 client.once('clientReady', () => {
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
@@ -235,9 +447,10 @@ client.once('clientReady', () => {
   setTimeout(() => { sendProaktivMelding(); setInterval(sendProaktivMelding, PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
+  setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
 });
 
-// ─── Meldingslytter (AI chat) ─────────────────────────────────────────────────
+// ─── Meldingslytter ───────────────────────────────────────────────────────────
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !client.user) return;
@@ -246,8 +459,9 @@ client.on('messageCreate', async (message) => {
   const erIChatKanal = process.env.DISCORD_CHAT_CHANNEL_ID
     ? message.channelId === process.env.DISCORD_CHAT_CHANNEL_ID
     : false;
+  const erITrad = message.channel instanceof ThreadChannel;
 
-  if (!erTagget && !erIChatKanal) return;
+  if (!erTagget && !erIChatKanal && !erITrad) return;
   if (isOnCooldown(message.author.id)) return;
 
   const tekst = message.content.replace(/<@!?[\d]+>/g, '').trim();
@@ -265,10 +479,7 @@ client.on('messageCreate', async (message) => {
         .setImage(svar.bildeUrl)
         .setFooter({ text: 'GLENVEX Bot • AI-generert bilde' });
 
-      await message.reply({
-        content: svar.tekst ?? undefined,
-        embeds: [embed],
-      });
+      await message.reply({ content: svar.tekst ?? undefined, embeds: [embed] });
     } else if (svar.tekst) {
       await message.reply(svar.tekst);
     }
@@ -283,6 +494,11 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('slett_kanal_')) {
       await handleSlettKanalKnapp(interaction).catch(console.error);
+      return;
+    }
+    if (interaction.customId.startsWith('stream_')) {
+      await handleStreamKnapp(interaction).catch(console.error);
+      return;
     }
     return;
   }
