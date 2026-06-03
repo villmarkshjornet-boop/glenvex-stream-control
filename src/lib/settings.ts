@@ -59,5 +59,7 @@ function buildDefaults(): Settings {
 }
 
 function writeSettingsFile(settings: Settings): void {
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch {}
 }

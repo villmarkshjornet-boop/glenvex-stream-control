@@ -7,10 +7,15 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
 const MAX_LOGS = 500;
 
+const READ_ONLY_FS = process.env.VERCEL === '1';
+
 function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+  if (READ_ONLY_FS) return;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {}
 }
 
 export function getLogs(): LogEntry[] {
@@ -42,7 +47,9 @@ export function addLog(
   if (logs.length > MAX_LOGS) {
     logs.splice(MAX_LOGS);
   }
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(logs, null, 2), 'utf-8');
+  try {
+    fs.writeFileSync(LOGS_FILE, JSON.stringify(logs, null, 2), 'utf-8');
+  } catch {}
   return entry;
 }
 
