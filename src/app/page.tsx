@@ -279,26 +279,55 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── AI Prioriteter ──────────────────────────────────────────── */}
-      {(scores?.prioriteter?.length ?? 0) > 0 && (
-        <div className="bg-g-card border border-g-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-xs font-bold text-g-text">◆ AI Vekstanbefalinger denne uken</p>
-              <p className="text-[9px] text-g-muted">Basert på followers, aktivitet og community-data</p>
-            </div>
-            <Link href="/ai-command-center" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Full analyse →</Link>
+      {/* ── AI Vekstanalyse ─────────────────────────────────────────── */}
+      <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-g-text">◆ AI Vekstanalyse</p>
+            <p className="text-[9px] text-g-muted">Konkrete tips for å få flere følgere, seere og subscribers – basert på din stream og Discord</p>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {scores!.prioriteter.slice(0, 4).map((p, i) => (
-              <div key={i} className="flex items-start gap-2 p-3 bg-g-bg border border-g-border rounded-lg">
-                <span className="text-g-green font-black font-mono text-sm w-4 flex-shrink-0">{i + 1}</span>
+          <Link href="/ai-command-center" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Full analyse →</Link>
+        </div>
+
+        {!scores ? (
+          <div className="grid grid-cols-3 gap-2">
+            {[1,2,3].map(i => (
+              <div key={i} className="p-3 bg-g-bg border border-g-border rounded-lg animate-pulse">
+                <div className="h-3 bg-g-border rounded w-4 mb-2" />
+                <div className="h-2 bg-g-border rounded w-full mb-1" />
+                <div className="h-2 bg-g-border rounded w-3/4" />
+              </div>
+            ))}
+          </div>
+        ) : (scores.prioriteter?.length ?? 0) === 0 ? (
+          <p className="text-xs text-g-muted">Henter anbefalinger... Oppdaterer om et øyeblikk.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {scores.prioriteter.slice(0, 3).map((p, i) => (
+              <div key={i} className="flex items-start gap-3 p-4 bg-g-bg border border-g-border rounded-xl hover:border-g-green/20 transition-all">
+                <div className="w-6 h-6 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-g-green font-black font-mono text-xs">{i + 1}</span>
+                </div>
                 <p className="text-xs text-g-text leading-relaxed">{p}</p>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+
+        {scores && (scores.prioriteter?.length ?? 0) > 3 && (
+          <div className="border-t border-g-border/40 pt-3">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Ytterligere anbefalinger</p>
+            <div className="space-y-1.5">
+              {scores.prioriteter.slice(3).map((p, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-g-green text-xs mt-0.5 flex-shrink-0">·</span>
+                  <p className="text-xs text-g-muted">{p}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── Hurtighandlinger ─────────────────────────────────────────── */}
       <div>
