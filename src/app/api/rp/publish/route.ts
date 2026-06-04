@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     chatKanalId?: string;
     karakterNavn: string;
     serverNavn: string;
+    gammelMsgId?: string;
   };
 
   const guildId = process.env.DISCORD_GUILD_ID;
@@ -82,7 +83,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3. Post karakterintro i karakterkanal
+  // 3. Slett gammel melding hvis den finnes (unngå duplikat)
+  if (karakterKanalId && body.gammelMsgId) {
+    await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages/${body.gammelMsgId}`, {
+      method: 'DELETE',
+      headers: botHeaders(),
+    }).catch(() => {});
+    resultater.push(`↳ Slettet gammel Discord-melding`);
+  }
+
+  // 4. Post karakterintro i karakterkanal
   if (karakterKanalId && body.karakterIntro) {
     const embed: any = {
       title: `◆ ${body.karakterNavn.toUpperCase()}`,
