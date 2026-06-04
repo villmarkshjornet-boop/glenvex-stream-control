@@ -133,17 +133,39 @@ export default function ViewerGoalsPage() {
 
       {/* OBS Overlay */}
       {overlayUrl && (
-        <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-3">
+        <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">
           <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">◆ OBS Browser Source</p>
-          <p className="text-xs text-g-muted">Legg inn denne URL-en i OBS som Browser Source for å vise goals på stream:</p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs text-g-green font-mono bg-g-bg border border-g-border rounded px-3 py-2 truncate">{overlayUrl}</code>
-            <button onClick={() => navigator.clipboard.writeText(overlayUrl)}
-              className="px-3 py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all whitespace-nowrap">
-              Kopier
-            </button>
+
+          {/* Preview */}
+          <div className="space-y-2">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest">Forhåndsvisning</p>
+            <div className="bg-gray-900 rounded-lg overflow-hidden border border-g-border" style={{ height: '160px', position: 'relative' }}>
+              <div style={{
+                backgroundImage: 'repeating-conic-gradient(#1a1a2e 0% 25%, transparent 0% 50%) 0 0 / 20px 20px',
+                position: 'absolute', inset: 0, opacity: 0.5
+              }} />
+              <iframe
+                src={overlayUrl}
+                className="relative z-10"
+                style={{ width: '100%', height: '100%', border: 'none', background: 'transparent' }}
+                title="Goals overlay preview"
+              />
+            </div>
+            <p className="text-[9px] text-g-muted">Rutemønsteret viser transparent bakgrunn – slik ser det ut i OBS over stream.</p>
           </div>
-          <p className="text-[9px] text-g-muted">Anbefalt: 300x150px, bakgrunn transparent. Oppdateres automatisk hvert 30. sekund.</p>
+
+          {/* URL */}
+          <div>
+            <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Browser Source URL</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs text-g-green font-mono bg-g-bg border border-g-border rounded px-3 py-2 truncate">{overlayUrl}</code>
+              <button onClick={() => navigator.clipboard.writeText(overlayUrl)}
+                className="px-3 py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all whitespace-nowrap">
+                Kopier
+              </button>
+            </div>
+            <p className="text-[9px] text-g-muted mt-1">OBS: 300×150px, huk av "Transparent bakgrunn". Oppdaterer hvert 30. sek.</p>
+          </div>
         </div>
       )}
 

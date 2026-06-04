@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-interface Rolle { id: string; navn: string; farge: string | null; antallBrukere: number; managed: boolean; position: number; }
+interface Rolle { id: string; navn: string; farge: string | null; antallBrukere: number; managed: boolean; position: number; kanTildeles: boolean; }
 interface Membre { id: string; brukernavn: string; displayNavn: string; roller: string[]; rolleNavn: string[]; level: number | null; meldinger: number | null; }
 
 const SENSITIVE_ROLLER = ['admin', 'owner', 'administrator', 'eier'];
@@ -56,7 +56,7 @@ export default function RoleManagerPage() {
   }
 
   const filtrerteRoller = roller
-    .filter(r => r.navn !== '@everyone' && !r.managed)
+    .filter(r => r.navn !== '@everyone')
     .sort((a, b) => b.position - a.position);
 
   const filtrerteMembres = membres
@@ -140,16 +140,18 @@ export default function RoleManagerPage() {
                 {filtrerteRoller.map(rolle => {
                   const harRolle = valgt.roller.includes(rolle.id);
                   const erSensitiv = SENSITIVE_ROLLER.some(s => rolle.navn.toLowerCase().includes(s));
+                  const kanEndres = rolle.kanTildeles && !erSensitiv && !rolle.managed;
+                  const grunn = rolle.managed ? 'Bot-administrert' : !rolle.kanTildeles ? 'For høy i hierarkiet' : erSensitiv ? 'Sensitiv rolle' : null;
                   return (
                     <label key={rolle.id}
-                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${
-                        harRolle ? 'border-g-green/20 bg-g-green/5' : 'border-g-border hover:border-g-green/10'
-                      } ${erSensitiv ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all ${
+                        harRolle ? 'border-g-green/20 bg-g-green/5' : 'border-g-border'
+                      } ${kanEndres ? 'cursor-pointer hover:border-g-green/10' : 'opacity-40 cursor-not-allowed'}`}>
                       <input
                         type="checkbox"
                         checked={harRolle}
-                        disabled={erSensitiv || oppdaterer === rolle.id}
-                        onChange={() => !erSensitiv && tildelRolle(rolle.id, rolle.navn, harRolle)}
+                        disabled={!kanEndres || oppdaterer === rolle.id}
+                        onChange={() => kanEndres && tildelRolle(rolle.id, rolle.navn, harRolle)}
                         className="accent-green-400 w-4 h-4 flex-shrink-0"
                       />
                       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -157,13 +159,18 @@ export default function RoleManagerPage() {
                           <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: rolle.farge }} />
                         )}
                         <span className="text-xs text-g-text truncate">{rolle.navn}</span>
-                        {erSensitiv && <span className="text-[8px] text-g-muted ml-auto">Sensitiv</span>}
+                        {grunn && <span className="text-[8px] text-g-muted ml-1 italic">{grunn}</span>}
                         {oppdaterer === rolle.id && <span className="text-[8px] text-g-green ml-auto animate-pulse">Oppdaterer...</span>}
                       </div>
                       <span className="text-[8px] text-g-muted flex-shrink-0">{rolle.antallBrukere}</span>
                     </label>
                   );
                 })}
+                {filtrerteRoller.some(r => !r.kanTildeles && !r.managed) && (
+                  <div className="mt-2 p-2 bg-yellow-400/10 border border-yellow-400/20 rounded text-[9px] text-yellow-400">
+                    ⚠ Noen roller er høyere enn botens rolle i hierarkiet. Flytt "GLENVEX Bot"-rollen høyere i Discord Serverinnstillinger → Roller for å låse opp disse.
+                  </div>
+                )}
               </div>
             </div>
 
