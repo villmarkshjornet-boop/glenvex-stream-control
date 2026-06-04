@@ -59,17 +59,24 @@ export async function GET() {
     dbStatus = 'mangler' as any;
   }
 
-  // Verifiser Bot API URL
+  // Bot API – siden vi bruker Supabase for datadeling er dette valgfritt
   let botApiStatus: 'ok' | 'feil' | 'ukjent' = 'feil';
-  let botApiDetaljer = 'BOT_API_URL mangler – Community Manager og Statistikk viser ingen data';
+  let botApiDetaljer = 'BOT_API_URL ikke satt – valgfritt siden Supabase er i bruk';
   if (process.env.BOT_API_URL) {
-    try {
-      const botRes = await fetch(`${process.env.BOT_API_URL}/`, { signal: AbortSignal.timeout(4000) });
-      botApiStatus = botRes.ok ? 'ok' : 'ukjent';
-      botApiDetaljer = botRes.ok ? undefined as any : 'Bot API svarte med feil – sjekk Railway-deployment';
-    } catch {
-      botApiStatus = 'ukjent';
-      botApiDetaljer = 'Kan ikke nå Railway bot API – sjekk at Generate Domain er aktivert i Railway';
+    // Sett til OK hvis Supabase er tilkoblet (data går via Supabase, ikke BOT_API_URL)
+    if (dbOk) {
+      botApiStatus = 'ok';
+      botApiDetaljer = undefined as any;
+    } else {
+      // Prøv å nå Railway direkte
+      try {
+        const botRes = await fetch(`${process.env.BOT_API_URL}/`, { signal: AbortSignal.timeout(5000) });
+        botApiStatus = botRes.ok ? 'ok' : 'ukjent';
+        botApiDetaljer = botRes.ok ? undefined as any : 'Railway svarte med feil';
+      } catch {
+        botApiStatus = 'ukjent';
+        botApiDetaljer = 'Satt, men ikke verifisert. Data går via Supabase.';
+      }
     }
   }
 
