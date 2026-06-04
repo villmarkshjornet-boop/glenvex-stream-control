@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChatKanalId } from '@/lib/discordChannel';
+import { getAllContent, updateContent } from '@/lib/contentLibrary';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,38 +12,26 @@ function botHeaders(json = true) {
   return h;
 }
 
-// Last opp bilde til Discord og returner en vedlegg-URL
-async function lastOppBildeTilDiscord(kanalId: string, base64: string): Promise<string | null> {
+function finnGammelMsgId(karakterNavn: string, kanalId?: string): string | null {
   try {
-    const [header, data] = base64.split(',');
-    const mime = header.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
-    const ext = mime.split('/')[1] ?? 'jpg';
-    const buffer = Buffer.from(data, 'base64');
+    const alle = getAllContent();
+    const gammel = alle.find(c =>
+      c.type === 'rp-karakter' &&
+      c.status === 'publisert' &&
+      c.discordMsgId &&
+      c.tittel.toLowerCase().includes(karakterNavn.toLowerCase()) &&
+      (!kanalId || c.kanalId === kanalId)
+    );
+    return gammel?.discordMsgId ?? null;
+  } catch { return null; }
+}
 
-    const form = new FormData();
-    const blob = new Blob([buffer], { type: mime });
-    form.append('files[0]', blob, `karakter.${ext}`);
-    form.append('payload_json', JSON.stringify({ content: '' }));
-
-    const res = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
-      body: form,
-    });
-
-    if (!res.ok) return null;
-    const msg = await res.json() as any;
-    const attachment = msg.attachments?.[0];
-    if (attachment?.url) {
-      // Slett hjelpemedlingen etterpå
-      await fetch(`${DISCORD_API}/channels/${kanalId}/messages/${msg.id}`, {
-        method: 'DELETE',
-        headers: botHeaders(false),
-      }).catch(() => {});
-      return attachment.url;
-    }
+function arkiverGammel(msgId: string) {
+  try {
+    const alle = getAllContent();
+    const gammel = alle.find(c => c.discordMsgId === msgId);
+    if (gammel) updateContent(gammel.id, { status: 'arkivert' });
   } catch {}
-  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -104,29 +93,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3. Slett gammel melding (unngå duplikat)
-  if (karakterKanalId && body.gammelMsgId) {
-    await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages/${body.gammelMsgId}`, {
+  // 3. Finn og slett gammel melding – søk i content library og gammelMsgId
+  const gammelMsgId = body.gammelMsgId ?? finnGammelMsgId(body.karakterNavn, karakterKanalId);
+  if (karakterKanalId && gammelMsgId) {
+    const delRes = await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages/${gammelMsgId}`, {
       method: 'DELETE', headers: botHeaders(false),
-    }).catch(() => {});
-    resultater.push(`↳ Slettet gammel Discord-melding`);
-  }
-
-  // 4. Håndter bilde – base64 lastes opp som vedlegg, https-URL brukes direkte
-  let bildeUrl = body.bildeUrl;
-  if (bildeUrl?.startsWith('data:') && karakterKanalId) {
-    const opplastetUrl = await lastOppBildeTilDiscord(karakterKanalId, bildeUrl);
-    if (opplastetUrl) {
-      bildeUrl = opplastetUrl;
-      resultater.push(`↳ Bilde lastet opp til Discord`);
-    } else {
-      bildeUrl = undefined;
-      resultater.push(`⚠ Kunne ikke laste opp bilde – publiserer uten bilde`);
+    });
+    if (delRes.ok) {
+      arkiverGammel(gammelMsgId);
+      resultater.push(`↳ Slettet gammel Discord-melding`);
     }
   }
 
-  // 5. Post karakterkort i karakterkanal
+  // 4. Bygg embed og send med eller uten bilde
   if (karakterKanalId && body.karakterIntro) {
+    const bildeUrl = body.bildeUrl;
+    const erBase64 = bildeUrl?.startsWith('data:');
+    const erHttpUrl = bildeUrl?.startsWith('http');
+
     const embed: any = {
       title: `◆ ${body.karakterNavn.toUpperCase()}`,
       description: body.karakterIntro,
@@ -134,16 +118,57 @@ export async function POST(req: NextRequest) {
       footer: { text: `${body.serverNavn} • GLENVEX Stream Control` },
       timestamp: new Date().toISOString(),
     };
-    if (bildeUrl?.startsWith('http')) embed.image = { url: bildeUrl };
 
-    const r = await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages`, {
-      method: 'POST', headers: botHeaders(), body: JSON.stringify({ embeds: [embed] }),
-    });
-    if (!r.ok) {
-      const errTekst = await r.text();
-      resultater.push(`✗ Feil ved publisering: ${r.status} ${errTekst.slice(0, 100)}`);
+    let msgRes: Response;
+
+    if (erBase64 && bildeUrl) {
+      // Send bilde som vedlegg i samme melding som embeden
+      const [header, data] = bildeUrl.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
+      const ext = mime.split('/')[1] ?? 'jpg';
+      const filNavn = `karakter.${ext}`;
+      const buffer = Buffer.from(data, 'base64');
+
+      embed.image = { url: `attachment://${filNavn}` };
+
+      const form = new FormData();
+      form.append('files[0]', new Blob([buffer], { type: mime }), filNavn);
+      form.append('payload_json', JSON.stringify({ embeds: [embed] }));
+
+      msgRes = await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+        body: form,
+      });
     } else {
-      resultater.push(`✓ Karakterkort publisert`);
+      if (erHttpUrl) embed.image = { url: bildeUrl };
+      msgRes = await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages`, {
+        method: 'POST', headers: botHeaders(), body: JSON.stringify({ embeds: [embed] }),
+      });
+    }
+
+    if (!msgRes.ok) {
+      const errTekst = await msgRes.text();
+      resultater.push(`✗ Feil ved publisering: ${msgRes.status} ${errTekst.slice(0, 100)}`);
+    } else {
+      const nyMsg = await msgRes.json() as any;
+      resultater.push(`✓ Karakterkort publisert${erBase64 ? ' med bilde' : ''}`);
+      // Lagre ny msg ID i content library
+      try {
+        const { addContent } = await import('@/lib/contentLibrary');
+        addContent({
+          tittel: `RP Karakter: ${body.karakterNavn}`,
+          type: 'rp-karakter',
+          status: 'publisert',
+          tekst: body.karakterIntro,
+          bildeUrl: erHttpUrl ? bildeUrl : undefined,
+          kanalId: karakterKanalId,
+          modul: 'RP Manager',
+          opprettetAv: 'dashboard',
+          discordMsgId: nyMsg.id,
+          publisert: new Date().toISOString(),
+        });
+      } catch {}
     }
   }
 
