@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getDb, isDbAvailable } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
 const FILE = path.join(process.cwd(), 'data', 'schedule.json');
 
-export interface StreamDay {
+interface StreamDay {
   dag: string;
   tid: string;
   spill: string;
@@ -14,14 +16,14 @@ export interface StreamDay {
   aktiv: boolean;
 }
 
-function load(): StreamDay[] {
+function loadFile(): StreamDay[] {
   try {
     if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8'));
   } catch {}
   return [];
 }
 
-function save(data: StreamDay[]) {
+function saveFile(data: StreamDay[]) {
   try {
     const dir = path.dirname(FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -29,12 +31,69 @@ function save(data: StreamDay[]) {
   } catch {}
 }
 
+async function loadFromDb(): Promise<StreamDay[] | null> {
+  if (!isDbAvailable()) return null;
+  const db = getDb();
+  if (!db) return null;
+  const { data } = await db
+    .from('workspaces')
+    .select('settings_json')
+    .eq('id', getWorkspaceId())
+    .single();
+  return data?.settings_json?.streamplan ?? null;
+}
+
+async function ensureWorkspace(db: any) {
+  const wsId = getWorkspaceId();
+  const { data } = await db.from('workspaces').select('id').eq('id', wsId).single();
+  if (!data) {
+    await db.from('workspaces').insert({
+      id: wsId,
+      owner_user_id: 'glenvex',
+      streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
+      twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+      discord_guild_id: process.env.DISCORD_GUILD_ID,
+      bot_personality: 'dark_gaming',
+      plan: 'creator',
+    });
+  }
+}
+
+async function saveToDb(plan: StreamDay[]): Promise<boolean> {
+  if (!isDbAvailable()) return false;
+  const db = getDb();
+  if (!db) return false;
+
+  await ensureWorkspace(db);
+
+  // Hent eksisterende settings_json og slå sammen
+  const { data: existing } = await db
+    .from('workspaces')
+    .select('settings_json')
+    .eq('id', getWorkspaceId())
+    .single();
+
+  const current = existing?.settings_json ?? {};
+  const { error } = await db
+    .from('workspaces')
+    .update({ settings_json: { ...current, streamplan: plan }, updated_at: new Date().toISOString() })
+    .eq('id', getWorkspaceId());
+  return !error;
+}
+
 export async function GET() {
-  return NextResponse.json(load());
+  const dbPlan = await loadFromDb();
+  if (dbPlan && dbPlan.length > 0) return NextResponse.json(dbPlan);
+  return NextResponse.json(loadFile());
 }
 
 export async function POST(req: NextRequest) {
   const data = await req.json() as StreamDay[];
-  save(data);
-  return NextResponse.json({ ok: true });
+
+  // Lagre begge steder
+  const dbOk = await saveToDb(data);
+  saveFile(data); // fallback på Railway
+
+  return NextResponse.json({ ok: true, lagret: dbOk ? 'supabase' : 'fil' });
 }

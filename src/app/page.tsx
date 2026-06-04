@@ -72,8 +72,11 @@ export default function Dashboard() {
   const isLive = status?.stream?.isLive;
   const dagNavn = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
   const idagIndex = new Date().getDay();
-  const aktivePlan = plan.filter(d => d.aktiv);
-  const nestePlan = aktivePlan.find(d => dagNavn.indexOf(d.dag) >= idagIndex) ?? aktivePlan[0];
+  const aktivePlan = Array.isArray(plan) ? plan.filter(d => d.aktiv) : [];
+  // Finn neste stream fra i dag og fremover, wrap rundt til neste uke
+  const nestePlan = aktivePlan.find(d => dagNavn.indexOf(d.dag) >= idagIndex)
+    ?? aktivePlan[0]
+    ?? null;
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
