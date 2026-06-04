@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
+import BotVarsler from '@/components/BotVarsler';
 
 export const metadata: Metadata = {
   title: 'GLENVEX Stream Control',
@@ -23,6 +24,7 @@ export default function RootLayout({
             <main className="flex-1 p-5 overflow-auto">{children}</main>
           </div>
         </div>
+        <BotVarsler />
       </body>
     </html>
   );
