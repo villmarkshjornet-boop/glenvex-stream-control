@@ -4,39 +4,29 @@ import OpenAI from 'openai';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  const { prompt } = await req.json() as { prompt: string };
-
-  // Prøv Railway bot API først (ingen timeout)
-  const botApiUrl = process.env.BOT_API_URL;
-  if (botApiUrl) {
-    try {
-      const res = await fetch(`${botApiUrl}/generate-image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-        signal: AbortSignal.timeout(25_000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { bildeUrl: string };
-        if (data.bildeUrl) return NextResponse.json({ bildeUrl: data.bildeUrl });
-      }
-    } catch {}
-  }
-
-  // Fallback: DALL-E 2 (raskere, ~3 sek, innenfor Vercel-grensen)
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: 'OPENAI_API_KEY mangler' }, { status: 400 });
 
+  const { prompt } = await req.json() as { prompt: string };
+  if (!prompt) return NextResponse.json({ error: 'Ingen prompt' }, { status: 400 });
+
+  const client = new OpenAI({ apiKey });
+
+  const fullPrompt = `GTA RP character portrait. ${prompt}. Cinematic dark style, neon green and black, dramatic lighting. No text.`.slice(0, 900);
+
   try {
-    const client = new OpenAI({ apiKey });
     const response = await client.images.generate({
       model: 'dall-e-2',
-      prompt: `GTA RP character portrait, cinematic dark style. ${prompt}. Norwegian RP server. Dark neon green and black, dramatic lighting, no text.`.slice(0, 1000),
+      prompt: fullPrompt,
       n: 1,
       size: '512x512',
     });
-    return NextResponse.json({ bildeUrl: response.data?.[0]?.url ?? null });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+
+    const url = response.data?.[0]?.url;
+    if (!url) return NextResponse.json({ error: 'Ingen bilde-URL returnert' }, { status: 500 });
+
+    return NextResponse.json({ bildeUrl: url });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? 'DALL-E feil' }, { status: 500 });
   }
 }
