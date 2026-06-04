@@ -1,22 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import fs from 'fs';
-import path from 'path';
-import type { Partner } from '../route';
+import { getPartners, savePartners, type Partner } from '@/lib/partners';
 
 export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
-const FILE = path.join(process.cwd(), 'data', 'partners.json');
-
-function load(): Partner[] {
-  try { if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8')); } catch {}
-  return [];
-}
-
-function save(data: Partner[]) {
-  try { fs.writeFileSync(FILE, JSON.stringify(data, null, 2), 'utf-8'); } catch {}
-}
 
 function velgPartner(partners: Partner[]): Partner | null {
   const aktive = partners.filter(p => p.aktiv);
@@ -38,7 +26,7 @@ function velgPartner(partners: Partner[]): Partner | null {
 export async function POST(req: NextRequest) {
   const { manuellPartnerId } = await req.json().catch(() => ({})) as { manuellPartnerId?: string };
 
-  const partners = load();
+  const partners = getPartners();
   const partner = manuellPartnerId
     ? partners.find(p => p.id === manuellPartnerId)
     : velgPartner(partners);
@@ -89,7 +77,7 @@ export async function POST(req: NextRequest) {
     if (idx >= 0) {
       partners[idx].sistePromotert = new Date().toISOString();
       partners[idx].eksponering = (partners[idx].eksponering ?? 0) + 1;
-      save(partners);
+      savePartners(partners);
     }
   }
 

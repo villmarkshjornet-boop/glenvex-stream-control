@@ -1,20 +1,11 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import fs from 'fs';
-import path from 'path';
-import type { Partner } from '../route';
+import { getPartners } from '@/lib/partners';
 
 export const dynamic = 'force-dynamic';
 
-const FILE = path.join(process.cwd(), 'data', 'partners.json');
-
-function load(): Partner[] {
-  try { if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8')); } catch {}
-  return [];
-}
-
 export async function GET() {
-  const partners = load();
+  const partners = getPartners();
   const totalInntekt = partners.reduce((s, p) => s + (p.estimertInntekt ?? 0), 0);
   const totalKlikk = partners.reduce((s, p) => s + (p.klikk ?? 0), 0);
   const totalEksponering = partners.reduce((s, p) => s + (p.eksponering ?? 0), 0);

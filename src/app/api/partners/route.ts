@@ -1,77 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import { randomUUID } from 'crypto';
+import { getPartners, savePartners, type Partner } from '@/lib/partners';
 
 export const dynamic = 'force-dynamic';
 
-const FILE = path.join(process.cwd(), 'data', 'partners.json');
-
-export interface Partner {
-  id: string;
-  navn: string;
-  logo?: string;
-  nettadresse: string;
-  affiliateLink: string;
-  rabattkode: string;
-  beskrivelse: string;
-  kategori: 'gaming' | 'hardware' | 'energidrikk' | 'bil' | 'jakt' | 'ownedBrand' | 'annet';
-  provisjonstype: 'fast' | 'prosent';
-  provisjon: number;
-  avtaleStart: string;
-  avtaleSlutt?: string;
-  aktiv: boolean;
-  featured: boolean;
-  ownedBrand: boolean;
-  prioritet: number;
-  eksponering: number;
-  sistePromotert?: string;
-  klikk: number;
-  estimertInntekt: number;
-  kampanjer: Kampanje[];
-  opprettet: string;
-}
-
-export interface Kampanje {
-  id: string;
-  navn: string;
-  budskap: string;
-  rabattkode: string;
-  startDato: string;
-  sluttDato: string;
-  aktiv: boolean;
-  prioritet: number;
-}
-
-function load(): Partner[] {
-  try {
-    if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8'));
-  } catch {}
-  return [];
-}
-
-function save(data: Partner[]) {
-  try {
-    const dir = path.dirname(FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch {}
-}
-
-export function getPartners() { return load(); }
-
 export async function GET() {
-  return NextResponse.json(load());
+  return NextResponse.json(getPartners());
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as Partial<Partner>;
-  const partners = load();
+  const partners = getPartners();
 
-  // Kun én featured
-  if (body.featured) {
-    partners.forEach(p => { p.featured = false; });
-  }
+  if (body.featured) partners.forEach(p => { p.featured = false; });
 
   const ny: Partner = {
     id: randomUUID(),
@@ -98,27 +39,25 @@ export async function POST(req: NextRequest) {
   };
 
   partners.unshift(ny);
-  save(partners);
+  savePartners(partners);
   return NextResponse.json(ny);
 }
 
 export async function PATCH(req: NextRequest) {
   const { id, ...updates } = await req.json() as Partial<Partner> & { id: string };
-  const partners = load();
+  const partners = getPartners();
   const idx = partners.findIndex(p => p.id === id);
   if (idx < 0) return NextResponse.json({ error: 'Ikke funnet' }, { status: 404 });
 
-  if (updates.featured) {
-    partners.forEach(p => { p.featured = false; });
-  }
+  if (updates.featured) partners.forEach(p => { p.featured = false; });
 
   partners[idx] = { ...partners[idx], ...updates };
-  save(partners);
+  savePartners(partners);
   return NextResponse.json(partners[idx]);
 }
 
 export async function DELETE(req: NextRequest) {
   const { id } = await req.json();
-  save(load().filter(p => p.id !== id));
+  savePartners(getPartners().filter(p => p.id !== id));
   return NextResponse.json({ ok: true });
 }

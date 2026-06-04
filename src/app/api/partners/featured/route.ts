@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPartners } from '../route';
+import { getPartners } from '@/lib/partners';
 
 export const dynamic = 'force-dynamic';
 
