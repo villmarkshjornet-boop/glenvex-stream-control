@@ -193,18 +193,14 @@ export default function DiscordPage() {
               <div>
                 <p className="text-[10px] text-red-400 uppercase tracking-widest font-bold mb-2">Bør slettes</p>
                 {suggestions.slett.map(s => (
-                  <label key={s.id} className="flex items-center gap-2 py-1 cursor-pointer group">
-                    <input
-                      type="checkbox"
-                      checked={valgtSlett.has(s.id)}
-                      onChange={e => {
-                        const next = new Set(valgtSlett);
-                        e.target.checked ? next.add(s.id) : next.delete(s.id);
-                        setValgtSlett(next);
-                      }}
-                      className="accent-red-400"
-                    />
-                    <span className="text-xs text-g-text font-mono group-hover:text-red-400 transition-colors">#{s.navn}</span>
+                  <label key={s.id} className="flex items-start gap-2 py-1.5 cursor-pointer group">
+                    <input type="checkbox" checked={valgtSlett.has(s.id)}
+                      onChange={e => { const next = new Set(valgtSlett); e.target.checked ? next.add(s.id) : next.delete(s.id); setValgtSlett(next); }}
+                      className="accent-red-400 mt-0.5" />
+                    <div>
+                      <span className="text-xs text-g-text font-mono group-hover:text-red-400 transition-colors">#{s.navn}</span>
+                      {(s as any).grunn && <p className="text-[9px] text-g-muted mt-0.5">{(s as any).grunn}</p>}
+                    </div>
                   </label>
                 ))}
               </div>

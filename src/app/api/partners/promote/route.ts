@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getPartners, updatePartner, type Partner } from '@/lib/partners';
 import { getPartnerKanalId } from '@/lib/discordChannel';
+import { postOgOppdater } from '@/lib/discordMessages';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,18 +71,15 @@ export async function POST(req: NextRequest) {
     embed.fields = [{ name: 'Rabattkode', value: `\`${partner.rabattkode}\``, inline: true }];
   }
 
-  const discordRes = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ embeds: [embed] }),
-  });
+  // Slett gammel partner-post + post ny
+  const result = await postOgOppdater(`partner_${partner.id}`, kanalId, { embeds: [embed] });
 
-  if (discordRes.ok) {
+  if (result.ok) {
     await updatePartner(partner.id, {
       sistePromotert: new Date().toISOString(),
       eksponering: (partner.eksponering ?? 0) + 1,
     });
   }
 
-  return NextResponse.json({ ok: discordRes.ok, partner: partner.navn });
+  return NextResponse.json({ ok: result.ok, partner: partner.navn, error: result.error });
 }

@@ -67,44 +67,64 @@ export async function GET() {
     return `  ${ch.name} (type:${ch.type}, id:${ch.id})`;
   });
 
+  // Finn mulige duplikater
+  const kanalNavn = sorted.filter((c: any) => c.type === 0).map((c: any) => c.name.toLowerCase());
+  const muligeDuplikater: string[] = [];
+  const sett = new Set<string>();
+  for (const navn of kanalNavn) {
+    const rot = navn.replace(/[-_•·og]/g, '').replace(/\d+/g, '');
+    if (sett.has(rot) && !muligeDuplikater.includes(navn)) muligeDuplikater.push(navn);
+    sett.add(rot);
+  }
+
   const client = new OpenAI({ apiKey });
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{
       role: 'user',
-      content: `Du er Discord-administrator for GLENVEX, et norsk Twitch streaming community som også spiller GTA RP på Future RP.
+      content: `Du er en erfaren Discord-administrator for GLENVEX sitt Twitch community (Future RP, Tarkov, FPS).
 
-Nåværende kanalstruktur:
+Analyser strukturen NØYE. Sjekk:
+1. Duplikater – kanaler med samme formål
+2. Manglende – viktige kanaler som ikke finnes
+3. Navngivning – er navn tydelige og konsistente?
+4. Kategoristruktur – er inndelingen logisk?
+
+Kanalstruktur:
 ${linjer.join('\n')}
+${muligeDuplikater.length > 0 ? `\nMulige duplikater: ${muligeDuplikater.join(', ')}` : ''}
 
-Returner KUN gyldig JSON (ingen markdown, ingen forklaring):
+Returner KUN gyldig JSON:
 {
-  "tekst": "Kort norsk oppsummering av analysen (2-3 setninger)",
+  "tekst": "Konkret analyse: hva fungerer, hva er problemet og HVORFOR det er et problem (3-4 setninger, norsk)",
   "slett": [
-    { "id": "kanal-id", "navn": "kanal-navn" }
+    { "id": "eksakt-id-fra-listen-over", "navn": "navn", "grunn": "Konkret grunn til sletting" }
   ],
   "opprett": [
-    { "navn": "kanal-navn", "kategori": "KATEGORI-NAVN", "emne": "Kanal-beskrivelse", "publiser": true, "karakterInfo": "Valgfri info om karakter hvis relevant" }
+    { "navn": "kanal-navn", "kategori": "EKSAKT-KATEGORI-NAVN", "emne": "Hva kanalen brukes til", "publiser": false, "grunn": "Konkret grunn til opprettelse" }
   ],
   "rename": [
-    { "id": "kanal-id", "fra": "gammelt-navn", "til": "nytt-navn" }
+    { "id": "eksakt-id", "fra": "gammelt-navn", "til": "nytt-navn", "grunn": "Konkret grunn" }
   ]
 }
 
-Regler:
-- Foreslå kun kanaler som faktisk mangler for et Twitch + GTA RP community
-- Foreslå kanaler som #karakterer, #mats-haugland, #future-rp, #klipp, #highlights etc hvis de mangler
-- Sett publiser: true for karakterkanaler og viktige informasjonskanaler
-- karakterInfo fylles ut KUN for karakterspesifikke kanaler`,
+Viktig: Bruk kun eksakte kanal-IDer fra listen. Ikke foreslå kanaler som allerede finnes. Maks 3 forslag per kategori. Vær konkret – ikke generisk.`,
     }],
-    max_tokens: 800,
-    temperature: 0.7,
+    max_tokens: 1000,
+    temperature: 0.4,
     response_format: { type: 'json_object' },
   });
 
   try {
-    const suggestions = JSON.parse(response.choices[0]?.message?.content ?? '{}') as ChannelSuggestions;
-    return NextResponse.json({ channels: sorted, suggestions });
+    const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}');
+    // Filtrer ut forslag til kanaler som allerede finnes
+    const eksisterendeNavn = new Set(kanalNavn);
+    if (parsed.opprett) {
+      parsed.opprett = parsed.opprett.filter((o: any) =>
+        !eksisterendeNavn.has(o.navn.toLowerCase())
+      );
+    }
+    return NextResponse.json({ channels: sorted, suggestions: parsed as ChannelSuggestions });
   } catch {
     return NextResponse.json({ channels: sorted, suggestions: null });
   }

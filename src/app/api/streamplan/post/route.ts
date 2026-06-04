@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStreamplanKanalId } from '@/lib/discordChannel';
-import { addContent, getAllContent, updateContent } from '@/lib/contentLibrary';
+import { postOgOppdater } from '@/lib/discordMessages';
+import { addContent } from '@/lib/contentLibrary';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,20 +22,6 @@ interface StreamDay {
   aktiv: boolean;
 }
 
-async function slettGammelPlan(kanalId: string) {
-  const alle = getAllContent();
-  const gammel = alle.find(c =>
-    c.type === 'streamplan' && c.status === 'publisert' && c.discordMsgId && c.kanalId === kanalId
-  );
-  if (!gammel?.discordMsgId) return;
-  try {
-    await fetch(`${DISCORD_API}/channels/${kanalId}/messages/${gammel.discordMsgId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
-    });
-    updateContent(gammel.id, { status: 'arkivert' });
-  } catch {}
-}
 
 export async function POST(req: NextRequest) {
   const { plan } = await req.json() as { plan: StreamDay[] };
@@ -49,9 +36,6 @@ export async function POST(req: NextRequest) {
   if (aktive.length === 0) {
     return NextResponse.json({ error: 'Ingen aktive stream-dager å poste' }, { status: 400 });
   }
-
-  // Slett forrige ukes plan i samme kanal
-  await slettGammelPlan(kanalId);
 
   const planLinjer = aktive
     .map(d => `**${d.dag}** kl. ${d.tid}  ·  ${d.spill}${d.tittel ? `  –  *${d.tittel}*` : ''}`)
@@ -70,18 +54,9 @@ export async function POST(req: NextRequest) {
     timestamp: new Date().toISOString(),
   };
 
-  const res = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
-    method: 'POST',
-    headers: botHeaders(),
-    body: JSON.stringify({ embeds: [embed] }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    return NextResponse.json({ error: `Discord feil ${res.status}: ${err}` }, { status: 500 });
-  }
-
-  const msg = await res.json() as any;
+  // Slett gammel + post ny atomisk
+  const result = await postOgOppdater('streamplan', kanalId, { embeds: [embed] });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
 
   addContent({
     tittel: `Streamplan – uke ${getWeekNumber()}`,
@@ -91,12 +66,12 @@ export async function POST(req: NextRequest) {
     kanalId,
     modul: 'Streamplan',
     opprettetAv: 'dashboard',
-    discordMsgId: msg.id,
+    discordMsgId: result.msgId,
     publisert: new Date().toISOString(),
     tags: aktive.map(d => d.dag),
   });
 
-  return NextResponse.json({ ok: true, msgId: msg.id, antallDager: aktive.length, kanalId });
+  return NextResponse.json({ ok: true, msgId: result.msgId, antallDager: aktive.length, kanalId });
 }
 
 function getWeekNumber(): number {
