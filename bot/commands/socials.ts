@@ -1,19 +1,18 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { getSettings } from '@/lib/settings';
 
-async function hentSocials() {
+async function hentSocials(): Promise<{ s: Record<string, string | undefined>; twitchUrl: string | undefined }> {
   const settings = getSettings();
-  let s = settings.socials ?? {};
+  let s: Record<string, string | undefined> = { ...(settings.socials as any ?? {}) };
 
-  // Prøv å hente oppdaterte socials fra Vercel/Supabase via app URL
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
   if (appUrl) {
     try {
       const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
       const res = await fetch(`${url}/api/settings`, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
-        const data = await res.json();
-        if (data.socials) s = { ...s, ...data.socials };
+        const data = await res.json() as Record<string, any>;
+        if (data.socials) s = { ...s, ...(data.socials as Record<string, string | undefined>) };
       }
     } catch {}
   }
@@ -21,7 +20,7 @@ async function hentSocials() {
   return { s, twitchUrl: settings.twitchUrl };
 }
 
-export function byggSocialsEmbed(s: Record<string, string | undefined>, twitchUrl?: string) {
+export function byggSocialsEmbed(s: Record<string, string | undefined>, twitchUrl?: string): string[] {
   const links: string[] = [];
   if (s.twitch || twitchUrl) links.push(`🎮 **Twitch** – ${s.twitch || twitchUrl}`);
   if (s.tiktok) links.push(`📱 **TikTok** – ${s.tiktok}`);
