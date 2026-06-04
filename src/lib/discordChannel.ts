@@ -15,20 +15,57 @@ function loadPrefs(): Record<string, string> {
   return {};
 }
 
-async function autoDetektKanal(prioritet: string[]): Promise<string | null> {
+// Kategorier som er spill/RP-spesifikke – ekskluderes fra generelle kanaler
+const RP_KATEGORIER = ['future', 'rp', 'tarkov', 'gta', 'nxt', 'gaming', 'spill', 'game'];
+const GENERELLE_KATEGORIER = ['informasjon', 'info', 'general', 'community', 'server', 'generelt', 'hoved'];
+
+async function hentAlleKanaler() {
   const guildId = process.env.DISCORD_GUILD_ID;
-  if (!guildId || !process.env.DISCORD_BOT_TOKEN) return null;
+  if (!guildId || !process.env.DISCORD_BOT_TOKEN) return [];
   try {
     const res = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, { headers: botHeaders() });
-    if (!res.ok) return null;
-    const kanaler = await res.json() as any[];
-    const tekstKanaler = kanaler.filter((k: any) => k.type === 0);
+    if (!res.ok) return [];
+    return await res.json() as any[];
+  } catch { return []; }
+}
+
+function erRPKategori(kategorinavn: string): boolean {
+  const navn = kategorinavn.toLowerCase();
+  return RP_KATEGORIER.some(rp => navn.includes(rp));
+}
+
+function erGenerellKategori(kategorinavn: string): boolean {
+  const navn = kategorinavn.toLowerCase();
+  return GENERELLE_KATEGORIER.some(g => navn.includes(g));
+}
+
+async function autoDetektKanal(prioritet: string[]): Promise<string | null> {
+  try {
+    const alleKanaler = await hentAlleKanaler();
+    const kategorier = new Map(alleKanaler.filter((k: any) => k.type === 4).map((k: any) => [k.id, k.name]));
+    const tekstKanaler = alleKanaler.filter((k: any) => k.type === 0);
+
+    // Ekskluder kanaler i RP/spill-kategorier
+    const ikkeRpKanaler = tekstKanaler.filter((k: any) => {
+      const katNavn = kategorier.get(k.parent_id) ?? '';
+      return !erRPKategori(katNavn);
+    });
+
+    // Foretrekk kanaler i generelle kategorier
+    const generelleKanaler = ikkeRpKanaler.filter((k: any) => {
+      const katNavn = kategorier.get(k.parent_id) ?? '';
+      return erGenerellKategori(katNavn);
+    });
+
+    const søkI = generelleKanaler.length > 0 ? generelleKanaler : ikkeRpKanaler;
+
     for (const søk of prioritet) {
-      const funnet = tekstKanaler.find((k: any) => k.name.toLowerCase().includes(søk));
+      const funnet = søkI.find((k: any) => k.name.toLowerCase().includes(søk));
       if (funnet) return funnet.id;
     }
+
     const ekskluder = ['log', 'bot', 'admin', 'mod', 'staff', 'regel', 'velkomst'];
-    return tekstKanaler.find((k: any) =>
+    return søkI.find((k: any) =>
       !ekskluder.some(e => k.name.toLowerCase().includes(e))
     )?.id ?? null;
   } catch { return null; }
