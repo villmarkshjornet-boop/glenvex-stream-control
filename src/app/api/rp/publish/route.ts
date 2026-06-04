@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChatKanalId } from '@/lib/discordChannel';
 import { getAllContent, updateContent } from '@/lib/contentLibrary';
+import { slettGammelMelding, lagreMsgId, hentSisteMsgId } from '@/lib/discordMessages';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,25 +13,29 @@ function botHeaders(json = true) {
   return h;
 }
 
-function finnGammelMsgId(karakterNavn: string, kanalId?: string): string | null {
+async function finnOgSlettGammelKarakter(karakterNavn: string, kanalId: string): Promise<void> {
+  const nøkkel = `rp_${karakterNavn.toLowerCase().replace(/\s+/g, '_')}`;
+
+  // Prøv discordMessages-systemet først (mest pålitelig)
+  const slettet = await slettGammelMelding(nøkkel);
+  if (slettet) return;
+
+  // Fallback: søk i content library
   try {
     const alle = getAllContent();
     const gammel = alle.find(c =>
       c.type === 'rp-karakter' &&
       c.status === 'publisert' &&
       c.discordMsgId &&
-      c.tittel.toLowerCase().includes(karakterNavn.toLowerCase()) &&
-      (!kanalId || c.kanalId === kanalId)
+      c.tittel.toLowerCase().includes(karakterNavn.toLowerCase())
     );
-    return gammel?.discordMsgId ?? null;
-  } catch { return null; }
-}
-
-function arkiverGammel(msgId: string) {
-  try {
-    const alle = getAllContent();
-    const gammel = alle.find(c => c.discordMsgId === msgId);
-    if (gammel) updateContent(gammel.id, { status: 'arkivert' });
+    if (gammel?.discordMsgId && gammel.kanalId) {
+      await fetch(`${DISCORD_API}/channels/${gammel.kanalId}/messages/${gammel.discordMsgId}`, {
+        method: 'DELETE',
+        headers: botHeaders(false),
+      }).catch(() => {});
+      updateContent(gammel.id, { status: 'arkivert' });
+    }
   } catch {}
 }
 
@@ -93,16 +98,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3. Finn og slett gammel melding – søk i content library og gammelMsgId
-  const gammelMsgId = body.gammelMsgId ?? finnGammelMsgId(body.karakterNavn, karakterKanalId);
-  if (karakterKanalId && gammelMsgId) {
-    const delRes = await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages/${gammelMsgId}`, {
-      method: 'DELETE', headers: botHeaders(false),
-    });
-    if (delRes.ok) {
-      arkiverGammel(gammelMsgId);
-      resultater.push(`↳ Slettet gammel Discord-melding`);
+  // 3. Slett gammel melding (alle metoder)
+  if (karakterKanalId) {
+    await finnOgSlettGammelKarakter(body.karakterNavn, karakterKanalId);
+    // Slett også via gammelMsgId hvis oppgitt
+    if (body.gammelMsgId) {
+      await fetch(`${DISCORD_API}/channels/${karakterKanalId}/messages/${body.gammelMsgId}`, {
+        method: 'DELETE', headers: botHeaders(false),
+      }).catch(() => {});
     }
+    resultater.push(`↳ Gammel melding sjekket og slettet`);
   }
 
   // 4. Bygg embed og send med eller uten bilde
@@ -153,7 +158,12 @@ export async function POST(req: NextRequest) {
     } else {
       const nyMsg = await msgRes.json() as any;
       resultater.push(`✓ Karakterkort publisert${erBase64 ? ' med bilde' : ''}`);
-      // Lagre ny msg ID i content library
+
+      // Lagre msg ID for fremtidig dedup
+      const nøkkel = `rp_${body.karakterNavn.toLowerCase().replace(/\s+/g, '_')}`;
+      await lagreMsgId(nøkkel, nyMsg.id, karakterKanalId);
+
+      // Lagre i content library
       try {
         const { addContent } = await import('@/lib/contentLibrary');
         addContent({

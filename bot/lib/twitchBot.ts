@@ -224,12 +224,18 @@ export function startTwitchBot() {
     client?.say(`#${KANAL}`, melding).catch(() => {});
   }, 5 * 60 * 1000);
 
-  // ─── Partner auto-promotering i Twitch-chat ───────────────────────────────
+  // ─── Partner auto-promotering i Twitch-chat (kun chat, ikke Discord) ────────
 
-  const PARTNER_INTERVAL_MS = 60 * 60 * 1000; // Hver time
+  const PARTNER_INTERVAL_MS = 60 * 60 * 1000;
   let sistePartnerPromo = 0;
 
   setInterval(async () => {
+    try {
+      const { getBotSettings } = require('@/lib/botMemory');
+      const s = getBotSettings();
+      if (!s.aktiv || s.pauseTwitch || s.pausePartnerPromo) return;
+    } catch {}
+
     if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
     sistePartnerPromo = Date.now();
 
@@ -243,14 +249,13 @@ export function startTwitchBot() {
       const aktive = partners.filter((p: any) => p.aktiv);
       if (aktive.length === 0) return;
 
-      // Velg partner basert på prioritet
       const partner = aktive.sort((a: any, b: any) => b.prioritet - a.prioritet)[
         Math.floor(Math.random() * Math.min(3, aktive.length))
       ];
 
       const melding = partner.rabattkode
-        ? `🤝 Sjekk ut ${partner.navn}! ${partner.beskrivelse} Bruk kode ${partner.rabattkode} for rabatt: ${partner.affiliateLink}`
-        : `🤝 Sponsored by ${partner.navn}: ${partner.beskrivelse} ${partner.affiliateLink}`;
+        ? `🤝 ${partner.navn}: ${partner.beskrivelse} – Bruk kode ${partner.rabattkode}: ${partner.affiliateLink}`
+        : `🤝 ${partner.navn}: ${partner.beskrivelse} ${partner.affiliateLink}`;
 
       client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
     } catch {}
