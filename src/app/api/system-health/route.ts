@@ -59,13 +59,27 @@ export async function GET() {
     dbStatus = 'mangler' as any;
   }
 
+  // Verifiser Bot API URL
+  let botApiStatus: 'ok' | 'feil' | 'ukjent' = 'feil';
+  let botApiDetaljer = 'BOT_API_URL mangler – Community Manager og Statistikk viser ingen data';
+  if (process.env.BOT_API_URL) {
+    try {
+      const botRes = await fetch(`${process.env.BOT_API_URL}/`, { signal: AbortSignal.timeout(4000) });
+      botApiStatus = botRes.ok ? 'ok' : 'ukjent';
+      botApiDetaljer = botRes.ok ? undefined as any : 'Bot API svarte med feil – sjekk Railway-deployment';
+    } catch {
+      botApiStatus = 'ukjent';
+      botApiDetaljer = 'Kan ikke nå Railway bot API – sjekk at Generate Domain er aktivert i Railway';
+    }
+  }
+
   const tjenester: ServiceCheck[] = [
     { navn: 'Twitch API', status: twitchOk ? 'ok' : 'feil', detaljer: twitchOk ? undefined : 'Sjekk TWITCH_CLIENT_ID og TWITCH_CLIENT_SECRET' },
     { navn: 'Discord Bot', status: discordOk ? 'ok' : 'feil', detaljer: discordOk ? undefined : 'Sjekk DISCORD_BOT_TOKEN og DISCORD_GUILD_ID' },
     { navn: 'Supabase Database', status: dbStatus, detaljer: dbOk ? undefined : 'Legg til SUPABASE_URL og SUPABASE_SERVICE_ROLE_KEY for delt database' },
     { navn: 'OpenAI', status: process.env.OPENAI_API_KEY ? 'ok' : 'feil', detaljer: process.env.OPENAI_API_KEY ? undefined : 'OPENAI_API_KEY mangler – AI-funksjoner vil ikke fungere' },
-    { navn: 'Bot API (Railway)', status: process.env.BOT_API_URL ? 'ukjent' : 'feil', detaljer: process.env.BOT_API_URL ? 'Satt, men ikke verifisert' : 'BOT_API_URL mangler – Community Manager og Statistikk viser ingen data' },
-    { navn: 'Twitch Chat Bot', status: process.env.TWITCH_BOT_OAUTH ? 'ok' : 'feil', detaljer: process.env.TWITCH_BOT_OAUTH ? undefined : 'TWITCH_BOT_OAUTH mangler – Twitch chat-bot inaktiv' },
+    { navn: 'Bot API (Railway)', status: botApiStatus, detaljer: botApiDetaljer },
+    { navn: 'Twitch Chat Bot', status: process.env.TWITCH_BOT_OAUTH ? 'ok' : 'feil', detaljer: process.env.TWITCH_BOT_OAUTH ? undefined : 'TWITCH_BOT_OAUTH mangler i Vercel env vars' },
   ];
 
   // Kjente bugs / advarsler
@@ -74,7 +88,7 @@ export async function GET() {
   if (!process.env.BOT_API_URL) advarsler.push('KRITISK: BOT_API_URL ikke satt – Community Manager, Statistikk og Stream Coach viser ingen data.');
   if (!process.env.SUPABASE_URL) advarsler.push('VIKTIG: Role Rules når ikke boten fordi det ikke finnes en felles database.');
   if (!process.env.TWITCH_BOT_OAUTH) advarsler.push('VIKTIG: Twitch chat-bot ikke aktiv – ingen automatiske chat-meldinger.');
-  if (!process.env.DISCORD_CHAT_CHANNEL_ID) advarsler.push('ADVARSEL: DISCORD_CHAT_CHANNEL_ID mangler – proaktive meldinger og partner-promo postes ikke.');
+  // DISCORD_CHAT_CHANNEL_ID auto-detekteres nå – ingen advarsel nødvendig
   if (!process.env.OPENAI_API_KEY) advarsler.push('ADVARSEL: OPENAI_API_KEY mangler – all AI-generering vil falle tilbake til maler.');
 
   const helseScore = Math.round(
