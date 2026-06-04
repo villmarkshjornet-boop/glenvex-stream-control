@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
@@ -37,58 +36,64 @@ export async function POST(req: NextRequest) {
   const data = await req.json() as RPData;
   const client = new OpenAI({ apiKey });
 
-  // Hent Discord-kanaler for NXT-søk
+  // Kjør Discord-henting og GPT parallelt
   const guildId = process.env.DISCORD_GUILD_ID;
-  let kanaler: any[] = [];
-  if (guildId && data.erstattNXT) {
-    const res = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, { headers: botHeaders() });
-    if (res.ok) kanaler = await res.json() as any[];
-  }
 
-  const nxtKanaler = kanaler.filter((k: any) =>
-    k.name?.toLowerCase().includes('nxt') || k.topic?.toLowerCase().includes('nxt')
-  );
-
-  const kanalForslag = nxtKanaler.map((k: any) => ({
-    id: k.id,
-    navn: k.name,
-    nyttNavn: k.name.toLowerCase().replace(/nxt/g, data.serverNavn.toLowerCase().replace(/\s/g, '-')),
-    type: 'rename' as const,
-  }));
-
-  // Generer kun tekst (raskt) – bilde genereres separat for å unngå Vercel-timeout
-  const [karakterRes, serverRes] = await Promise.all([
+  const [gptRes, kanalerRes] = await Promise.all([
+    // Én enkelt GPT-call som genererer begge tekstene
     client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `Lag et Discord-karakterkort på norsk for denne GTA RP-karakteren. Bruk Discord markdown (bold, kursiv, overskrifter). Maks 250 ord.
+        content: `Lag innhold for GTA RP-karakteren ${data.karakterNavn} på serveren ${data.serverNavn}. Returner KUN gyldig JSON:
+{
+  "karakterkort": "Discord-karakterkort med bold/kursiv markdown, maks 200 ord. Start med navn, rolle, beskrivelse, backstory.",
+  "servermelding": "Kort Discord-annonseringsmelding (maks 100 ord) om at GLENVEX nå spiller ${data.serverNavn} med ${data.karakterNavn}. Energisk og mørk gaming-vibe.${data.erstattNXT ? ' Nevn at vi går fra NXT.' : ''}"
+}
 
-Server: ${data.serverNavn}
-Karakter: ${data.karakterNavn}
+Karakterinfo:
 Rolle: ${data.karakterRolle}
 Beskrivelse: ${data.karakterBeskrivelse}
-Backstory: ${data.backstory}
+Backstory: ${data.backstory}`,
+      }],
+      max_tokens: 600,
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+    }),
 
-Format: Start med karakterens navn som tittel, deretter rolle, så en engasjerende beskrivelse og backstory. Avslutt med en linje om hva folk kan forvente av denne karakteren på stream.`,
-      }],
-      max_tokens: 400,
-      temperature: 0.8,
-    }),
-    client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'user',
-        content: `Lag en kort Discord-serveroppdateringsmelding på norsk (maks 150 ord) som annonserer at GLENVEX nå streamer ${data.serverNavn} med karakteren ${data.karakterNavn} (${data.karakterRolle}). Energisk, mørk gaming-vibe. ${data.erstattNXT ? `Nevn at vi går fra NXT til ${data.serverNavn}.` : ''}`,
-      }],
-      max_tokens: 200,
-      temperature: 0.8,
-    }),
+    // Discord-kanaler for NXT-søk
+    (guildId && data.erstattNXT)
+      ? fetch(`${DISCORD_API}/guilds/${guildId}/channels`, { headers: botHeaders() })
+          .then(r => r.ok ? r.json() : [])
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
 
+  // Parse GPT-svar
+  let karakterIntro = '';
+  let serverOppdatering = '';
+  try {
+    const parsed = JSON.parse(gptRes.choices[0]?.message?.content ?? '{}');
+    karakterIntro = parsed.karakterkort ?? '';
+    serverOppdatering = parsed.servermelding ?? '';
+  } catch {
+    karakterIntro = gptRes.choices[0]?.message?.content ?? '';
+  }
+
+  // NXT-kanalforslag
+  const kanaler = Array.isArray(kanalerRes) ? kanalerRes : [];
+  const kanalForslag = kanaler
+    .filter((k: any) => k.name?.toLowerCase().includes('nxt') || k.topic?.toLowerCase().includes('nxt'))
+    .map((k: any) => ({
+      id: k.id,
+      navn: k.name,
+      nyttNavn: k.name.toLowerCase().replace(/nxt/g, data.serverNavn.toLowerCase().replace(/\s/g, '-')),
+      type: 'rename' as const,
+    }));
+
   const generert: RPGenerert = {
-    karakterIntro: karakterRes.choices[0]?.message?.content ?? '',
-    serverOppdatering: serverRes.choices[0]?.message?.content ?? '',
+    karakterIntro,
+    serverOppdatering,
     kanalForslag,
     bildePrompt: `${data.karakterNavn} – ${data.karakterRolle} – ${data.karakterBeskrivelse}`,
     bildeUrl: undefined,
