@@ -63,6 +63,7 @@ export default function PartnerHubPage() {
   const [promoterer, setPromoterer] = useState(false);
   const [promotertMsg, setPromotertMsg] = useState('');
   const [kopiert, setKopiert] = useState(false);
+  const [lagreFeil, setLagreFeil] = useState('');
 
   const hent = () => {
     setLoading(true);
@@ -72,13 +73,27 @@ export default function PartnerHubPage() {
   useEffect(() => { hent(); }, []);
 
   async function lagre() {
+    setLagreFeil('');
     const method = redigerId ? 'PATCH' : 'POST';
     const body = redigerId ? { ...form, id: redigerId } : form;
-    await fetch('/api/partners', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    setVisForm(false);
-    setRedigerId(null);
-    setForm(TOM_PARTNER);
-    hent();
+    try {
+      const res = await fetch('/api/partners', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLagreFeil(`Feil: ${data.error ?? res.status}`);
+        return;
+      }
+      setVisForm(false);
+      setRedigerId(null);
+      setForm(TOM_PARTNER);
+      hent();
+    } catch (e) {
+      setLagreFeil(`Nettverksfeil: ${(e as Error).message}`);
+    }
   }
 
   async function slett(id: string) {
@@ -397,6 +412,9 @@ export default function PartnerHubPage() {
             <button onClick={lagre} className="w-full py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all">
               ◆ {redigerId ? 'Oppdater' : 'Legg til partner'}
             </button>
+            {lagreFeil && (
+              <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 border border-red-500/20 rounded">{lagreFeil}</p>
+            )}
           </div>
         </div>
       )}

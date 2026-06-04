@@ -60,17 +60,50 @@ async function dbGetAll(): Promise<Partner[]> {
   return (data ?? []).map(mapFromDb);
 }
 
+async function ensureWorkspace() {
+  const db = getDb();
+  if (!db) return;
+  const wsId = getWorkspaceId();
+  const { data } = await db.from('workspaces').select('id').eq('id', wsId).single();
+  if (!data) {
+    await db.from('workspaces').insert({
+      id: wsId,
+      owner_user_id: 'glenvex',
+      streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
+      twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+      discord_guild_id: process.env.DISCORD_GUILD_ID,
+      live_channel_id: process.env.DISCORD_LIVE_CHANNEL_ID,
+      promo_channel_id: process.env.DISCORD_CHAT_CHANNEL_ID,
+      bot_personality: 'dark_gaming',
+      plan: 'creator',
+    });
+  }
+}
+
 async function dbInsert(partner: Omit<Partner, 'id' | 'opprettet'>): Promise<Partner | null> {
   const db = getDb();
-  const row = mapToDb({ ...partner, id: crypto.randomUUID(), opprettet: new Date().toISOString() });
+  const { randomUUID } = await import('crypto');
+  const row = mapToDb({ ...partner, id: randomUUID(), opprettet: new Date().toISOString() });
+
   if (!db) {
     const items = loadFile();
     items.unshift(row as any);
     saveFile(items);
     return row as Partner;
   }
+
+  await ensureWorkspace();
+
   const { data, error } = await db.from('partners').insert(row).select().single();
-  if (error) { console.error('[DB] insert partner:', error.message); return null; }
+  if (error) {
+    console.error('[DB] insert partner:', error.message);
+    // Fallback til fil
+    const items = loadFile();
+    items.unshift(row as any);
+    saveFile(items);
+    return row as Partner;
+  }
   return mapFromDb(data);
 }
 
