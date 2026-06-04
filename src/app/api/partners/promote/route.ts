@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getPartners, updatePartner, type Partner } from '@/lib/partners';
-import { getAnnonseringsKanalId } from '@/lib/discordChannel';
+import { getPartnerKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   if (!partner) return NextResponse.json({ error: 'Ingen aktive partnere' }, { status: 404 });
 
-  const kanalId = await getAnnonseringsKanalId();
+  const kanalId = await getPartnerKanalId();
   if (!kanalId) return NextResponse.json({ error: 'Ingen Discord-kanal funnet' }, { status: 400 });
 
   const apiKey = process.env.OPENAI_API_KEY;

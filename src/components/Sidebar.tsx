@@ -54,6 +54,7 @@ const NAV: NavGruppe[] = [
     items: [
       { label: 'Control Center', href: '/discord-control' },
       { label: 'Oversikt', href: '/discord' },
+      { label: 'Kanalinnstillinger', href: '/kanal-innstillinger' },
       { label: 'Role Manager', href: '/role-manager' },
       { label: 'AI Moderator', href: '/moderation' },
       { label: 'Raid Manager', href: '/raid-manager' },

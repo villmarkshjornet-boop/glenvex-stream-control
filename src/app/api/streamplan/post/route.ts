@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnnonseringsKanalId } from '@/lib/discordChannel';
+import { getStreamplanKanalId } from '@/lib/discordChannel';
 import { addContent, getAllContent, updateContent } from '@/lib/contentLibrary';
 
 export const dynamic = 'force-dynamic';
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   const { plan } = await req.json() as { plan: StreamDay[] };
 
   // Bruk annonseringskanal – ikke chat
-  const kanalId = await getAnnonseringsKanalId();
+  const kanalId = await getStreamplanKanalId();
   if (!kanalId) {
     return NextResponse.json({ error: 'Ingen annonseringskanal funnet. Sett DISCORD_ANNOUNCE_CHANNEL_ID eller DISCORD_LIVE_CHANNEL_ID.' }, { status: 400 });
   }
