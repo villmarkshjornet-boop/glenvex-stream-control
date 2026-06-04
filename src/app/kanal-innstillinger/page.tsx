@@ -21,6 +21,7 @@ export default function KanalInnstillingerPage() {
   const [loading, setLoading] = useState(true);
   const [lagret, setLagret] = useState(false);
   const [feil, setFeil] = useState('');
+  const [debug, setDebug] = useState<any>(null);
 
   useEffect(() => {
     fetch('/api/channel-settings').then(r => r.json()).then(d => {
@@ -32,16 +33,21 @@ export default function KanalInnstillingerPage() {
 
   async function lagre() {
     setFeil('');
+    setDebug(null);
     const res = await fetch('/api/channel-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prefs),
     });
+    const data = await res.json();
     if (res.ok) {
       setLagret(true);
-      setTimeout(() => setLagret(false), 2000);
+      // Hent debug-info for å bekrefte lagring
+      const dbg = await fetch('/api/channel-settings/debug').then(r => r.json()).catch(() => null);
+      setDebug(dbg);
+      setTimeout(() => { setLagret(false); }, 3000);
     } else {
-      setFeil('Kunne ikke lagre innstillinger');
+      setFeil(`Kunne ikke lagre: ${data.error ?? res.status}`);
     }
   }
 
@@ -106,7 +112,18 @@ export default function KanalInnstillingerPage() {
             ))}
           </div>
 
-          {feil && <p className="text-xs text-red-400 font-mono">{feil}</p>}
+          {feil && <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 border border-red-500/20 rounded">{feil}</p>}
+
+          {debug && (
+            <div className={`p-3 rounded border text-xs font-mono space-y-1 ${debug.supabaseHarData ? 'border-g-green/30 bg-g-green/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
+              <p className={debug.supabaseHarData ? 'text-g-green' : 'text-yellow-400'}>
+                {debug.supabaseHarData ? '✓ Lagret i Supabase' : '⚠ Ikke funnet i Supabase – bruker auto-detect'}
+              </p>
+              {debug.lagretISupabase && Object.entries(debug.lagretISupabase).filter(([, v]) => v).map(([k, v]) => (
+                <p key={k} className="text-g-muted">{k}: {kanaler.find(c => c.id === v)?.navn ?? v as string}</p>
+              ))}
+            </div>
+          )}
 
           <button onClick={lagre}
             className="w-full py-3 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">

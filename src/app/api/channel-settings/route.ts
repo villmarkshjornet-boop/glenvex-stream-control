@@ -49,21 +49,26 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<boolean> {
     fs.writeFileSync(FILE, JSON.stringify(prefs, null, 2), 'utf-8');
   } catch {}
 
-  // Lagre i Supabase (primær)
   if (!isDbAvailable()) return false;
   const db = getDb();
   if (!db) return false;
 
-  // Sørg for at workspace finnes
+  const wsId = getWorkspaceId();
+
+  // Hent eksisterende settings_json
   const { data: existing } = await db
     .from('workspaces')
     .select('id, settings_json')
-    .eq('id', getWorkspaceId())
+    .eq('id', wsId)
     .single();
 
+  const current = existing?.settings_json ?? {};
+  const nySettings = { ...current, kanalPreferanser: prefs };
+
   if (!existing) {
-    await db.from('workspaces').insert({
-      id: getWorkspaceId(),
+    // Opprett workspace med preferansene inkludert
+    const { error } = await db.from('workspaces').insert({
+      id: wsId,
       owner_user_id: 'glenvex',
       streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
       brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
@@ -71,17 +76,16 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<boolean> {
       discord_guild_id: process.env.DISCORD_GUILD_ID,
       bot_personality: 'dark_gaming',
       plan: 'creator',
+      settings_json: nySettings,
     });
+    return !error;
   }
 
-  const current = existing?.settings_json ?? {};
+  // Oppdater eksisterende workspace
   const { error } = await db
     .from('workspaces')
-    .update({
-      settings_json: { ...current, kanalPreferanser: prefs },
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', getWorkspaceId());
+    .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
+    .eq('id', wsId);
 
   return !error;
 }
