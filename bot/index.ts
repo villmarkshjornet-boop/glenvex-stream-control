@@ -277,34 +277,70 @@ async function autoPostStreamplan() {
   const now = new Date();
   if (now.getDay() !== 1) return; // Kun mandag
   const uke = ukeNummer();
-  // Sjekk om vi allerede har postet denne uken
   const cacheKey = `streamplan_uke_${uke}`;
   if ((global as any)[cacheKey]) return;
   (global as any)[cacheKey] = true;
-
-  const kanal = finnChatKanal();
-  if (!kanal) return;
 
   try {
     const fs = require('fs');
     const path = require('path');
     const planFil = path.join(process.cwd(), 'data', 'schedule.json');
-    if (!fs.existsSync(planFil)) return;
 
-    const plan = JSON.parse(fs.readFileSync(planFil, 'utf-8')) as any[];
-    const aktive = plan.filter((d: any) => d.aktiv);
+    let plan: any[] = [];
+    if (fs.existsSync(planFil)) {
+      plan = JSON.parse(fs.readFileSync(planFil, 'utf-8'));
+    }
+
+    let aktive = plan.filter((d: any) => d.aktiv);
+
+    // Ingen plan satt – generer fra stream-historikk
+    if (aktive.length === 0) {
+      const historikkFil = path.join(process.cwd(), 'data', 'stream-history.json');
+      if (fs.existsSync(historikkFil)) {
+        const historikk = JSON.parse(fs.readFileSync(historikkFil, 'utf-8')) as any[];
+        if (historikk.length > 0 && process.env.OPENAI_API_KEY) {
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          const res = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{
+              role: 'user',
+              content: `Basert på disse tidligere stream-øktene for GLENVEX, foreslå en ukentlig streamplan for denne uken som JSON-array:
+[{"dag": "Mandag", "tid": "20:00", "spill": "Future RP", "tittel": "", "aktiv": true}]
+
+Historikk: ${historikk.slice(0, 5).map(h => `${h.game} (${new Date(h.startedAt).toLocaleDateString('no-NO', { weekday: 'long' })} kl. ${new Date(h.startedAt).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
+
+Returner kun JSON-array.`,
+            }],
+            max_tokens: 300,
+            temperature: 0.7,
+            response_format: { type: 'json_object' },
+          });
+
+          try {
+            const parsed = JSON.parse(res.choices[0]?.message?.content ?? '{}');
+            aktive = (parsed.plan ?? parsed.streamplan ?? []).filter((d: any) => d.aktiv);
+            if (aktive.length > 0) {
+              fs.writeFileSync(planFil, JSON.stringify(aktive.map((d: any) => ({ ...d, aktiv: true })), null, 2));
+              addLog('info', `Streamplan auto-generert fra historikk (uke ${uke})`, 'OK');
+            }
+          } catch {}
+        }
+      }
+    }
+
     if (aktive.length === 0) return;
 
-    const planTekst = aktive.map((d: any) => `**${d.dag}** kl. ${d.tid} – ${d.spill}${d.tittel ? ` – ${d.tittel}` : ''}`).join('\n');
+    // Post via Vercel API (håndterer annonseringskanal og sletting av gammel plan)
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+    if (appUrl) {
+      const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+      await fetch(`${url}/api/streamplan/post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: aktive }),
+      }).catch(() => {});
+    }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00ff41)
-      .setTitle('📅 Streamplan denne uken')
-      .setDescription(planTekst)
-      .setFooter({ text: 'GLENVEX Stream Control • Auto Streamplan' })
-      .setTimestamp();
-
-    await kanal.send({ embeds: [embed] });
     addLog('success', `Streamplan postet automatisk uke ${uke}`, 'OK');
   } catch (error) {
     addLog('error', `Streamplan-post feil: ${(error as Error).message}`, 'ERROR');

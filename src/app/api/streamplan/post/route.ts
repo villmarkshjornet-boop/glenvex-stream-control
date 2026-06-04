@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getChatKanalId } from '@/lib/discordChannel';
-import { addContent } from '@/lib/contentLibrary';
+import { getAnnonseringsKanalId } from '@/lib/discordChannel';
+import { addContent, getAllContent, updateContent } from '@/lib/contentLibrary';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,19 +21,37 @@ interface StreamDay {
   aktiv: boolean;
 }
 
+async function slettGammelPlan(kanalId: string) {
+  const alle = getAllContent();
+  const gammel = alle.find(c =>
+    c.type === 'streamplan' && c.status === 'publisert' && c.discordMsgId && c.kanalId === kanalId
+  );
+  if (!gammel?.discordMsgId) return;
+  try {
+    await fetch(`${DISCORD_API}/channels/${kanalId}/messages/${gammel.discordMsgId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+    });
+    updateContent(gammel.id, { status: 'arkivert' });
+  } catch {}
+}
+
 export async function POST(req: NextRequest) {
   const { plan } = await req.json() as { plan: StreamDay[] };
-  const kanalId = await getChatKanalId();
 
+  // Bruk annonseringskanal – ikke chat
+  const kanalId = await getAnnonseringsKanalId();
   if (!kanalId) {
-    return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler i Vercel env vars' }, { status: 400 });
+    return NextResponse.json({ error: 'Ingen annonseringskanal funnet. Sett DISCORD_ANNOUNCE_CHANNEL_ID eller DISCORD_LIVE_CHANNEL_ID.' }, { status: 400 });
   }
 
   const aktive = plan.filter(d => d.aktiv);
-
   if (aktive.length === 0) {
     return NextResponse.json({ error: 'Ingen aktive stream-dager å poste' }, { status: 400 });
   }
+
+  // Slett forrige ukes plan i samme kanal
+  await slettGammelPlan(kanalId);
 
   const planLinjer = aktive
     .map(d => `**${d.dag}** kl. ${d.tid}  ·  ${d.spill}${d.tittel ? `  –  *${d.tittel}*` : ''}`)
@@ -43,13 +61,11 @@ export async function POST(req: NextRequest) {
     title: '📅 Streamplan denne uken',
     description: planLinjer,
     color: 0x00ff41,
-    fields: [
-      {
-        name: '📺 Se streamen her',
-        value: `[twitch.tv/glenvex](${process.env.TWITCH_URL || 'https://twitch.tv/glenvex'})`,
-        inline: true,
-      },
-    ],
+    fields: [{
+      name: '📺 Se streamen her',
+      value: `[twitch.tv/glenvex](${process.env.TWITCH_URL || 'https://twitch.tv/glenvex'})`,
+      inline: true,
+    }],
     footer: { text: 'GLENVEX Stream Control • Streamplan' },
     timestamp: new Date().toISOString(),
   };
@@ -67,7 +83,6 @@ export async function POST(req: NextRequest) {
 
   const msg = await res.json() as any;
 
-  // Lagre til content library
   addContent({
     tittel: `Streamplan – uke ${getWeekNumber()}`,
     type: 'streamplan',
@@ -81,7 +96,7 @@ export async function POST(req: NextRequest) {
     tags: aktive.map(d => d.dag),
   });
 
-  return NextResponse.json({ ok: true, msgId: msg.id, antallDager: aktive.length });
+  return NextResponse.json({ ok: true, msgId: msg.id, antallDager: aktive.length, kanalId });
 }
 
 function getWeekNumber(): number {

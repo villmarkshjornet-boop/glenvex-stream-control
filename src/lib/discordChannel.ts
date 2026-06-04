@@ -7,13 +7,21 @@ function botHeaders() {
 let cachedChatKanalId: string | null = null;
 
 export async function getChatKanalId(): Promise<string | null> {
-  // 1. Eksplisitt satt i env
   if (process.env.DISCORD_CHAT_CHANNEL_ID) return process.env.DISCORD_CHAT_CHANNEL_ID;
-
-  // 2. Cachet fra forrige kall
   if (cachedChatKanalId) return cachedChatKanalId;
+  return autoDetectKanal(['chat', 'general', 'gaming', 'generelt', 'snakk', 'community']);
+}
 
-  // 3. Auto-detect fra Discord
+export async function getAnnonseringsKanalId(): Promise<string | null> {
+  if (process.env.DISCORD_ANNOUNCE_CHANNEL_ID) return process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
+  // Prøv annonsering-kanal først, fall tilbake til live-kanal, så chat
+  const annonse = await autoDetectKanal(['annonsering', 'announce', 'kunngjøring', 'nyheter', 'live']);
+  if (annonse) return annonse;
+  if (process.env.DISCORD_LIVE_CHANNEL_ID) return process.env.DISCORD_LIVE_CHANNEL_ID;
+  return getChatKanalId();
+}
+
+async function autoDetectKanal(prioritet: string[]): Promise<string | null> {
   const guildId = process.env.DISCORD_GUILD_ID;
   if (!guildId || !process.env.DISCORD_BOT_TOKEN) return null;
 
@@ -22,28 +30,17 @@ export async function getChatKanalId(): Promise<string | null> {
     if (!res.ok) return null;
 
     const kanaler = await res.json() as any[];
-    const tekstKanaler = kanaler.filter((k: any) => k.type === 0); // Kun tekstkanaler
+    const tekstKanaler = kanaler.filter((k: any) => k.type === 0);
 
-    // Prioritert søk
-    const prioritet = ['chat', 'general', 'gaming', 'generelt', 'snakk', 'community'];
     for (const søk of prioritet) {
       const funnet = tekstKanaler.find((k: any) => k.name.toLowerCase().includes(søk));
-      if (funnet) {
-        cachedChatKanalId = funnet.id;
-        return funnet.id;
-      }
+      if (funnet) return funnet.id;
     }
 
-    // Fallback: første tekstkanal som ikke er system/logs/bot
-    const ekskluder = ['log', 'bot', 'admin', 'mod', 'staff', 'announce', 'regel', 'info', 'velkomst'];
-    const fallback = tekstKanaler.find((k: any) =>
+    const ekskluder = ['log', 'bot', 'admin', 'mod', 'staff', 'regel', 'velkomst'];
+    return tekstKanaler.find((k: any) =>
       !ekskluder.some(e => k.name.toLowerCase().includes(e))
-    );
-    if (fallback) {
-      cachedChatKanalId = fallback.id;
-      return fallback.id;
-    }
+    )?.id ?? null;
   } catch {}
-
   return null;
 }
