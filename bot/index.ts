@@ -546,7 +546,7 @@ async function delSocialsSubtilt() {
   if (!kanal) return;
 
   const settings = getSettings();
-  const s = settings.socials ?? {};
+  const s: Record<string, string | undefined> = { ...(settings.socials ?? {}) };
   const links = byggSocialsEmbed(s, settings.twitchUrl);
   if (links.length === 0) return;
 
