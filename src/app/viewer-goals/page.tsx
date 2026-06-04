@@ -6,11 +6,11 @@ interface Goal { type: string; label: string; mal: number; gjeldende: number; ak
 
 export default function ViewerGoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([
-    { type: 'followers', label: 'Følgere på Twitch', mal: 1000, gjeldende: 0, aktiv: true },
-    { type: 'subscribers', label: 'Subscribers', mal: 50, gjeldende: 0, aktiv: false },
+    { type: 'followers', label: 'Følgere', mal: 1000, gjeldende: 0, aktiv: true },
+    { type: 'subscribers', label: 'Subscribers', mal: 50, gjeldende: 0, aktiv: true },
     { type: 'discord', label: 'Discord-membres', mal: 200, gjeldende: 0, aktiv: false },
   ]);
-  const [live, setLive] = useState<{ followers: number; discordMembres: number } | null>(null);
+  const [live, setLive] = useState<{ followers: number; subscribers: number; harSubData: boolean } | null>(null);
   const [lagret, setLagret] = useState(false);
   const [posting, setPosting] = useState(false);
   const [postRes, setPostRes] = useState('');
@@ -76,8 +76,12 @@ export default function ViewerGoalsPage() {
             <p className="text-3xl font-black text-g-green font-mono mt-1">{live.followers.toLocaleString()}</p>
           </div>
           <div className="bg-g-card border border-g-border rounded-lg p-4 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">Discord-membres nå</p>
-            <p className="text-3xl font-black text-g-green font-mono mt-1">{live.discordMembres.toLocaleString()}</p>
+            <p className="text-[9px] text-g-muted uppercase tracking-widest">Subscribers nå</p>
+            {live.harSubData ? (
+              <p className="text-3xl font-black text-g-green font-mono mt-1">{live.subscribers.toLocaleString()}</p>
+            ) : (
+              <p className="text-sm text-g-muted mt-1 leading-tight">Krever Affiliate<br/>+ bruker-token</p>
+            )}
           </div>
         </div>
       )}
@@ -85,7 +89,7 @@ export default function ViewerGoalsPage() {
       {/* Goals */}
       <div className="space-y-3">
         {goals.map((g, i) => {
-          const gjeldende = g.type === 'followers' ? (live?.followers ?? g.gjeldende) : g.type === 'discord' ? (live?.discordMembres ?? g.gjeldende) : g.gjeldende;
+          const gjeldende = g.type === 'followers' ? (live?.followers ?? g.gjeldende) : g.type === 'subscribers' ? (live?.harSubData ? (live?.subscribers ?? g.gjeldende) : g.gjeldende) : g.gjeldende;
           const pct = g.mal > 0 ? Math.min(100, Math.round((gjeldende / g.mal) * 100)) : 0;
 
           return (
