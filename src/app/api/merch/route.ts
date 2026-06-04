@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getChatKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
     bildeUrl?: string;
   };
 
-  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
+  const kanalId = await getChatKanalId();
   if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler' }, { status: 400 });
 
   const embed: any = {

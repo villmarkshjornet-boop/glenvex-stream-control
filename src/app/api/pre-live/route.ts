@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getChatKanalId } from '@/lib/discordChannel';
 import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';

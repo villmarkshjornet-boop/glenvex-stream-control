@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getChatKanalId } from '@/lib/discordChannel';
 import { addContent } from '@/lib/contentLibrary';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ interface StreamDay {
 
 export async function POST(req: NextRequest) {
   const { plan } = await req.json() as { plan: StreamDay[] };
-  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
+  const kanalId = await getChatKanalId();
 
   if (!kanalId) {
     return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler i Vercel env vars' }, { status: 400 });

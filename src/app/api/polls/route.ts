@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getChatKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
     kanalId?: string;
   };
 
-  const kanalId = body.kanalId || process.env.DISCORD_CHAT_CHANNEL_ID;
+  const kanalId = body?.kanalId || await getChatKanalId();
   if (!kanalId) return NextResponse.json({ error: 'Ingen kanal' }, { status: 400 });
 
   const alternativTekst = body.alternativer
