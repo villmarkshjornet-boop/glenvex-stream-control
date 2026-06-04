@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getAnnonseringsKanalId } from '@/lib/discordChannel';
+import { postOgOppdater } from '@/lib/discordMessages';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,12 +65,7 @@ export async function POST(req: NextRequest) {
     timestamp: new Date().toISOString(),
   };
 
-  const res = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
-    method: 'POST',
-    headers: botHeaders(),
-    body: JSON.stringify({ embeds: [embed] }),
-  });
-
-  if (!res.ok) return NextResponse.json({ error: `Discord feil ${res.status}` }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  const result = await postOgOppdater('goals', kanalId, { embeds: [embed] });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
+  return NextResponse.json({ ok: true, msgId: result.msgId });
 }

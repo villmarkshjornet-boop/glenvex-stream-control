@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChatKanalId } from '@/lib/discordChannel';
+import { postOgOppdater } from '@/lib/discordMessages';
 
 export const dynamic = 'force-dynamic';
-
-const DISCORD_API = 'https://discord.com/api/v10';
-
-function botHeaders() {
-  return {
-    Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
-    'Content-Type': 'application/json',
-  };
-}
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
@@ -22,7 +14,7 @@ export async function POST(req: NextRequest) {
   };
 
   const kanalId = await getChatKanalId();
-  if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler' }, { status: 400 });
+  if (!kanalId) return NextResponse.json({ error: 'Ingen kanal funnet' }, { status: 400 });
 
   const embed: any = {
     title: `🛍️ ${body.navn}`,
@@ -33,12 +25,11 @@ export async function POST(req: NextRequest) {
   };
   if (body.bildeUrl) embed.image = { url: body.bildeUrl };
 
-  const res = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
-    method: 'POST',
-    headers: botHeaders(),
-    body: JSON.stringify({ content: '🔥 Nytt fra GLENVEX!', embeds: [embed] }),
+  const result = await postOgOppdater(`merch_${body.navn.replace(/\s/g, '_').toLowerCase()}`, kanalId, {
+    content: '🔥 Nytt fra GLENVEX!',
+    embeds: [embed],
   });
 
-  if (!res.ok) return NextResponse.json({ error: 'Discord feil' }, { status: 500 });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

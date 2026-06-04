@@ -1,54 +1,121 @@
 /**
- * Lagrer og henter siste Discord meldings-ID per type i Supabase.
- * Brukes for å slette gammel melding før ny postes (unngå duplikater).
+ * Felles håndtering av Discord-meldinger.
+ * Lagrer siste message ID per type i Supabase + fil-fallback.
+ * Brukes til å slette gamle meldinger før ny postes (ingen duplikater).
  */
 
 import { getDb, isDbAvailable } from './db';
 import { getWorkspaceId } from './workspace';
+import fs from 'fs';
+import path from 'path';
 
 const DISCORD_API = 'https://discord.com/api/v10';
+const MSG_FILE = path.join(process.cwd(), 'data', 'discord-messages.json');
 
 function botHeaders() {
   return { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` };
 }
 
-async function getSettings(): Promise<Record<string, any>> {
+// ── Fil-fallback (Railway) ────────────────────────────────────────────────────
+
+function loadFile(): Record<string, { msgId: string; kanalId: string; dato: string }> {
+  try {
+    if (fs.existsSync(MSG_FILE)) return JSON.parse(fs.readFileSync(MSG_FILE, 'utf-8'));
+  } catch {}
+  return {};
+}
+
+function saveFile(data: Record<string, any>) {
+  try {
+    const dir = path.dirname(MSG_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MSG_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
+}
+
+// ── Supabase ──────────────────────────────────────────────────────────────────
+
+async function hentFraDb(): Promise<Record<string, any>> {
   if (!isDbAvailable()) return {};
   const db = getDb();
   if (!db) return {};
-  const { data } = await db
-    .from('workspaces')
-    .select('settings_json')
-    .eq('id', getWorkspaceId())
-    .single();
-  return data?.settings_json ?? {};
+  try {
+    const { data } = await db
+      .from('workspaces')
+      .select('settings_json')
+      .eq('id', getWorkspaceId())
+      .single();
+    return data?.settings_json?.discordMeldinger ?? {};
+  } catch { return {}; }
 }
 
-async function saveSettings(updates: Record<string, any>): Promise<void> {
-  if (!isDbAvailable()) return;
+async function lagreTilDb(meldinger: Record<string, any>): Promise<boolean> {
+  if (!isDbAvailable()) return false;
   const db = getDb();
-  if (!db) return;
-  const current = await getSettings();
-  await db
-    .from('workspaces')
-    .update({ settings_json: { ...current, ...updates }, updated_at: new Date().toISOString() })
-    .eq('id', getWorkspaceId());
+  if (!db) return false;
+  try {
+    const wsId = getWorkspaceId();
+
+    // Hent eksisterende eller opprett workspace
+    const { data: existing } = await db
+      .from('workspaces')
+      .select('id, settings_json')
+      .eq('id', wsId)
+      .single();
+
+    if (!existing) {
+      await db.from('workspaces').insert({
+        id: wsId,
+        owner_user_id: 'glenvex',
+        streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+        brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
+        twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+        discord_guild_id: process.env.DISCORD_GUILD_ID,
+        bot_personality: 'dark_gaming',
+        plan: 'creator',
+        settings_json: { discordMeldinger: meldinger },
+      });
+      return true;
+    }
+
+    const current = existing.settings_json ?? {};
+    const { error } = await db
+      .from('workspaces')
+      .update({
+        settings_json: { ...current, discordMeldinger: { ...(current.discordMeldinger ?? {}), ...meldinger } },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', wsId);
+    return !error;
+  } catch { return false; }
 }
 
-/** Hent siste meldings-ID for en type (f.eks. 'partner', 'streamplan', 'live') */
+// ── Offentlige funksjoner ────────────────────────────────────────────────────
+
 export async function hentSisteMsgId(type: string): Promise<{ msgId: string; kanalId: string } | null> {
-  const s = await getSettings();
-  const key = `lastMsg_${type}`;
-  return s[key] ?? null;
+  // Prøv fil-fallback først (raskere på Railway)
+  const fil = loadFile();
+  if (fil[type]) return fil[type];
+
+  // Prøv Supabase
+  const db = await hentFraDb();
+  if (db[type]) return db[type];
+
+  return null;
 }
 
-/** Lagre meldings-ID etter posting */
 export async function lagreMsgId(type: string, msgId: string, kanalId: string): Promise<void> {
-  const key = `lastMsg_${type}`;
-  await saveSettings({ [key]: { msgId, kanalId, dato: new Date().toISOString() } });
+  const entry = { msgId, kanalId, dato: new Date().toISOString() };
+
+  // Lagre i fil alltid
+  const fil = loadFile();
+  fil[type] = entry;
+  saveFile(fil);
+
+  // Lagre i Supabase
+  await lagreTilDb({ [type]: entry });
 }
 
-/** Slett gammel melding og returner om det lyktes */
 export async function slettGammelMelding(type: string): Promise<boolean> {
   const gammel = await hentSisteMsgId(type);
   if (!gammel?.msgId || !gammel.kanalId) return false;
@@ -58,20 +125,20 @@ export async function slettGammelMelding(type: string): Promise<boolean> {
       method: 'DELETE',
       headers: botHeaders(),
     });
-    return res.ok || res.status === 404; // 404 = allerede slettet
-  } catch {
-    return false;
-  }
+    // 200/204 = slettet, 404 = allerede slettet, begge er OK
+    return res.ok || res.status === 404;
+  } catch { return false; }
 }
 
-/** Alt i ett: slett gammel, post ny, lagre ny ID */
+/** Slett gammel → post ny → lagre ID. Brukes overalt. */
 export async function postOgOppdater(
   type: string,
   kanalId: string,
   payload: Record<string, any>
 ): Promise<{ ok: boolean; msgId?: string; error?: string }> {
-  // Slett gammel
-  await slettGammelMelding(type);
+  // Alltid slett gammel melding (uavhengig av kanal)
+  const slettet = await slettGammelMelding(type);
+  if (slettet) console.log(`[Discord] Slettet gammel ${type}-melding`);
 
   // Post ny
   const res = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
