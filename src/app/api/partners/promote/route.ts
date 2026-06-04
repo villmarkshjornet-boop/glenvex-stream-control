@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { getPartners, savePartners, type Partner } from '@/lib/partners';
+import { getPartners, updatePartner, type Partner } from '@/lib/partners';
+import { getChatKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +10,6 @@ const DISCORD_API = 'https://discord.com/api/v10';
 function velgPartner(partners: Partner[]): Partner | null {
   const aktive = partners.filter(p => p.aktiv);
   if (aktive.length === 0) return null;
-
-  // Score basert på prioritet, tid siden sist og eksponering
   const scored = aktive.map(p => {
     const sidenSist = p.sistePromotert
       ? (Date.now() - new Date(p.sistePromotert).getTime()) / 3_600_000
@@ -18,7 +17,6 @@ function velgPartner(partners: Partner[]): Partner | null {
     const score = p.prioritet * 10 + Math.min(sidenSist, 100) - p.eksponering * 0.1;
     return { partner: p, score };
   });
-
   scored.sort((a, b) => b.score - a.score);
   return scored[0].partner;
 }
@@ -26,15 +24,15 @@ function velgPartner(partners: Partner[]): Partner | null {
 export async function POST(req: NextRequest) {
   const { manuellPartnerId } = await req.json().catch(() => ({})) as { manuellPartnerId?: string };
 
-  const partners = getPartners();
+  const partners = await getPartners();
   const partner = manuellPartnerId
     ? partners.find(p => p.id === manuellPartnerId)
     : velgPartner(partners);
 
   if (!partner) return NextResponse.json({ error: 'Ingen aktive partnere' }, { status: 404 });
 
-  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
-  if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler' }, { status: 400 });
+  const kanalId = await getChatKanalId();
+  if (!kanalId) return NextResponse.json({ error: 'Ingen Discord-kanal funnet' }, { status: 400 });
 
   const apiKey = process.env.OPENAI_API_KEY;
   let tekst = `🤝 **Dagens partner: ${partner.navn}**\n\n${partner.beskrivelse}\n\n${partner.rabattkode ? `Bruk kode **${partner.rabattkode}** for rabatt!\n` : ''}${partner.affiliateLink}`;
@@ -55,6 +53,12 @@ export async function POST(req: NextRequest) {
     } catch {}
   }
 
+  // Lagre til memory
+  try {
+    const { addToMemory } = await import('@/lib/botMemory');
+    addToMemory({ type: 'partner-post', innhold: partner.navn, partner: partner.navn });
+  } catch {}
+
   const embed: any = {
     title: `🤝 Partner: ${partner.navn}`,
     description: tekst,
@@ -66,12 +70,6 @@ export async function POST(req: NextRequest) {
     embed.fields = [{ name: 'Rabattkode', value: `\`${partner.rabattkode}\``, inline: true }];
   }
 
-  // Lagre til memory for anti-repetisjon
-  try {
-    const { addToMemory } = await import('@/lib/botMemory');
-    addToMemory({ type: 'partner-post', innhold: partner.navn, partner: partner.navn });
-  } catch {}
-
   const discordRes = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
@@ -79,12 +77,10 @@ export async function POST(req: NextRequest) {
   });
 
   if (discordRes.ok) {
-    const idx = partners.findIndex(p => p.id === partner.id);
-    if (idx >= 0) {
-      partners[idx].sistePromotert = new Date().toISOString();
-      partners[idx].eksponering = (partners[idx].eksponering ?? 0) + 1;
-      savePartners(partners);
-    }
+    await updatePartner(partner.id, {
+      sistePromotert: new Date().toISOString(),
+      eksponering: (partner.eksponering ?? 0) + 1,
+    });
   }
 
   return NextResponse.json({ ok: discordRes.ok, partner: partner.navn });

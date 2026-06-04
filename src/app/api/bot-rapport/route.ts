@@ -17,7 +17,7 @@ export async function GET() {
   // Hent members og events
   const members = await hentBotData('members') ?? {};
   const events = await hentBotData('events') ?? { raids: [], giftSubs: [] };
-  const partners = getPartners();
+  const partners = await getPartners();
 
   // Grupper logg-hendelser
   const sisteLive = loggData.find(l => l.message?.includes('live-varsel'));

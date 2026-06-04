@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
-import { getPartners, savePartners, type Partner } from '@/lib/partners';
+import { getPartners, createPartner, updatePartner, deletePartner } from '@/lib/partners';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return NextResponse.json(getPartners());
+  const partners = await getPartners();
+  return NextResponse.json(partners);
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json() as Partial<Partner>;
-  const partners = getPartners();
+  const body = await req.json();
 
-  if (body.featured) partners.forEach(p => { p.featured = false; });
+  // Kun én featured om gangen
+  if (body.featured) {
+    const all = await getPartners();
+    for (const p of all.filter(p => p.featured)) {
+      await updatePartner(p.id, { featured: false });
+    }
+  }
 
-  const ny: Partner = {
-    id: randomUUID(),
+  const ny = await createPartner({
     navn: body.navn ?? '',
     logo: body.logo,
     nettadresse: body.nettadresse ?? '',
@@ -25,7 +29,7 @@ export async function POST(req: NextRequest) {
     kategori: body.kategori ?? 'annet',
     provisjonstype: body.provisjonstype ?? 'prosent',
     provisjon: body.provisjon ?? 0,
-    avtaleStart: body.avtaleStart ?? new Date().toISOString().split('T')[0],
+    avtaleStart: body.avtaleStart,
     avtaleSlutt: body.avtaleSlutt,
     aktiv: body.aktiv ?? true,
     featured: body.featured ?? false,
@@ -35,29 +39,27 @@ export async function POST(req: NextRequest) {
     klikk: 0,
     estimertInntekt: 0,
     kampanjer: [],
-    opprettet: new Date().toISOString(),
-  };
+  });
 
-  partners.unshift(ny);
-  savePartners(partners);
+  if (!ny) return NextResponse.json({ error: 'Kunne ikke opprette partner' }, { status: 500 });
   return NextResponse.json(ny);
 }
 
 export async function PATCH(req: NextRequest) {
-  const { id, ...updates } = await req.json() as Partial<Partner> & { id: string };
-  const partners = getPartners();
-  const idx = partners.findIndex(p => p.id === id);
-  if (idx < 0) return NextResponse.json({ error: 'Ikke funnet' }, { status: 404 });
-
-  if (updates.featured) partners.forEach(p => { p.featured = false; });
-
-  partners[idx] = { ...partners[idx], ...updates };
-  savePartners(partners);
-  return NextResponse.json(partners[idx]);
+  const { id, ...updates } = await req.json();
+  if (updates.featured) {
+    const all = await getPartners();
+    for (const p of all.filter(p => p.featured && p.id !== id)) {
+      await updatePartner(p.id, { featured: false });
+    }
+  }
+  const updated = await updatePartner(id, updates);
+  if (!updated) return NextResponse.json({ error: 'Ikke funnet' }, { status: 404 });
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(req: NextRequest) {
   const { id } = await req.json();
-  savePartners(getPartners().filter(p => p.id !== id));
+  await deletePartner(id);
   return NextResponse.json({ ok: true });
 }

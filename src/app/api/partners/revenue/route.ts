@@ -5,7 +5,7 @@ import { getPartners } from '@/lib/partners';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const partners = getPartners();
+  const partners = await getPartners();
   const totalInntekt = partners.reduce((s, p) => s + (p.estimertInntekt ?? 0), 0);
   const totalKlikk = partners.reduce((s, p) => s + (p.klikk ?? 0), 0);
   const totalEksponering = partners.reduce((s, p) => s + (p.eksponering ?? 0), 0);
