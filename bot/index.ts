@@ -17,6 +17,7 @@ import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot } from './lib/twitchBot';
+import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
@@ -488,6 +489,42 @@ async function smartVelkomst(userId: string, username: string, displayName: stri
   } catch {}
 }
 
+async function delSocialsSubtilt() {
+  const botSettings = getBotSettings();
+  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
+  const kanal = finnChatKanal();
+  if (!kanal) return;
+
+  const settings = getSettings();
+  const s = settings.socials ?? {};
+  const links = byggSocialsEmbed(s, settings.twitchUrl);
+  if (links.length === 0) return;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  let intro = '🔗 Finn GLENVEX på alle plattformer:';
+
+  if (apiKey) {
+    try {
+      const openai = new OpenAI({ apiKey });
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Skriv én kort, naturlig norsk setning (maks 10 ord) som oppfordrer folk til å følge GLENVEX på sosiale medier. Ikke nevn "følg" direkte. Vær kreativ.' }],
+        max_tokens: 40,
+        temperature: 0.95,
+      });
+      intro = res.choices[0]?.message?.content?.trim() ?? intro;
+    } catch {}
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x00ff41)
+    .setDescription(`${intro}\n\n${links.join('\n')}`)
+    .setFooter({ text: 'GLENVEX' });
+
+  await kanal.send({ embeds: [embed] }).catch(() => {});
+  addToMemory({ type: 'socials', innhold: 'delt sosiale lenker' });
+}
+
 async function sendProaktivMelding() {
   const botSettings = getBotSettings();
   if (!botSettings.aktiv || botSettings.pauseDiscord) return;
@@ -655,6 +692,7 @@ const PROAKTIV_INTERVAL    = 4  * 60 * 60 * 1000;
 const CLIP_INTERVAL        = 12 * 60 * 60 * 1000;
 const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
 const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
+const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
 
 client.once('clientReady', () => {
   startTwitchBot();
@@ -668,6 +706,7 @@ client.once('clientReady', () => {
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
   setTimeout(() => { sendProaktivMelding(); setInterval(sendProaktivMelding, PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
+  setTimeout(() => { delSocialsSubtilt(); setInterval(delSocialsSubtilt, SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
   setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
