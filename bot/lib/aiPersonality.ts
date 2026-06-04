@@ -80,13 +80,16 @@ export async function generateChatReply(
 ): Promise<ChatReply> {
   const apiKey = process.env.OPENAI_API_KEY;
 
-  // Fallback uten OpenAI
   if (!apiKey) {
-    return {
-      tekst: `Hei ${username}! Systemet er aktivert men AI-nøkkel mangler. Sjekk Railway-variabler. 🤖`,
-      bildeUrl: null,
-    };
+    return { tekst: `Hei ${username}! Systemet er aktivert men AI-nøkkel mangler. Sjekk Railway-variabler. 🤖`, bildeUrl: null };
   }
+
+  // Hent personlighets-instruksjon fra bot-settings
+  let personalityExtra = '';
+  try {
+    const { getBotSettings, getPersonalityPrompt } = require('@/lib/botMemory');
+    personalityExtra = getPersonalityPrompt();
+  } catch {}
 
   const client = new OpenAI({ apiKey });
   const hist = history.get(channelId) ?? [];
@@ -134,7 +137,7 @@ export async function generateChatReply(
     // Vanlig tekstsvar
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...hist],
+      messages: [{ role: 'system', content: `${SYSTEM_PROMPT}${personalityExtra ? '\n\n' + personalityExtra : ''}` }, ...hist],
       max_tokens: 200,
       temperature: 0.92,
     });

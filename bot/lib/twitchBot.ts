@@ -212,6 +212,12 @@ export function startTwitchBot() {
   // ─── Periodic Discord-promo ────────────────────────────────────────────────
 
   setInterval(() => {
+    try {
+      const { getBotSettings } = require('@/lib/botMemory');
+      const settings = getBotSettings();
+      if (!settings.aktiv || settings.pauseTwitch) return;
+    } catch {}
+
     if (Date.now() - sisteDiscordMelding < DISCORD_INTERVAL_MS) return;
     sisteDiscordMelding = Date.now();
     const melding = DISCORD_MELDINGER[Math.floor(Math.random() * DISCORD_MELDINGER.length)];

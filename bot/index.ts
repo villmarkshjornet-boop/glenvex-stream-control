@@ -24,6 +24,8 @@ import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers }
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
+import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
+import { addContent } from '@/lib/contentLibrary';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -88,10 +90,28 @@ async function checkLive() {
     const stream = await getStreamInfo();
 
     if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId) {
+      const botSettings = getBotSettings();
+      if (botSettings.pauseLiveVarsler) return;
+
       await postLiveEmbed(stream, settings);
       saveSettings({ lastNotifiedStreamId: stream.id });
       addLog('success', `Auto live-varsel postet: ${stream.title}`, 'OK');
       startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
+
+      // Lagre til content library
+      addContent({
+        tittel: `Live-varsel: ${stream.title}`,
+        type: 'live-varsel',
+        status: 'publisert',
+        tekst: `🔴 GLENVEX ER LIVE – ${stream.game}: ${stream.title}`,
+        kanalId: settings.discordLiveChannelId,
+        modul: 'Auto Live',
+        opprettetAv: 'bot',
+        publisert: new Date().toISOString(),
+        tags: [stream.game ?? '', 'live'],
+      });
+
+      addToMemory({ type: 'live-varsel', innhold: stream.title ?? '' });
       tweetLiveNå(stream).catch(() => {});
       await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
       await postPreLiveHype(stream.title ?? '', stream.game ?? '');
@@ -433,9 +453,15 @@ async function smartVelkomst(userId: string, username: string, displayName: stri
 }
 
 async function sendProaktivMelding() {
+  const botSettings = getBotSettings();
+  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
   const kanal = finnChatKanal();
   if (!kanal) return;
-  try { await kanal.send(getProaktivMelding()); } catch {}
+  const melding = getProaktivMelding();
+  try {
+    await kanal.send(melding);
+    addToMemory({ type: 'proaktiv', innhold: melding });
+  } catch {}
 }
 
 // ─── Ukentlig statistikk ─────────────────────────────────────────────────────
@@ -652,6 +678,9 @@ client.on('messageCreate', async (message) => {
   if (!tekst) return;
 
   setCooldown(message.author.id);
+
+  const botSettings = getBotSettings();
+  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
 
   try {
     await message.channel.sendTyping();

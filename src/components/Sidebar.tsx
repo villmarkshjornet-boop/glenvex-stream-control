@@ -59,7 +59,10 @@ const NAV: NavGruppe[] = [
     gruppe: 'Discord',
     icon: '◈',
     items: [
+      { label: 'Control Center', href: '/discord-control' },
       { label: 'Oversikt', href: '/discord' },
+      { label: 'Discord Library', href: '/discord-library' },
+      { label: 'Role Manager', href: '/role-manager' },
       { label: 'AI Moderator', href: '/moderation' },
       { label: 'Raid Manager', href: '/raid-manager' },
     ],
@@ -69,6 +72,7 @@ const NAV: NavGruppe[] = [
     icon: '◉',
     items: [
       { label: 'RP Manager', href: '/rp-manager' },
+      { label: 'RP Vault', href: '/rp-vault' },
       { label: 'RP Intelligence', href: '/rp-intelligence' },
     ],
   },

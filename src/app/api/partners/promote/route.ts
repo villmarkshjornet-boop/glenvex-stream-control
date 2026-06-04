@@ -66,6 +66,12 @@ export async function POST(req: NextRequest) {
     embed.fields = [{ name: 'Rabattkode', value: `\`${partner.rabattkode}\``, inline: true }];
   }
 
+  // Lagre til memory for anti-repetisjon
+  try {
+    const { addToMemory } = await import('@/lib/botMemory');
+    addToMemory({ type: 'partner-post', innhold: partner.navn, partner: partner.navn });
+  } catch {}
+
   const discordRes = await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
