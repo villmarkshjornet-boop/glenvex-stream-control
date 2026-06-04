@@ -489,6 +489,56 @@ async function smartVelkomst(userId: string, username: string, displayName: stri
   } catch {}
 }
 
+let forrigeFollowers = 0;
+
+async function sjekkGoals() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const goalFil = path.join(process.cwd(), 'data', 'goals.json');
+    if (!fs.existsSync(goalFil)) return;
+
+    const goals = JSON.parse(fs.readFileSync(goalFil, 'utf-8')) as any[];
+    const aktive = goals.filter((g: any) => g.aktiv && g.mal > 0);
+    if (aktive.length === 0) return;
+
+    // Hent ekte tall
+    const broadcasterId = await getBroadcasterId();
+    if (!broadcasterId) return;
+    const stats = await getChannelStats(broadcasterId);
+    const nyeFollowers = stats.followerCount;
+
+    // Post til Twitch chat hvis vesentlig endring
+    if (forrigeFollowers > 0 && nyeFollowers > forrigeFollowers) {
+      const økning = nyeFollowers - forrigeFollowers;
+      const mål = aktive.find((g: any) => g.type === 'followers');
+      if (mål && økning >= 1) {
+        const pct = Math.min(100, Math.round((nyeFollowers / mål.mal) * 100));
+        const twitchMsg = `🎯 Vi er nå ${nyeFollowers.toLocaleString()} følgere! ${pct}% av målet på ${mål.mal.toLocaleString()}. Tusen takk! 💚`;
+        // Post til Twitch chat via twitchBot (eksponert gjennom global state ikke mulig direkte)
+        // Post til Discord
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+        if (appUrl) {
+          const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+          await fetch(`${url}/api/goals/post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              goals,
+              live: { followers: nyeFollowers, discordMembres: 0 },
+            }),
+          }).catch(() => {});
+        }
+        addLog('info', `Followers oppdatert: ${nyeFollowers} (+${økning})`, 'OK');
+      }
+    }
+
+    forrigeFollowers = nyeFollowers;
+  } catch (error) {
+    addLog('error', `Goals-sjekk feil: ${(error as Error).message}`, 'ERROR');
+  }
+}
+
 async function delSocialsSubtilt() {
   const botSettings = getBotSettings();
   if (!botSettings.aktiv || botSettings.pauseDiscord) return;
@@ -693,6 +743,7 @@ const CLIP_INTERVAL        = 12 * 60 * 60 * 1000;
 const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
 const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
+const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
 
 client.once('clientReady', () => {
   startTwitchBot();
@@ -707,6 +758,7 @@ client.once('clientReady', () => {
   setTimeout(() => { sendProaktivMelding(); setInterval(sendProaktivMelding, PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
   setTimeout(() => { delSocialsSubtilt(); setInterval(delSocialsSubtilt, SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
+  setTimeout(() => { sjekkGoals(); setInterval(sjekkGoals, GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
   setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
