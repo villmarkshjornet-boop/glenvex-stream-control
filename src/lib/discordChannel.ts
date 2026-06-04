@@ -8,10 +8,46 @@ function botHeaders() {
   return { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` };
 }
 
-function loadPrefs(): Record<string, string> {
+// Cache preferanser i minnet i 60 sekunder
+let prefsCache: Record<string, string> | null = null;
+let prefsCacheTime = 0;
+const CACHE_TTL = 60_000;
+
+async function loadPrefs(): Promise<Record<string, string>> {
+  // Returner cache hvis fersk
+  if (prefsCache && Date.now() - prefsCacheTime < CACHE_TTL) return prefsCache;
+
+  // Prøv Supabase
   try {
-    if (fs.existsSync(PREFS_FILE)) return JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8'));
+    const { getDb, isDbAvailable } = await import('./db');
+    const { getWorkspaceId } = await import('./workspace');
+    if (isDbAvailable()) {
+      const db = getDb();
+      if (db) {
+        const { data } = await db
+          .from('workspaces')
+          .select('settings_json')
+          .eq('id', getWorkspaceId())
+          .single();
+        if (data?.settings_json?.kanalPreferanser) {
+          prefsCache = data.settings_json.kanalPreferanser;
+          prefsCacheTime = Date.now();
+          return prefsCache!;
+        }
+      }
+    }
   } catch {}
+
+  // Fallback til fil
+  try {
+    if (fs.existsSync(PREFS_FILE)) {
+      const prefs = JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8'));
+      prefsCache = prefs;
+      prefsCacheTime = Date.now();
+      return prefs;
+    }
+  } catch {}
+
   return {};
 }
 
@@ -71,16 +107,16 @@ async function autoDetektKanal(prioritet: string[]): Promise<string | null> {
   } catch { return null; }
 }
 
-// Hent kanal – preferanse → env → auto-detect
+// Hent kanal – preferanse (Supabase) → env → auto-detect
 export async function getChatKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.chat) return prefs.chat;
   if (process.env.DISCORD_CHAT_CHANNEL_ID) return process.env.DISCORD_CHAT_CHANNEL_ID;
   return autoDetektKanal(['chat', 'general', 'gaming', 'generelt', 'snakk', 'community']);
 }
 
 export async function getAnnonseringsKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.announce) return prefs.announce;
   if (process.env.DISCORD_ANNOUNCE_CHANNEL_ID) return process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
   const auto = await autoDetektKanal(['annonsering', 'announce', 'kunngjøring', 'nyheter']);
@@ -90,32 +126,38 @@ export async function getAnnonseringsKanalId(): Promise<string | null> {
 }
 
 export async function getLiveKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.live) return prefs.live;
   if (process.env.DISCORD_LIVE_CHANNEL_ID) return process.env.DISCORD_LIVE_CHANNEL_ID;
   return autoDetektKanal(['live', 'stream', 'streaming']);
 }
 
 export async function getPartnerKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.partner) return prefs.partner;
   return getAnnonseringsKanalId();
 }
 
 export async function getStreamplanKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.streamplan) return prefs.streamplan;
   return getAnnonseringsKanalId();
 }
 
 export async function getClipsKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.clips) return prefs.clips;
   return autoDetektKanal(['klipp', 'clips', 'highlights', 'høydepunkter']);
 }
 
 export async function getEventsKanalId(): Promise<string | null> {
-  const prefs = loadPrefs();
+  const prefs = await loadPrefs();
   if (prefs.events) return prefs.events;
   return getChatKanalId();
+}
+
+// Nullstill cache (kalles etter kanalinnstillinger er lagret)
+export function nullstillKanalCache() {
+  prefsCache = null;
+  prefsCacheTime = 0;
 }
