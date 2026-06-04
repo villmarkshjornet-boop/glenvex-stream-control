@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getBotDb, WORKSPACE_ID } from './supabase';
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'events.json');
 
@@ -52,6 +53,19 @@ export function trackRaid(username: string, viewers: number) {
   const data = load();
   data.raids.push({ username, viewers, timestamp: new Date().toISOString() });
   save(data);
+  // Sync til Supabase
+  const db = getBotDb();
+  if (db) {
+    db.from('role_change_log').insert({
+      workspace_id: WORKSPACE_ID,
+      bruker_navn: username,
+      bruker_id: username,
+      rolle: `raid_${viewers}`,
+      handling: 'lagt_til',
+      aarsak: `Raid med ${viewers} seere`,
+      utfort_av: 'bot',
+    }).catch(() => {});
+  }
 }
 
 export function trackGiftSub(username: string, count: number) {
