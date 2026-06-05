@@ -8,7 +8,7 @@ interface NavItem { label: string; href: string; }
 interface NavSeksjon {
   id: string;
   label: string;
-  href: string;        // hoved-hub
+  href: string;
   icon: string;
   items?: NavItem[];
 }
@@ -26,12 +26,11 @@ const NAV: NavSeksjon[] = [
     href: '/twitch',
     icon: '🟣',
     items: [
-      { label: 'Live-status',   href: '/live-overvaking' },
+      { label: 'Oversikt',      href: '/twitch' },
       { label: 'Streamplan',    href: '/streamplan' },
       { label: 'AI Producer',   href: '/ai-producer' },
       { label: 'Stream Coach',  href: '/stream-coach' },
-      { label: 'Statistikk',    href: '/statistikk' },
-      { label: 'Future RP',     href: '/rp-manager' },
+      { label: 'Vekstanalyse',  href: '/statistikk' },
     ],
   },
   {
@@ -40,11 +39,10 @@ const NAV: NavSeksjon[] = [
     href: '/discord',
     icon: '◈',
     items: [
-      { label: 'Oversikt',      href: '/discord-control' },
-      { label: 'Pre-Live Hype', href: '/pre-live' },
-      { label: 'Community',     href: '/community-manager' },
-      { label: 'Moderator',     href: '/moderation' },
-      { label: 'Raid Manager',  href: '/raid-manager' },
+      { label: 'Oversikt',           href: '/discord' },
+      { label: 'Community Manager',  href: '/community-manager' },
+      { label: 'Moderator',          href: '/moderation' },
+      { label: 'Raid Manager',       href: '/raid-manager' },
     ],
   },
   {
@@ -53,9 +51,10 @@ const NAV: NavSeksjon[] = [
     href: '/innhold',
     icon: '▶',
     items: [
-      { label: 'Content Factory',    href: '/content-factory-admin' },
-      { label: 'Highlight Viewer',   href: '/content-factory-admin/highlights' },
-      { label: 'Clip Factory',       href: '/clip-factory' },
+      { label: 'Content Factory', href: '/content-factory-admin' },
+      { label: 'Highlights',      href: '/content-factory-admin/highlights' },
+      { label: 'Klipp',           href: '/clip-factory' },
+      { label: 'Publisering',     href: '/innhold/publisering' },
     ],
   },
   {
@@ -66,6 +65,7 @@ const NAV: NavSeksjon[] = [
     items: [
       { label: 'Partner Hub',     href: '/partner-hub' },
       { label: 'Sponsor Manager', href: '/sponsor-manager' },
+      { label: 'Affiliate',       href: '/partner-hub' },
     ],
   },
   {
@@ -73,6 +73,9 @@ const NAV: NavSeksjon[] = [
     label: 'Team',
     href: '/team',
     icon: '◉',
+    items: [
+      { label: 'AI-kollegaer', href: '/team' },
+    ],
   },
   {
     id: 'innstillinger',
@@ -80,19 +83,22 @@ const NAV: NavSeksjon[] = [
     href: '/innstillinger',
     icon: '⚙',
     items: [
-      { label: 'System Health', href: '/system-health' },
-      { label: 'Logs',          href: '/logs' },
-      { label: 'Setup',         href: '/setup-wizard' },
+      { label: 'Integrasjoner',  href: '/innstillinger' },
+      { label: 'Systemstatus',   href: '/innstillinger#helse' },
+      { label: 'API-status',     href: '/innstillinger#helse' },
+      { label: 'Logging',        href: '/logs' },
+      { label: 'QA',             href: '/content-factory-admin/qa' },
+      { label: 'Debug',          href: '/innstillinger#debug' },
+      { label: 'Automatiseringer', href: '/innstillinger#automatiseringer' },
     ],
   },
 ];
 
-// Alle href-er som hører til en seksjon
 function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
   if (pathname === seksjon.href) return true;
-  if (seksjon.items?.some(i => pathname.startsWith(i.href))) return true;
-  // Spesial: /content-factory-admin/* tilhører innhold
+  if (seksjon.items?.some(i => pathname.startsWith(i.href) && i.href !== '/')) return true;
   if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
+  if (seksjon.id === 'dashboard' && pathname === '/') return true;
   return false;
 }
 
@@ -101,18 +107,13 @@ export default function Sidebar() {
   const aktivSeksjon = NAV.find(s => seksjonEier(s, pathname));
 
   const [åpne, setÅpne] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
-    if (aktivSeksjon) initial.add(aktivSeksjon.id);
-    return initial;
+    const s = new Set<string>();
+    if (aktivSeksjon) s.add(aktivSeksjon.id);
+    return s;
   });
 
-  const toggle = (id: string) => {
-    setÅpne(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
+  const toggle = (id: string) =>
+    setÅpne(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
     <aside className="w-48 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
@@ -131,8 +132,7 @@ export default function Sidebar() {
           const erAktivSeksjon = seksjonEier(seksjon, pathname);
           const erÅpen = åpne.has(seksjon.id);
 
-          // Uten sub-items: direkte lenke
-          if (!seksjon.items) {
+          if (!seksjon.items || seksjon.items.length === 0) {
             const erAktiv = pathname === seksjon.href;
             return (
               <Link key={seksjon.id} href={seksjon.href}
@@ -143,12 +143,11 @@ export default function Sidebar() {
                 }`}>
                 <span className="text-sm flex-shrink-0">{seksjon.icon}</span>
                 <span className="flex-1">{seksjon.label}</span>
-                {erAktiv && <span className="w-1.5 h-1.5 rounded-full bg-g-green" style={{ boxShadow: '0 0 6px #00ff41' }} />}
+                {erAktiv && <span className="w-1.5 h-1.5 rounded-full bg-g-green" />}
               </Link>
             );
           }
 
-          // Med sub-items: kollapsibel seksjon
           return (
             <div key={seksjon.id}>
               <button
@@ -165,21 +164,11 @@ export default function Sidebar() {
 
               {erÅpen && (
                 <div className="ml-4 mt-0.5 mb-1 space-y-0.5 border-l border-g-border/30 pl-2.5">
-                  {/* Hub-lenke */}
-                  <Link href={seksjon.href}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-all ${
-                      pathname === seksjon.href
-                        ? 'text-g-green font-bold'
-                        : 'text-g-muted/70 hover:text-g-muted italic'
-                    }`}>
-                    <span className="text-[9px]">Oversikt</span>
-                  </Link>
-                  {/* Sub-items */}
                   {seksjon.items.map(item => {
-                    const erAktiv = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+                    const erAktiv = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href) && !item.href.includes('#'));
                     return (
-                      <Link key={item.href} href={item.href}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-all ${
+                      <Link key={`${item.href}-${item.label}`} href={item.href}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-[11px] transition-all ${
                           erAktiv ? 'text-g-green font-bold' : 'text-g-muted hover:text-g-text'
                         }`}>
                         {erAktiv && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
@@ -196,7 +185,7 @@ export default function Sidebar() {
 
       {/* Status */}
       <div className="px-4 py-2.5 border-t border-g-border">
-        <Link href="/system-health" className="flex items-center gap-1.5 group">
+        <Link href="/innstillinger#helse" className="flex items-center gap-1.5 group">
           <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
           <p className="text-[8px] text-g-muted/50 group-hover:text-g-muted transition-colors">System Online</p>
         </Link>
