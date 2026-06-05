@@ -56,12 +56,19 @@ export async function kjørFullPipeline(
 
   await oppdaterVodStatus(vod.id, 'ANALYZING');
 
-  // STEG 1b: DOWNLOAD – Kall Railway-boten for yt-dlp nedlasting (Vercel støtter ikke dette)
-  let railwayAudioSti: string | null = null;
+  // STEG 1b: DOWNLOAD_VIDEO + UPLOAD_AUDIO via Railway-boten
+  // Railway: yt-dlp → FFmpeg → Supabase Storage → signed URL
+  let signedAudioUrl: string | null = null;
+
   if (opts.twitchVodUrl) {
     const botApiUrl = process.env.BOT_API_URL;
-    if (botApiUrl) {
+    if (!botApiUrl) {
+      steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'HOPPET OVER', melding: 'BOT_API_URL ikke satt i Vercel' });
+      steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'Krever DOWNLOAD_VIDEO' });
+    } else {
       try {
+        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'STARTER', melding: 'Kaller Railway...' });
+
         const railwayRes = await fetch(`${botApiUrl}/content-factory/process`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -70,27 +77,33 @@ export async function kjørFullPipeline(
             twitchVodUrl: opts.twitchVodUrl,
             userOauth: opts.userOauth ?? process.env.TWITCH_USER_OAUTH,
           }),
-          signal: AbortSignal.timeout(300_000), // 5 min timeout
+          signal: AbortSignal.timeout(600_000), // 10 min – lange VODs
         });
+
         if (railwayRes.ok) {
-          const railwayData = await railwayRes.json() as any;
-          // Railway lagrer audio lokalt – vi bruker Railway BOT API URL for Whisper
-          railwayAudioSti = railwayData.audioPath;
-          steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: `Lastet ned via Railway – audio klar` });
+          const d = await railwayRes.json() as any;
+          signedAudioUrl = d.signedUrl;
+          steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
+          steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
+          steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Lastet opp til Supabase Storage – URL gyldig i 1 time` });
         } else {
           const err = await railwayRes.json() as any;
+          steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
           steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: err.error ?? 'Railway feil' });
+          steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'DOWNLOAD_VIDEO feilet' });
         }
       } catch (err) {
         steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: (err as Error).message });
+        steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'Timeout eller nettverksfeil' });
       }
-    } else {
-      steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'HOPPET OVER', melding: 'BOT_API_URL ikke satt i Vercel' });
     }
+  } else {
+    steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'HOPPET OVER', melding: 'Ingen twitchVodUrl oppgitt' });
+    steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'Ingen nedlasting' });
   }
 
-  // STEG 2: TRANSCRIBE – Bruk Railway-audio (lokal fil), ekstern URL, eller hopp over
-  const audioStiEllerUrl = railwayAudioSti ?? opts.audioUrl;
+  // STEG 2: TRANSCRIBE – Bruk signed URL fra Supabase Storage, ekstern URL, eller hopp over
+  const audioStiEllerUrl = signedAudioUrl ?? opts.audioUrl;
   if (audioStiEllerUrl) {
     try {
       const { transkriber } = await import('../transcripts/whisperService');

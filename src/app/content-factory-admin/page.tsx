@@ -113,19 +113,23 @@ export default function ContentFactoryAdminPage() {
         <p className="text-xs font-bold text-g-text">▶ Start Content Factory Pipeline</p>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Twitch Stream/VOD ID</label>
+            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Twitch VOD ID eller URL</label>
             <input value={startForm.streamId} onChange={e => setStartForm(p => ({ ...p, streamId: e.target.value }))}
-              placeholder="f.eks. 123456789"
+              placeholder="2786985500 eller https://twitch.tv/videos/..."
               className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
             <p className="text-[9px] text-g-muted mt-1">Finn på twitch.tv/glenvex/videos → klikk video → kopier tall fra URL</p>
           </div>
           <div>
-            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Lyd/video URL (for transkripsjon)</label>
+            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Direkte lyd-URL (valgfritt)</label>
             <input value={startForm.audioUrl} onChange={e => setStartForm(p => ({ ...p, audioUrl: e.target.value }))}
-              placeholder="https://... (m3u8 eller mp4)"
+              placeholder="https://... (hopp over Railway-nedlasting)"
               className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
-            <p className="text-[9px] text-g-muted mt-1">Valgfritt – uten denne hoppes transkripsjon over</p>
+            <p className="text-[9px] text-g-muted mt-1">Kun hvis du vil bruke ekstern lydfil direkte</p>
           </div>
+        </div>
+        <div className="p-3 bg-g-bg border border-g-border rounded-lg">
+          <p className="text-[9px] text-g-muted font-bold uppercase mb-1">Pipeline-flyt</p>
+          <p className="text-[9px] text-g-muted">VOD ID → Railway laster ned → FFmpeg → Supabase Storage → Whisper → Highlights → Tekster</p>
         </div>
         <button onClick={startPipeline} disabled={!startForm.streamId || starter}
           className="px-5 py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-40">
