@@ -113,12 +113,8 @@ ${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s] Score:${k.score} 
     });
 
     const rawContent = res.choices[0]?.message?.content ?? '{}';
-    let aiData: any = { highlights: [] };
-    try {
-      aiData = JSON.parse(rawContent);
-    } catch {
-      console.error('[ContentFactory] JSON parse feil i DISCOVER:', rawContent.slice(0, 200));
-    }
+    const { sikreJsonParse } = await import('../utils/retry');
+    const aiData = sikreJsonParse(rawContent, { highlights: [] });
 
     for (const ai of aiData.highlights ?? []) {
       const kandidat = topp[ai.index];

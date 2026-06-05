@@ -31,6 +31,8 @@ const NAV: NavGruppe[] = [
     items: [
       { label: 'Content Factory', href: '/content-factory-admin' },
       { label: 'Highlight Viewer', href: '/content-factory-admin/highlights' },
+      { label: 'Job Monitor', href: '/content-factory-admin/jobs' },
+      { label: 'CF Analytics', href: '/content-factory-admin/analytics' },
       { label: 'AI Assistent', href: '/ai-assistent' },
       { label: 'Clip Factory', href: '/clip-factory' },
       { label: 'Highlights', href: '/highlights' },

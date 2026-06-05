@@ -1,98 +1,117 @@
-/**
- * Content Factory Phase 2
- * Kjøres etter at Railway Phase 1 er COMPLETE.
- * Leser transkripsjon fra Supabase → Highlights → Ranking → Copywriting → Queue
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 import { hentVod, oppdaterVodStatus } from '@/lib/content-factory/vod/vodService';
 import { getDb } from '@/lib/db';
+import { medRetry, sikreJsonParse } from '@/lib/content-factory/utils/retry';
+import { logPipeline } from '@/lib/content-factory/jobs/pipelineLogger';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+async function kjørMedRetry<T>(
+  stegNavn: string,
+  vodId: string,
+  fn: () => Promise<T>,
+  steg: any[]
+): Promise<T | null> {
+  const start = Date.now();
+  try {
+    const res = await medRetry(fn, { maxForsøk: 3, venteMs: 3000 });
+    steg.push({ steg: stegNavn, status: 'OK' });
+    return res;
+  } catch (err) {
+    const melding = (err as Error).message?.slice(0, 300) ?? 'Ukjent feil';
+    steg.push({ steg: stegNavn, status: 'FEILET', melding });
+    await logPipeline({ vodId, step: stegNavn as any, status: 'FAILED', message: melding, durationMs: Date.now() - start });
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   if (!isContentFactoryEnabled()) {
     return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
   }
 
-  const { vodId, stegKun } = await req.json() as { vodId: string; stegKun?: string };
-
-  if (!vodId) {
-    return NextResponse.json({ error: 'vodId kreves' }, { status: 400 });
+  let vodId: string;
+  try {
+    const body = await req.json();
+    vodId = body.vodId;
+  } catch {
+    return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 });
   }
+
+  if (!vodId) return NextResponse.json({ error: 'vodId kreves' }, { status: 400 });
 
   const vod = await hentVod(vodId);
   if (!vod) return NextResponse.json({ error: 'VOD ikke funnet' }, { status: 404 });
 
-  const steg: { steg: string; status: string; melding?: string }[] = [];
-
-  // Sjekk at transkripsjon finnes
+  const steg: any[] = [];
   const db = getDb();
-  const antall = db ? await db.from('content_transcripts').select('id', { count: 'exact', head: true })
-    .eq('vod_id', vodId).then(r => r.count ?? 0) : 0;
+
+  // Sjekk transkripsjon
+  const antall = db ? await db.from('content_transcripts')
+    .select('id', { count: 'exact', head: true })
+    .eq('vod_id', vodId)
+    .then(r => r.count ?? 0) : 0;
 
   if ((antall as number) === 0) {
     return NextResponse.json({
       ok: false,
-      error: `Ingen transkripsjon funnet for ${vodId}. Railway Phase 1 må fullføres først.`,
-      steg: [{ steg: 'TRANSCRIBE', status: 'FEILET', melding: 'Ingen data i Supabase' }],
+      error: 'Ingen transkripsjon funnet – Railway Phase 1 må fullføres først',
+      steg: [{ steg: 'TRANSCRIBE', status: 'FEILET', melding: `0 segmenter i Supabase for VOD ${vodId}` }],
     });
   }
 
   steg.push({ steg: 'TRANSCRIBE', status: 'OK', melding: `${antall} segmenter` });
 
-  // Kun ett steg om gangen for å unngå timeout
-  if (!stegKun || stegKun === 'DISCOVER') {
-    try {
-      const { oppdagHighlights } = await import('@/lib/content-factory/analysis/highlightDiscovery');
-      const highlights = await oppdagHighlights(vodId);
-      steg.push({ steg: 'DISCOVER', status: 'OK', melding: `${highlights.length} highlights` });
-    } catch (err) {
-      steg.push({ steg: 'DISCOVER', status: 'FEILET', melding: (err as Error).message });
-      return NextResponse.json({ ok: false, steg });
-    }
-  }
+  // DISCOVER med retry
+  const highlights = await kjørMedRetry('DISCOVER', vodId, async () => {
+    const { oppdagHighlights } = await import('@/lib/content-factory/analysis/highlightDiscovery');
+    return oppdagHighlights(vodId);
+  }, steg);
 
-  if (!stegKun || stegKun === 'RANK') {
-    try {
+  // RANK med retry
+  if (highlights && highlights.length > 0) {
+    await kjørMedRetry('RANK', vodId, async () => {
       const { rangerHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
-      await rangerHighlights(vodId);
-      steg.push({ steg: 'RANK', status: 'OK' });
-    } catch (err) {
-      steg.push({ steg: 'RANK', status: 'FEILET', melding: (err as Error).message });
-    }
+      return rangerHighlights(vodId);
+    }, steg);
+  } else if (!steg.find(s => s.steg === 'RANK')) {
+    steg.push({ steg: 'RANK', status: 'HOPPET OVER', melding: 'Ingen highlights å rangere' });
   }
 
-  if (!stegKun || stegKun === 'COPYWRITE') {
-    try {
-      const { hentToppHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
-      const { genererCopyForAlle } = await import('@/lib/content-factory/copywriter/copywriterService');
-      const topp = await hentToppHighlights(vodId, 5);
-      const copy = await genererCopyForAlle(vodId, topp, vod.title ?? '', vod.category ?? '');
-      steg.push({ steg: 'COPYWRITE', status: 'OK', melding: `${copy.length} tekster` });
-    } catch (err) {
-      steg.push({ steg: 'COPYWRITE', status: 'FEILET', melding: (err as Error).message });
-    }
-  }
+  // COPYWRITE – maks 5 highlights for å unngå timeout
+  let antallCopy = 0;
+  await kjørMedRetry('COPYWRITE', vodId, async () => {
+    const { hentToppHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
+    const { genererCopyForAlle } = await import('@/lib/content-factory/copywriter/copywriterService');
+    const topp = await hentToppHighlights(vodId, 5);
+    const copy = await genererCopyForAlle(vodId, topp, vod.title ?? '', vod.category ?? '');
+    antallCopy = copy.length;
+    return copy;
+  }, steg);
 
-  if (!stegKun || stegKun === 'QUEUE') {
-    try {
-      const { hentToppHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
-      const { leggIReviewKø } = await import('@/lib/content-factory/review/reviewQueue');
-      const topp = await hentToppHighlights(vodId, 5);
-      await leggIReviewKø(vodId, topp.map(h => ({ highlightId: h.id, type: `highlight_${h.category}` })));
-      steg.push({ steg: 'QUEUE', status: 'OK', melding: `${topp.length} items` });
-    } catch (err) {
-      steg.push({ steg: 'QUEUE', status: 'FEILET', melding: (err as Error).message });
-    }
-  }
+  // QUEUE med retry
+  await kjørMedRetry('QUEUE', vodId, async () => {
+    const { hentToppHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
+    const { leggIReviewKø } = await import('@/lib/content-factory/review/reviewQueue');
+    const topp = await hentToppHighlights(vodId, 5);
+    return leggIReviewKø(vodId, topp.map(h => ({
+      highlightId: h.id,
+      type: `highlight_${h.category ?? 'GENERAL'}`,
+    })));
+  }, steg);
 
   await oppdaterVodStatus(vodId, 'COMPLETE');
 
-  const highlights = db ? await db.from('content_highlights').select('id').eq('vod_id', vodId).then(r => r.data?.length ?? 0) : 0;
-  const copy = db ? await db.from('content_copy').select('id').eq('vod_id', vodId).then(r => r.data?.length ?? 0) : 0;
+  const antallHighlights = db
+    ? await db.from('content_highlights').select('id', { count: 'exact', head: true }).eq('vod_id', vodId).then(r => r.count ?? 0)
+    : 0;
 
-  return NextResponse.json({ ok: true, steg, antallHighlights: highlights, antallCopy: copy });
+  return NextResponse.json({
+    ok: true,
+    steg,
+    antallHighlights,
+    antallCopy,
+  });
 }
