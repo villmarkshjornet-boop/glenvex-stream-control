@@ -196,6 +196,38 @@ export function startDataApi(port = 4242) {
       return;
     }
 
+    // ── Clip Worker: manuell klipp-trigger ───────────────────────────────────
+    if (url === '/content-factory/clip' && method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk; });
+      req.on('end', async () => {
+        if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+          res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+        }
+        try {
+          const { highlightId } = JSON.parse(body);
+          if (!highlightId) { res.writeHead(400); res.end(JSON.stringify({ error: 'highlightId kreves' })); return; }
+
+          const { createClient } = require('@supabase/supabase-js');
+          const ws = require('ws');
+          const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
+
+          // Sett tilbake til READY_FOR_CLIP slik at worker plukker den opp
+          await sb.from('content_highlights').update({
+            clip_status: 'READY_FOR_CLIP',
+            clip_error: null,
+          }).eq('id', highlightId);
+
+          res.writeHead(202);
+          res.end(JSON.stringify({ ok: true, melding: 'Lagt i clip-kø – worker starter snart' }));
+        } catch (err: any) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
     // ── Clip Worker: retry et highlight ──────────────────────────────────────
     if (url.startsWith('/content-factory/clip-retry/') && method === 'POST') {
       const highlightId = url.replace('/content-factory/clip-retry/', '');

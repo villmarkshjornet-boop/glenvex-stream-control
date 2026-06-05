@@ -120,11 +120,21 @@ ${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s] Score:${k.score} 
       const kandidat = topp[ai.index];
       if (!kandidat) continue;
 
+      // Sørg for at start/end er tall (ikke strenger)
+      const startNum = parseFloat(String(kandidat.startTime));
+      const endNum = parseFloat(String(kandidat.endTime));
+      if (isNaN(startNum) || isNaN(endNum)) {
+        console.error(`[DISCOVER] Ugyldig tid for kandidat ${ai.index}: start=${kandidat.startTime}, end=${kandidat.endTime}`);
+        continue;
+      }
+
+      console.log(`[DISCOVER] Lagrer highlight: id=${ai.index}, start=${startNum}, end=${endNum}, score=${kandidat.score}`);
+
       const { data } = await db.from('content_highlights').insert({
         vod_id: vodId,
-        start_time: kandidat.startTime,
-        end_time: kandidat.endTime,
-        score: kandidat.score,
+        start_time: startNum,
+        end_time: endNum,
+        score: Math.round(kandidat.score),
         category: ai.category,
         title: ai.title,
         begrunnelse: ai.begrunnelse,
@@ -158,8 +168,12 @@ export async function hentHighlights(vodId: string): Promise<ContentHighlight[]>
   const { data } = await db.from('content_highlights').select('*')
     .eq('vod_id', vodId).order('score', { ascending: false });
   return (data ?? []).map(r => ({
-    id: r.id, vodId: r.vod_id, startTime: r.start_time, endTime: r.end_time,
-    score: r.score, category: r.category, title: r.title,
+    id: r.id, vodId: r.vod_id,
+    // Supabase NUMERIC returneres som string – konverter eksplisitt
+    startTime: parseFloat(r.start_time) || 0,
+    endTime: parseFloat(r.end_time) || 0,
+    score: parseInt(r.score) || 0,
+    category: r.category, title: r.title,
     begrunnelse: r.begrunnelse, signals: r.signals ?? [], rank: r.rank, status: r.status,
   }));
 }

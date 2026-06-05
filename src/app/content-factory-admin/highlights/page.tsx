@@ -46,13 +46,23 @@ const KAT_FARGE: Record<string, string> = {
   EDUCATIONAL: 'text-cyan-400 border-cyan-400/30 bg-cyan-400/10',
 };
 
-function tidFormat(sek: number): string {
-  const h = Math.floor(sek / 3600);
-  const m = Math.floor((sek % 3600) / 60);
-  const s = Math.floor(sek % 60);
+function tidFormat(sek: number | string | null | undefined): string {
+  const n = parseFloat(String(sek ?? ''));
+  if (!n && n !== 0) return 'Ukjent';
+  if (isNaN(n) || !isFinite(n)) return 'Ukjent';
+  const h = Math.floor(n / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  const s = Math.floor(n % 60);
   return h > 0
     ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
     : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function sikkerDato(dato: string | null | undefined): string {
+  if (!dato) return 'Ukjent dato';
+  const d = new Date(dato);
+  if (isNaN(d.getTime())) return 'Ukjent dato';
+  return d.toLocaleDateString('no-NO');
 }
 
 export default function HighlightViewerPage() {
@@ -117,7 +127,7 @@ export default function HighlightViewerPage() {
             <button key={v.id} onClick={() => hentHighlights(v.id)}
               className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all ${valgtVod === v.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
               <p className="font-bold text-g-text truncate">{v.title ?? 'Ukjent stream'}</p>
-              <p className="text-[9px] text-g-muted mt-0.5">{v.category} · {new Date(v.created_at).toLocaleDateString('no-NO')}</p>
+              <p className="text-[9px] text-g-muted mt-0.5">{v.category || 'Ukjent'} · {sikkerDato(v.created_at)}</p>
             </button>
           ))}
         </div>
