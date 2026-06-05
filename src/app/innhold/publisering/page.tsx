@@ -30,7 +30,7 @@ export default function PubliseringPage() {
         setKlare(highlights.filter(h => h.clip_status === 'CLIPPED').slice(0, 10));
 
         // Hent VOD-titler
-        const vodIds = [...new Set(highlights.map(h => h.vod_id))];
+        const vodIds = Array.from(new Set(highlights.map(h => h.vod_id)));
         const vodsRes = await fetch('/api/content-factory').catch(() => null);
         if (vodsRes?.ok) {
           const vodsData = await vodsRes.json().catch(() => ({}));
