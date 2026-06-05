@@ -95,22 +95,30 @@ export async function oppdagHighlights(
     const openai = new OpenAI({ apiKey });
     const topp = kandidater.sort((a, b) => b.score - a.score).slice(0, 20);
 
+    // Send maks 10 kandidater med kortere tekst for å unngå avskjæring
+    const begrenset = topp.slice(0, 10);
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `Analyser disse potensielle stream-highlights og kategoriser dem. Returner KUN JSON:
-{"highlights": [{"index": 0, "category": "FUNNY|FAIL|CLUTCH|RAGE|REACTION|TACTICAL|RP_MOMENT|EDUCATIONAL", "title": "Kort tittel", "begrunnelse": "Hvorfor dette er interessant"}]}
+        content: `Analyser disse stream-highlights og kategoriser dem. Returner KUN JSON:
+{"highlights": [{"index": 0, "category": "FUNNY|FAIL|CLUTCH|RAGE|REACTION|TACTICAL|RP_MOMENT|EDUCATIONAL", "title": "Kort tittel (maks 8 ord)", "begrunnelse": "Kort begrunnelse (maks 15 ord)"}]}
 
-Highlights (med transkripsjon):
-${topp.map((k, i) => `${i}. [${k.startTime.toFixed(0)}s-${k.endTime.toFixed(0)}s] Score:${k.score} Tekst:"${k.tekst.slice(0, 150)}"`).join('\n')}`,
+Highlights:
+${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s] Score:${k.score} "${k.tekst.slice(0, 80)}"`).join('\n')}`,
       }],
-      max_tokens: 600,
+      max_tokens: 1200,
       temperature: 0.5,
       response_format: { type: 'json_object' },
     });
 
-    const aiData = JSON.parse(res.choices[0]?.message?.content ?? '{}');
+    const rawContent = res.choices[0]?.message?.content ?? '{}';
+    let aiData: any = { highlights: [] };
+    try {
+      aiData = JSON.parse(rawContent);
+    } catch {
+      console.error('[ContentFactory] JSON parse feil i DISCOVER:', rawContent.slice(0, 200));
+    }
 
     for (const ai of aiData.highlights ?? []) {
       const kandidat = topp[ai.index];
