@@ -29,6 +29,7 @@ export default function ContentFactoryAdminPage() {
   const [pakker, setPakker] = useState<Pakke[]>([]);
   const [sammendrag, setSammendrag] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [cfStatus, setCfStatus] = useState<any>(null);
   const [startForm, setStartForm] = useState({ streamId: '', audioUrl: '' });
   const [starter, setStarter] = useState(false);
   const [startRes, setStartRes] = useState<any>(null);
@@ -39,6 +40,16 @@ export default function ContentFactoryAdminPage() {
   const [valgtHøydepunkt, setValgtHøydepunkt] = useState<string>('');
 
   useEffect(() => {
+    // Hent CF status
+    fetch('/api/content-factory/status').then(r => r.json()).then(setCfStatus).catch(() => {});
+    const statusId = setInterval(() => {
+      fetch('/api/content-factory/status').then(r => r.json()).then(d => {
+        setCfStatus(d);
+        // Varsle om nye ferdige VODs
+        if (d.sisteFerdige?.length > 0) setVods(prev => prev);
+      }).catch(() => {});
+    }, 30_000);
+
     // Sjekk om feature er aktivert
     fetch('/api/content-factory')
       .then(r => {
@@ -48,6 +59,8 @@ export default function ContentFactoryAdminPage() {
       })
       .then(d => { if (d?.vods) setVods(d.vods); })
       .catch(() => setAktivert(false));
+
+    return () => clearInterval(statusId);
   }, []);
 
   async function hentDetaljer(vodId: string) {
@@ -134,14 +147,57 @@ export default function ContentFactoryAdminPage() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-3 h-3 rounded-full bg-g-green animate-pulse" />
-        <div>
-          <h1 className="text-xl font-black text-g-text uppercase tracking-wider">Content Factory</h1>
-          <p className="text-[10px] text-g-muted">Intern testside · Kun manuell kjøring · Ingen autopublisering</p>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 rounded-full bg-g-green animate-pulse" />
+          <div>
+            <h1 className="text-xl font-black text-g-text uppercase tracking-wider">Content Factory</h1>
+            <p className="text-[10px] text-g-muted">Automatisk innholdsproduksjon · Ingen autopublisering</p>
+          </div>
+          <span className="text-[9px] px-2 py-1 bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 rounded-full font-bold">BETA</span>
         </div>
-        <span className="ml-auto text-[9px] px-2 py-1 bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 rounded-full font-bold">BETA</span>
+        <a href="/content-factory-admin/highlights"
+          className="px-3 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
+          ▶ Highlight Viewer
+        </a>
       </div>
+
+      {/* Live Status */}
+      {cfStatus?.enabled && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className={`bg-g-card border rounded-lg p-3 text-center ${cfStatus.isLive ? 'border-red-500/30' : 'border-g-border'}`}>
+            <p className="text-[9px] text-g-muted uppercase tracking-widest">Stream</p>
+            <p className={`text-sm font-black mt-1 ${cfStatus.isLive ? 'text-red-400' : 'text-g-muted'}`}>
+              {cfStatus.isLive ? '🔴 LIVE' : '⚪ OFFLINE'}
+            </p>
+          </div>
+          <div className="bg-g-card border border-g-border rounded-lg p-3 text-center">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest">Auto VOD-overvåkning</p>
+            <p className="text-sm font-black text-g-green mt-1">✓ Aktiv</p>
+          </div>
+          <div className="bg-g-card border border-g-border rounded-lg p-3 text-center">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest">Ferdige VODs</p>
+            <p className="text-sm font-black text-g-green font-mono mt-1">{cfStatus.sisteFerdige?.length ?? 0}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Varsling om ferdige VODs */}
+      {cfStatus?.sisteFerdige?.length > 0 && (
+        <div className="bg-g-card border border-g-green/20 rounded-xl p-4 space-y-2">
+          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">◆ Nylig fullførte VODs</p>
+          {cfStatus.sisteFerdige.map((v: any) => (
+            <div key={v.id} className="flex items-center justify-between py-1 border-b border-g-border/30 last:border-0">
+              <p className="text-xs text-g-text">{v.title ?? 'Ukjent stream'}</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-g-green font-bold">✓ COMPLETE</span>
+                <a href="/content-factory-admin/highlights"
+                  className="text-[9px] text-g-green hover:underline">Se highlights →</a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Start pipeline */}
       <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">

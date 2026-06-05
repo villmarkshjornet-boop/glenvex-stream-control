@@ -90,6 +90,24 @@ async function checkLive() {
     if (!settings.autoPostLive) return;
     const stream = await getStreamInfo();
 
+    // VOD Watcher – automatisk pipeline etter stream
+    if (process.env.CONTENT_FACTORY_ENABLED === 'true') {
+      try {
+        const { sjekkForNyVod } = await import('@/lib/content-factory/vod/vodWatcher');
+        const botApiUrl = process.env.BOT_API_URL;
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+        await sjekkForNyVod(stream.isLive ?? false, async (twitchVodId, twitchVodUrl) => {
+          if (!appUrl) return;
+          const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+          await fetch(`${url}/api/content-factory`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ streamId: twitchVodId, twitchVodUrl }),
+          }).catch(console.error);
+        });
+      } catch {}
+    }
+
     if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId) {
       const botSettings = getBotSettings();
       if (botSettings.pauseLiveVarsler) return;
