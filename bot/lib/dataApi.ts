@@ -50,7 +50,10 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
 
     oppdaterJobbStatus(vodId, 'UPLOADING', 'Laster opp til Supabase Storage...');
     const { createClient } = require('@supabase/supabase-js');
-    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const ws = require('ws');
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      realtime: { transport: ws },
+    });
     const storagePath = `content-factory/audio/${vodId}.mp3`;
     const buf = fs.readFileSync(audioPath);
 
