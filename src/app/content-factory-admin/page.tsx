@@ -74,20 +74,37 @@ export default function ContentFactoryAdminPage() {
       const vodsRes = await fetch('/api/content-factory').then(r => r.json());
       setVods(vodsRes.vods ?? []);
 
-      // Hvis Railway-jobb er startet, poll status fra nettleseren
-      if (data.steg?.find((s: any) => s.steg === 'UPLOAD_AUDIO' && s.status === 'VENTER')) {
-        const botUrl = process.env.NEXT_PUBLIC_BOT_API_URL;
-        if (botUrl && data.vodId) {
-          const pollInterval = setInterval(async () => {
-            const st = await fetch(`${botUrl}/content-factory/status/${data.vodId}`).then(r => r.json()).catch(() => null);
-            if (st) {
-              setJobbStatus(st);
-              if (st.status === 'COMPLETE' || st.status === 'FAILED') {
-                clearInterval(pollInterval);
-              }
+      // Poll Railway status + automatisk trigger Phase 2 når ferdig
+      const botUrl = 'https://glenvex-stream-control-production.up.railway.app';
+      if (data.vodId) {
+        const pollInterval = setInterval(async () => {
+          const st = await fetch(`${botUrl}/content-factory/status/${data.vodId}`)
+            .then(r => r.json()).catch(() => null);
+          if (!st) return;
+
+          setJobbStatus(st);
+
+          if (st.status === 'COMPLETE' && st.signedUrl) {
+            clearInterval(pollInterval);
+            // Automatisk start Phase 2 (Whisper → Highlights → Tekster)
+            setJobbStatus((prev: any) => ({ ...prev, phase2: 'STARTER' }));
+            try {
+              const p2 = await fetch('/api/content-factory/phase2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vodId: data.vodId, signedUrl: st.signedUrl }),
+              }).then(r => r.json());
+              setJobbStatus((prev: any) => ({ ...prev, phase2: 'FERDIG', ...p2 }));
+              setStartRes((prev: any) => ({ ...prev, ...p2 }));
+              // Oppdater VOD-liste
+              fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
+            } catch (e) {
+              setJobbStatus((prev: any) => ({ ...prev, phase2: 'FEILET' }));
             }
-          }, 15000);
-        }
+          } else if (st.status === 'FAILED') {
+            clearInterval(pollInterval);
+          }
+        }, 15000);
       }
     } catch (e) {
       setFeil((e as Error).message);
@@ -159,11 +176,26 @@ export default function ContentFactoryAdminPage() {
         {feil && <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 rounded">✗ {feil}</p>}
 
         {jobbStatus && (
-          <div className={`p-3 rounded border text-xs font-mono space-y-1 ${jobbStatus.status === 'COMPLETE' ? 'border-g-green/30 bg-g-green/5' : jobbStatus.status === 'FAILED' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
-            <p className={jobbStatus.status === 'COMPLETE' ? 'text-g-green font-bold' : jobbStatus.status === 'FAILED' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold'}>
-              Railway jobb: {jobbStatus.status}
-            </p>
-            <p className="text-g-muted">{jobbStatus.melding}</p>
+          <div className={`p-3 rounded border text-xs space-y-1.5 ${jobbStatus.status === 'COMPLETE' ? 'border-g-green/30 bg-g-green/5' : jobbStatus.status === 'FAILED' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
+            <div className="flex items-center gap-2">
+              {jobbStatus.status !== 'COMPLETE' && jobbStatus.status !== 'FAILED' && (
+                <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin flex-shrink-0" />
+              )}
+              <p className={`font-bold ${jobbStatus.status === 'COMPLETE' ? 'text-g-green' : jobbStatus.status === 'FAILED' ? 'text-red-400' : 'text-yellow-400'}`}>
+                Railway: {jobbStatus.status === 'DOWNLOADING' ? '📥 Laster ned VOD...' :
+                          jobbStatus.status === 'EXTRACTING_AUDIO' ? '🎵 Ekstraherer audio...' :
+                          jobbStatus.status === 'UPLOADING' ? '☁️ Laster opp til Supabase...' :
+                          jobbStatus.status === 'COMPLETE' ? '✓ Audio klar!' :
+                          jobbStatus.status === 'FAILED' ? '✗ Feilet' : jobbStatus.status}
+              </p>
+            </div>
+            {jobbStatus.melding && <p className="text-g-muted text-[10px]">{jobbStatus.melding}</p>}
+            {jobbStatus.phase2 && (
+              <p className={`text-[10px] font-bold ${jobbStatus.phase2 === 'FERDIG' ? 'text-g-green' : jobbStatus.phase2 === 'FEILET' ? 'text-red-400' : 'text-yellow-400'}`}>
+                Phase 2 (AI): {jobbStatus.phase2 === 'STARTER' ? 'Starter Whisper + Highlights...' :
+                               jobbStatus.phase2 === 'FERDIG' ? '✓ Ferdig!' : jobbStatus.phase2}
+              </p>
+            )}
           </div>
         )}
         {startRes && (
