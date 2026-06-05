@@ -12,6 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { logBotEvent } from './botEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
@@ -117,6 +118,7 @@ async function lastOppOgFerdigstill(
       clip_finished_at: new Date().toISOString(),
       clip_error: null,
     }).eq('id', hId);
+    logBotEvent('klipp_ferdig', { id: hId });
     console.log(`[ClipWorker] ✓ Ferdig: ${hId} – 16:9: ${!!clipUrl}, 9:16: ${!!verticalClipUrl}`);
     return true;
   }
@@ -264,6 +266,7 @@ async function kjørSyklus(): Promise<void> {
       }
       await db.from('content_highlights').update({ clip_status: 'CLIPPING', clip_error: null }).eq('id', h.id);
       klipperNå.add(h.id);
+      logBotEvent('klipp_start', { title: h.title ?? h.id, vod_id: h.vod_id });
       klippHighlight(h, vodUrl).catch((err: any) => {
         console.error('[ClipWorker] Uventet krasj:', err.message);
         klipperNå.delete(h.id);

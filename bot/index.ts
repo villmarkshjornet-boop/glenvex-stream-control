@@ -23,6 +23,7 @@ import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase } from './lib/memberTracker';
+import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
@@ -135,6 +136,8 @@ async function checkLive() {
       tweetLiveNå(stream).catch(() => {});
       await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
       await postPreLiveHype(stream.title ?? '', stream.game ?? '');
+      updateStreamSyklus({ stream_start_at: new Date().toISOString(), sist_live_id: stream.id }).catch(() => {});
+      logBotEvent('stream_live', { tittel: stream.title ?? '', spill: stream.game ?? '' });
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
@@ -145,6 +148,9 @@ async function checkLive() {
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
       endSession(0);
+      logBotEvent('stream_offline', {});
+      // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
+      setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
     }
   } catch (error) {
     addLog('error', `Live-sjekk feil: ${(error as Error).message}`, 'ERROR');
@@ -770,7 +776,7 @@ const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
 const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
 
 async function gjenopprettStuckeVods() {
-  // Sett ANALYZING-VODs som er eldre enn 30 min tilbake til FAILED etter Railway-restart
+  // Reset ANALYZING-VODs som er eldre enn 30 min til PENDING etter Railway-restart
   try {
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -785,12 +791,63 @@ async function gjenopprettStuckeVods() {
       await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vod.id}`, {
         method: 'PATCH',
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: JSON.stringify({ status: 'FAILED', error_message: 'Railway restartet midt i prosessen – kjør på nytt via Force Reset', progress_percent: 0 }),
+        body: JSON.stringify({ status: 'PENDING', error_message: 'Railway restartet – klikk Retry for å kjøre på nytt', progress_percent: 0 }),
       });
-      addLog('warning', `Satte stuck VOD til FAILED etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
+      addLog('warning', `Satte stuck VOD til PENDING etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
     }
-    if (stucke.length > 0) console.log(`[Recovery] Satte ${stucke.length} stuck VOD(er) til FAILED`);
+    if (stucke.length > 0) console.log(`[Recovery] Satte ${stucke.length} stuck VOD(er) til PENDING`);
   } catch {}
+}
+
+const DAGNAVN_BOT = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
+
+async function sjekkPreHype() {
+  try {
+    const syklus = await getStreamSyklus();
+    if (syklus.pre_hype_sendt_at) return; // allerede sendt
+    const plan = await getStreamplan();
+    const aktive = plan.filter((d: any) => d.aktiv);
+    if (aktive.length === 0) return;
+
+    const now = new Date();
+    const idag = now.getDay();
+    const minutter = now.getHours() * 60 + now.getMinutes();
+
+    for (const dag of aktive) {
+      const dagIdx = DAGNAVN_BOT.indexOf(dag.dag);
+      if (dagIdx !== idag) continue;
+      const [timer, min] = (dag.tid ?? '20:00').split(':').map(Number);
+      const streamMin = timer * 60 + min;
+      const diff = streamMin - minutter;
+      if (diff > 0 && diff <= 60) {
+        // Stream innen 60 min – send pre-hype
+        const kanal = finnChatKanal();
+        if (!kanal) return;
+        const apiKey = process.env.OPENAI_API_KEY;
+        let melding = `🔥 **GLENVEX** streamer om ${diff} minutt${diff > 1 ? 'er' : ''}! ${dag.spill} starter kl. ${dag.tid}`;
+        if (apiKey) {
+          try {
+            const openai = new OpenAI({ apiKey });
+            const res2 = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [{ role: 'user', content: `GLENVEX streamer ${dag.spill} om ${diff} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
+              max_tokens: 80,
+              temperature: 0.9,
+            });
+            const ai = res2.choices[0]?.message?.content ?? '';
+            if (ai) melding = `🔥 ${ai}`;
+          } catch {}
+        }
+        await kanal.send(melding).catch(() => {});
+        await updateStreamSyklus({ pre_hype_sendt_at: new Date().toISOString() });
+        logBotEvent('pre_hype', { spill: dag.spill, tittel: dag.tittel ?? '', minutter_til: diff });
+        addLog('success', `Pre-hype sendt: ${dag.spill} om ${diff}min`, 'OK');
+        break;
+      }
+    }
+  } catch (err: any) {
+    console.error('[PreHype] Feil:', err.message);
+  }
 }
 
 client.once('clientReady', () => {
@@ -806,6 +863,7 @@ client.once('clientReady', () => {
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
 
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
+  setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
   setTimeout(() => { sendProaktivMelding(); setInterval(sendProaktivMelding, PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
   setTimeout(() => { delSocialsSubtilt(); setInterval(delSocialsSubtilt, SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
@@ -827,6 +885,7 @@ client.on('messageCreate', async (message) => {
     const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
     if (xpResult?.leveledUp) {
       message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
+      logBotEvent('level_up', { username: message.author.displayName ?? message.author.username, level: xpResult.newLevel });
 
       // Tildel rolle basert på nytt level
       if (message.guild && message.member) {

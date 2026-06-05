@@ -28,6 +28,7 @@ const NAV: NavSeksjon[] = [
     items: [
       { label: 'Oversikt',      href: '/twitch' },
       { label: 'Streamplan',    href: '/streamplan' },
+      { label: 'Viewer Goals',  href: '/viewer-goals' },
       { label: 'AI Producer',   href: '/ai-producer' },
       { label: 'Stream Coach',  href: '/stream-coach' },
       { label: 'Raid Manager',  href: '/raid-manager' },

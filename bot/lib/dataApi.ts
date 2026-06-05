@@ -2,6 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { triggerClipNow } from './clipWorker';
+import { logBotEvent, updateStreamSyklus } from './botEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 
@@ -38,6 +39,11 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
       update.status = 'ANALYZING';
       update.current_step = 'TRANSCRIBING';
       update.progress_percent = ekstra?.progress ?? 40;
+    } else if (status === 'PENDING_RETRY') {
+      update.status = 'PENDING';
+      update.error_message = melding;
+      update.progress_percent = 0;
+      update.current_step = 'DOWNLOAD';
     }
     fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vodId}`, {
       method: 'PATCH',
@@ -69,25 +75,58 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     const audioPath = path.join(audioDir, `${vodId}.mp3`);
     const cookieArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
 
-    // Last ned KUN lyd – mye raskere enn full video (200–400MB vs 3–8GB).
-    // Klipp-worker laster ned video separat ved behov, så vi trenger ikke video her.
-    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned lydspor (2–8 min)...');
+    let nedlastingOk = false;
 
-    // Heartbeat hvert 30s så "STUCK?"-varselet ikke dukker opp under normal nedlasting
-    const heartbeat = setInterval(() => {
-      oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned lydspor...');
-    }, 30_000);
-
+    // ── Strategi 1: audio_only / bestaudio (raskest, minst data) ────────────
+    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp: laster ned lydspor (strategi 1/3)...');
+    const hb1 = setInterval(() => oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp strategi 1 pågår...'), 30_000);
     try {
       await execAsync(
-        `yt-dlp -f "audio_only/bestaudio/best" --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
-        { maxBuffer: 1024 * 1024 * 200, timeout: 45 * 60 * 1000 }
+        `yt-dlp -f "audio_only/bestaudio" --retries 2 --fragment-retries 2 --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
+        { maxBuffer: 1024 * 1024 * 200, timeout: 25 * 60 * 1000 }
       );
-    } finally {
-      clearInterval(heartbeat);
+      if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
+    } catch (e: any) {
+      console.error(`[CF] Strategi 1 feilet: ${(e.message ?? '').slice(0, 200)}`);
+      try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
+    } finally { clearInterval(hb1); }
+
+    // ── Strategi 2: bestaudio fra video-track (mer robust) ──────────────────
+    if (!nedlastingOk) {
+      oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp: strategi 2 (bestaudio/best)...');
+      const hb2 = setInterval(() => oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp strategi 2 pågår...'), 30_000);
+      try {
+        await execAsync(
+          `yt-dlp -f "bestaudio[ext=mp4]/bestaudio/best" --retries 2 --fragment-retries 2 --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
+          { maxBuffer: 1024 * 1024 * 200, timeout: 30 * 60 * 1000 }
+        );
+        if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
+      } catch (e: any) {
+        console.error(`[CF] Strategi 2 feilet: ${(e.message ?? '').slice(0, 200)}`);
+        try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
+      } finally { clearInterval(hb2); }
     }
 
-    if (!fs.existsSync(audioPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Lydfil ikke funnet etter nedlasting'); return; }
+    // ── Strategi 3: laveste video-format + trekk ut lyd ────────────────────
+    if (!nedlastingOk) {
+      oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp: strategi 3 (lavest video-format)...');
+      const hb3 = setInterval(() => oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp strategi 3 pågår...'), 30_000);
+      try {
+        await execAsync(
+          `yt-dlp -f "worst[ext=mp4]/worst/best" --retries 2 --fragment-retries 2 --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
+          { maxBuffer: 1024 * 1024 * 500, timeout: 45 * 60 * 1000 }
+        );
+        if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
+      } catch (e: any) {
+        console.error(`[CF] Strategi 3 feilet: ${(e.message ?? '').slice(0, 200)}`);
+        try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
+      } finally { clearInterval(hb3); }
+    }
+
+    if (!nedlastingOk) {
+      oppdaterJobbStatus(vodId, 'PENDING_RETRY', 'Alle 3 nedlastingsstrategier feilet – klikk Retry for å prøve igjen');
+      return;
+    }
 
     // Normaliser audio til 16kHz mono (Whisper-optimal) hvis ffmpeg er tilgjengelig
     try {
@@ -218,6 +257,56 @@ export function startDataApi(port = 4242) {
           res.writeHead(200);
           res.end(JSON.stringify({ bildeUrl: response.data?.[0]?.url ?? null }));
         } catch (err: any) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+
+    // ── Stream-syklus: Discord-varsling når streamplan er lagret ────────────
+    if (url === '/stream-syklus/discord-varsling' && method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk; });
+      req.on('end', async () => {
+        res.writeHead(202);
+        res.end(JSON.stringify({ ok: true }));
+        try {
+          const { plan } = JSON.parse(body);
+          const sbUrl = process.env.SUPABASE_URL;
+          const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+          const discordWebhook = process.env.DISCORD_LIVE_WEBHOOK_URL;
+          const aktive = (plan ?? []).filter((d: any) => d.aktiv);
+          if (aktive.length === 0) return;
+
+          const planTekst = aktive.map((d: any) => `• **${d.dag}** kl. ${d.tid} – ${d.spill}${d.tittel ? ` (${d.tittel})` : ''}`).join('\n');
+
+          if (discordWebhook) {
+            await fetch(discordWebhook, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                embeds: [{
+                  title: '📅 Streamplan oppdatert',
+                  description: planTekst,
+                  color: 0x00ff41,
+                  footer: { text: 'GLENVEX Creator OS' },
+                }],
+              }),
+            }).catch(() => {});
+          } else if (sbUrl && sbKey) {
+            const channelId = process.env.DISCORD_LIVE_CHANNEL_ID;
+            if (channelId) {
+              const { createClient } = require('@supabase/supabase-js');
+              const ws = require('ws');
+              const sb = createClient(sbUrl, sbKey, { realtime: { transport: ws } });
+              await sb.rpc('noop').catch(() => {});
+            }
+          }
+
+          await updateStreamSyklus({ discord_varslet_at: new Date().toISOString() });
+          logBotEvent('discord_varsel', { melding: `Streamplan varslet: ${aktive.length} stream${aktive.length > 1 ? 'er' : ''}` });
+          console.log(`[DataApi] Discord-varsling om streamplan sendt (${aktive.length} aktive dager)`);
+        } catch (err: any) {
+          console.error('[DataApi] Discord-varsling feil:', err.message);
+        }
       });
       return;
     }

@@ -19,7 +19,9 @@ interface SlowData {
   meta: { hentetKl: string };
 }
 interface LiveEvent {
-  type: 'follow' | 'sub' | 'resub' | 'giftsub' | 'mystery_gift' | 'raid' | 'cheer';
+  type: 'follow' | 'sub' | 'resub' | 'giftsub' | 'mystery_gift' | 'raid' | 'cheer'
+      | 'klipp_start' | 'klipp_ferdig' | 'level_up' | 'stream_live' | 'stream_offline'
+      | 'discord_varsel' | 'pre_hype';
   ts: string;
   username?: string;
   viewers?: number;
@@ -28,6 +30,12 @@ interface LiveEvent {
   count?: number;
   bits?: string | number;
   total?: number;
+  title?: string;
+  level?: number;
+  tittel?: string;
+  spill?: string;
+  melding?: string;
+  minutter_til?: number;
 }
 
 interface LiveData {
@@ -296,6 +304,8 @@ function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteR
 
 const EVENT_IKON: Record<string, string> = {
   follow: '💚', sub: '⭐', resub: '⭐', giftsub: '🎁', mystery_gift: '🎁', raid: '🚨', cheer: '💎',
+  klipp_start: '✂', klipp_ferdig: '🎬', level_up: '🏅', stream_live: '🔴', stream_offline: '⬛',
+  discord_varsel: '📅', pre_hype: '🔥',
 };
 
 function hendelsesTekst(e: LiveEvent): string {
@@ -307,6 +317,13 @@ function hendelsesTekst(e: LiveEvent): string {
     case 'mystery_gift': return `${e.username} giftet ${e.count} subs!`;
     case 'raid': return `${e.username} raidet med ${e.viewers} seere!`;
     case 'cheer': return `${e.username} cheeret ${e.bits} bits!`;
+    case 'klipp_start': return `Klipp starter: ${e.title ?? 'highlight'}`;
+    case 'klipp_ferdig': return `Klipp ferdig: ${e.title ?? 'highlight'}`;
+    case 'level_up': return `${e.username} nådde Level ${e.level}!`;
+    case 'stream_live': return `Stream er LIVE${e.spill ? ` – ${e.spill}` : ''}${e.tittel ? `: ${e.tittel}` : ''}`;
+    case 'stream_offline': return 'Stream avsluttet';
+    case 'discord_varsel': return e.melding ?? 'Discord varslet om streamplan';
+    case 'pre_hype': return `Pre-hype sendt${e.spill ? ` – ${e.spill}` : ''}${e.minutter_til ? ` (om ${e.minutter_til}min)` : ''}`;
     default: return JSON.stringify(e);
   }
 }

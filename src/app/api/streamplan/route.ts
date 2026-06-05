@@ -95,5 +95,15 @@ export async function POST(req: NextRequest) {
   const dbOk = await saveToDb(data);
   saveFile(data); // fallback på Railway
 
+  // Notify bot om ny streamplan (fire-and-forget)
+  const botApiUrl = process.env.BOT_API_URL;
+  if (botApiUrl && data.some(d => d.aktiv)) {
+    fetch(`${botApiUrl}/stream-syklus/discord-varsling`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan: data }),
+    }).catch(() => {});
+  }
+
   return NextResponse.json({ ok: true, lagret: dbOk ? 'supabase' : 'fil' });
 }

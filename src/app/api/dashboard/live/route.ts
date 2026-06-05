@@ -108,12 +108,13 @@ export async function GET() {
   const sisteVod = vods.find(v => v.created_at > cutoff72t) ?? null;
   const sisteVodHighlights = sisteVod ? highlights.filter(h => h.vod_id === sisteVod.id) : [];
   const harKlipp = sisteVodHighlights.some(h => h.clip_status === 'CLIPPED');
+  const syklus = workspaceRes.data?.settings_json?.stream_syklus ?? {};
 
   const sjekkliste = [
     { label: 'Streamplan lagret', done: aktiveStreamdager.length > 0, href: '/streamplan' },
-    { label: 'Discord varslet', done: false, href: '/discord' },
-    { label: 'Pre-Hype planlagt', done: false, href: '/pre-live' },
-    { label: 'Stream startet', done: false, href: '/live-overvaking' },
+    { label: 'Discord varslet', done: !!syklus.discord_varslet_at, href: '/discord' },
+    { label: 'Pre-Hype planlagt', done: !!syklus.pre_hype_sendt_at, href: '/pre-live' },
+    { label: 'Stream startet', done: !!syklus.stream_start_at, href: '/live-overvaking' },
     { label: 'VOD oppdaget', done: !!sisteVod, href: '/content-factory-admin' },
     { label: 'Transkribering ferdig', done: !!sisteVod && ['TRANSCRIBED', 'COMPLETE'].includes(sisteVod.status), href: '/content-factory-admin' },
     { label: 'Highlights generert', done: sisteVodHighlights.length > 0, href: '/content-factory-admin/highlights' },

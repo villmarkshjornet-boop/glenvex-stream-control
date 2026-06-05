@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { getDb, isDbAvailable } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
-
-const FILE = path.join(process.cwd(), 'data', 'goals.json');
 
 interface Goal {
   type: string;
@@ -14,11 +12,18 @@ interface Goal {
   aktiv: boolean;
 }
 
-function loadGoals(): Goal[] {
-  try {
-    if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8'));
-  } catch {}
-  return [];
+const DEFAULT_GOALS: Goal[] = [
+  { type: 'followers', label: 'Følgere', mal: 1000, gjeldende: 0, aktiv: true },
+  { type: 'subscribers', label: 'Subscribers', mal: 50, gjeldende: 0, aktiv: true },
+  { type: 'viewers', label: 'Seere (snitt)', mal: 20, gjeldende: 0, aktiv: false },
+];
+
+async function loadGoals(): Promise<Goal[]> {
+  if (!isDbAvailable()) return DEFAULT_GOALS;
+  const db = getDb();
+  if (!db) return DEFAULT_GOALS;
+  const { data } = await db.from('workspaces').select('settings_json').eq('id', getWorkspaceId()).single();
+  return data?.settings_json?.viewer_goals ?? DEFAULT_GOALS;
 }
 
 async function getTwitchToken(): Promise<string | null> {
@@ -88,7 +93,7 @@ export async function GET() {
     }
   }
 
-  const goals = loadGoals();
+  const goals = await loadGoals();
 
   const oppdatert = goals.map(g => {
     if (g.type === 'followers') return { ...g, gjeldende: followers };
