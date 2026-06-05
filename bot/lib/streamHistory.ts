@@ -89,24 +89,28 @@ export function endSession(followerGain = 0) {
   save(history.slice(0, 50));
   activeSession = null;
 
-  // Sync til Supabase
+  // Sync til Supabase asynkront
   const db = getBotDb();
   if (db) {
-    db.from('stream_history').upsert({
-      workspace_id: WORKSPACE_ID,
-      stream_id: session.id,
-      title: session.title,
-      game: session.game,
-      started_at: session.startedAt,
-      ended_at: session.endedAt,
-      duration_minutes: session.durationMinutes,
-      peak_viewers: session.peakViewers,
-      avg_viewers: session.avgViewers,
-      chat_messages: session.chatMessages,
-      followers_gained: session.followerGain,
-      subs_gained: session.subsGained,
-      raids_during: session.raidsDuring,
-    }, { onConflict: 'stream_id' }).catch(() => {});
+    (async () => {
+      try {
+        await db.from('stream_history').upsert({
+          workspace_id: WORKSPACE_ID,
+          stream_id: session.id,
+          title: session.title,
+          game: session.game,
+          started_at: session.startedAt,
+          ended_at: session.endedAt,
+          duration_minutes: session.durationMinutes,
+          peak_viewers: session.peakViewers,
+          avg_viewers: session.avgViewers,
+          chat_messages: session.chatMessages,
+          followers_gained: session.followerGain,
+          subs_gained: session.subsGained,
+          raids_during: session.raidsDuring,
+        }, { onConflict: 'stream_id' });
+      } catch {}
+    })();
   }
 }
 

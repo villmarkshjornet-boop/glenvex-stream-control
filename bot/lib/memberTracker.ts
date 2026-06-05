@@ -50,27 +50,29 @@ function save(data: Record<string, MemberProfile>) {
   } catch {}
 }
 
-async function syncToSupabase(member: MemberProfile): Promise<void> {
+function syncToSupabase(member: MemberProfile): void {
   const db = getBotDb();
   if (!db) return;
-  try {
-    await db.from('community_members').upsert({
-      workspace_id: WORKSPACE_ID,
-      discord_id: member.id,
-      username: member.username,
-      display_name: member.displayName,
-      xp: member.xp,
-      level: member.level,
-      messages: member.messages,
-      subs: member.subs,
-      gift_subs: member.giftSubs,
-      raids: member.raids,
-      badges: member.badges,
-      last_seen: member.lastSeen,
-      last_welcomed: member.lastWelcomed,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'workspace_id,discord_id' });
-  } catch {}
+  (async () => {
+    try {
+      await db.from('community_members').upsert({
+        workspace_id: WORKSPACE_ID,
+        discord_id: member.id,
+        username: member.username,
+        display_name: member.displayName,
+        xp: member.xp,
+        level: member.level,
+        messages: member.messages,
+        subs: member.subs,
+        gift_subs: member.giftSubs,
+        raids: member.raids,
+        badges: member.badges,
+        last_seen: member.lastSeen,
+        last_welcomed: member.lastWelcomed,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,discord_id' });
+    } catch {}
+  })();
 }
 
 export function getMember(id: string): MemberProfile | null {
