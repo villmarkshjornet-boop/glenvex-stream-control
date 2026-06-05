@@ -13,6 +13,11 @@ interface Highlight {
   begrunnelse: string;
   rank: number;
   status: string;
+  clip_status?: string;
+  clip_url?: string | null;
+  vertical_clip_url?: string | null;
+  clip_finished_at?: string | null;
+  clip_error?: string | null;
 }
 
 interface Copy {
@@ -75,6 +80,7 @@ export default function HighlightViewerPage() {
   const [loading, setLoading] = useState(false);
   const [klipperH, setKlipperH] = useState<string | null>(null);
   const [kopiert, setKopiert] = useState<string | null>(null);
+  const [pollerKlipp, setPollerKlipp] = useState(false);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
@@ -99,7 +105,18 @@ export default function HighlightViewerPage() {
       body: JSON.stringify({ vodId: valgtVod, highlightId }),
     });
     setKlipperH(null);
+    // Refresh umiddelbart, så poll hvert 5s mens noe er i CLIPPING
+    await hentHighlights(valgtVod);
+    setPollerKlipp(true);
   }
+
+  useEffect(() => {
+    if (!pollerKlipp || !valgtVod) return;
+    const harClipping = highlights.some(h => h.clip_status === 'CLIPPING');
+    if (!harClipping) { setPollerKlipp(false); return; }
+    const t = setTimeout(() => hentHighlights(valgtVod), 5000);
+    return () => clearTimeout(t);
+  }, [pollerKlipp, highlights, valgtVod]);
 
   function kopier(tekst: string, id: string) {
     navigator.clipboard.writeText(tekst);
@@ -187,11 +204,11 @@ export default function HighlightViewerPage() {
                       <div className="flex items-center justify-between">
                         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Videoklipp</p>
                         <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
-                          (h as any).clip_status === 'CLIPPED' ? 'text-g-green border-g-green/30' :
-                          (h as any).clip_status === 'CLIPPING' ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
-                          (h as any).clip_status === 'CLIP_FAILED' ? 'text-red-400 border-red-400/30' :
+                          h.clip_status === 'CLIPPED' ? 'text-g-green border-g-green/30' :
+                          h.clip_status === 'CLIPPING' ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
+                          h.clip_status === 'CLIP_FAILED' ? 'text-red-400 border-red-400/30' :
                           'text-g-muted border-g-border'
-                        }`}>{(h as any).clip_status ?? 'READY_FOR_CLIP'}</span>
+                        }`}>{h.clip_status ?? 'READY_FOR_CLIP'}</span>
                       </div>
 
                       <div className="flex items-start gap-3">
@@ -199,16 +216,16 @@ export default function HighlightViewerPage() {
                           <p className="text-g-text">Start: <span className="text-g-green font-mono font-bold">{tidFormat(h.start_time)}</span></p>
                           <p className="text-g-text">Slutt: <span className="text-g-green font-mono font-bold">{tidFormat(h.end_time)}</span></p>
                           <p className="text-g-text">Varighet: <span className="text-g-green font-mono font-bold">{Math.round(h.end_time - h.start_time)}s</span></p>
-                          {(h as any).clip_error && <p className="text-red-400 text-[9px] mt-1">✗ {(h as any).clip_error}</p>}
+                          {h.clip_error && <p className="text-red-400 text-[9px] mt-1">✗ {h.clip_error}</p>}
                         </div>
                         <div className="flex flex-col gap-1.5">
-                          {(h as any).clip_status !== 'CLIPPING' && (
+                          {h.clip_status !== 'CLIPPING' && (
                             <button onClick={() => genererKlipp(h.id)} disabled={klipperH === h.id}
                               className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all">
-                              {klipperH === h.id ? '⏳...' : (h as any).clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
+                              {klipperH === h.id ? '⏳...' : h.clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
                             </button>
                           )}
-                          {(h as any).clip_status === 'CLIP_FAILED' && (
+                          {h.clip_status === 'CLIP_FAILED' && (
                             <button onClick={async () => {
                               await fetch('/api/content-factory/clip-retry', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -223,26 +240,26 @@ export default function HighlightViewerPage() {
                       </div>
 
                       {/* Video preview */}
-                      {(h as any).clip_url && (
+                      {h.clip_url && (
                         <div className="space-y-2">
                           <p className="text-[9px] text-g-muted font-bold uppercase">16:9 – YouTube / Twitch</p>
                           <video controls className="w-full rounded border border-g-border" style={{ maxHeight: '200px' }}>
-                            <source src={(h as any).clip_url} type="video/mp4" />
+                            <source src={h.clip_url} type="video/mp4" />
                           </video>
-                          <a href={(h as any).clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
+                          <a href={h.clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
                             className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                             ↓ Last ned 16:9
                           </a>
                         </div>
                       )}
 
-                      {(h as any).vertical_clip_url && (
+                      {h.vertical_clip_url && (
                         <div className="space-y-2">
                           <p className="text-[9px] text-g-muted font-bold uppercase">9:16 – TikTok / Shorts / Reel</p>
                           <video controls className="mx-auto rounded border border-g-border" style={{ maxHeight: '300px', maxWidth: '170px' }}>
-                            <source src={(h as any).vertical_clip_url} type="video/mp4" />
+                            <source src={h.vertical_clip_url} type="video/mp4" />
                           </video>
-                          <a href={(h as any).vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
+                          <a href={h.vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
                             className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                             ↓ Last ned 9:16
                           </a>

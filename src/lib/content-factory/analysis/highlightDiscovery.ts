@@ -168,12 +168,21 @@ export async function hentHighlights(vodId: string): Promise<ContentHighlight[]>
   const { data } = await db.from('content_highlights').select('*')
     .eq('vod_id', vodId).order('score', { ascending: false });
   return (data ?? []).map(r => ({
-    id: r.id, vodId: r.vod_id,
+    id: r.id,
+    vodId: r.vod_id, vod_id: r.vod_id,
     // Supabase NUMERIC returneres som string – konverter eksplisitt
     startTime: parseFloat(r.start_time) || 0,
+    start_time: parseFloat(r.start_time) || 0,
     endTime: parseFloat(r.end_time) || 0,
+    end_time: parseFloat(r.end_time) || 0,
     score: parseInt(r.score) || 0,
     category: r.category, title: r.title,
     begrunnelse: r.begrunnelse, signals: r.signals ?? [], rank: r.rank, status: r.status,
+    // Clip-felter
+    clip_status: r.clip_status ?? 'READY_FOR_CLIP',
+    clip_url: r.clip_url ?? null,
+    vertical_clip_url: r.vertical_clip_url ?? null,
+    clip_finished_at: r.clip_finished_at ?? null,
+    clip_error: r.clip_error ?? null,
   }));
 }
