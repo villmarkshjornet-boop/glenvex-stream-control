@@ -34,6 +34,8 @@ export default function ContentFactoryAdminPage() {
   const [startRes, setStartRes] = useState<any>(null);
   const [feil, setFeil] = useState('');
   const [jobbStatus, setJobbStatus] = useState<any>(null);
+  const [phase2Running, setPhase2Running] = useState(false);
+  const [phase2Res, setPhase2Res] = useState<any>(null);
   const [valgtHøydepunkt, setValgtHøydepunkt] = useState<string>('');
 
   useEffect(() => {
@@ -174,6 +176,46 @@ export default function ContentFactoryAdminPage() {
           ) : '◆ Start Pipeline'}
         </button>
         {feil && <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 rounded">✗ {feil}</p>}
+
+        {/* Manuell Phase 2 trigger */}
+        <div className="border-t border-g-border/40 pt-3 space-y-2">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Manuell Phase 2 (bruk når Railway er COMPLETE)</p>
+          <div className="flex gap-2">
+            <input id="phase2VodId" placeholder="VOD ID fra Railway status..."
+              className="flex-1 bg-g-bg border border-g-border rounded px-3 py-1.5 text-xs text-g-text outline-none focus:border-g-green/50" />
+            <button onClick={async () => {
+              const vodId = (document.getElementById('phase2VodId') as HTMLInputElement)?.value;
+              if (!vodId) return;
+              setPhase2Running(true);
+              setPhase2Res(null);
+              const res = await fetch('/api/content-factory/phase2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vodId }),
+              }).then(r => r.json()).catch(e => ({ error: e.message }));
+              setPhase2Res(res);
+              setPhase2Running(false);
+              fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
+            }} disabled={phase2Running}
+              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all whitespace-nowrap">
+              {phase2Running ? '⏳...' : '◆ Start Phase 2'}
+            </button>
+          </div>
+          {phase2Res && (
+            <div className={`p-3 rounded border text-xs space-y-1 ${phase2Res.ok ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
+              {phase2Res.ok ? (
+                <>
+                  <p className="text-g-green font-bold">✓ Phase 2 ferdig! Highlights: {phase2Res.antallHighlights} · Tekster: {phase2Res.antallCopy}</p>
+                  {phase2Res.steg?.map((s: any, i: number) => (
+                    <p key={i} className={s.status === 'OK' ? 'text-g-green' : s.status === 'FEILET' ? 'text-red-400' : 'text-g-muted'}>
+                      {s.status === 'OK' ? '✓' : s.status === 'FEILET' ? '✗' : '○'} {s.steg}{s.melding ? ` – ${s.melding}` : ''}
+                    </p>
+                  ))}
+                </>
+              ) : <p className="text-red-400">✗ {phase2Res.error ?? 'Feil'}</p>}
+            </div>
+          )}
+        </div>
 
         {jobbStatus && (
           <div className={`p-3 rounded border text-xs space-y-1.5 ${jobbStatus.status === 'COMPLETE' ? 'border-g-green/30 bg-g-green/5' : jobbStatus.status === 'FAILED' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
