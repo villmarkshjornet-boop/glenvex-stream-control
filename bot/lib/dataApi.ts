@@ -48,38 +48,82 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     await execAsync(`ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${audioPath}"`);
     if (!fs.existsSync(audioPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Lydfil ikke funnet'); return; }
 
-    oppdaterJobbStatus(vodId, 'UPLOADING', 'Laster opp til Supabase Storage...');
+    // Transkriber direkte med Whisper – ingen Supabase Storage (unngår filstørrelsesbegrensning)
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) { oppdaterJobbStatus(vodId, 'FAILED', 'OPENAI_API_KEY mangler'); return; }
+
     const { createClient } = require('@supabase/supabase-js');
     const ws = require('ws');
-    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-      realtime: { transport: ws },
-    });
-    const storagePath = `content-factory/audio/${vodId}.mp3`;
-    const buf = fs.readFileSync(audioPath);
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
 
-    const { error: upErr } = await sb.storage.from('glenvex-assets').upload(storagePath, buf, { contentType: 'audio/mpeg', upsert: true });
-    if (upErr) {
-      await sb.storage.createBucket('glenvex-assets', { public: false }).catch(() => {});
-      const { error: retry } = await sb.storage.from('glenvex-assets').upload(storagePath, buf, { contentType: 'audio/mpeg', upsert: true });
-      if (retry) { oppdaterJobbStatus(vodId, 'FAILED', `Supabase Storage: ${retry.message}`); return; }
+    // Slett gamle transkripsjoner
+    await sb.from('content_transcripts').delete().eq('vod_id', vodId);
+
+    const MAX_BYTES = 24 * 1024 * 1024; // 24MB Whisper-grense
+    const audioSize = fs.statSync(audioPath).size;
+    const segmentPaths: { filePath: string; offset: number }[] = [];
+
+    if (audioSize > MAX_BYTES) {
+      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Stor fil (${Math.round(audioSize/1024/1024)}MB) – deler i 20-min segmenter...`);
+      const { stdout: durStr } = await execAsync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`);
+      const totalSek = parseFloat(durStr.trim());
+      const segSek = 1200;
+      let start = 0; let idx = 0;
+      while (start < totalSek) {
+        const segPath = audioPath.replace('.mp3', `_s${idx}.mp3`);
+        await execAsync(`ffmpeg -y -ss ${start} -i "${audioPath}" -t ${segSek} -c copy "${segPath}"`);
+        segmentPaths.push({ filePath: segPath, offset: start });
+        start += segSek; idx++;
+      }
+    } else {
+      segmentPaths.push({ filePath: audioPath, offset: 0 });
     }
 
-    const { data: sd } = await sb.storage.from('glenvex-assets').createSignedUrl(storagePath, 7200);
-    if (!sd?.signedUrl) { oppdaterJobbStatus(vodId, 'FAILED', 'Signed URL generering feilet'); return; }
+    let totalSegmenter = 0;
+    for (let i = 0; i < segmentPaths.length; i++) {
+      const { filePath: segPath, offset } = segmentPaths[i];
+      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Whisper transkriberer segment ${i+1}/${segmentPaths.length}...`);
 
-    await sb.from('content_vods').update({
-      audio_storage_path: storagePath,
-      audio_signed_url: sd.signedUrl,
-      audio_url_expires_at: new Date(Date.now() + 7200000).toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq('id', vodId);
+      const segBuf = fs.readFileSync(segPath);
+      const boundary = `----formdata-${Date.now()}`;
+      const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`;
+      const middle = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\nverbose_json\r\n--${boundary}--\r\n`;
+      const bodyBuf = Buffer.concat([Buffer.from(header), segBuf, Buffer.from(middle)]);
+
+      const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        body: bodyBuf,
+      });
+
+      if (!wRes.ok) {
+        const errTxt = await wRes.text();
+        oppdaterJobbStatus(vodId, 'FAILED', `Whisper feil: ${errTxt.slice(0, 200)}`);
+        return;
+      }
+
+      const wData = await wRes.json() as any;
+      const segs = wData.segments ?? [];
+
+      for (const seg of segs) {
+        await sb.from('content_transcripts').insert({
+          vod_id: vodId,
+          start_time: seg.start + offset,
+          end_time: seg.end + offset,
+          text: seg.text,
+        });
+        totalSegmenter++;
+      }
+
+      if (segPath !== audioPath) try { fs.unlinkSync(segPath); } catch {}
+    }
 
     try { fs.unlinkSync(videoPath); } catch {}
+    try { fs.unlinkSync(audioPath); } catch {}
 
-    oppdaterJobbStatus(vodId, 'COMPLETE', 'Audio klar!', {
-      storagePath,
-      signedUrl: sd.signedUrl,
-      audioSize: fs.statSync(audioPath).size,
+    oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret.`, {
+      transcribed: true,
+      segmenter: totalSegmenter,
     });
 
     console.log(`[ContentFactory] ✓ Jobb ferdig: ${vodId}`);

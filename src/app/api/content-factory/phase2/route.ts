@@ -17,10 +17,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
   }
 
-  const { vodId, signedUrl } = await req.json() as { vodId: string; signedUrl: string };
+  const { vodId } = await req.json() as { vodId: string };
 
-  if (!vodId || !signedUrl) {
-    return NextResponse.json({ error: 'vodId og signedUrl kreves' }, { status: 400 });
+  if (!vodId) {
+    return NextResponse.json({ error: 'vodId kreves' }, { status: 400 });
   }
 
   const vod = await hentVod(vodId);
@@ -28,15 +28,15 @@ export async function POST(req: NextRequest) {
 
   const steg: { steg: string; status: string; melding?: string }[] = [];
 
-  // TRANSCRIBE
-  try {
-    const { transkriber } = await import('@/lib/content-factory/transcripts/whisperService');
-    await transkriber(vodId, signedUrl);
-    steg.push({ steg: 'TRANSCRIBE', status: 'OK' });
-  } catch (err) {
-    steg.push({ steg: 'TRANSCRIBE', status: 'FEILET', melding: (err as Error).message });
+  // TRANSCRIBE – allerede gjort av Railway, sjekk at data finnes
+  const { getDb } = await import('@/lib/db');
+  const db = getDb();
+  const antallSegmenter = db ? await db.from('content_transcripts').select('id', { count: 'exact', head: true }).eq('vod_id', vodId).then(r => r.count ?? 0) : 0;
+  if ((antallSegmenter as number) === 0) {
+    steg.push({ steg: 'TRANSCRIBE', status: 'FEILET', melding: 'Ingen transkripsjon funnet i Supabase – Railway-jobben må fullføres først' });
     return NextResponse.json({ steg, antallHighlights: 0, antallCopy: 0 });
   }
+  steg.push({ steg: 'TRANSCRIBE', status: 'OK', melding: `${antallSegmenter} segmenter funnet` });
 
   // DISCOVER
   let highlights: any[] = [];

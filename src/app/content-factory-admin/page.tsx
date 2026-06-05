@@ -84,15 +84,15 @@ export default function ContentFactoryAdminPage() {
 
           setJobbStatus(st);
 
-          if (st.status === 'COMPLETE' && st.signedUrl) {
+          if (st.status === 'COMPLETE') {
             clearInterval(pollInterval);
-            // Automatisk start Phase 2 (Whisper → Highlights → Tekster)
+            // Phase 2: Highlights + tekster (transkripsjon er allerede i Supabase DB)
             setJobbStatus((prev: any) => ({ ...prev, phase2: 'STARTER' }));
             try {
               const p2 = await fetch('/api/content-factory/phase2', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vodId: data.vodId, signedUrl: st.signedUrl }),
+                body: JSON.stringify({ vodId: data.vodId }),
               }).then(r => r.json());
               setJobbStatus((prev: any) => ({ ...prev, phase2: 'FERDIG', ...p2 }));
               setStartRes((prev: any) => ({ ...prev, ...p2 }));
