@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { getBotDb, WORKSPACE_ID } from './supabase';
 
 const FILE = path.join(process.cwd(), 'data', 'members.json');
 
@@ -50,29 +49,8 @@ function save(data: Record<string, MemberProfile>) {
   } catch {}
 }
 
-function syncToSupabase(member: MemberProfile): void {
-  const db = getBotDb();
-  if (!db) return;
-  (async () => {
-    try {
-      await db.from('community_members').upsert({
-        workspace_id: WORKSPACE_ID,
-        discord_id: member.id,
-        username: member.username,
-        display_name: member.displayName,
-        xp: member.xp,
-        level: member.level,
-        messages: member.messages,
-        subs: member.subs,
-        gift_subs: member.giftSubs,
-        raids: member.raids,
-        badges: member.badges,
-        last_seen: member.lastSeen,
-        last_welcomed: member.lastWelcomed,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'workspace_id,discord_id' });
-    } catch {}
-  })();
+function syncToSupabase(_member: MemberProfile): void {
+  // Supabase-sync håndteres via Railway data API eller separat job
 }
 
 export function getMember(id: string): MemberProfile | null {
