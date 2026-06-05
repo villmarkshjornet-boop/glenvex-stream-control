@@ -172,22 +172,72 @@ export default function HighlightViewerPage() {
                 {/* Utvidet visning */}
                 {erValgt && (
                   <div className="border-t border-g-border p-4 space-y-4">
-                    {/* Video / Preview */}
-                    <div className="bg-g-bg border border-g-border rounded-lg p-4 space-y-2">
-                      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Highlight Preview</p>
-                      <div className="flex items-center gap-4">
-                        <div className="flex-1">
-                          <p className="text-xs text-g-text">Start: <span className="text-g-green font-mono font-bold">{tidFormat(h.start_time)}</span></p>
-                          <p className="text-xs text-g-text">Slutt: <span className="text-g-green font-mono font-bold">{tidFormat(h.end_time)}</span></p>
-                          <p className="text-xs text-g-text">Varighet: <span className="text-g-green font-mono font-bold">{Math.round(h.end_time - h.start_time)} sekunder</span></p>
-                        </div>
-                        <button onClick={() => genererKlipp(h.id)} disabled={klipperH === h.id}
-                          className="px-3 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
-                          {klipperH === h.id ? (
-                            <span className="flex items-center gap-2"><span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />Genererer...</span>
-                          ) : '▶ Generer videoklipp'}
-                        </button>
+                    {/* Video / Preview / Download */}
+                    <div className="bg-g-bg border border-g-border rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Videoklipp</p>
+                        <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
+                          (h as any).clip_status === 'CLIPPED' ? 'text-g-green border-g-green/30' :
+                          (h as any).clip_status === 'CLIPPING' ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
+                          (h as any).clip_status === 'CLIP_FAILED' ? 'text-red-400 border-red-400/30' :
+                          'text-g-muted border-g-border'
+                        }`}>{(h as any).clip_status ?? 'READY_FOR_CLIP'}</span>
                       </div>
+
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 text-xs space-y-0.5">
+                          <p className="text-g-text">Start: <span className="text-g-green font-mono font-bold">{tidFormat(h.start_time)}</span></p>
+                          <p className="text-g-text">Slutt: <span className="text-g-green font-mono font-bold">{tidFormat(h.end_time)}</span></p>
+                          <p className="text-g-text">Varighet: <span className="text-g-green font-mono font-bold">{Math.round(h.end_time - h.start_time)}s</span></p>
+                          {(h as any).clip_error && <p className="text-red-400 text-[9px] mt-1">✗ {(h as any).clip_error}</p>}
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {(h as any).clip_status !== 'CLIPPING' && (
+                            <button onClick={() => genererKlipp(h.id)} disabled={klipperH === h.id}
+                              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all">
+                              {klipperH === h.id ? '⏳...' : (h as any).clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
+                            </button>
+                          )}
+                          {(h as any).clip_status === 'CLIP_FAILED' && (
+                            <button onClick={async () => {
+                              await fetch('/api/content-factory/clip-retry', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ highlightId: h.id }),
+                              });
+                              hentHighlights(valgtVod);
+                            }} className="px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 text-yellow-400 text-[10px] font-bold rounded hover:bg-yellow-400/20 transition-all">
+                              ↺ Retry
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Video preview */}
+                      {(h as any).clip_url && (
+                        <div className="space-y-2">
+                          <p className="text-[9px] text-g-muted font-bold uppercase">16:9 – YouTube / Twitch</p>
+                          <video controls className="w-full rounded border border-g-border" style={{ maxHeight: '200px' }}>
+                            <source src={(h as any).clip_url} type="video/mp4" />
+                          </video>
+                          <a href={(h as any).clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
+                            className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                            ↓ Last ned 16:9
+                          </a>
+                        </div>
+                      )}
+
+                      {(h as any).vertical_clip_url && (
+                        <div className="space-y-2">
+                          <p className="text-[9px] text-g-muted font-bold uppercase">9:16 – TikTok / Shorts / Reel</p>
+                          <video controls className="mx-auto rounded border border-g-border" style={{ maxHeight: '300px', maxWidth: '170px' }}>
+                            <source src={(h as any).vertical_clip_url} type="video/mp4" />
+                          </video>
+                          <a href={(h as any).vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
+                            className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                            ↓ Last ned 9:16
+                          </a>
+                        </div>
+                      )}
                     </div>
 
                     {/* Captions */}

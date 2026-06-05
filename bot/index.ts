@@ -17,6 +17,7 @@ import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot } from './lib/twitchBot';
+import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
@@ -765,6 +766,7 @@ const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
 
 client.once('clientReady', () => {
   startTwitchBot();
+  startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);

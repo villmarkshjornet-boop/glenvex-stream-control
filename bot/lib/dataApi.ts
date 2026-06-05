@@ -196,6 +196,26 @@ export function startDataApi(port = 4242) {
       return;
     }
 
+    // ── Clip Worker: retry et highlight ──────────────────────────────────────
+    if (url.startsWith('/content-factory/clip-retry/') && method === 'POST') {
+      const highlightId = url.replace('/content-factory/clip-retry/', '');
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+      }
+      const { createClient } = require('@supabase/supabase-js');
+      const ws = require('ws');
+      const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
+      await sb.from('content_highlights').update({
+        clip_status: 'READY_FOR_CLIP',
+        clip_error: null,
+        clip_url: null,
+        vertical_clip_url: null,
+      }).eq('id', highlightId);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, melding: `Highlight ${highlightId} resatt til READY_FOR_CLIP` }));
+      return;
+    }
+
     // ── Datafiler ────────────────────────────────────────────────────────────
     const endpointMap: Record<string, string> = {
       '/members': 'members', '/events': 'events', '/stream-history': 'stream-history',
