@@ -24,27 +24,60 @@ export async function hentVodMetadata(streamId: string): Promise<Partial<Content
   assertContentFactoryEnabled();
 
   const token = await getTwitchToken();
-  if (!token) return null;
+  if (!token) {
+    console.error('[ContentFactory] Ingen Twitch-token – sjekk TWITCH_CLIENT_ID og TWITCH_CLIENT_SECRET');
+    return null;
+  }
+
+  // Ekstraher ren VOD-ID (støtter tall, URL-format)
+  const vodId = streamId.replace(/.*\/videos\//,'').replace(/[^0-9]/g,'');
 
   try {
-    const res = await fetch(
-      `https://api.twitch.tv/helix/videos?user_id=${streamId}&type=archive&first=1`,
-      {
-        headers: {
-          'Client-ID': process.env.TWITCH_CLIENT_ID!,
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
+    // Korrekt endpoint: id= for spesifikk VOD (ikke user_id=)
+    const apiUrl = `https://api.twitch.tv/helix/videos?id=${vodId}`;
+    console.log(`[ContentFactory] Twitch API: ${apiUrl}`);
 
-    if (!res.ok) return null;
-    const data = await res.json() as any;
+    const res = await fetch(apiUrl, {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENT_ID!,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const rawBody = await res.text();
+    console.log(`[ContentFactory] Twitch API status: ${res.status}, svar: ${rawBody.slice(0, 300)}`);
+
+    if (!res.ok) {
+      console.error(`[ContentFactory] Twitch API feil ${res.status}: ${rawBody}`);
+      return null;
+    }
+
+    const data = JSON.parse(rawBody) as any;
     const vod = data.data?.[0];
-    if (!vod) return null;
+    if (!vod) {
+      console.error(`[ContentFactory] Ingen VOD funnet for ID ${vodId}. Respons: ${rawBody}`);
+      return null;
+    }
+
+    console.log(`[ContentFactory] VOD funnet: "${vod.title}" av ${vod.user_name}`);
+
+    // Hent spillnavn via game_id hvis tilgjengelig
+    let kategori = 'Ukjent spill';
+    if (vod.game_id) {
+      try {
+        const gameRes = await fetch(`https://api.twitch.tv/helix/games?id=${vod.game_id}`, {
+          headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, Authorization: `Bearer ${token}` },
+        });
+        if (gameRes.ok) {
+          const gameData = await gameRes.json() as any;
+          kategori = gameData.data?.[0]?.name ?? 'Ukjent spill';
+        }
+      } catch {}
+    }
 
     // Parse duration (f.eks "3h12m44s")
     let durationSeconds = 0;
-    const durMatch = vod.duration.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+    const durMatch = (vod.duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
     if (durMatch) {
       durationSeconds =
         (parseInt(durMatch[1] ?? '0') * 3600) +
@@ -55,7 +88,7 @@ export async function hentVodMetadata(streamId: string): Promise<Partial<Content
     return {
       twitchVodId: vod.id,
       title: vod.title,
-      category: vod.game_name ?? 'Ukjent',
+      category: kategori,
       durationSeconds,
       vodUrl: vod.url,
       thumbnailUrl: vod.thumbnail_url?.replace('%{width}', '640').replace('%{height}', '360'),
