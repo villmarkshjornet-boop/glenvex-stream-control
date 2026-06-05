@@ -32,7 +32,7 @@ export async function DELETE(
 
   await db.from('content_transcripts').delete().eq('vod_id', vodId);
   await db.from('content_highlights').delete().eq('vod_id', vodId);
-  await db.from('content_copy').delete().eq('vod_id', vodId).catch(() => {});
+  try { await db.from('content_copy').delete().eq('vod_id', vodId); } catch {}
   await db.from('content_vods').delete().eq('id', vodId);
 
   return NextResponse.json({ ok: true, slettet: vodId });
