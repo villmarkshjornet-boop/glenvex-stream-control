@@ -1,6 +1,8 @@
 import * as tmi from 'tmi.js';
 import OpenAI from 'openai';
 import { trackRaid, trackGiftSub } from './eventTracker';
+import { getSettings } from '@/lib/settings';
+import { getBroadcasterId } from '@/lib/twitch';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
@@ -73,6 +75,130 @@ async function aiSvar(kontekst: string): Promise<string> {
   }
 }
 
+// ─── Følger-detektor ──────────────────────────────────────────────────────────
+
+let forrigeFollowerAntall = -1;
+let followAppToken: string | null = null;
+let followAppTokenExpiry = 0;
+
+async function getAppToken(): Promise<string | null> {
+  if (followAppToken && Date.now() < followAppTokenExpiry) return followAppToken;
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+  try {
+    const res = await fetch(
+      `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
+      { method: 'POST', signal: AbortSignal.timeout(5000) }
+    );
+    const d = await res.json() as any;
+    followAppToken = d.access_token ?? null;
+    followAppTokenExpiry = Date.now() + (d.expires_in ?? 3600) * 1000 - 60_000;
+    return followAppToken;
+  } catch { return null; }
+}
+
+async function sjekkNyeFollowers() {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  if (!clientId) return;
+
+  try {
+    const broadcasterId = await getBroadcasterId();
+    if (!broadcasterId) return;
+
+    // Prøv med bruker-token (gir tilgang til enkeltfølgere), ellers app token
+    const userOauth = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
+    const token = userOauth || await getAppToken();
+    if (!token) return;
+
+    const res = await fetch(
+      `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}&first=10`,
+      {
+        headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(6000),
+      }
+    ).catch(() => null);
+
+    if (!res?.ok) return;
+    const data = await res.json() as any;
+    const nyAntall: number = data.total ?? 0;
+
+    if (forrigeFollowerAntall === -1) {
+      forrigeFollowerAntall = nyAntall;
+      return;
+    }
+
+    if (nyAntall <= forrigeFollowerAntall) return;
+
+    const antallNye = nyAntall - forrigeFollowerAntall;
+    forrigeFollowerAntall = nyAntall;
+
+    // Nyeste følgere (tilgjengelig ved user token, tom liste ellers)
+    const nyeNavn: string[] = (data.data ?? [])
+      .slice(0, antallNye)
+      .map((f: any) => f.user_name as string)
+      .filter(Boolean);
+
+    // Velkomst i Twitch chat
+    const erLive = (await getSettings()).lastNotifiedStreamId != null;
+    if (erLive && client) {
+      const navnListe = nyeNavn.length > 0 ? nyeNavn : Array(Math.min(antallNye, 3)).fill(null).map(() => null as null);
+      for (const navn of navnListe) {
+        const tekst = navn
+          ? `${navn} fulgte nettopp GLENVEX! Lag én kort, varm velkomst på norsk. Maks 10 ord.`
+          : `Noen nye fulgte GLENVEX! Lag én kort velkomst til de nye seerne på norsk. Maks 10 ord.`;
+        const svar = await aiSvar(tekst);
+        const hilsen = svar || (navn ? `@${navn} Takk for follow! Velkommen! PogChamp` : `Takk til alle nye følgere! PogChamp FeelsGoodMan`);
+        client.say(`#${KANAL}`, hilsen).catch(() => {});
+      }
+    }
+
+    // Post til Discord
+    const kanalId = chatKanalId() || liveKanalId();
+    if (!kanalId) return;
+
+    if (nyeNavn.length > 0) {
+      const beskrivelse = antallNye === 1
+        ? `**${nyeNavn[0]}** fulgte nettopp GLENVEX! Velkommen til familien! 💚`
+        : nyeNavn.map(n => `💚 **${n}**`).join('\n') + (antallNye > nyeNavn.length ? `\n... og ${antallNye - nyeNavn.length} til` : '');
+
+      await postTilDiscord(kanalId, {
+        embeds: [{
+          title: antallNye === 1 ? '💚 Ny følger!' : `💚 ${antallNye} nye følgere!`,
+          description: beskrivelse,
+          color: 0x00e676,
+          footer: { text: `GLENVEX har nå ${nyAntall.toLocaleString()} følgere på Twitch` },
+          timestamp: new Date().toISOString(),
+        }],
+      });
+    } else {
+      await postTilDiscord(kanalId, {
+        content: `💚 **${antallNye}** ny${antallNye > 1 ? 'e' : ''} følger${antallNye > 1 ? 'e' : ''}! Totalt: **${nyAntall.toLocaleString()}** på Twitch`,
+      });
+    }
+  } catch {}
+}
+
+// ─── Partner-promo via Supabase ───────────────────────────────────────────────
+
+async function hentAktivePartnere(): Promise<any[]> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return [];
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const ws = require('ws');
+    const sb = createClient(url, key, { realtime: { transport: ws } });
+    const { data } = await sb
+      .from('partners')
+      .select('navn,beskrivelse,affiliate_link,rabattkode,prioritet')
+      .eq('aktiv', true)
+      .order('prioritet', { ascending: false })
+      .limit(10);
+    return data ?? [];
+  } catch { return []; }
+}
+
 export function startTwitchBot() {
   const oauth = process.env.TWITCH_BOT_OAUTH;
   const botNavn = process.env.TWITCH_BOT_USERNAME || KANAL;
@@ -90,6 +216,11 @@ export function startTwitchBot() {
 
   client.connect().then(() => {
     console.log(`  ✓ Twitch chat-bot koblet til #${KANAL}`);
+    // Start følger-polling etter 30s (vent på at broadcaster ID er klart)
+    setTimeout(() => {
+      sjekkNyeFollowers();
+      setInterval(sjekkNyeFollowers, 2 * 60 * 1000);
+    }, 30_000);
   }).catch((err: Error) => {
     console.error('  ✗ Twitch chat feil:', err.message);
   });
@@ -104,7 +235,6 @@ export function startTwitchBot() {
 
     client?.say(channel, melding).catch(() => {});
 
-    // Post i Discord
     await postTilDiscord(liveKanalId(), {
       embeds: [{
         title: `🚨 RAID – ${username}`,
@@ -133,7 +263,7 @@ export function startTwitchBot() {
 
   // ─── RESUB ─────────────────────────────────────────────────────────────────
 
-  client.on('resub', async (channel, username, months, _message, _userstate, methods) => {
+  client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
   });
@@ -165,7 +295,7 @@ export function startTwitchBot() {
 
   // ─── CHEER (bits) ──────────────────────────────────────────────────────────
 
-  client.on('cheer', async (channel, userstate, message) => {
+  client.on('cheer', async (channel, userstate, _message) => {
     const bits = userstate.bits ?? '?';
     const username = userstate.username ?? 'Noen';
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
@@ -224,9 +354,9 @@ export function startTwitchBot() {
     client?.say(`#${KANAL}`, melding).catch(() => {});
   }, 5 * 60 * 1000);
 
-  // ─── Partner auto-promotering i Twitch-chat (kun chat, ikke Discord) ────────
+  // ─── Partner-promotering via Supabase ─────────────────────────────────────
 
-  const PARTNER_INTERVAL_MS = 60 * 60 * 1000;
+  const PARTNER_INTERVAL_MS = 60 * 60 * 1000; // 1 time mellom hver partner-promo
   let sistePartnerPromo = 0;
 
   setInterval(async () => {
@@ -239,26 +369,21 @@ export function startTwitchBot() {
     if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
     sistePartnerPromo = Date.now();
 
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const fil = path.join(process.cwd(), 'data', 'partners.json');
-      if (!fs.existsSync(fil)) return;
+    const partnere = await hentAktivePartnere();
+    if (partnere.length === 0) return;
 
-      const partners = JSON.parse(fs.readFileSync(fil, 'utf-8'));
-      const aktive = partners.filter((p: any) => p.aktiv);
-      if (aktive.length === 0) return;
+    // Velg tilfeldig blant topp 3 (prioritet)
+    const kandidater = partnere.slice(0, 3);
+    const partner = kandidater[Math.floor(Math.random() * kandidater.length)];
 
-      const partner = aktive.sort((a: any, b: any) => b.prioritet - a.prioritet)[
-        Math.floor(Math.random() * Math.min(3, aktive.length))
-      ];
-
-      const melding = partner.rabattkode
-        ? `🤝 ${partner.navn}: ${partner.beskrivelse} – Bruk kode ${partner.rabattkode}: ${partner.affiliateLink}`
-        : `🤝 ${partner.navn}: ${partner.beskrivelse} ${partner.affiliateLink}`;
-
-      client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
-    } catch {}
+    // La AI formulere reklamen naturlig med kanalens tone
+    const link = partner.affiliate_link ?? '';
+    const kode = partner.rabattkode ? ` – Bruk kode: ${partner.rabattkode}` : '';
+    const ai = await aiSvar(
+      `Lag en naturlig, kort Twitch-chat-reklame for partneren vår "${partner.navn}": ${partner.beskrivelse}. Lenke: ${link}${kode}. Maks 200 tegn. Norsk, avslappet tone.`
+    );
+    const melding = ai || `🤝 ${partner.navn}: ${partner.beskrivelse}${kode} ${link}`;
+    client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
   }, 15 * 60 * 1000);
 }
 
