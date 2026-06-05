@@ -95,7 +95,7 @@ export default function RPManagerPage() {
       const res = await fetch('/api/rp/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: redigert.bildePrompt }),
+        body: JSON.stringify({ prompt: (redigert as Generert).bildePrompt }),
       });
       const data = await res.json();
       if (data.bildeUrl) setRedigert(prev => prev ? { ...prev, bildeUrl: data.bildeUrl } : prev);
