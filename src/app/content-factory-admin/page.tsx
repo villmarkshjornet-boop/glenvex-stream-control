@@ -97,11 +97,22 @@ export default function ContentFactoryAdminPage() {
     setVods(d.vods ?? []);
   }, []);
 
+  // ─── Auto-cleanup: sett FAILED på hengete jobber ─────────────────────────
+  const kjørCleanup = useCallback(async () => {
+    const res = await fetch('/api/content-factory/cleanup', { method: 'POST' }).catch(() => null);
+    if (res?.ok) {
+      const d = await res.json().catch(() => ({}));
+      if (d.ryddet > 0) await hentVods();
+    }
+  }, [hentVods]);
+
   useEffect(() => {
     hentVods();
+    kjørCleanup(); // rydd hengete jobber ved load
     const id = setInterval(hentVods, 10_000);
-    return () => clearInterval(id);
-  }, [hentVods]);
+    const cleanupId = setInterval(kjørCleanup, 60_000); // cleanup hvert minutt
+    return () => { clearInterval(id); clearInterval(cleanupId); };
+  }, [hentVods, kjørCleanup]);
 
   // ─── Health check ─────────────────────────────────────────────────────────
   const sjekkHealth = async () => {
@@ -324,11 +335,14 @@ export default function ContentFactoryAdminPage() {
             const rs = railwayStatusMap[v.id];
             const pct = v.progress_percent ?? 10;
             const erRailwayFerdig = rs?.status === 'COMPLETE' || rs?.status === 'RAILWAY_COMPLETE';
+            const erUkjent = rs?.status === 'UNKNOWN';
+            const minderAktiv = Math.floor((Date.now() - new Date(v.created_at).getTime()) / 60000);
+            const erSannsynligHengt = erUkjent && minderAktiv > 10;
 
             return (
-              <div key={v.id} className="bg-g-card border border-yellow-400/20 rounded-xl p-4">
+              <div key={v.id} className={`bg-g-card border rounded-xl p-4 ${erSannsynligHengt ? 'border-red-500/30' : 'border-yellow-400/20'}`}>
                 <div className="flex items-start gap-3">
-                  <span className="w-4 h-4 border-2 border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0 mt-0.5" />
+                  <span className={`w-4 h-4 border-2 rounded-full flex-shrink-0 mt-0.5 ${erSannsynligHengt ? 'border-red-500/40 border-t-red-400 animate-spin' : 'border-yellow-400/40 border-t-yellow-400 animate-spin'}`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-g-text truncate">{v.title}</p>
                     <p className="text-[9px] text-g-muted">{v.category} · {tidSiden(v.created_at)}</p>
@@ -350,16 +364,19 @@ export default function ContentFactoryAdminPage() {
                       const minSiden = oppdatertTs
                         ? Math.floor((Date.now() - new Date(oppdatertTs).getTime()) / 60000)
                         : null;
-                      const sitter = minSiden !== null && minSiden >= 5;
+                      const sitter = !erUkjent && minSiden !== null && minSiden >= 5;
                       return (
-                        <div className={`mt-1 p-1.5 rounded border text-[9px] ${sitter ? 'border-red-500/30 bg-red-500/5' : 'border-transparent'}`}>
+                        <div className={`mt-1 p-1.5 rounded border text-[9px] ${erSannsynligHengt ? 'border-red-500/30 bg-red-500/5' : sitter ? 'border-red-500/20 bg-red-500/5' : 'border-transparent'}`}>
                           <span className="text-g-muted">Railway: </span>
-                          <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : sitter ? 'text-red-400' : 'text-yellow-400'}`}>
+                          <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : erUkjent ? 'text-red-400' : sitter ? 'text-red-400' : 'text-yellow-400'}`}>
                             {rs.status}
                           </span>
                           {rs.melding && <span className="text-g-muted"> – {rs.melding.slice(0, 80)}</span>}
                           {rs.segmenter && <span className="text-g-green"> ({rs.segmenter} seg)</span>}
-                          {minSiden !== null && (
+                          {erSannsynligHengt && (
+                            <span className="ml-2 text-red-400 font-bold">⚠ Railway har ingen data – klikk Retry Railway</span>
+                          )}
+                          {!erUkjent && minSiden !== null && (
                             <span className={`ml-2 ${sitter ? 'text-red-400 font-bold' : 'text-g-muted/60'}`}>
                               · oppdatert {minSiden === 0 ? 'nå' : `${minSiden}m siden`}
                               {sitter && ' ⚠ STUCK?'}
@@ -370,9 +387,9 @@ export default function ContentFactoryAdminPage() {
                     })()}
                   </div>
 
-                  {/* Høyre-side: Phase 2 eller Force Reset */}
+                  {/* Høyre-side: Phase 2 eller Retry/Force Reset */}
                   <div className="flex-shrink-0 flex flex-col gap-1.5">
-                    {erRailwayFerdig ? (
+                    {erRailwayFerdig && (
                       <button
                         onClick={() => kjørPhase2(v.id)}
                         disabled={phase2Running === v.id}
@@ -380,13 +397,17 @@ export default function ContentFactoryAdminPage() {
                       >
                         {phase2Running === v.id ? '⏳...' : '◆ Kjør Phase 2'}
                       </button>
-                    ) : null}
+                    )}
                     <button
                       onClick={() => retryRailway(v.id)}
-                      className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded hover:border-red-500/30 hover:text-red-400 transition-all"
-                      title="Avbryt og start på nytt"
+                      className={`px-3 py-1.5 border text-[10px] font-bold rounded transition-all ${
+                        erSannsynligHengt
+                          ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                          : 'bg-g-bg border-g-border text-g-muted hover:border-red-500/30 hover:text-red-400'
+                      }`}
+                      title="Avbryt og start Railway på nytt"
                     >
-                      ↺ Force Reset
+                      {erSannsynligHengt ? '↺ Retry Railway' : '↺ Force Reset'}
                     </button>
                   </div>
                 </div>
