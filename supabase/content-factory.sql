@@ -111,20 +111,6 @@ CREATE TABLE IF NOT EXISTS content_pipeline_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Copy (tekster per highlight og plattform)
-CREATE TABLE IF NOT EXISTS content_copy (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  vod_id UUID REFERENCES content_vods(id),
-  highlight_id UUID REFERENCES content_highlights(id),
-  platform TEXT NOT NULL,
-  tittel TEXT,
-  beskrivelse TEXT,
-  hashtags TEXT[],
-  caption TEXT,
-  discord_post TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_vods_stream ON content_vods(stream_id);
 CREATE INDEX IF NOT EXISTS idx_highlights_vod ON content_highlights(vod_id);
