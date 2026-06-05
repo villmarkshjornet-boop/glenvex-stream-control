@@ -87,6 +87,9 @@ export default function ContentFactoryAdminPage() {
   const autoTriggertRef = useRef<Set<string>>(new Set()); // dedup: ikke trigger Phase 2 to ganger
   const [aktivertVod, setAktivertVod] = useState<string | null>(null);
   const [aktivert, setAktivert] = useState<boolean | null>(null);
+  const [detekterer, setDetekterer] = useState(false);
+  const [detektFeil, setDetektFeil] = useState('');
+  const [sisteVods, setSisteVods] = useState<{ id: string; title: string; duration: string; published_at: string; url: string }[]>([]);
 
   // ─── Hent VOD-liste ──────────────────────────────────────────────────────
   const hentVods = useCallback(async () => {
@@ -219,6 +222,37 @@ export default function ContentFactoryAdminPage() {
     else alert('Sletting feilet – prøv igjen');
   }
 
+  // ─── Hent siste VOD fra Twitch og start pipeline ──────────────────────
+  async function hentSisteVodFraTwitch() {
+    setDetekterer(true);
+    setDetektFeil('');
+    // Hent liste over siste VODs for preview
+    const previewRes = await fetch('/api/vod/detect-latest').catch(() => null);
+    if (previewRes?.ok) {
+      const d = await previewRes.json();
+      setSisteVods(d.vods ?? []);
+    }
+    setDetekterer(false);
+  }
+
+  async function startLatestVodPipeline() {
+    setDetekterer(true);
+    setDetektFeil('');
+    const res = await fetch('/api/vod/detect-latest', { method: 'POST' }).catch(() => null);
+    if (!res) { setDetektFeil('Nettverksfeil'); setDetekterer(false); return; }
+    const d = await res.json();
+    if (d.ok) {
+      setNyligStartet(d.vodId ?? d.vod?.id ?? null);
+      setSisteVods([]);
+      await hentVods();
+    } else if (d.alleredeBehandlet) {
+      setDetektFeil(d.melding);
+    } else {
+      setDetektFeil(d.error ?? d.detalj ?? 'Ukjent feil');
+    }
+    setDetekterer(false);
+  }
+
   // ─── Slett alle VODs ─────────────────────────────────────────────────────
   async function slettAlle() {
     if (!confirm(`Slett ALLE ${vods.length} VODs og all tilhørende data?\n\nDette tømmer Content Factory fullstendig og kan ikke angres.`)) return;
@@ -313,9 +347,53 @@ export default function ContentFactoryAdminPage() {
         )}
       </div>
 
+      {/* ─── Auto-detect siste VOD fra Twitch ────────────────────────────── */}
+      <div className="bg-g-card border border-g-green/20 rounded-xl p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-g-text">🔍 Hent siste VOD automatisk</p>
+            <p className="text-[9px] text-g-muted mt-0.5">Henter siste arkiverte stream fra Twitch og starter pipeline direkte</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={hentSisteVodFraTwitch}
+              disabled={detekterer}
+              className="px-3 py-2 border border-g-border text-g-muted text-xs font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40"
+            >
+              {detekterer ? '⏳...' : '↻ Forhåndsvis'}
+            </button>
+            <button
+              onClick={startLatestVodPipeline}
+              disabled={detekterer}
+              className="px-4 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-black rounded hover:bg-g-green/20 transition-all disabled:opacity-40"
+            >
+              {detekterer ? '⏳ Detekterer...' : '▶ Start siste VOD'}
+            </button>
+          </div>
+        </div>
+
+        {sisteVods.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Siste VODs på Twitch:</p>
+            {sisteVods.map(v => (
+              <div key={v.id} className="flex items-center gap-3 p-2 rounded-lg bg-g-bg border border-g-border">
+                <span className="font-mono text-[9px] text-g-muted">{v.id}</span>
+                <span className="flex-1 text-[10px] text-g-text truncate">{v.title}</span>
+                <span className="text-[9px] text-g-muted">{v.duration}</span>
+                <span className="text-[9px] text-g-muted">{new Date(v.published_at).toLocaleDateString('no-NO')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {detektFeil && (
+          <p className="text-[10px] text-red-400 p-2 bg-red-500/5 border border-red-500/20 rounded">{detektFeil}</p>
+        )}
+      </div>
+
       {/* ─── Start ny VOD ─────────────────────────────────────────────────── */}
       <div className="bg-g-card border border-g-border rounded-xl p-5">
-        <p className="text-xs font-bold text-g-text mb-3">▶ Start ny VOD-pipeline</p>
+        <p className="text-xs font-bold text-g-text mb-3">▶ Start manuelt med VOD-ID</p>
         <div className="flex gap-3">
           <div className="flex-1">
             <input
