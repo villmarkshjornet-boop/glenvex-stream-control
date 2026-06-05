@@ -5,166 +5,184 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 interface NavItem { label: string; href: string; }
-interface NavGruppe {
-  gruppe: string;
+interface NavSeksjon {
+  id: string;
+  label: string;
+  href: string;        // hoved-hub
   icon: string;
-  href?: string;
   items?: NavItem[];
 }
 
-const NAV: NavGruppe[] = [
-  { gruppe: 'Dashboard', icon: '⊞', href: '/' },
+const NAV: NavSeksjon[] = [
   {
-    gruppe: 'Stream',
-    icon: '🔴',
+    id: 'dashboard',
+    label: 'Dashboard',
+    href: '/',
+    icon: '⊞',
+  },
+  {
+    id: 'twitch',
+    label: 'Twitch',
+    href: '/twitch',
+    icon: '🟣',
     items: [
-      { label: 'AI Producer', href: '/ai-producer' },
-      { label: 'Live Overvåking', href: '/live-overvaking' },
-      { label: 'Pre-Live Hype', href: '/pre-live' },
-      { label: 'Stream Coach', href: '/stream-coach' },
-      { label: 'Streamplan', href: '/streamplan' },
+      { label: 'Live-status',   href: '/live-overvaking' },
+      { label: 'Streamplan',    href: '/streamplan' },
+      { label: 'AI Producer',   href: '/ai-producer' },
+      { label: 'Stream Coach',  href: '/stream-coach' },
+      { label: 'Statistikk',    href: '/statistikk' },
+      { label: 'Future RP',     href: '/rp-manager' },
     ],
   },
   {
-    gruppe: 'Innhold',
+    id: 'discord',
+    label: 'Discord',
+    href: '/discord',
+    icon: '◈',
+    items: [
+      { label: 'Oversikt',      href: '/discord-control' },
+      { label: 'Pre-Live Hype', href: '/pre-live' },
+      { label: 'Community',     href: '/community-manager' },
+      { label: 'Moderator',     href: '/moderation' },
+      { label: 'Raid Manager',  href: '/raid-manager' },
+    ],
+  },
+  {
+    id: 'innhold',
+    label: 'Innhold',
+    href: '/innhold',
     icon: '▶',
     items: [
-      { label: 'Content Factory', href: '/content-factory-admin' },
-      { label: 'Highlight Viewer', href: '/content-factory-admin/highlights' },
-      { label: 'Job Monitor', href: '/content-factory-admin/jobs' },
-      { label: 'CF Analytics', href: '/content-factory-admin/analytics' },
-      { label: 'CF QA', href: '/content-factory-admin/qa' },
-      { label: 'AI Assistent', href: '/ai-assistent' },
-      { label: 'Clip Factory', href: '/clip-factory' },
-      { label: 'Highlights', href: '/highlights' },
-      { label: 'Discord Library', href: '/discord-library' },
-      { label: 'Merch', href: '/merch' },
+      { label: 'Content Factory',    href: '/content-factory-admin' },
+      { label: 'Highlight Viewer',   href: '/content-factory-admin/highlights' },
+      { label: 'Clip Factory',       href: '/clip-factory' },
     ],
   },
   {
-    gruppe: 'Community',
-    icon: '◈',
+    id: 'partnere',
+    label: 'Partnere',
+    href: '/partnere',
+    icon: '◇',
     items: [
-      { label: 'Community Manager', href: '/community-manager' },
-      { label: 'Community Memory', href: '/community-memory' },
-      { label: 'XP System', href: '/xp-system' },
-      { label: 'Events', href: '/event-generator' },
-      { label: 'Polls', href: '/polls' },
-      { label: 'Clip-innsendinger', href: '/clips' },
-    ],
-  },
-  {
-    gruppe: 'Discord',
-    icon: '◈',
-    items: [
-      { label: 'Control Center', href: '/discord-control' },
-      { label: 'Oversikt', href: '/discord' },
-      { label: 'Kanalinnstillinger', href: '/kanal-innstillinger' },
-      { label: 'Role Manager', href: '/role-manager' },
-      { label: 'AI Moderator', href: '/moderation' },
-      { label: 'Raid Manager', href: '/raid-manager' },
-    ],
-  },
-  {
-    gruppe: 'Future RP',
-    icon: '◉',
-    items: [
-      { label: 'RP Manager', href: '/rp-manager' },
-      { label: 'RP Vault', href: '/rp-vault' },
-      { label: 'RP Intelligence', href: '/rp-intelligence' },
-    ],
-  },
-  { gruppe: 'Partner Hub', icon: '◇', href: '/partner-hub' },
-  {
-    gruppe: 'Vekst',
-    icon: '◎',
-    items: [
-      { label: 'AI Command Center', href: '/ai-command-center' },
-      { label: 'Statistikk', href: '/statistikk' },
-      { label: 'Viewer Goals', href: '/viewer-goals' },
+      { label: 'Partner Hub',     href: '/partner-hub' },
       { label: 'Sponsor Manager', href: '/sponsor-manager' },
     ],
   },
   {
-    gruppe: 'System',
+    id: 'team',
+    label: 'Team',
+    href: '/team',
+    icon: '◉',
+  },
+  {
+    id: 'innstillinger',
+    label: 'Innstillinger',
+    href: '/innstillinger',
     icon: '⚙',
     items: [
       { label: 'System Health', href: '/system-health' },
-      { label: 'Setup Wizard', href: '/setup-wizard' },
-      { label: 'Innstillinger', href: '/innstillinger' },
-      { label: 'Logs', href: '/logs' },
-      { label: 'Systemstatus', href: '/systemstatus' },
+      { label: 'Logs',          href: '/logs' },
+      { label: 'Setup',         href: '/setup-wizard' },
     ],
   },
 ];
 
+// Alle href-er som hører til en seksjon
+function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
+  if (pathname === seksjon.href) return true;
+  if (seksjon.items?.some(i => pathname.startsWith(i.href))) return true;
+  // Spesial: /content-factory-admin/* tilhører innhold
+  if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
+  return false;
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const aktivSeksjon = NAV.find(s => seksjonEier(s, pathname));
 
-  const aktivGruppe = NAV.find(g =>
-    g.items?.some(i => i.href === pathname) || g.href === pathname
-  )?.gruppe ?? '';
+  const [åpne, setÅpne] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    if (aktivSeksjon) initial.add(aktivSeksjon.id);
+    return initial;
+  });
 
-  const [åpen, setÅpen] = useState<Set<string>>(() => new Set([aktivGruppe, 'Stream']));
-
-  const toggle = (gruppe: string) => {
-    setÅpen(prev => {
+  const toggle = (id: string) => {
+    setÅpne(prev => {
       const next = new Set(prev);
-      next.has(gruppe) ? next.delete(gruppe) : next.add(gruppe);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
 
   return (
-    <aside className="w-52 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
-      <Link href="/" className="px-5 py-4 border-b border-g-border block hover:bg-white/[0.02] transition-colors">
-        <div className="text-g-green font-black text-lg tracking-[0.15em] uppercase"
-          style={{ textShadow: '0 0 12px rgba(0,255,65,0.5)' }}>
+    <aside className="w-48 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
+      {/* Logo */}
+      <Link href="/" className="px-4 py-4 border-b border-g-border block hover:bg-white/[0.02] transition-colors">
+        <div className="text-g-green font-black text-base tracking-[0.15em] uppercase"
+          style={{ textShadow: '0 0 12px rgba(0,255,65,0.4)' }}>
           GLENVEX
         </div>
-        <div className="text-[9px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
+        <div className="text-[8px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
       </Link>
 
+      {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
-        {NAV.map(gruppe => {
-          if (gruppe.href) {
-            const active = pathname === gruppe.href;
+        {NAV.map(seksjon => {
+          const erAktivSeksjon = seksjonEier(seksjon, pathname);
+          const erÅpen = åpne.has(seksjon.id);
+
+          // Uten sub-items: direkte lenke
+          if (!seksjon.items) {
+            const erAktiv = pathname === seksjon.href;
             return (
-              <Link key={gruppe.href} href={gruppe.href}
+              <Link key={seksjon.id} href={seksjon.href}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
-                  active ? 'bg-g-green/10 text-g-green border-g-green/20' : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
+                  erAktiv
+                    ? 'bg-g-green/10 text-g-green border-g-green/20'
+                    : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
                 }`}>
-                <span className={`text-sm flex-shrink-0 ${active ? 'text-g-green' : ''}`}>{gruppe.icon}</span>
-                <span>{gruppe.gruppe}</span>
-                {active && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-g-green" style={{ boxShadow: '0 0 6px #00ff41' }} />}
+                <span className="text-sm flex-shrink-0">{seksjon.icon}</span>
+                <span className="flex-1">{seksjon.label}</span>
+                {erAktiv && <span className="w-1.5 h-1.5 rounded-full bg-g-green" style={{ boxShadow: '0 0 6px #00ff41' }} />}
               </Link>
             );
           }
 
-          const erÅpen = åpen.has(gruppe.gruppe);
-          const harAktiv = gruppe.items?.some(i => i.href === pathname);
-
+          // Med sub-items: kollapsibel seksjon
           return (
-            <div key={gruppe.gruppe}>
-              <button onClick={() => toggle(gruppe.gruppe)}
+            <div key={seksjon.id}>
+              <button
+                onClick={() => toggle(seksjon.id)}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
-                  harAktiv ? 'text-g-green border-g-green/10 bg-g-green/5' : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
+                  erAktivSeksjon
+                    ? 'text-g-green border-g-green/10 bg-g-green/5'
+                    : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
                 }`}>
-                <span className={`text-sm flex-shrink-0 ${harAktiv ? 'text-g-green' : ''}`}>{gruppe.icon}</span>
-                <span className="flex-1 text-left">{gruppe.gruppe}</span>
+                <span className="text-sm flex-shrink-0">{seksjon.icon}</span>
+                <span className="flex-1 text-left">{seksjon.label}</span>
                 <span className={`text-[10px] transition-transform duration-200 ${erÅpen ? 'rotate-90' : ''} text-g-muted`}>›</span>
               </button>
 
-              {erÅpen && gruppe.items && (
-                <div className="ml-4 mt-0.5 mb-1 space-y-0.5 border-l border-g-border/30 pl-3">
-                  {gruppe.items.map(item => {
-                    const active = pathname === item.href;
+              {erÅpen && (
+                <div className="ml-4 mt-0.5 mb-1 space-y-0.5 border-l border-g-border/30 pl-2.5">
+                  {/* Hub-lenke */}
+                  <Link href={seksjon.href}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-all ${
+                      pathname === seksjon.href
+                        ? 'text-g-green font-bold'
+                        : 'text-g-muted/70 hover:text-g-muted italic'
+                    }`}>
+                    <span className="text-[9px]">Oversikt</span>
+                  </Link>
+                  {/* Sub-items */}
+                  {seksjon.items.map(item => {
+                    const erAktiv = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                       <Link key={item.href} href={item.href}
                         className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-all ${
-                          active ? 'text-g-green font-bold' : 'text-g-muted hover:text-g-text'
+                          erAktiv ? 'text-g-green font-bold' : 'text-g-muted hover:text-g-text'
                         }`}>
-                        {active && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
+                        {erAktiv && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
                         <span>{item.label}</span>
                       </Link>
                     );
@@ -176,7 +194,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-4 py-2 border-t border-g-border">
+      {/* Status */}
+      <div className="px-4 py-2.5 border-t border-g-border">
         <Link href="/system-health" className="flex items-center gap-1.5 group">
           <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
           <p className="text-[8px] text-g-muted/50 group-hover:text-g-muted transition-colors">System Online</p>
