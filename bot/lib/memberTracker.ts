@@ -98,7 +98,7 @@ export function addMessageXP(id: string, username: string, displayName: string):
 
   members[id] = m;
   save(members);
-  syncToSupabase(m).catch(() => {});
+  syncToSupabase(m);
 
   const leveledUp = m.level > oldLevel;
   return { leveledUp, newLevel: m.level };
