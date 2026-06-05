@@ -92,7 +92,7 @@ async function klippFormat(
 }
 
 async function lastOppTilSupabase(
-  sb: ReturnType<typeof createClient>,
+  sb: any,
   lokalSti: string,
   storageSti: string
 ): Promise<string | null> {
