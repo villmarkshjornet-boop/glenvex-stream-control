@@ -1,138 +1,196 @@
 'use client';
 
-/**
- * Content Factory Admin – INTERN SIDE
- * IKKE synlig i navigasjon.
- * Kun tilgjengelig via direkte URL.
- * Krever CONTENT_FACTORY_ENABLED=true
- */
+import { useEffect, useState, useCallback } from 'react';
 
-import { useEffect, useState } from 'react';
-
-interface VOD { id: string; title: string; category: string; status: string; duration_seconds: number; created_at: string; twitch_vod_id?: string; }
-interface Pakke {
-  highlight: { id: string; rank: number; tittel: string; score: number; kategori: string; begrunnelse: string; start: number; slutt: number; };
-  videoer: { type: string; format: string; status: string; url?: string; path?: string; størrelse?: number; }[];
-  tekster: { youtube?: any; tiktok?: any; instagram?: any; discord?: any; };
+// ─── Typer ────────────────────────────────────────────────────────────────────
+interface Vod {
+  id: string;
+  title: string;
+  category: string;
+  status: string;
+  created_at: string;
+  twitch_vod_id?: string;
+  duration_seconds?: number;
+  current_step?: string;
+  progress_percent?: number;
+  status_message?: string;
+  error_message?: string;
 }
 
-function tidFormat(sek: number): string {
-  const m = Math.floor(sek / 60);
-  const s = Math.floor(sek % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+interface RailwayStatus {
+  status: string;
+  melding?: string;
+  segmenter?: number;
+  transcribed?: boolean;
 }
 
+interface HealthStatus { ok: boolean; melding: string; }
+interface Health {
+  railway: HealthStatus;
+  supabase: HealthStatus;
+  storage: HealthStatus;
+  openai: HealthStatus;
+  twitch: HealthStatus;
+  altOk: boolean;
+}
+
+// ─── Hjelpefunksjoner ─────────────────────────────────────────────────────────
+function tidSiden(dato: string): string {
+  const d = new Date(dato);
+  if (isNaN(d.getTime())) return '–';
+  const sek = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sek < 60) return `${sek}s siden`;
+  if (sek < 3600) return `${Math.floor(sek/60)}m siden`;
+  if (sek < 86400) return `${Math.floor(sek/3600)}t siden`;
+  return d.toLocaleDateString('no-NO');
+}
+
+function progresjonsFarge(status: string): string {
+  if (status === 'COMPLETE') return 'bg-g-green';
+  if (status === 'FAILED') return 'bg-red-500';
+  if (['ANALYZING', 'PROCESSING'].includes(status)) return 'bg-yellow-400';
+  return 'bg-blue-400';
+}
+
+function statusTekst(v: Vod): string {
+  if (v.status === 'COMPLETE') return '✓ KOMPLETT';
+  if (v.status === 'FAILED') return '✗ FEILET';
+  if (v.status === 'PENDING') return '◎ VENTER...';
+  if (v.status === 'ANALYZING') return '⟳ PROSESSERER';
+  return v.status;
+}
+
+const PIPELINE_STEG = [
+  { id: 'DOWNLOAD',     label: 'Last ned',   pct: 5  },
+  { id: 'TRANSCRIBING', label: 'Transkriber', pct: 35 },
+  { id: 'DISCOVER',     label: 'Highlights',  pct: 55 },
+  { id: 'RANK',         label: 'Ranger',      pct: 65 },
+  { id: 'COPYWRITE',    label: 'Tekster',     pct: 80 },
+  { id: 'CLIP',         label: 'Klipp',       pct: 95 },
+  { id: 'COMPLETE',     label: 'Ferdig',      pct: 100 },
+];
+
+// ─── Komponent ─────────────────────────────────────────────────────────────────
 export default function ContentFactoryAdminPage() {
-  const [aktivert, setAktivert] = useState<boolean | null>(null);
-  const [vods, setVods] = useState<VOD[]>([]);
-  const [valgtVod, setValgtVod] = useState<string>('');
-  const [pakker, setPakker] = useState<Pakke[]>([]);
-  const [sammendrag, setSammendrag] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [cfStatus, setCfStatus] = useState<any>(null);
-  const [startForm, setStartForm] = useState({ streamId: '', audioUrl: '' });
+  const [vods, setVods] = useState<Vod[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [vodInput, setVodInput] = useState('');
   const [starter, setStarter] = useState(false);
-  const [startRes, setStartRes] = useState<any>(null);
-  const [feil, setFeil] = useState('');
-  const [jobbStatus, setJobbStatus] = useState<any>(null);
-  const [phase2Running, setPhase2Running] = useState(false);
-  const [phase2Res, setPhase2Res] = useState<any>(null);
-  const [valgtHøydepunkt, setValgtHøydepunkt] = useState<string>('');
+  const [startFeil, setStartFeil] = useState('');
+  const [nyligStartet, setNyligStartet] = useState<string | null>(null);
+  const [railwayStatusMap, setRailwayStatusMap] = useState<Record<string, RailwayStatus>>({});
+  const [phase2Running, setPhase2Running] = useState<string | null>(null);
+  const [phase2Res, setPhase2Res] = useState<Record<string, any>>({});
+  const [aktivertVod, setAktivertVod] = useState<string | null>(null);
+  const [aktivert, setAktivert] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    // Hent CF status
-    fetch('/api/content-factory/status').then(r => r.json()).then(setCfStatus).catch(() => {});
-    const statusId = setInterval(() => {
-      fetch('/api/content-factory/status').then(r => r.json()).then(d => {
-        setCfStatus(d);
-        // Varsle om nye ferdige VODs
-        if (d.sisteFerdige?.length > 0) setVods(prev => prev);
-      }).catch(() => {});
-    }, 30_000);
-
-    // Sjekk om feature er aktivert
-    fetch('/api/content-factory')
-      .then(r => {
-        if (r.status === 403) { setAktivert(false); return null; }
-        setAktivert(true);
-        return r.json();
-      })
-      .then(d => { if (d?.vods) setVods(d.vods); })
-      .catch(() => setAktivert(false));
-
-    return () => clearInterval(statusId);
+  // ─── Hent VOD-liste ──────────────────────────────────────────────────────
+  const hentVods = useCallback(async () => {
+    const res = await fetch('/api/content-factory').catch(() => null);
+    if (!res) return;
+    if (res.status === 403) { setAktivert(false); return; }
+    setAktivert(true);
+    const d = await res.json().catch(() => ({}));
+    setVods(d.vods ?? []);
   }, []);
 
-  async function hentDetaljer(vodId: string) {
-    setLoading(true);
-    setValgtVod(vodId);
-    const res = await fetch(`/api/content-factory/download?vodId=${vodId}`).then(r => r.json());
-    setPakker(res.pakker ?? []);
-    setSammendrag(res.sammendrag ?? null);
-    setLoading(false);
-  }
+  useEffect(() => {
+    hentVods();
+    const id = setInterval(hentVods, 10_000);
+    return () => clearInterval(id);
+  }, [hentVods]);
 
-  async function startPipeline() {
-    if (!startForm.streamId) return;
-    setStarter(true);
-    setFeil('');
-    setStartRes(null);
-    try {
-      const res = await fetch('/api/content-factory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(startForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setStartRes(data);
-      const vodsRes = await fetch('/api/content-factory').then(r => r.json());
-      setVods(vodsRes.vods ?? []);
+  // ─── Health check ─────────────────────────────────────────────────────────
+  const sjekkHealth = async () => {
+    setHealthLoading(true);
+    const res = await fetch('/api/content-factory/health').catch(() => null);
+    if (res?.ok) setHealth(await res.json());
+    setHealthLoading(false);
+  };
 
-      // Poll Railway status + automatisk trigger Phase 2 når ferdig
-      const botUrl = 'https://glenvex-stream-control-production.up.railway.app';
-      if (data.vodId) {
-        const pollInterval = setInterval(async () => {
-          const st = await fetch(`${botUrl}/content-factory/status/${data.vodId}`)
-            .then(r => r.json()).catch(() => null);
-          if (!st) return;
+  useEffect(() => { sjekkHealth(); }, []);
 
-          setJobbStatus(st);
+  // ─── Poll Railway for aktive jobber ──────────────────────────────────────
+  useEffect(() => {
+    const aktive = vods.filter(v => ['PENDING', 'ANALYZING'].includes(v.status));
+    if (aktive.length === 0) return;
 
-          if (st.status === 'COMPLETE') {
-            clearInterval(pollInterval);
-            // Phase 2: Highlights + tekster (transkripsjon er allerede i Supabase DB)
-            setJobbStatus((prev: any) => ({ ...prev, phase2: 'STARTER' }));
-            try {
-              const p2 = await fetch('/api/content-factory/phase2', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vodId: data.vodId }),
-              }).then(r => r.json());
-              setJobbStatus((prev: any) => ({ ...prev, phase2: 'FERDIG', ...p2 }));
-              setStartRes((prev: any) => ({ ...prev, ...p2 }));
-              // Oppdater VOD-liste
-              fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
-            } catch (e) {
-              setJobbStatus((prev: any) => ({ ...prev, phase2: 'FEILET' }));
-            }
-          } else if (st.status === 'FAILED') {
-            clearInterval(pollInterval);
-          }
-        }, 15000);
+    const poll = async () => {
+      for (const v of aktive) {
+        const res = await fetch(`/api/content-factory/railway-status/${v.id}`).catch(() => null);
+        if (!res?.ok) continue;
+        const st: RailwayStatus = await res.json();
+        setRailwayStatusMap(prev => ({ ...prev, [v.id]: st }));
+
+        // Oppdater Supabase via phase2 når Railway er ferdig
+        if (st.status === 'COMPLETE' && st.transcribed) {
+          setRailwayStatusMap(prev => ({ ...prev, [v.id]: { ...st, status: 'RAILWAY_COMPLETE' } }));
+        }
       }
-    } catch (e) {
-      setFeil((e as Error).message);
+    };
+
+    poll();
+    const id = setInterval(poll, 8_000);
+    return () => clearInterval(id);
+  }, [vods]);
+
+  // ─── Start pipeline ───────────────────────────────────────────────────────
+  async function startPipeline() {
+    if (!vodInput.trim()) return;
+    setStarter(true);
+    setStartFeil('');
+    setNyligStartet(null);
+
+    const res = await fetch('/api/content-factory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ streamId: vodInput.trim() }),
+    });
+    const d = await res.json().catch(() => ({}));
+
+    if (!res.ok || !d.ok) {
+      setStartFeil(d.railwayFeil ?? d.error ?? 'Ukjent feil');
+    } else {
+      setNyligStartet(d.vodId);
+      setVodInput('');
+      await hentVods();
     }
     setStarter(false);
   }
 
+  // ─── Kjør Phase 2 manuelt ─────────────────────────────────────────────────
+  async function kjørPhase2(vodId: string) {
+    setPhase2Running(vodId);
+    setPhase2Res(prev => ({ ...prev, [vodId]: null }));
+    const res = await fetch('/api/content-factory/phase2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vodId }),
+    });
+    const d = await res.json().catch(() => ({ error: 'Timeout/feil' }));
+    setPhase2Res(prev => ({ ...prev, [vodId]: d }));
+    setPhase2Running(null);
+    await hentVods();
+  }
+
+  // ─── Retry Railway (reset VOD til PENDING) ────────────────────────────────
+  async function retryRailway(vodId: string) {
+    const res = await fetch('/api/content-factory/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vodId }),
+    });
+    if (res.ok) await hentVods();
+  }
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   if (aktivert === false) {
     return (
-      <div className="max-w-2xl mx-auto p-8 space-y-4">
+      <div className="max-w-xl mx-auto p-8">
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
-          <p className="text-red-400 font-black text-lg">🔒 Content Factory er ikke aktivert</p>
-          <p className="text-g-muted text-sm mt-2">Sett <code className="text-red-400">CONTENT_FACTORY_ENABLED=true</code> i Vercel og Railway</p>
+          <p className="text-red-400 font-black text-lg">Content Factory deaktivert</p>
+          <p className="text-g-muted text-xs mt-2">Sett <code className="text-red-400 font-mono">CONTENT_FACTORY_ENABLED=true</code> i Vercel og Railway</p>
         </div>
       </div>
     );
@@ -144,17 +202,17 @@ export default function ContentFactoryAdminPage() {
     </div>
   );
 
+  const aktiveVods = vods.filter(v => ['PENDING', 'ANALYZING'].includes(v.status));
+  const ferdige = vods.filter(v => v.status === 'COMPLETE');
+  const feilede = vods.filter(v => v.status === 'FAILED');
+
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
-      {/* Header */}
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* ─── Header ───────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-g-green animate-pulse" />
-          <div>
-            <h1 className="text-xl font-black text-g-text uppercase tracking-wider">Content Factory</h1>
-            <p className="text-[10px] text-g-muted">Automatisk innholdsproduksjon · Ingen autopublisering</p>
-          </div>
-          <span className="text-[9px] px-2 py-1 bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 rounded-full font-bold">BETA</span>
+        <div>
+          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Content Factory</h1>
+          <p className="text-[10px] text-g-muted mt-0.5">Pipeline manager · Ingen autopublisering</p>
         </div>
         <a href="/content-factory-admin/highlights"
           className="px-3 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
@@ -162,296 +220,333 @@ export default function ContentFactoryAdminPage() {
         </a>
       </div>
 
-      {/* Live Status */}
-      {cfStatus?.enabled && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className={`bg-g-card border rounded-lg p-3 text-center ${cfStatus.isLive ? 'border-red-500/30' : 'border-g-border'}`}>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">Stream</p>
-            <p className={`text-sm font-black mt-1 ${cfStatus.isLive ? 'text-red-400' : 'text-g-muted'}`}>
-              {cfStatus.isLive ? '🔴 LIVE' : '⚪ OFFLINE'}
-            </p>
-          </div>
-          <div className="bg-g-card border border-g-border rounded-lg p-3 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">Auto VOD-overvåkning</p>
-            <p className="text-sm font-black text-g-green mt-1">✓ Aktiv</p>
-          </div>
-          <div className="bg-g-card border border-g-border rounded-lg p-3 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">Ferdige VODs</p>
-            <p className="text-sm font-black text-g-green font-mono mt-1">{cfStatus.sisteFerdige?.length ?? 0}</p>
-          </div>
+      {/* ─── System Health ────────────────────────────────────────────────── */}
+      <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">System Health</p>
+          <button onClick={sjekkHealth} disabled={healthLoading}
+            className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+            {healthLoading ? '⟳...' : '↻ Sjekk'}
+          </button>
         </div>
-      )}
-
-      {/* Varsling om ferdige VODs */}
-      {cfStatus?.sisteFerdige?.length > 0 && (
-        <div className="bg-g-card border border-g-green/20 rounded-xl p-4 space-y-2">
-          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">◆ Nylig fullførte VODs</p>
-          {cfStatus.sisteFerdige.map((v: any) => (
-            <div key={v.id} className="flex items-center justify-between py-1 border-b border-g-border/30 last:border-0">
-              <p className="text-xs text-g-text">{v.title ?? 'Ukjent stream'}</p>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-g-green font-bold">✓ COMPLETE</span>
-                <a href="/content-factory-admin/highlights"
-                  className="text-[9px] text-g-green hover:underline">Se highlights →</a>
+        {health ? (
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: 'Railway', ...health.railway },
+              { label: 'Supabase', ...health.supabase },
+              { label: 'Storage', ...health.storage },
+              { label: 'OpenAI', ...health.openai },
+              { label: 'Twitch', ...health.twitch },
+            ].map(s => (
+              <div key={s.label} className={`p-2 rounded-lg border text-center ${s.ok ? 'border-g-green/20 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                <p className={`text-[10px] font-black ${s.ok ? 'text-g-green' : 'text-red-400'}`}>{s.ok ? '✓' : '✗'} {s.label}</p>
+                <p className="text-[8px] text-g-muted mt-0.5 truncate" title={s.melding}>{s.melding}</p>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Start pipeline */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">
-        <p className="text-xs font-bold text-g-text">▶ Start Content Factory Pipeline</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Twitch VOD ID eller URL</label>
-            <input value={startForm.streamId} onChange={e => setStartForm(p => ({ ...p, streamId: e.target.value }))}
-              placeholder="2786985500 eller https://twitch.tv/videos/..."
-              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
-            <p className="text-[9px] text-g-muted mt-1">Finn på twitch.tv/glenvex/videos → klikk video → kopier tall fra URL</p>
+            ))}
           </div>
-          <div>
-            <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Direkte lyd-URL (valgfritt)</label>
-            <input value={startForm.audioUrl} onChange={e => setStartForm(p => ({ ...p, audioUrl: e.target.value }))}
-              placeholder="https://... (hopp over Railway-nedlasting)"
-              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
-            <p className="text-[9px] text-g-muted mt-1">Kun hvis du vil bruke ekstern lydfil direkte</p>
-          </div>
-        </div>
-        <div className="p-3 bg-g-bg border border-g-border rounded-lg">
-          <p className="text-[9px] text-g-muted font-bold uppercase mb-1">Pipeline-flyt</p>
-          <p className="text-[9px] text-g-muted">VOD ID → Railway laster ned → FFmpeg → Supabase Storage → Whisper → Highlights → Tekster</p>
-        </div>
-        <button onClick={startPipeline} disabled={!startForm.streamId || starter}
-          className="px-5 py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-40">
-          {starter ? (
-            <span className="flex items-center gap-2">
-              <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
-              Kjører pipeline...
-            </span>
-          ) : '◆ Start Pipeline'}
-        </button>
-        {feil && <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 rounded">✗ {feil}</p>}
-
-        {/* Manuell Phase 2 trigger */}
-        <div className="border-t border-g-border/40 pt-3 space-y-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Manuell Phase 2 (bruk når Railway er COMPLETE)</p>
+        ) : (
           <div className="flex gap-2">
-            <input id="phase2VodId" placeholder="VOD ID fra Railway status..."
-              className="flex-1 bg-g-bg border border-g-border rounded px-3 py-1.5 text-xs text-g-text outline-none focus:border-g-green/50" />
-            <button onClick={async () => {
-              const vodId = (document.getElementById('phase2VodId') as HTMLInputElement)?.value;
-              if (!vodId) return;
-              setPhase2Running(true);
-              setPhase2Res(null);
-              const rawRes = await fetch('/api/content-factory/phase2', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vodId }),
-              });
-              const tekst = await rawRes.text();
-              let res: any;
-              try { res = JSON.parse(tekst); }
-              catch { res = { error: `Vercel timeout eller feil. HTTP ${rawRes.status}. Prøv igjen.` }; }
-              setPhase2Res(res);
-              setPhase2Running(false);
-              fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
-            }} disabled={phase2Running}
-              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all whitespace-nowrap">
-              {phase2Running ? '⏳...' : '◆ Start Phase 2'}
-            </button>
-          </div>
-          {phase2Res && (
-            <div className={`p-3 rounded border text-xs space-y-1 ${phase2Res.ok ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
-              {phase2Res.ok ? (
-                <>
-                  <p className="text-g-green font-bold">✓ Phase 2 ferdig! Highlights: {phase2Res.antallHighlights} · Tekster: {phase2Res.antallCopy}</p>
-                  {phase2Res.steg?.map((s: any, i: number) => (
-                    <p key={i} className={s.status === 'OK' ? 'text-g-green' : s.status === 'FEILET' ? 'text-red-400' : 'text-g-muted'}>
-                      {s.status === 'OK' ? '✓' : s.status === 'FEILET' ? '✗' : '○'} {s.steg}{s.melding ? ` – ${s.melding}` : ''}
-                    </p>
-                  ))}
-                </>
-              ) : <p className="text-red-400">✗ {phase2Res.error ?? 'Feil'}</p>}
-            </div>
-          )}
-        </div>
-
-        {jobbStatus && (
-          <div className={`p-3 rounded border text-xs space-y-1.5 ${jobbStatus.status === 'COMPLETE' ? 'border-g-green/30 bg-g-green/5' : jobbStatus.status === 'FAILED' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
-            <div className="flex items-center gap-2">
-              {jobbStatus.status !== 'COMPLETE' && jobbStatus.status !== 'FAILED' && (
-                <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin flex-shrink-0" />
-              )}
-              <p className={`font-bold ${jobbStatus.status === 'COMPLETE' ? 'text-g-green' : jobbStatus.status === 'FAILED' ? 'text-red-400' : 'text-yellow-400'}`}>
-                Railway: {jobbStatus.status === 'DOWNLOADING' ? '📥 Laster ned VOD...' :
-                          jobbStatus.status === 'EXTRACTING_AUDIO' ? '🎵 Ekstraherer audio...' :
-                          jobbStatus.status === 'UPLOADING' ? '☁️ Laster opp til Supabase...' :
-                          jobbStatus.status === 'COMPLETE' ? '✓ Audio klar!' :
-                          jobbStatus.status === 'FAILED' ? '✗ Feilet' : jobbStatus.status}
-              </p>
-            </div>
-            {jobbStatus.melding && <p className="text-g-muted text-[10px]">{jobbStatus.melding}</p>}
-            {jobbStatus.phase2 && (
-              <p className={`text-[10px] font-bold ${jobbStatus.phase2 === 'FERDIG' ? 'text-g-green' : jobbStatus.phase2 === 'FEILET' ? 'text-red-400' : 'text-yellow-400'}`}>
-                Phase 2 (AI): {jobbStatus.phase2 === 'STARTER' ? 'Starter Whisper + Highlights...' :
-                               jobbStatus.phase2 === 'FERDIG' ? '✓ Ferdig!' : jobbStatus.phase2}
-              </p>
-            )}
+            {['Railway', 'Supabase', 'Storage', 'OpenAI', 'Twitch'].map(s => (
+              <div key={s} className="flex-1 h-8 bg-g-bg border border-g-border rounded animate-pulse" />
+            ))}
           </div>
         )}
-        {startRes && (
-          <div className="p-3 bg-g-bg border border-g-green/20 rounded-lg space-y-2">
-            <p className="text-xs text-g-green font-bold">✓ Pipeline fullført</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {[['Highlights', startRes.antallHighlights], ['Tekster', startRes.antallCopy], ['I kø', startRes.antallIKø]].map(([l, v]) => (
-                <div key={l as string} className="bg-g-card border border-g-border rounded p-2">
-                  <p className="text-[9px] text-g-muted">{l}</p>
-                  <p className="text-sm font-black text-g-green">{v}</p>
-                </div>
-              ))}
+        {health && !health.altOk && (
+          <p className="text-[9px] text-red-400 mt-2 p-2 bg-red-500/5 border border-red-500/20 rounded">
+            ⚠ En eller flere tjenester er nede. Pipeline vil feile inntil alle er grønne.
+          </p>
+        )}
+      </div>
+
+      {/* ─── Start ny VOD ─────────────────────────────────────────────────── */}
+      <div className="bg-g-card border border-g-border rounded-xl p-5">
+        <p className="text-xs font-bold text-g-text mb-3">▶ Start ny VOD-pipeline</p>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <input
+              value={vodInput}
+              onChange={e => setVodInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && startPipeline()}
+              placeholder="Twitch VOD ID (f.eks. 2786985500) eller full URL"
+              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50 font-mono"
+            />
+            <p className="text-[9px] text-g-muted mt-1">
+              Finn på twitch.tv/glenvex/videos → klikk video → kopier tall fra URL
+            </p>
+          </div>
+          <button
+            onClick={startPipeline}
+            disabled={!vodInput.trim() || starter}
+            className="px-5 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-40 whitespace-nowrap self-start"
+          >
+            {starter ? (
+              <span className="flex items-center gap-2">
+                <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
+                Starter...
+              </span>
+            ) : '◆ Start pipeline'}
+          </button>
+        </div>
+
+        {startFeil && (
+          <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <p className="text-[10px] text-red-400 font-bold mb-1">✗ Pipeline feilet</p>
+            <p className="text-[10px] text-red-400 font-mono break-all">{startFeil}</p>
+            <div className="mt-2 text-[9px] text-g-muted space-y-0.5">
+              <p>Sjekk:</p>
+              <p>• Railway er online (grønn health above)</p>
+              <p>• CONTENT_FACTORY_ENABLED=true på Railway</p>
+              <p>• yt-dlp og ffmpeg er installert på Railway</p>
+              <p>• SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY er satt på Railway</p>
             </div>
-            <div className="space-y-1">
-              {(startRes.steg ?? []).map((s: any, i: number) => (
-                <div key={i} className={`flex items-center gap-2 text-[10px] ${s.status === 'OK' ? 'text-g-green' : s.status === 'FEILET' ? 'text-red-400' : 'text-g-muted'}`}>
-                  <span>{s.status === 'OK' ? '✓' : s.status === 'FEILET' ? '✗' : '○'}</span>
-                  <span className="font-bold">{s.steg}</span>
-                  {s.melding && <span className="text-g-muted">– {s.melding}</span>}
-                </div>
-              ))}
-            </div>
-            {startRes.vodId && (
-              <button onClick={() => hentDetaljer(startRes.vodId)}
-                className="w-full py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-                Se resultater →
-              </button>
-            )}
+          </div>
+        )}
+
+        {nyligStartet && (
+          <div className="mt-3 p-3 bg-g-green/5 border border-g-green/20 rounded-lg">
+            <p className="text-[10px] text-g-green font-bold">✓ Pipeline startet! Railway laster ned og transkriberer VOD.</p>
+            <p className="text-[9px] text-g-muted mt-1">Dette tar 10–45 min avhengig av VOD-lengde. Statusen oppdateres automatisk nedenfor.</p>
+            <p className="text-[9px] text-g-muted">Når Railway er ferdig, klikk <strong className="text-g-green">Kjør Phase 2</strong> for highlights og klipp.</p>
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        {/* VOD-liste */}
-        <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">VODs ({vods.length})</p>
-          {vods.length === 0 ? (
-            <p className="text-[10px] text-g-muted">Ingen VODs ennå. Start en pipeline.</p>
-          ) : vods.map(v => (
-            <button key={v.id} onClick={() => hentDetaljer(v.id)}
-              className={`w-full text-left p-2 rounded-lg border transition-all ${valgtVod === v.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
-              <p className="text-[10px] font-bold text-g-text truncate">{v.title ?? v.twitch_vod_id ?? v.id.slice(0, 8)}</p>
-              <p className="text-[9px] text-g-muted">{v.category} · {v.status}</p>
-              <p className="text-[9px] text-g-muted">{new Date(v.created_at).toLocaleDateString('no-NO')}</p>
-            </button>
-          ))}
-        </div>
+      {/* ─── Aktive jobber ────────────────────────────────────────────────── */}
+      {aktiveVods.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">
+            Aktive jobber ({aktiveVods.length})
+          </p>
+          {aktiveVods.map(v => {
+            const rs = railwayStatusMap[v.id];
+            const pct = v.progress_percent ?? 10;
+            const erRailwayFerdig = rs?.status === 'COMPLETE' || rs?.status === 'RAILWAY_COMPLETE';
 
-        {/* Resultater */}
-        <div className="col-span-3 space-y-4">
-          {loading && (
-            <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
-              <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
-            </div>
-          )}
+            return (
+              <div key={v.id} className="bg-g-card border border-yellow-400/20 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <span className="w-4 h-4 border-2 border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-g-text truncate">{v.title}</p>
+                    <p className="text-[9px] text-g-muted">{v.category} · {tidSiden(v.created_at)}</p>
 
-          {sammendrag && !loading && (
-            <div className="grid grid-cols-4 gap-2">
-              {[['Highlights', sammendrag.antallHighlights], ['Videoer', sammendrag.antallAssets], ['Tekster', sammendrag.antallTekster], ['I kø', sammendrag.venterGodkjenning]].map(([l, v]) => (
-                <div key={l as string} className="bg-g-card border border-g-border rounded-lg p-3 text-center">
-                  <p className="text-[9px] text-g-muted uppercase">{l}</p>
-                  <p className="text-xl font-black text-g-green font-mono">{v}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {pakker.length > 0 && !loading && (
-            <div className="space-y-3">
-              <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Highlights og nedlasting</p>
-              {pakker.map((p, i) => (
-                <div key={p.highlight.id}
-                  className={`bg-g-card border rounded-xl p-4 cursor-pointer transition-all ${valgtHøydepunkt === p.highlight.id ? 'border-g-green/30' : 'border-g-border hover:border-g-green/20'}`}
-                  onClick={() => setValgtHøydepunkt(valgtHøydepunkt === p.highlight.id ? '' : p.highlight.id)}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0">
-                        <span className="text-g-green font-black text-xs">#{p.highlight.rank}</span>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-g-text">{p.highlight.tittel ?? `Highlight ${i + 1}`}</p>
-                        <p className="text-[9px] text-g-muted">{p.highlight.kategori} · Score: {p.highlight.score}/100 · {tidFormat(p.highlight.start)}–{tidFormat(p.highlight.slutt)}</p>
-                        {p.highlight.begrunnelse && <p className="text-[9px] text-g-muted italic mt-0.5">{p.highlight.begrunnelse}</p>}
-                      </div>
+                    {/* Progress bar */}
+                    <div className="mt-2 h-1.5 bg-g-border rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-1000 ${progresjonsFarge(v.status)}`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
-                    <span className="text-[9px] text-g-muted">{valgtHøydepunkt === p.highlight.id ? '▲' : '▼'}</span>
+                    <p className="text-[9px] text-g-muted mt-1">
+                      {v.status_message ?? v.current_step ?? v.status} ({pct}%)
+                    </p>
+
+                    {/* Railway live status */}
+                    {rs && (
+                      <p className="text-[9px] mt-1">
+                        <span className="text-g-muted">Railway: </span>
+                        <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : 'text-yellow-400'}`}>
+                          {rs.status}
+                        </span>
+                        {rs.melding && <span className="text-g-muted"> – {rs.melding.slice(0, 80)}</span>}
+                        {rs.segmenter && <span className="text-g-green"> ({rs.segmenter} segmenter)</span>}
+                      </p>
+                    )}
                   </div>
 
-                  {valgtHøydepunkt === p.highlight.id && (
-                    <div className="mt-4 space-y-3 border-t border-g-border/40 pt-4">
-                      {/* Videoer */}
-                      {p.videoer.length > 0 && (
-                        <div>
-                          <p className="text-[9px] text-g-muted font-bold uppercase mb-2">Videoer</p>
-                          <div className="flex gap-2 flex-wrap">
-                            {p.videoer.map((v, j) => (
-                              <div key={j} className="flex items-center gap-2 px-3 py-1.5 bg-g-bg border border-g-border rounded-lg">
-                                <span className="text-[9px] font-bold text-g-text">{v.type} {v.format}</span>
-                                <span className={`text-[8px] font-bold ${v.status === 'READY' ? 'text-g-green' : 'text-g-muted'}`}>{v.status}</span>
-                                {v.url && (
-                                  <a href={v.url} download className="text-[9px] text-g-green hover:underline">↓ Last ned</a>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Tekster */}
-                      <div>
-                        <p className="text-[9px] text-g-muted font-bold uppercase mb-2">Tekster (klar til kopiere)</p>
-                        <div className="space-y-2">
-                          {p.tekster.youtube && (
-                            <div className="p-3 bg-g-bg border border-g-border rounded-lg">
-                              <p className="text-[9px] text-red-400 font-bold mb-1">▶ YouTube</p>
-                              <p className="text-xs font-bold text-g-text">{p.tekster.youtube.tittel}</p>
-                              <p className="text-[10px] text-g-muted mt-0.5">{p.tekster.youtube.beskrivelse}</p>
-                              <p className="text-[9px] text-g-green mt-1">{(p.tekster.youtube.hashtags ?? []).join(' ')}</p>
-                            </div>
-                          )}
-                          {p.tekster.tiktok && (
-                            <div className="p-3 bg-g-bg border border-g-border rounded-lg">
-                              <p className="text-[9px] text-pink-400 font-bold mb-1">♪ TikTok</p>
-                              <p className="text-xs text-g-text">{p.tekster.tiktok.caption}</p>
-                              <p className="text-[9px] text-g-green mt-1">{(p.tekster.tiktok.hashtags ?? []).join(' ')}</p>
-                            </div>
-                          )}
-                          {p.tekster.instagram && (
-                            <div className="p-3 bg-g-bg border border-g-border rounded-lg">
-                              <p className="text-[9px] text-purple-400 font-bold mb-1">📸 Instagram</p>
-                              <p className="text-xs text-g-text">{p.tekster.instagram.caption}</p>
-                              <p className="text-[9px] text-g-green mt-1">{(p.tekster.instagram.hashtags ?? []).join(' ')}</p>
-                            </div>
-                          )}
-                          {p.tekster.discord && (
-                            <div className="p-3 bg-g-bg border border-g-border rounded-lg">
-                              <p className="text-[9px] text-blue-400 font-bold mb-1">◈ Discord</p>
-                              <p className="text-xs text-g-text">{p.tekster.discord.discord_post}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                  {/* Kjør Phase 2 */}
+                  {erRailwayFerdig && (
+                    <div className="flex-shrink-0">
+                      <button
+                        onClick={() => kjørPhase2(v.id)}
+                        disabled={phase2Running === v.id}
+                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all"
+                      >
+                        {phase2Running === v.id ? '⏳...' : '◆ Kjør Phase 2'}
+                      </button>
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
+
+                {/* Phase 2 resultat */}
+                {phase2Res[v.id] && (
+                  <div className={`mt-3 p-3 rounded border text-xs ${phase2Res[v.id].ok ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                    {phase2Res[v.id].ok ? (
+                      <p className="text-g-green font-bold">✓ {phase2Res[v.id].antallHighlights} highlights · {phase2Res[v.id].antallCopy} tekster</p>
+                    ) : (
+                      <p className="text-red-400">✗ {phase2Res[v.id].error}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+      )}
+
+      {/* ─── Feilede VODs ─────────────────────────────────────────────────── */}
+      {feilede.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Feilede ({feilede.length})</p>
+          {feilede.map(v => (
+            <div key={v.id} className="bg-g-card border border-red-500/20 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-red-400 truncate">{v.title}</p>
+                  <p className="text-[9px] text-g-muted">{tidSiden(v.created_at)}</p>
+                  {v.error_message && (
+                    <p className="text-[9px] text-red-400 mt-1 font-mono break-all">{v.error_message}</p>
+                  )}
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => retryRailway(v.id)}
+                    className="px-2 py-1 bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-bold rounded hover:bg-red-500/20 transition-all"
+                  >
+                    ↻ Retry Railway
+                  </button>
+                  <button
+                    onClick={() => kjørPhase2(v.id)}
+                    disabled={phase2Running === v.id}
+                    className="px-2 py-1 bg-g-bg border border-g-border text-g-muted text-[9px] font-bold rounded hover:text-g-green transition-all"
+                  >
+                    {phase2Running === v.id ? '⏳' : 'Phase 2'}
+                  </button>
+                </div>
+              </div>
+              {phase2Res[v.id] && (
+                <div className={`mt-2 p-2 rounded border text-[10px] ${phase2Res[v.id].ok ? 'border-g-green/30 text-g-green' : 'border-red-500/30 text-red-400'}`}>
+                  {phase2Res[v.id].ok ? `✓ ${phase2Res[v.id].antallHighlights} highlights` : `✗ ${phase2Res[v.id].error}`}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─── Ferdige VODs ─────────────────────────────────────────────────── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">
+            Fullførte VODs ({ferdige.length})
+          </p>
+          <button onClick={hentVods} className="text-[9px] text-g-muted hover:text-g-green transition-colors">↻</button>
+        </div>
+
+        {ferdige.length === 0 ? (
+          <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
+            <p className="text-xs text-g-muted">Ingen fullførte VODs ennå.</p>
+            <p className="text-[9px] text-g-muted mt-1">Start en pipeline ovenfor for å komme i gang.</p>
+          </div>
+        ) : ferdige.map(v => {
+          const erÅpen = aktivertVod === v.id;
+          return (
+            <div key={v.id} className={`bg-g-card border rounded-xl overflow-hidden transition-all ${erÅpen ? 'border-g-green/30' : 'border-g-border'}`}>
+              <div className="p-4 cursor-pointer" onClick={() => setAktivertVod(erÅpen ? null : v.id)}>
+                <div className="flex items-start gap-3">
+                  <span className="text-g-green font-bold text-sm flex-shrink-0 mt-0.5">✓</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-g-text truncate">{v.title}</p>
+                    <p className="text-[9px] text-g-muted">{v.category} · {tidSiden(v.created_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a
+                      href="/content-factory-admin/highlights"
+                      onClick={e => e.stopPropagation()}
+                      className="px-2 py-1 bg-g-green/10 border border-g-green/20 text-g-green text-[9px] font-bold rounded hover:bg-g-green/20 transition-all"
+                    >
+                      ▶ Vis highlights
+                    </a>
+                    <span className="text-g-muted text-xs">{erÅpen ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+
+                {/* Full progress bar */}
+                <div className="mt-2 h-1 bg-g-border rounded-full overflow-hidden">
+                  <div className="h-full bg-g-green rounded-full w-full" />
+                </div>
+              </div>
+
+              {erÅpen && (
+                <div className="border-t border-g-border p-4 space-y-3">
+                  {/* Pipeline steg-visualisering */}
+                  <div>
+                    <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Pipeline</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {PIPELINE_STEG.map(s => (
+                        <div key={s.id} className="px-2 py-1 bg-g-green/5 border border-g-green/20 rounded text-center">
+                          <p className="text-[8px] font-bold text-g-green uppercase">{s.label}</p>
+                          <p className="text-[8px] text-g-green">✓</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Re-kjør Phase 2 */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => kjørPhase2(v.id)}
+                      disabled={phase2Running === v.id}
+                      className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all"
+                    >
+                      {phase2Running === v.id ? '⏳ Kjører...' : '↻ Re-kjør Phase 2'}
+                    </button>
+                    <p className="text-[9px] text-g-muted">Oppdaterer highlights + tekster fra eksisterende transkripsjon</p>
+                  </div>
+
+                  {phase2Res[v.id] && (
+                    <div className={`p-3 rounded border text-xs ${phase2Res[v.id].ok ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                      {phase2Res[v.id].ok ? (
+                        <div className="space-y-1">
+                          <p className="text-g-green font-bold">✓ Phase 2 ferdig!</p>
+                          <p className="text-g-muted">{phase2Res[v.id].antallHighlights} highlights · {phase2Res[v.id].antallCopy} tekster</p>
+                          {(phase2Res[v.id].steg ?? []).map((s: any, i: number) => (
+                            <p key={i} className={`text-[10px] ${s.status === 'OK' ? 'text-g-green' : s.status === 'FEILET' ? 'text-red-400' : 'text-g-muted'}`}>
+                              {s.status === 'OK' ? '✓' : s.status === 'FEILET' ? '✗' : '○'} {s.steg}{s.melding ? ` – ${s.melding}` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-red-400">✗ {phase2Res[v.id].error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Security notice */}
+      {/* ─── Manuell Phase 2 (backup) ─────────────────────────────────────── */}
+      <div className="bg-g-card border border-g-border/50 rounded-xl p-4">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Manuell Phase 2 (ved behov)</p>
+        <div className="flex gap-2">
+          <input
+            id="manual-phase2-vodid"
+            placeholder="VOD ID fra Supabase..."
+            className="flex-1 bg-g-bg border border-g-border rounded px-3 py-1.5 text-xs text-g-text outline-none focus:border-g-green/50 font-mono"
+          />
+          <button
+            onClick={async () => {
+              const el = document.getElementById('manual-phase2-vodid') as HTMLInputElement;
+              if (!el?.value) return;
+              await kjørPhase2(el.value);
+            }}
+            className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all whitespace-nowrap"
+          >
+            ◆ Start Phase 2
+          </button>
+        </div>
+        {phase2Res['manual'] && (
+          <p className={`text-[10px] mt-2 ${phase2Res['manual'].ok ? 'text-g-green' : 'text-red-400'}`}>
+            {phase2Res['manual'].ok ? '✓ Ferdig' : `✗ ${phase2Res['manual'].error}`}
+          </p>
+        )}
+      </div>
+
       <div className="border border-yellow-400/20 rounded-lg p-3 text-center">
-        <p className="text-[9px] text-yellow-400">⚠ Intern testside · Ingen autopublisering · Alle assets lastes ned manuelt</p>
+        <p className="text-[9px] text-yellow-400">⚠ Intern side · Ingen autopublisering · Alle assets lastes ned manuelt</p>
       </div>
     </div>
   );

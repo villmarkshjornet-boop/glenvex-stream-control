@@ -81,9 +81,14 @@ export default function HighlightViewerPage() {
   const [klipperH, setKlipperH] = useState<string | null>(null);
   const [kopiert, setKopiert] = useState<string | null>(null);
   const [pollerKlipp, setPollerKlipp] = useState(false);
+  const [phase2Running, setPhase2Running] = useState(false);
+  const [phase2Res, setPhase2Res] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
+    fetch('/api/content-factory').then(r => r.json()).then(d => {
+      // API returnerer snake_case direkte fra DB
+      setVods(d.vods ?? []);
+    });
   }, []);
 
   async function hentHighlights(vodId: string) {
@@ -124,6 +129,21 @@ export default function HighlightViewerPage() {
     setTimeout(() => setKopiert(null), 2000);
   }
 
+  async function kjørPhase2() {
+    if (!valgtVod) return;
+    setPhase2Running(true);
+    setPhase2Res(null);
+    const res = await fetch('/api/content-factory/phase2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vodId: valgtVod }),
+    });
+    const d = await res.json().catch(() => ({ error: 'Timeout/nettverksfeil' }));
+    setPhase2Res(d);
+    setPhase2Running(false);
+    if (d.ok) await hentHighlights(valgtVod);
+  }
+
   const hCopy = (h: Highlight) => copies.filter(c => c.highlight_id === h.id);
   const hAssets = (h: Highlight) => assets.filter(a => a.highlight_id === h.id);
 
@@ -137,14 +157,21 @@ export default function HighlightViewerPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* VOD-velger */}
         <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">VODs</p>
-          {vods.filter(v => v.status === 'COMPLETE').length === 0 ? (
-            <p className="text-[10px] text-g-muted">Ingen fullførte VODs ennå.</p>
-          ) : vods.filter(v => v.status === 'COMPLETE').map(v => (
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">VODs ({vods.length})</p>
+          {vods.length === 0 ? (
+            <p className="text-[10px] text-g-muted">Ingen VODs. Start pipeline i Content Factory.</p>
+          ) : vods.map(v => (
             <button key={v.id} onClick={() => hentHighlights(v.id)}
               className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all ${valgtVod === v.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
               <p className="font-bold text-g-text truncate">{v.title ?? 'Ukjent stream'}</p>
-              <p className="text-[9px] text-g-muted mt-0.5">{v.category || 'Ukjent'} · {sikkerDato(v.created_at)}</p>
+              <p className="text-[9px] text-g-muted mt-0.5">
+                {v.category || 'Ukjent'} · {sikkerDato(v.created_at)}
+              </p>
+              <span className={`text-[8px] font-bold ${
+                v.status === 'COMPLETE' ? 'text-g-green' :
+                v.status === 'FAILED' ? 'text-red-400' :
+                'text-yellow-400'
+              }`}>{v.status}</span>
             </button>
           ))}
         </div>
@@ -158,8 +185,28 @@ export default function HighlightViewerPage() {
           )}
 
           {!loading && highlights.length === 0 && valgtVod && (
-            <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
-              <p className="text-xs text-g-muted">Ingen highlights. Kjør Phase 2 for denne VOD-en.</p>
+            <div className="bg-g-card border border-g-border rounded-xl p-6 text-center space-y-3">
+              <p className="text-xs text-g-muted">Ingen highlights for denne VOD-en.</p>
+              <p className="text-[9px] text-g-muted">Railway må ha fullført Phase 1 (transkripsjon) før Phase 2 kan kjøres.</p>
+              <button
+                onClick={kjørPhase2}
+                disabled={phase2Running}
+                className="px-4 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all"
+              >
+                {phase2Running ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
+                    Kjører Phase 2...
+                  </span>
+                ) : '◆ Kjør Phase 2 (Highlights + tekster)'}
+              </button>
+              {phase2Res && (
+                <div className={`text-xs p-2 rounded border ${phase2Res.ok ? 'border-g-green/30 text-g-green' : 'border-red-500/30 text-red-400'}`}>
+                  {phase2Res.ok
+                    ? `✓ ${phase2Res.antallHighlights} highlights funnet`
+                    : `✗ ${phase2Res.error}`}
+                </div>
+              )}
             </div>
           )}
 
