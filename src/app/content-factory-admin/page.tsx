@@ -188,11 +188,15 @@ export default function ContentFactoryAdminPage() {
               if (!vodId) return;
               setPhase2Running(true);
               setPhase2Res(null);
-              const res = await fetch('/api/content-factory/phase2', {
+              const rawRes = await fetch('/api/content-factory/phase2', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ vodId }),
-              }).then(r => r.json()).catch(e => ({ error: e.message }));
+              });
+              const tekst = await rawRes.text();
+              let res: any;
+              try { res = JSON.parse(tekst); }
+              catch { res = { error: `Vercel timeout eller feil. HTTP ${rawRes.status}. Prøv igjen.` }; }
               setPhase2Res(res);
               setPhase2Running(false);
               fetch('/api/content-factory').then(r => r.json()).then(d => setVods(d.vods ?? []));
