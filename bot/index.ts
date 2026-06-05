@@ -22,7 +22,7 @@ import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
-import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers } from './lib/memberTracker';
+import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase } from './lib/memberTracker';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
@@ -797,7 +797,8 @@ client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
-  gjenopprettStuckeVods().catch(() => {}); // Kjør på oppstart
+  gjenopprettStuckeVods().catch(() => {});
+  lasterMedlemmerFraSupabase().catch(() => {}); // Gjenopprett membres fra Supabase ved Railway-restart
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);

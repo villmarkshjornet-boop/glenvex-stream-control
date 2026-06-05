@@ -1,21 +1,23 @@
 /**
- * Clip Worker – Automatisk videoklipping med FFmpeg
- * Kjøres kontinuerlig på Railway.
- * Henter highlights med clip_status = READY_FOR_CLIP og klipper dem.
- * Produserer 16:9 og 9:16 (TikTok/Shorts/Reels) formater.
+ * Clip Worker – Bulletproof videoklipping fra Twitch VOD
+ *
+ * Strategi:
+ * 1. Hent direkte HLS-URL via yt-dlp (sekunder, ingen nedlasting)
+ * 2. ffmpeg klipper direkte fra HLS-stream (seek i HLS, kun nødvendige segmenter)
+ * 3. Fallback: yt-dlp --download-sections 720p
+ * 4. Fallback 2: yt-dlp laveste kvalitet
+ * 5. Alle feil: reset til READY_FOR_CLIP (aldri CLIP_FAILED – automatisk retry)
  */
 
 import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 
-const WORKSPACE_ID = 'glenvex-default';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
-const VODS_DIR = path.join(DATA_DIR, 'content-factory', 'raw-vods');
 
-// Lock-system: forhindrer at samme highlight klippes to ganger
 const klipperNå = new Set<string>();
+const execAsync = require('util').promisify(require('child_process').exec);
 
 function getDb() {
   const url = process.env.SUPABASE_URL;
@@ -28,74 +30,55 @@ function sikreDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-async function lastNedSegment(
-  twitchVodUrl: string,
-  startSek: number,
-  sluttSek: number,
-  utPath: string
-): Promise<boolean> {
-  const execAsync = require('util').promisify(require('child_process').exec);
-  const varighet = sluttSek - startSek;
-
-  // Legg til 5s buffer før og etter for smidig klipp
-  const buffer = 5;
-  const fraStart = Math.max(0, startSek - buffer);
-  const ekstraTid = buffer;
-
-  try {
-    // Prøv yt-dlp med --download-sections (raskest – laster kun nødvendig segment)
-    await execAsync(
-      `yt-dlp --download-sections "*${fraStart}-${sluttSek + buffer}" -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" --merge-output-format mp4 -o "${utPath}" "${twitchVodUrl}"`,
-      { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
-    );
-    return fs.existsSync(utPath);
-  } catch {
-    // Fallback: bruk FFmpeg direkte på HLS-stream
-    try {
-      await execAsync(
-        `ffmpeg -y -ss ${fraStart} -t ${varighet + ekstraTid * 2} -i "${twitchVodUrl}" -c:v libx264 -c:a aac -preset fast "${utPath}"`,
-        { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
-      );
-      return fs.existsSync(utPath);
-    } catch { return false; }
-  }
+function ryddFil(...paths: string[]) {
+  for (const p of paths) try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
 }
 
-async function klippFormat(
-  inputPath: string,
-  outputPath: string,
+async function hentHlsUrl(twitchVodUrl: string, authArg: string): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync(
+      `yt-dlp --get-url -f "best[height<=720]/best" ${authArg} "${twitchVodUrl}"`,
+      { timeout: 30_000 }
+    );
+    return stdout.trim().split('\n')[0] || null;
+  } catch { return null; }
+}
+
+async function ffmpegKlipp(
+  sourceUrl: string,
+  utPath: string,
   startSek: number,
-  sluttSek: number,
-  format: '16:9' | '9:16'
+  varighetSek: number,
+  vfFilter: string,
+  crf: number
 ): Promise<boolean> {
-  const execAsync = require('util').promisify(require('child_process').exec);
-  const varighet = sluttSek - startSek;
-
-  let vf = '';
-  if (format === '9:16') {
-    // Vertikal format: crop midten og skaler til 1080x1920
-    vf = `-vf "scale=1920:1080,crop=608:1080:(1920-608)/2:0,scale=1080:1920"`;
-  } else {
-    vf = `-vf "scale=1920:1080"`;
-  }
-
   try {
     await execAsync(
-      `ffmpeg -y -ss ${startSek} -t ${varighet} -i "${inputPath}" ${vf} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`,
-      { maxBuffer: 1024 * 1024 * 200, timeout: 180_000 }
+      `ffmpeg -y -ss ${startSek} -t ${varighetSek} -i "${sourceUrl}" -vf "${vfFilter}" -c:v libx264 -preset fast -crf ${crf} -c:a aac -b:a 96k -movflags +faststart "${utPath}"`,
+      { maxBuffer: 1024 * 1024 * 100, timeout: 300_000 }
     );
-    return fs.existsSync(outputPath) && fs.statSync(outputPath).size > 10_000;
+    return fs.existsSync(utPath) && fs.statSync(utPath).size > 20_000;
   } catch (err: any) {
-    console.error(`[ClipWorker] FFmpeg ${format} feil:`, err.message?.slice(0, 200));
+    console.error(`[ClipWorker] ffmpeg feil (${path.basename(utPath)}):`, err.message?.slice(0, 200));
     return false;
   }
 }
 
-async function lastOppTilSupabase(
-  sb: any,
-  lokalSti: string,
-  storageSti: string
-): Promise<string | null> {
+async function komprimerHvisForStor(filPath: string): Promise<void> {
+  const MAX = 45 * 1024 * 1024;
+  if (!fs.existsSync(filPath) || fs.statSync(filPath).size <= MAX) return;
+  const tmp = filPath.replace('.mp4', '_c.mp4');
+  try {
+    await execAsync(
+      `ffmpeg -y -i "${filPath}" -c:v libx264 -preset fast -crf 32 -c:a aac -b:a 64k -movflags +faststart "${tmp}"`,
+      { timeout: 180_000 }
+    );
+    if (fs.existsSync(tmp) && fs.statSync(tmp).size > 10_000) fs.renameSync(tmp, filPath);
+  } catch { ryddFil(tmp); }
+}
+
+async function lastOppTilSupabase(sb: any, lokalSti: string, storageSti: string): Promise<string | null> {
+  if (!fs.existsSync(lokalSti)) return null;
   try {
     const buf = fs.readFileSync(lokalSti);
     const { error } = await sb.storage.from('glenvex-assets').upload(storageSti, buf, {
@@ -103,7 +86,6 @@ async function lastOppTilSupabase(
       upsert: true,
     });
     if (error) throw error;
-
     const { data: sd } = await sb.storage.from('glenvex-assets').createSignedUrl(storageSti, 7 * 24 * 3600);
     return sd?.signedUrl ?? null;
   } catch (err: any) {
@@ -112,140 +94,200 @@ async function lastOppTilSupabase(
   }
 }
 
+async function lastOppOgFerdigstill(
+  db: any, hId: string, vodId: string,
+  p16x9: string, p9x16: string, ok16: boolean, ok9: boolean
+): Promise<boolean> {
+  let clipUrl: string | null = null;
+  let verticalClipUrl: string | null = null;
+
+  if (ok16 && fs.existsSync(p16x9)) {
+    clipUrl = await lastOppTilSupabase(db, p16x9, `content-factory/clips/${vodId}/${hId}_16x9.mp4`);
+  }
+  if (ok9 && fs.existsSync(p9x16)) {
+    verticalClipUrl = await lastOppTilSupabase(db, p9x16, `content-factory/clips/${vodId}/${hId}_9x16.mp4`);
+  }
+  ryddFil(p16x9, p9x16);
+
+  if (clipUrl || verticalClipUrl) {
+    await db.from('content_highlights').update({
+      clip_status: 'CLIPPED',
+      clip_url: clipUrl,
+      vertical_clip_url: verticalClipUrl,
+      clip_finished_at: new Date().toISOString(),
+      clip_error: null,
+    }).eq('id', hId);
+    console.log(`[ClipWorker] ✓ Ferdig: ${hId} – 16:9: ${!!clipUrl}, 9:16: ${!!verticalClipUrl}`);
+    return true;
+  }
+
+  // Opplasting feilet – reset til READY_FOR_CLIP for automatisk retry
+  await db.from('content_highlights').update({
+    clip_status: 'READY_FOR_CLIP',
+    clip_error: 'Klipping OK – opplasting til Supabase Storage feilet, retry automatisk',
+  }).eq('id', hId);
+  return false;
+}
+
 async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
   const db = getDb();
   if (!db) return;
 
   const hId = highlight.id;
-  if (klipperNå.has(hId)) return; // Lock
-  klipperNå.add(hId);
-
-  const startSek = Math.floor(highlight.start_time);
-  const sluttSek = Math.ceil(highlight.end_time);
+  const startSek = Math.max(0, Math.floor(highlight.start_time) - 3);
+  const varighetSek = Math.ceil(highlight.end_time - highlight.start_time) + 6;
   const vodId = highlight.vod_id;
 
   sikreDir(path.join(CLIPS_DIR, vodId));
-
-  const råPath = path.join(VODS_DIR, `${vodId}_seg_${hId}.mp4`);
   const p16x9 = path.join(CLIPS_DIR, vodId, `${hId}_16x9.mp4`);
   const p9x16 = path.join(CLIPS_DIR, vodId, `${hId}_9x16.mp4`);
 
+  const userOauth = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
+  const authArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
+
+  const vf16x9 = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2';
+  const vf9x16 = 'scale=-2:1280,crop=720:1280';
+
+  console.log(`[ClipWorker] Starter klipping: ${hId} [t=${startSek}s, dur=${varighetSek}s]`);
+
+  // ── Forsøk 1: HLS-URL fra yt-dlp + ffmpeg direkte ─────────────────────────
+  const hlsUrl = await hentHlsUrl(vodUrl, authArg);
+  if (hlsUrl) {
+    const [ok16, ok9] = await Promise.all([
+      ffmpegKlipp(hlsUrl, p16x9, startSek, varighetSek, vf16x9, 26),
+      ffmpegKlipp(hlsUrl, p9x16, startSek, varighetSek, vf9x16, 26),
+    ]);
+    if (ok16 || ok9) {
+      await komprimerHvisForStor(p16x9);
+      await komprimerHvisForStor(p9x16);
+      const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
+      if (ok) { klipperNå.delete(hId); return; }
+    }
+  }
+  console.log(`[ClipWorker] Forsøk 1 feilet – prøver forsøk 2 (yt-dlp --download-sections)`);
+
+  // ── Forsøk 2: yt-dlp --download-sections ──────────────────────────────────
+  ryddFil(p16x9, p9x16);
+  const seg2 = path.join(CLIPS_DIR, vodId, `${hId}_raw2.mp4`);
   try {
-    console.log(`[ClipWorker] Klipper highlight ${hId} [${startSek}s-${sluttSek}s]`);
-
-    // Last ned segment fra Twitch
-    const lastetNed = await lastNedSegment(vodUrl, startSek, sluttSek, råPath);
-    if (!lastetNed) throw new Error('Kunne ikke laste ned VOD-segment');
-
-    // Klipp 16:9
-    const ok16x9 = await klippFormat(råPath, p16x9, startSek, sluttSek, '16:9');
-
-    // Klipp 9:16
-    const ok9x16 = await klippFormat(råPath, p9x16, startSek, sluttSek, '9:16');
-
-    // Last opp til Supabase Storage
-    let clipUrl: string | null = null;
-    let verticalClipUrl: string | null = null;
-
-    if (ok16x9) {
-      clipUrl = await lastOppTilSupabase(db, p16x9, `content-factory/clips/${vodId}/${hId}_16x9.mp4`);
+    await execAsync(
+      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]" --merge-output-format mp4 ${authArg} -o "${seg2}" "${vodUrl}"`,
+      { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
+    );
+    if (fs.existsSync(seg2) && fs.statSync(seg2).size > 20_000) {
+      const [ok16, ok9] = await Promise.all([
+        ffmpegKlipp(seg2, p16x9, 0, varighetSek, vf16x9, 28),
+        ffmpegKlipp(seg2, p9x16, 0, varighetSek, vf9x16, 28),
+      ]);
+      if (ok16 || ok9) {
+        await komprimerHvisForStor(p16x9);
+        await komprimerHvisForStor(p9x16);
+        const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
+        ryddFil(seg2);
+        if (ok) { klipperNå.delete(hId); return; }
+      }
     }
-    if (ok9x16) {
-      verticalClipUrl = await lastOppTilSupabase(db, p9x16, `content-factory/clips/${vodId}/${hId}_9x16.mp4`);
-    }
-
-    // Slett lokale filer
-    for (const f of [råPath, p16x9, p9x16]) {
-      try { fs.unlinkSync(f); } catch {}
-    }
-
-    // Oppdater Supabase
-    await db.from('content_highlights').update({
-      clip_status: (clipUrl || verticalClipUrl) ? 'CLIPPED' : 'CLIP_FAILED',
-      clip_url: clipUrl,
-      vertical_clip_url: verticalClipUrl,
-      clip_finished_at: new Date().toISOString(),
-      clip_error: (!clipUrl && !verticalClipUrl) ? 'FFmpeg produserte ingen gyldig fil' : null,
-    }).eq('id', hId);
-
-    console.log(`[ClipWorker] ✓ Ferdig: ${hId} – 16:9: ${!!clipUrl}, 9:16: ${!!verticalClipUrl}`);
   } catch (err: any) {
-    console.error(`[ClipWorker] ✗ Feil for ${hId}:`, err.message);
-    for (const f of [råPath, p16x9, p9x16]) {
-      try { fs.unlinkSync(f); } catch {}
+    console.error(`[ClipWorker] Forsøk 2 feilet:`, err.message?.slice(0, 200));
+  } finally { ryddFil(seg2); }
+
+  console.log(`[ClipWorker] Forsøk 2 feilet – prøver forsøk 3 (laveste kvalitet)`);
+
+  // ── Forsøk 3: laveste mulige kvalitet ─────────────────────────────────────
+  ryddFil(p16x9, p9x16);
+  const seg3 = path.join(CLIPS_DIR, vodId, `${hId}_raw3.mp4`);
+  try {
+    await execAsync(
+      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "worst/best" --merge-output-format mp4 ${authArg} -o "${seg3}" "${vodUrl}"`,
+      { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
+    );
+    if (fs.existsSync(seg3) && fs.statSync(seg3).size > 10_000) {
+      const vf480_16x9 = 'scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2';
+      const vf480_9x16 = 'scale=-2:854,crop=480:854';
+      const [ok16, ok9] = await Promise.all([
+        ffmpegKlipp(seg3, p16x9, 0, varighetSek, vf480_16x9, 32),
+        ffmpegKlipp(seg3, p9x16, 0, varighetSek, vf480_9x16, 32),
+      ]);
+      if (ok16 || ok9) {
+        const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
+        ryddFil(seg3);
+        if (ok) { klipperNå.delete(hId); return; }
+      }
     }
-    await db.from('content_highlights').update({
-      clip_status: 'CLIP_FAILED',
-      clip_error: err.message?.slice(0, 500),
-      clip_finished_at: new Date().toISOString(),
-    }).eq('id', hId);
-  } finally {
-    klipperNå.delete(hId);
+  } catch (err: any) {
+    console.error(`[ClipWorker] Forsøk 3 feilet:`, err.message?.slice(0, 200));
+  } finally { ryddFil(seg3); }
+
+  // Alle 3 forsøk feilet – reset til READY_FOR_CLIP (aldri CLIP_FAILED)
+  await db.from('content_highlights').update({
+    clip_status: 'READY_FOR_CLIP',
+    clip_error: 'Alle 3 forsøk feilet – prøves igjen automatisk om 1 minutt',
+  }).eq('id', hId);
+  console.error(`[ClipWorker] ✗ Alle forsøk feilet for ${hId} – resatt til READY_FOR_CLIP`);
+
+  klipperNå.delete(hId);
+}
+
+// ── Syklus: hent og start jobber ─────────────────────────────────────────────
+async function kjørSyklus(): Promise<void> {
+  if (process.env.CONTENT_FACTORY_ENABLED !== 'true') return;
+  const db = getDb();
+  if (!db) return;
+
+  try {
+    const lock = Array.from(klipperNå);
+    const { data: highlights } = await db
+      .from('content_highlights')
+      .select('id,vod_id,start_time,end_time,title')
+      .eq('clip_status', 'READY_FOR_CLIP')
+      .not('id', 'in', `(${lock.length > 0 ? lock.join(',') : 'null'})`)
+      .limit(2);
+
+    if (!highlights || highlights.length === 0) return;
+
+    const vodIds = [...new Set(highlights.map((h: any) => h.vod_id))];
+    const { data: vods } = await db
+      .from('content_vods')
+      .select('id,vod_url,twitch_vod_id')
+      .in('id', vodIds);
+
+    const vodMap = new Map((vods ?? []).map((v: any) => [
+      v.id,
+      v.vod_url ?? (v.twitch_vod_id ? `https://www.twitch.tv/videos/${v.twitch_vod_id}` : null),
+    ]));
+
+    for (const h of highlights) {
+      const vodUrl = vodMap.get(h.vod_id);
+      if (!vodUrl) {
+        console.error(`[ClipWorker] Ingen VOD-URL for highlight ${h.id}`);
+        continue;
+      }
+      await db.from('content_highlights').update({ clip_status: 'CLIPPING', clip_error: null }).eq('id', h.id);
+      klipperNå.add(h.id);
+      klippHighlight(h, vodUrl).catch((err: any) => {
+        console.error('[ClipWorker] Uventet krasj:', err.message);
+        klipperNå.delete(h.id);
+        getDb()?.from('content_highlights').update({
+          clip_status: 'READY_FOR_CLIP',
+          clip_error: `Uventet feil: ${err.message?.slice(0, 200)}`,
+        }).eq('id', h.id).then(() => {});
+      });
+    }
+  } catch (err: any) {
+    console.error('[ClipWorker] Syklus-feil:', err.message);
   }
 }
 
 export async function startClipWorker(): Promise<void> {
   if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-    console.log('[ClipWorker] Deaktivert (CONTENT_FACTORY_ENABLED != true)');
+    console.log('[ClipWorker] Deaktivert');
     return;
   }
-
-  console.log('[ClipWorker] ✓ Startet – sjekker READY_FOR_CLIP highlights hvert minutt');
-
-  const kjørSyklus = async () => {
-    if (process.env.CONTENT_FACTORY_ENABLED !== 'true') return;
-    const db = getDb();
-    if (!db) return;
-
-    try {
-      // Hent highlights klare for klipping (maks 3 om gangen)
-      const { data: highlights } = await db
-        .from('content_highlights')
-        .select('id,vod_id,start_time,end_time,title')
-        .eq('clip_status', 'READY_FOR_CLIP')
-        .not('id', 'in', `(${Array.from(klipperNå).join(',') || 'null'})`)
-        .limit(3);
-
-      if (!highlights || highlights.length === 0) return;
-
-      // Hent VOD-URLer
-      const vodIds = [...new Set(highlights.map(h => h.vod_id))];
-      const { data: vods } = await db
-        .from('content_vods')
-        .select('id,vod_url,twitch_vod_id')
-        .in('id', vodIds);
-
-      const vodMap = new Map((vods ?? []).map(v => [
-        v.id,
-        v.vod_url ?? (v.twitch_vod_id ? `https://www.twitch.tv/videos/${v.twitch_vod_id}` : null)
-      ]));
-
-      for (const h of highlights) {
-        const vodUrl = vodMap.get(h.vod_id);
-        if (!vodUrl) {
-          await db.from('content_highlights').update({
-            clip_status: 'CLIP_FAILED',
-            clip_error: 'Ingen VOD-URL tilgjengelig',
-          }).eq('id', h.id);
-          continue;
-        }
-
-        // Sett CLIPPING umiddelbart (lock)
-        await db.from('content_highlights').update({ clip_status: 'CLIPPING' }).eq('id', h.id);
-        klipperNå.add(h.id);
-
-        // Klipp asynkront (ikke await – håndter parallelt)
-        klippHighlight(h, vodUrl).catch(err => {
-          console.error('[ClipWorker] Uventet feil:', err.message);
-          klipperNå.delete(h.id);
-        });
-      }
-    } catch (err: any) {
-      console.error('[ClipWorker] Syklus-feil:', err.message);
-    }
-  };
-
-  // Kjør umiddelbart, deretter hvert minutt
+  console.log('[ClipWorker] ✓ Startet – sjekker READY_FOR_CLIP hvert minutt');
   await kjørSyklus();
   setInterval(kjørSyklus, 60_000);
+}
+
+export async function triggerClipNow(): Promise<void> {
+  await kjørSyklus();
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Highlight {
   id: string;
@@ -104,21 +104,34 @@ export default function HighlightViewerPage() {
 
   async function genererKlipp(highlightId: string) {
     setKlipperH(highlightId);
-    await fetch('/api/content-factory/clip', {
+    const res = await fetch('/api/content-factory/clip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vodId: valgtVod, highlightId }),
     });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok && d.error) {
+      console.error('[Klipp]', d.error);
+    }
     setKlipperH(null);
-    // Refresh umiddelbart, så poll hvert 5s mens noe er i CLIPPING
     await hentHighlights(valgtVod);
     setPollerKlipp(true);
   }
 
+  // Poll så lenge noe er READY_FOR_CLIP eller CLIPPING (maks 15 min)
+  const pollerStartRef = useRef<number>(0);
   useEffect(() => {
     if (!pollerKlipp || !valgtVod) return;
-    const harClipping = highlights.some(h => h.clip_status === 'CLIPPING');
-    if (!harClipping) { setPollerKlipp(false); return; }
+    if (!pollerStartRef.current) pollerStartRef.current = Date.now();
+    const harAktiv = highlights.some(h =>
+      h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP'
+    );
+    const timeoutNådd = Date.now() - pollerStartRef.current > 15 * 60 * 1000;
+    if (!harAktiv || timeoutNådd) {
+      setPollerKlipp(false);
+      pollerStartRef.current = 0;
+      return;
+    }
     const t = setTimeout(() => hentHighlights(valgtVod), 5000);
     return () => clearTimeout(t);
   }, [pollerKlipp, highlights, valgtVod]);
@@ -263,22 +276,36 @@ export default function HighlightViewerPage() {
                           <p className="text-g-text">Start: <span className="text-g-green font-mono font-bold">{tidFormat(h.start_time)}</span></p>
                           <p className="text-g-text">Slutt: <span className="text-g-green font-mono font-bold">{tidFormat(h.end_time)}</span></p>
                           <p className="text-g-text">Varighet: <span className="text-g-green font-mono font-bold">{Math.round(h.end_time - h.start_time)}s</span></p>
-                          {h.clip_error && <p className="text-red-400 text-[9px] mt-1">✗ {h.clip_error}</p>}
+                          {/* Status-melding */}
+                          {(h.clip_status === 'READY_FOR_CLIP') && (
+                            <p className="text-yellow-400 text-[9px] mt-1 flex items-center gap-1">
+                              <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin inline-block" />
+                              I kø – Railway plukker opp innen 30 sekunder...
+                            </p>
+                          )}
+                          {(h.clip_status === 'CLIPPING') && (
+                            <p className="text-yellow-400 text-[9px] mt-1 flex items-center gap-1">
+                              <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin inline-block" />
+                              Klipper – laster ned segment og koder video (2–5 min)...
+                            </p>
+                          )}
+                          {h.clip_error && <p className="text-red-400 text-[9px] mt-1 break-all">✗ {h.clip_error}</p>}
                         </div>
                         <div className="flex flex-col gap-1.5">
-                          {h.clip_status !== 'CLIPPING' && (
+                          {h.clip_status !== 'CLIPPING' && h.clip_status !== 'READY_FOR_CLIP' && (
                             <button onClick={() => genererKlipp(h.id)} disabled={klipperH === h.id}
-                              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all">
-                              {klipperH === h.id ? '⏳...' : h.clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
+                              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all disabled:opacity-40">
+                              {klipperH === h.id ? '⏳ Sender...' : h.clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
                             </button>
                           )}
-                          {h.clip_status === 'CLIP_FAILED' && (
+                          {(h.clip_status === 'CLIP_FAILED') && (
                             <button onClick={async () => {
                               await fetch('/api/content-factory/clip-retry', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ highlightId: h.id }),
                               });
-                              hentHighlights(valgtVod);
+                              await hentHighlights(valgtVod);
+                              setPollerKlipp(true);
                             }} className="px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 text-yellow-400 text-[10px] font-bold rounded hover:bg-yellow-400/20 transition-all">
                               ↺ Retry
                             </button>

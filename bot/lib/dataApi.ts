@@ -1,6 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import { triggerClipNow } from './clipWorker';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 
@@ -255,33 +256,13 @@ export function startDataApi(port = 4242) {
 
     // ── Clip Worker: manuell klipp-trigger ───────────────────────────────────
     if (url === '/content-factory/clip' && method === 'POST') {
-      let body = '';
-      req.on('data', (chunk: any) => { body += chunk; });
-      req.on('end', async () => {
-        if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-          res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
-        }
-        try {
-          const { highlightId } = JSON.parse(body);
-          if (!highlightId) { res.writeHead(400); res.end(JSON.stringify({ error: 'highlightId kreves' })); return; }
-
-          const { createClient } = require('@supabase/supabase-js');
-          const ws = require('ws');
-          const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
-
-          // Sett tilbake til READY_FOR_CLIP slik at worker plukker den opp
-          await sb.from('content_highlights').update({
-            clip_status: 'READY_FOR_CLIP',
-            clip_error: null,
-          }).eq('id', highlightId);
-
-          res.writeHead(202);
-          res.end(JSON.stringify({ ok: true, melding: 'Lagt i clip-kø – worker starter snart' }));
-        } catch (err: any) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: err.message }));
-        }
-      });
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+      }
+      // Svar umiddelbart, trigger clip worker i bakgrunnen
+      res.writeHead(202);
+      res.end(JSON.stringify({ ok: true, melding: 'Clip worker trigget' }));
+      triggerClipNow().catch(console.error);
       return;
     }
 
