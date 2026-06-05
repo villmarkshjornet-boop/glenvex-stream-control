@@ -198,6 +198,23 @@ export default function ContentFactoryAdminPage() {
     if (res.ok) await hentVods();
   }
 
+  // ─── Slett VOD og all tilhørende data ────────────────────────────────────
+  async function slettVod(vodId: string, tittel: string) {
+    if (!confirm(`Slett "${tittel}" og alle tilhørende transkripter, highlights og klipp?\n\nDette kan ikke angres.`)) return;
+    const res = await fetch(`/api/content-factory/${vodId}`, { method: 'DELETE' });
+    if (res.ok) await hentVods();
+    else alert('Sletting feilet – prøv igjen');
+  }
+
+  // ─── Slett alle VODs ─────────────────────────────────────────────────────
+  async function slettAlle() {
+    if (!confirm(`Slett ALLE ${vods.length} VODs og all tilhørende data?\n\nDette tømmer Content Factory fullstendig og kan ikke angres.`)) return;
+    for (const v of vods) {
+      await fetch(`/api/content-factory/${v.id}`, { method: 'DELETE' });
+    }
+    await hentVods();
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────
   if (aktivert === false) {
     return (
@@ -228,10 +245,21 @@ export default function ContentFactoryAdminPage() {
           <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Content Factory</h1>
           <p className="text-[10px] text-g-muted mt-0.5">Pipeline manager · Ingen autopublisering</p>
         </div>
-        <a href="/content-factory-admin/highlights"
-          className="px-3 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
-          ▶ Highlight Viewer
-        </a>
+        <div className="flex gap-2">
+          {vods.length > 0 && (
+            <button
+              onClick={slettAlle}
+              className="px-3 py-2 border border-red-500/20 text-red-400/70 text-xs font-bold rounded hover:bg-red-500/10 hover:border-red-500/40 hover:text-red-400 transition-all"
+              title="Slett alle VODs og start fra scratch"
+            >
+              🗑 Slett alt
+            </button>
+          )}
+          <a href="/content-factory-admin/highlights"
+            className="px-3 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
+            ▶ Highlight Viewer
+          </a>
+        </div>
       </div>
 
       {/* ─── System Health ────────────────────────────────────────────────── */}
@@ -442,12 +470,12 @@ export default function ContentFactoryAdminPage() {
                     <p className="text-[9px] text-red-400 mt-1 font-mono break-all">{v.error_message}</p>
                   )}
                 </div>
-                <div className="flex gap-1.5 flex-shrink-0">
+                <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
                   <button
                     onClick={() => retryRailway(v.id)}
                     className="px-2 py-1 bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-bold rounded hover:bg-red-500/20 transition-all"
                   >
-                    ↻ Retry Railway
+                    ↻ Retry
                   </button>
                   <button
                     onClick={() => kjørPhase2(v.id)}
@@ -455,6 +483,13 @@ export default function ContentFactoryAdminPage() {
                     className="px-2 py-1 bg-g-bg border border-g-border text-g-muted text-[9px] font-bold rounded hover:text-g-green transition-all"
                   >
                     {phase2Running === v.id ? '⏳' : 'Phase 2'}
+                  </button>
+                  <button
+                    onClick={() => slettVod(v.id, v.title)}
+                    className="px-2 py-1 bg-g-bg border border-g-border text-g-muted text-[9px] font-bold rounded hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all"
+                    title="Slett VOD og all data"
+                  >
+                    🗑
                   </button>
                 </div>
               </div>
@@ -501,6 +536,13 @@ export default function ContentFactoryAdminPage() {
                     >
                       ▶ Vis highlights
                     </a>
+                    <button
+                      onClick={e => { e.stopPropagation(); slettVod(v.id, v.title); }}
+                      className="px-2 py-1 border border-g-border text-g-muted text-[9px] font-bold rounded hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all"
+                      title="Slett VOD og all data"
+                    >
+                      🗑
+                    </button>
                     <span className="text-g-muted text-xs">{erÅpen ? '▲' : '▼'}</span>
                   </div>
                 </div>

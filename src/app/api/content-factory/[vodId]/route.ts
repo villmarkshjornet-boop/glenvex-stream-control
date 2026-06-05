@@ -1,67 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
+import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function sjekkFlag() {
-  if (!isContentFactoryEnabled()) {
-    return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
-  }
-  return null;
-}
-
-// GET /api/content-factory/[vodId] – Full status for én VOD
-export async function GET(
+export async function DELETE(
   _req: NextRequest,
   { params }: { params: { vodId: string } }
 ) {
-  const feil = sjekkFlag();
-  if (feil) return feil;
-
-  const { vodId } = params;
-
-  const [
-    { hentVod },
-    { hentHighlights },
-    { hentCopyForVod },
-    { hentReviewKø },
-    { hentPipelineLogs },
-  ] = await Promise.all([
-    import('@/lib/content-factory/vod/vodService'),
-    import('@/lib/content-factory/analysis/highlightDiscovery'),
-    import('@/lib/content-factory/copywriter/copywriterService'),
-    import('@/lib/content-factory/review/reviewQueue'),
-    import('@/lib/content-factory/jobs/pipelineLogger'),
-  ]);
-
-  const [vod, highlights, copy, kø, logs] = await Promise.all([
-    hentVod(vodId),
-    hentHighlights(vodId),
-    hentCopyForVod(vodId),
-    hentReviewKø({ vodId }),
-    hentPipelineLogs(vodId),
-  ]);
-
-  if (!vod) return NextResponse.json({ error: 'VOD ikke funnet' }, { status: 404 });
-
-  return NextResponse.json({ vod, highlights, copy, kø, logs });
-}
-
-// PATCH /api/content-factory/[vodId] – Restart et steg
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { vodId: string } }
-) {
-  const feil = sjekkFlag();
-  if (feil) return feil;
-
-  const { steg, audioUrl } = await req.json() as { steg: string; audioUrl?: string };
-  const { restartSteg } = await import('@/lib/content-factory/jobs/orchestrator');
-
-  try {
-    await restartSteg(params.vodId, steg as any, { audioUrl });
-    return NextResponse.json({ ok: true, steg });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  if (!isContentFactoryEnabled()) {
+    return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
   }
+  const { vodId } = params;
+  if (!vodId) return NextResponse.json({ error: 'vodId mangler' }, { status: 400 });
+
+  const db = getDb();
+  if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
+
+  const { data: highlights } = await db
+    .from('content_highlights')
+    .select('id')
+    .eq('vod_id', vodId);
+
+  if (highlights && highlights.length > 0) {
+    const stier = highlights.flatMap((h: any) => [
+      `content-factory/clips/${vodId}/${h.id}_16x9.mp4`,
+      `content-factory/clips/${vodId}/${h.id}_9x16.mp4`,
+    ]);
+    await db.storage.from('glenvex-assets').remove(stier).catch(() => {});
+  }
+
+  await db.from('content_transcripts').delete().eq('vod_id', vodId);
+  await db.from('content_highlights').delete().eq('vod_id', vodId);
+  await db.from('content_copy').delete().eq('vod_id', vodId).catch(() => {});
+  await db.from('content_vods').delete().eq('id', vodId);
+
+  return NextResponse.json({ ok: true, slettet: vodId });
 }
