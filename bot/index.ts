@@ -769,10 +769,35 @@ const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
 const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
 
+async function gjenopprettStuckeVods() {
+  // Sett ANALYZING-VODs som er eldre enn 30 min tilbake til FAILED etter Railway-restart
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!sbUrl || !sbKey) return;
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const res = await fetch(`${sbUrl}/rest/v1/content_vods?status=eq.ANALYZING&updated_at=lt.${cutoff}&select=id,title`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    });
+    if (!res.ok) return;
+    const stucke: any[] = await res.json();
+    for (const vod of stucke) {
+      await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vod.id}`, {
+        method: 'PATCH',
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: 'FAILED', error_message: 'Railway restartet midt i prosessen – kjør på nytt via Force Reset', progress_percent: 0 }),
+      });
+      addLog('warn', `Satte stuck VOD til FAILED etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
+    }
+    if (stucke.length > 0) console.log(`[Recovery] Satte ${stucke.length} stuck VOD(er) til FAILED`);
+  } catch {}
+}
+
 client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
+  gjenopprettStuckeVods().catch(() => {}); // Kjør på oppstart
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);

@@ -133,6 +133,14 @@ async function sjekkNyeFollowers() {
     const antallNye = nyAntall - forrigeFollowerAntall;
     forrigeFollowerAntall = nyAntall;
 
+    // Log til dashboard
+    const navnListe = (data.data ?? []).slice(0, antallNye).map((f: any) => f.user_name).filter(Boolean);
+    if (navnListe.length > 0) {
+      for (const navn of navnListe) logHendelse('follow', { username: navn, total: nyAntall });
+    } else {
+      logHendelse('follow', { count: antallNye, total: nyAntall });
+    }
+
     // Nyeste følgere (tilgjengelig ved user token, tom liste ellers)
     const nyeNavn: string[] = (data.data ?? [])
       .slice(0, antallNye)
@@ -178,6 +186,41 @@ async function sjekkNyeFollowers() {
     }
   } catch {}
 }
+
+// ─── Live-hendelser → Supabase (buffret, skrives hvert 30s) ──────────────────
+
+const hendelsesBuffer: { type: string; ts: string; [k: string]: any }[] = [];
+const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+
+function logHendelse(type: string, data: Record<string, any>) {
+  hendelsesBuffer.push({ type, ts: new Date().toISOString(), ...data });
+}
+
+async function flushHendelser() {
+  if (hendelsesBuffer.length === 0) return;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  const batch = hendelsesBuffer.splice(0, hendelsesBuffer.length); // tøm buffer
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const ws = require('ws');
+    const sb = createClient(url, key, { realtime: { transport: ws } });
+    const { data: ws_ } = await sb.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single();
+    const existing = ws_?.settings_json ?? {};
+    const liveEvents: any[] = existing.live_events ?? [];
+    liveEvents.unshift(...batch);
+    if (liveEvents.length > 150) liveEvents.length = 150;
+    await sb.from('workspaces').update({
+      settings_json: { ...existing, live_events: liveEvents },
+    }).eq('id', WORKSPACE_ID);
+  } catch {
+    // Legg tilbake i bufferet hvis skriving feilet
+    hendelsesBuffer.unshift(...batch);
+  }
+}
+
+setInterval(flushHendelser, 30_000);
 
 // ─── Partner-promo via Supabase ───────────────────────────────────────────────
 
@@ -229,6 +272,7 @@ export function startTwitchBot() {
 
   client.on('raided', async (channel, username, viewers) => {
     trackRaid(username, viewers);
+    logHendelse('raid', { username, viewers });
 
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
     const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom! Sjekk Discord: ${DISCORD_URL}`;
@@ -253,6 +297,7 @@ export function startTwitchBot() {
   // ─── SUBSCRIPTION ──────────────────────────────────────────────────────────
 
   client.on('subscription', async (channel, username, _method, _message, _userstate) => {
+    logHendelse('sub', { username });
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`).catch(() => {});
 
@@ -264,6 +309,7 @@ export function startTwitchBot() {
   // ─── RESUB ─────────────────────────────────────────────────────────────────
 
   client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
+    logHendelse('resub', { username, months });
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
   });
@@ -272,12 +318,14 @@ export function startTwitchBot() {
 
   client.on('subgift', async (channel, username, _streakMonths, recipient, _methods, _userstate) => {
     trackGiftSub(username, 1);
+    logHendelse('giftsub', { username, recipient });
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`).catch(() => {});
   });
 
   client.on('submysterygift', async (channel, username, numbOfSubs, _methods, _userstate) => {
     trackGiftSub(username, numbOfSubs);
+    logHendelse('mystery_gift', { username, count: numbOfSubs });
 
     const svar = await aiSvar(`${username} giftet ${numbOfSubs} subs til random seere! Lag en episk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter ${numbOfSubs} subs! HVEM ER DETTE MENNESKET?! PogChamp`).catch(() => {});
@@ -298,6 +346,7 @@ export function startTwitchBot() {
   client.on('cheer', async (channel, userstate, _message) => {
     const bits = userstate.bits ?? '?';
     const username = userstate.username ?? 'Noen';
+    logHendelse('cheer', { username, bits });
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`).catch(() => {});
   });

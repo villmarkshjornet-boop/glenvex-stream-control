@@ -17,6 +17,28 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
   const ts = new Date().toISOString();
   fs.writeFileSync(fil, JSON.stringify({ jobId: vodId, status, melding, ...ekstra, oppdatert: ts, sisteOppdatering: ts }));
   console.log(`[CF] ${vodId} → ${status}: ${melding}`);
+
+  // Skriv også til Supabase – viktig ved heartbeat og Railway-restart
+  const sbUrl = process.env.SUPABASE_URL;
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (sbUrl && sbKey) {
+    const update: any = { status_message: melding };
+    if (status === 'FAILED') {
+      update.status = 'FAILED';
+      update.error_message = melding;
+      update.progress_percent = 0;
+    }
+    fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vodId}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': sbKey,
+        'Authorization': `Bearer ${sbKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify(update),
+    }).catch(() => {});
+  }
 }
 
 async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOauth?: string) {
@@ -48,7 +70,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     try {
       await execAsync(
         `yt-dlp -f "audio_only/bestaudio/best" --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
-        { maxBuffer: 1024 * 1024 * 200, timeout: 20 * 60 * 1000 }
+        { maxBuffer: 1024 * 1024 * 200, timeout: 45 * 60 * 1000 }
       );
     } finally {
       clearInterval(heartbeat);

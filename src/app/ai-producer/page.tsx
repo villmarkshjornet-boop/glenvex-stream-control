@@ -2,7 +2,21 @@
 
 import { useEffect, useState, useCallback } from 'react';
 
-interface Tiltak { tekst: string; prioritet: 'lav' | 'medium' | 'høy' | 'kritisk'; }
+interface TiltakInnhold {
+  tiktok?: string;
+  instagram?: string;
+  twitter?: string;
+  discord?: string;
+  chat?: string;
+  generelt?: string;
+}
+
+interface Tiltak {
+  tekst: string;
+  prioritet: 'lav' | 'medium' | 'høy' | 'kritisk';
+  type?: string;
+  innhold?: TiltakInnhold;
+}
 
 interface ProducerData {
   isLive: boolean;
@@ -10,6 +24,7 @@ interface ProducerData {
   analyse: string;
   tiltak: Tiltak[];
   metrics: { viewers: number; activeDiscord: number; raidsToday: number; giftSubsToday: number; engagementScore: number };
+  harHistorikk?: boolean;
 }
 
 interface DiagData {
@@ -157,6 +172,65 @@ function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
+// ─── Tiltak-kort med kopier-klar innhold ─────────────────────────────────────
+
+const PLATTFORM_IKON: Record<string, string> = {
+  tiktok: '▶ TikTok',
+  instagram: '◉ Instagram',
+  twitter: '✦ Twitter/X',
+  discord: '◈ Discord',
+  chat: '💬 Chat',
+  generelt: '◆ Innhold',
+};
+
+function TiltakKort({ tiltak }: { tiltak: Tiltak }) {
+  const [åpen, setÅpen] = useState(false);
+  const [kopiert, setKopiert] = useState<string | null>(null);
+  const harInnhold = tiltak.innhold && Object.keys(tiltak.innhold).length > 0;
+
+  function kopier(tekst: string, platform: string) {
+    navigator.clipboard.writeText(tekst).catch(() => {});
+    setKopiert(platform);
+    setTimeout(() => setKopiert(null), 2000);
+  }
+
+  return (
+    <div className={`rounded-xl border overflow-hidden ${PRIORITET_STIL[tiltak.prioritet]}`}>
+      <button
+        className="w-full flex items-center gap-3 p-3 text-left"
+        onClick={() => harInnhold && setÅpen(o => !o)}
+      >
+        <span className="text-[10px] font-black uppercase tracking-widest w-16 flex-shrink-0">{tiltak.prioritet}</span>
+        <p className="text-xs font-semibold flex-1">{tiltak.tekst}</p>
+        {harInnhold && (
+          <span className="text-[9px] text-current/60 flex-shrink-0">{åpen ? '▲' : '▼ innhold'}</span>
+        )}
+      </button>
+
+      {harInnhold && åpen && (
+        <div className="border-t border-current/10 bg-black/20 p-3 space-y-2">
+          {Object.entries(tiltak.innhold!).map(([platform, tekst]) => tekst ? (
+            <div key={platform} className="bg-black/30 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-black uppercase tracking-widest text-current/70">
+                  {PLATTFORM_IKON[platform] ?? platform}
+                </span>
+                <button
+                  onClick={() => kopier(tekst, platform)}
+                  className="text-[9px] font-bold px-2 py-0.5 rounded border border-current/30 hover:bg-current/10 transition-all"
+                >
+                  {kopiert === platform ? '✓ Kopiert!' : 'Kopier'}
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-current/90">{tekst}</p>
+            </div>
+          ) : null)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Hoved-komponent ───────────────────────────────────────────────────────────
 
 export default function AIProducerPage() {
@@ -245,18 +319,20 @@ export default function AIProducerPage() {
             </div>
           )}
 
-          {/* Tiltak */}
+          {/* Tiltak med innhold */}
           {data.tiltak.length > 0 && (
-            <div className="bg-g-card border border-g-border rounded-xl p-5">
-              <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">AI Tiltak</p>
-              <div className="space-y-2">
-                {data.tiltak.map((t, i) => (
-                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg border ${PRIORITET_STIL[t.prioritet]}`}>
-                    <span className="text-[10px] font-black uppercase tracking-widest w-16 flex-shrink-0">{t.prioritet}</span>
-                    <p className="text-xs font-semibold">{t.tekst}</p>
-                  </div>
-                ))}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">AI Tiltak</p>
+                {data.harHistorikk && (
+                  <span className="text-[9px] text-g-green/70 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-g-green/70" /> Basert på din Stream Coach-historikk
+                  </span>
+                )}
               </div>
+              {data.tiltak.map((t, i) => (
+                <TiltakKort key={i} tiltak={t} />
+              ))}
             </div>
           )}
         </>

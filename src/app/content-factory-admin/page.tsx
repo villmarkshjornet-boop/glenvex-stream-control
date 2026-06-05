@@ -459,7 +459,7 @@ export default function ContentFactoryAdminPage() {
             const minderAktiv = Math.floor((Date.now() - new Date(v.created_at).getTime()) / 60000);
             const erSannsynligHengt = erUkjent && minderAktiv > 10;
             // Stuck-terskel er status-avhengig: nedlasting kan ta 10 min, transkribering er rask per segment
-            const stuckTerskel = rs?.status === 'DOWNLOADING' ? 10 : rs?.status === 'TRANSCRIBING' ? 8 : 5;
+            const stuckTerskel = rs?.status === 'DOWNLOADING' ? 50 : rs?.status === 'TRANSCRIBING' ? 20 : 10;
 
             return (
               <div key={v.id} className={`bg-g-card border rounded-xl p-4 ${erSannsynligHengt ? 'border-red-500/30' : 'border-yellow-400/20'}`}>

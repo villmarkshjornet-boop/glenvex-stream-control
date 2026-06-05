@@ -18,11 +18,24 @@ interface SlowData {
   };
   meta: { hentetKl: string };
 }
+interface LiveEvent {
+  type: 'follow' | 'sub' | 'resub' | 'giftsub' | 'mystery_gift' | 'raid' | 'cheer';
+  ts: string;
+  username?: string;
+  viewers?: number;
+  months?: number;
+  recipient?: string;
+  count?: number;
+  bits?: string | number;
+  total?: number;
+}
+
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string }[];
   sjekkliste: { label: string; done: boolean; href: string }[];
   sisteResultater: { id: string; title: string; createdAt: string; highlights: number; klipp: number }[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
+  liveEvents: LiveEvent[];
   ts: string;
 }
 
@@ -279,6 +292,57 @@ function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteR
   );
 }
 
+// ─── Live Events Feed ──────────────────────────────────────────────────────────
+
+const EVENT_IKON: Record<string, string> = {
+  follow: '💚', sub: '⭐', resub: '⭐', giftsub: '🎁', mystery_gift: '🎁', raid: '🚨', cheer: '💎',
+};
+
+function hendelsesTekst(e: LiveEvent): string {
+  switch (e.type) {
+    case 'follow': return e.username ? `${e.username} følger nå kanalen${e.total ? ` · totalt ${e.total.toLocaleString('no-NO')}` : ''}` : `${e.count ?? 1} ny${(e.count ?? 1) > 1 ? 'e' : ''} følger${(e.count ?? 1) > 1 ? 'e' : ''}`;
+    case 'sub': return `${e.username} subscribet!`;
+    case 'resub': return `${e.username} re-subbet (${e.months} mnd)`;
+    case 'giftsub': return `${e.username} giftet sub til ${e.recipient}`;
+    case 'mystery_gift': return `${e.username} giftet ${e.count} subs!`;
+    case 'raid': return `${e.username} raidet med ${e.viewers} seere!`;
+    case 'cheer': return `${e.username} cheeret ${e.bits} bits!`;
+    default: return JSON.stringify(e);
+  }
+}
+
+function LiveEventsFeed({ events, loading }: { events: LiveEvent[]; loading: boolean }) {
+  if (loading) return <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  return (
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Live hendelser</p>
+        {events.length > 0 && (
+          <div className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
+            <span className="text-[9px] text-g-green">Live</span>
+          </div>
+        )}
+      </div>
+      {events.length === 0 ? (
+        <p className="text-[11px] text-g-muted">Ingen hendelser ennå – de dukker opp her under stream.</p>
+      ) : (
+        <div className="space-y-1 max-h-56 overflow-y-auto">
+          {events.map((e, i) => (
+            <div key={i} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
+              <span className="text-sm flex-shrink-0 leading-none mt-0.5">{EVENT_IKON[e.type] ?? '◆'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] text-g-text font-semibold leading-snug">{hendelsesTekst(e)}</p>
+              </div>
+              <span className="text-[9px] text-g-muted flex-shrink-0">{tidSiden(e.ts)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -363,9 +427,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Sjekkliste + Siste resultater ───────────────────────────────────── */}
+      {/* ── Live hendelser + Sjekkliste + Siste resultater ──────────────────── */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-1">
+        <div className="col-span-1 space-y-4">
+          <LiveEventsFeed events={live?.liveEvents ?? []} loading={loadingLive} />
           <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} />
         </div>
         <div className="col-span-2">

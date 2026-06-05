@@ -134,6 +134,9 @@ export async function GET() {
     };
   });
 
+  // ── Live hendelser fra bot ────────────────────────────────────────────────
+  const liveEvents: any[] = (workspaceRes.data?.settings_json?.live_events ?? []).slice(0, 30);
+
   return NextResponse.json({
     activeJobs,
     nesteStream: nesteStream
@@ -148,6 +151,7 @@ export async function GET() {
       : null,
     sjekkliste,
     sisteResultater,
+    liveEvents,
     ts: new Date().toISOString(),
   });
 }
