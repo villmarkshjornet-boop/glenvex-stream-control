@@ -14,9 +14,16 @@ export async function GET() {
     // Railway
     (async () => {
       const url = process.env.BOT_API_URL;
-      if (!url) return { ok: false, melding: 'BOT_API_URL mangler' };
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      return { ok: res.ok, melding: res.ok ? 'Online' : `HTTP ${res.status}` };
+      if (!url) return { ok: false, melding: 'BOT_API_URL mangler i Vercel env', url: null };
+      // Vis domene (ikke full URL) for debugging
+      let domene = '';
+      try { domene = new URL(url).hostname; } catch {}
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        return { ok: res.ok, melding: res.ok ? `Online (${domene})` : `HTTP ${res.status} (${domene})`, url: domene };
+      } catch (e: any) {
+        return { ok: false, melding: `Timeout/offline (${domene}): ${e.message?.slice(0, 60)}`, url: domene };
+      }
     })(),
     // Supabase
     (async () => {
