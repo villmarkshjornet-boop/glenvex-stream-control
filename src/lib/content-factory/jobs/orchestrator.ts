@@ -82,10 +82,29 @@ export async function kjørFullPipeline(
 
         if (railwayRes.ok) {
           const d = await railwayRes.json() as any;
-          signedAudioUrl = d.signedUrl;
           steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
           steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
-          steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Lastet opp til Supabase Storage – URL gyldig i 1 time` });
+
+          // Generer signed URL fra Vercel (Vercel har egne Supabase-credentials)
+          const storagePath = d.storagePath ?? `content-factory/audio/${vod.id}.mp3`;
+          try {
+            const { getDb } = await import('@/lib/db');
+            const db = getDb();
+            if (!db) throw new Error('Supabase ikke tilkoblet fra Vercel');
+
+            const { data: signedData, error: signErr } = await db.storage
+              .from('glenvex-assets')
+              .createSignedUrl(storagePath, 3600);
+
+            if (signErr || !signedData?.signedUrl) {
+              throw new Error(`Signed URL feil: ${signErr?.message ?? 'tom URL'}`);
+            }
+
+            signedAudioUrl = signedData.signedUrl;
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Audio i Supabase Storage – signed URL generert` });
+          } catch (signErr) {
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: (signErr as Error).message });
+          }
         } else {
           const err = await railwayRes.json() as any;
           steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
