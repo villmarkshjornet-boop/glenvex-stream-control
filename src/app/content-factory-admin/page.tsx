@@ -379,6 +379,8 @@ export default function ContentFactoryAdminPage() {
             const erUkjent = rs?.status === 'UNKNOWN';
             const minderAktiv = Math.floor((Date.now() - new Date(v.created_at).getTime()) / 60000);
             const erSannsynligHengt = erUkjent && minderAktiv > 10;
+            // Stuck-terskel er status-avhengig: nedlasting kan ta 10 min, transkribering er rask per segment
+            const stuckTerskel = rs?.status === 'DOWNLOADING' ? 10 : rs?.status === 'TRANSCRIBING' ? 8 : 5;
 
             return (
               <div key={v.id} className={`bg-g-card border rounded-xl p-4 ${erSannsynligHengt ? 'border-red-500/30' : 'border-yellow-400/20'}`}>
@@ -408,7 +410,7 @@ export default function ContentFactoryAdminPage() {
                       const minSiden = oppdatertTs
                         ? Math.floor((Date.now() - new Date(oppdatertTs).getTime()) / 60000)
                         : null;
-                      const sitter = !erUkjent && minSiden !== null && minSiden >= 5;
+                      const sitter = !erUkjent && minSiden !== null && minSiden >= stuckTerskel;
                       return (
                         <div className={`mt-1 p-1.5 rounded border text-[9px] ${erSannsynligHengt ? 'border-red-500/30 bg-red-500/5' : sitter ? 'border-red-500/20 bg-red-500/5' : 'border-transparent'}`}>
                           <span className="text-g-muted">Railway: </span>

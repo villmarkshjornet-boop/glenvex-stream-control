@@ -2,23 +2,22 @@
 
 import { useEffect, useState, useCallback } from 'react';
 
-interface Tiltak {
-  tekst: string;
-  prioritet: 'lav' | 'medium' | 'høy' | 'kritisk';
-}
+interface Tiltak { tekst: string; prioritet: 'lav' | 'medium' | 'høy' | 'kritisk'; }
 
 interface ProducerData {
   isLive: boolean;
   stream: { title: string; game: string; viewerCount: number; thumbnailUrl?: string } | null;
   analyse: string;
   tiltak: Tiltak[];
-  metrics: {
-    viewers: number;
-    activeDiscord: number;
-    raidsToday: number;
-    giftSubsToday: number;
-    engagementScore: number;
-  };
+  metrics: { viewers: number; activeDiscord: number; raidsToday: number; giftSubsToday: number; engagementScore: number };
+}
+
+interface DiagData {
+  altOk: boolean;
+  erLive: boolean;
+  kritiskeFeil: string[];
+  detaljer: Record<string, { ok: boolean; melding: string; verdi?: string }>;
+  settings: { autoPostLive: boolean; discordLiveChannelId: string; lastNotifiedStreamId: string | null; twitchUsername: string };
 }
 
 const PRIORITET_STIL: Record<string, string> = {
@@ -38,6 +37,128 @@ function MetricKort({ label, value, sub }: { label: string; value: string | numb
   );
 }
 
+// ─── Live Nødpanel ─────────────────────────────────────────────────────────────
+
+function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
+  const [diag, setDiag] = useState<DiagData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notifying, setNotifying] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [melding, setMelding] = useState<{ ok: boolean; tekst: string } | null>(null);
+
+  const hentDiag = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/live/diagnostics');
+      if (res.ok) setDiag(await res.json());
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { hentDiag(); }, [hentDiag]);
+
+  const forceNotify = async () => {
+    setNotifying(true);
+    setMelding(null);
+    try {
+      const res = await fetch('/api/live/force-notify', { method: 'POST' });
+      const d = await res.json();
+      setMelding({ ok: d.ok, tekst: d.ok ? `✓ ${d.melding}` : `✗ ${d.feil}` });
+      if (d.ok) onRefresh();
+    } catch (e: any) {
+      setMelding({ ok: false, tekst: `Feil: ${e.message}` });
+    }
+    setNotifying(false);
+  };
+
+  const resetId = async () => {
+    setResetting(true);
+    setMelding(null);
+    try {
+      const res = await fetch('/api/live/reset-id', { method: 'POST' });
+      const d = await res.json();
+      setMelding({ ok: true, tekst: d.melding });
+      await hentDiag();
+    } catch {}
+    setResetting(false);
+  };
+
+  return (
+    <div className="bg-g-card border border-red-500/30 rounded-xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-black text-red-400 uppercase tracking-wider">⚠ Live-deteksjon feilet</p>
+          <p className="text-[9px] text-g-muted mt-0.5">Systemet klarer ikke oppdage at du er live. Diagnostikk og manuell override nedenfor.</p>
+        </div>
+        <button onClick={hentDiag} className="text-[9px] text-g-muted hover:text-g-green transition-colors">↻ Oppdater</button>
+      </div>
+
+      {/* Hurtighandlinger */}
+      <div className="flex gap-3 flex-wrap">
+        <button
+          onClick={forceNotify}
+          disabled={notifying}
+          className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-black rounded hover:bg-red-500/20 transition-all disabled:opacity-50"
+        >
+          {notifying ? '⏳ Sender...' : '🔴 TVING DISCORD-VARSEL NÅ'}
+        </button>
+        <button
+          onClick={resetId}
+          disabled={resetting}
+          className="px-4 py-2 border border-g-border text-g-muted text-xs font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-50"
+        >
+          {resetting ? '⏳...' : '↺ Nullstill live-ID (boten varsler om < 2min)'}
+        </button>
+      </div>
+
+      {melding && (
+        <div className={`p-3 rounded border text-xs font-bold ${melding.ok ? 'border-g-green/30 text-g-green bg-g-green/5' : 'border-red-500/30 text-red-400 bg-red-500/5'}`}>
+          {melding.tekst}
+        </div>
+      )}
+
+      {/* Diagnostikk */}
+      {loading && <div className="h-24 bg-g-bg border border-g-border rounded-lg animate-pulse" />}
+      {diag && !loading && (
+        <div className="space-y-2">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Diagnostikk</p>
+          {Object.entries(diag.detaljer).map(([key, val]) => (
+            <div key={key} className={`flex items-start gap-2 p-2 rounded border text-[10px] ${val.ok ? 'border-g-border' : 'border-red-500/30 bg-red-500/5'}`}>
+              <span className={`flex-shrink-0 font-black ${val.ok ? 'text-g-green' : 'text-red-400'}`}>{val.ok ? '✓' : '✗'}</span>
+              <span className={`flex-shrink-0 w-40 font-mono ${val.ok ? 'text-g-muted' : 'text-red-400 font-bold'}`}>{key.replace(/_/g, ' ')}</span>
+              <span className={val.ok ? 'text-g-muted' : 'text-red-400'}>{val.melding}</span>
+              {val.verdi && <span className="ml-auto text-g-muted/50 font-mono">{val.verdi}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {diag?.kritiskeFeil && diag.kritiskeFeil.length > 0 && (
+        <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+          <p className="text-[9px] text-red-400 font-black uppercase mb-2">Slik fikser du det:</p>
+          {!diag.detaljer.twitch_client_id?.ok && (
+            <p className="text-[9px] text-g-muted mb-1">• Legg til <code className="text-yellow-400">TWITCH_CLIENT_ID</code> og <code className="text-yellow-400">TWITCH_CLIENT_SECRET</code> i Vercel Environment Variables</p>
+          )}
+          {!diag.detaljer.discord_live_channel?.ok && (
+            <p className="text-[9px] text-g-muted mb-1">• Gå til <a href="/innstillinger" className="text-g-green underline">Innstillinger</a> og sett Discord Live-kanal ID</p>
+          )}
+          {!diag.detaljer.auto_post_live?.ok && (
+            <p className="text-[9px] text-g-muted mb-1">• Skru på «Auto Post Live» i <a href="/innstillinger" className="text-g-green underline">Innstillinger</a></p>
+          )}
+          {diag.settings.lastNotifiedStreamId && (
+            <p className="text-[9px] text-g-muted mb-1">• Klikk «Nullstill live-ID» ovenfor – forrige stream-ID blokkerer nytt varsel</p>
+          )}
+          {!diag.detaljer.discord_bot_token?.ok && (
+            <p className="text-[9px] text-g-muted mb-1">• Legg til <code className="text-yellow-400">DISCORD_BOT_TOKEN</code> i Vercel og Railway Environment Variables</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Hoved-komponent ───────────────────────────────────────────────────────────
+
 export default function AIProducerPage() {
   const [data, setData] = useState<ProducerData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +177,7 @@ export default function AIProducerPage() {
 
   useEffect(() => {
     hent();
-    const interval = setInterval(hent, 30_000); // Oppdater hvert 30. sek
+    const interval = setInterval(hent, 15_000);
     return () => clearInterval(interval);
   }, [hent]);
 
@@ -71,9 +192,9 @@ export default function AIProducerPage() {
           {sisteOppdatert && (
             <p className="text-[9px] text-g-muted">Oppdatert {sisteOppdatert.toLocaleTimeString('no-NO')}</p>
           )}
-          <div className={`flex items-center gap-1.5 justify-end mt-1 ${data?.isLive ? 'text-g-green' : 'text-g-muted'}`}>
-            <span className={`w-2 h-2 rounded-full ${data?.isLive ? 'bg-g-green animate-pulse' : 'bg-g-muted'}`} />
-            <span className="text-xs font-bold">{data?.isLive ? 'LIVE' : 'OFFLINE'}</span>
+          <div className={`flex items-center gap-1.5 justify-end mt-1 ${data?.isLive ? 'text-red-400' : 'text-g-muted'}`}>
+            <span className={`w-2 h-2 rounded-full ${data?.isLive ? 'bg-red-400 animate-pulse' : 'bg-g-muted'}`} />
+            <span className="text-xs font-bold">{data?.isLive ? 'LIVE NÅ' : 'OFFLINE'}</span>
           </div>
         </div>
       </div>
@@ -81,27 +202,29 @@ export default function AIProducerPage() {
       {loading ? (
         <div className="bg-g-card border border-g-border rounded-lg p-12 text-center">
           <span className="w-8 h-8 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
-          <p className="text-xs text-g-muted mt-4">Analyserer stream...</p>
         </div>
       ) : !data?.isLive ? (
-        <div className="bg-g-card border border-g-border rounded-lg p-12 text-center space-y-2">
-          <p className="text-g-muted text-sm font-semibold">Du streamer ikke akkurat nå.</p>
-          <p className="text-xs text-g-muted">AI Producer aktiveres automatisk når du går live. Oppdaterer hvert 30. sekund.</p>
-        </div>
+        <LiveNødpanel onRefresh={hent} />
       ) : (
         <>
-          {/* Stream-info */}
-          {data.stream && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5 flex gap-4 items-start">
-              {data.stream.thumbnailUrl && (
-                <img src={data.stream.thumbnailUrl} alt="Stream" className="w-32 h-18 object-cover rounded border border-g-border flex-shrink-0" style={{ aspectRatio: '16/9' }} />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-g-muted uppercase tracking-widest">{data.stream.game}</p>
-                <p className="text-sm font-bold text-g-text mt-0.5">{data.stream.title}</p>
-              </div>
+          {/* Live banner */}
+          <div className="bg-g-card border border-red-500/20 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse" />
+              <p className="text-xs font-black text-red-400 uppercase tracking-widest">LIVE NÅ</p>
             </div>
-          )}
+            {data.stream && (
+              <div className="flex gap-4 items-start">
+                {data.stream.thumbnailUrl && (
+                  <img src={data.stream.thumbnailUrl} alt="Stream" className="w-32 rounded border border-g-border flex-shrink-0" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] text-g-muted uppercase tracking-widest">{data.stream.game}</p>
+                  <p className="text-sm font-bold text-g-text mt-0.5">{data.stream.title}</p>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Metrics */}
           {data.metrics && (
@@ -116,7 +239,7 @@ export default function AIProducerPage() {
 
           {/* AI Analyse */}
           {data.analyse && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5">
+            <div className="bg-g-card border border-g-border rounded-xl p-5">
               <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">◆ AI Analyse</p>
               <p className="text-sm text-g-text leading-relaxed">{data.analyse}</p>
             </div>
@@ -124,7 +247,7 @@ export default function AIProducerPage() {
 
           {/* Tiltak */}
           {data.tiltak.length > 0 && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5">
+            <div className="bg-g-card border border-g-border rounded-xl p-5">
               <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">AI Tiltak</p>
               <div className="space-y-2">
                 {data.tiltak.map((t, i) => (

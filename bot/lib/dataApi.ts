@@ -21,7 +21,7 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
 
 async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOauth?: string) {
   try {
-    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'Laster ned VOD med yt-dlp...');
+    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'Sjekker yt-dlp...');
 
     const { execSync } = require('child_process');
     const execAsync = require('util').promisify(require('child_process').exec);
@@ -30,26 +30,41 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     try { execSync('yt-dlp --version', { stdio: 'ignore' }); ytDlpOk = true; } catch {}
     if (!ytDlpOk) { oppdaterJobbStatus(vodId, 'FAILED', 'yt-dlp ikke tilgjengelig på Railway'); return; }
 
-    const outDir = path.join(DATA_DIR, 'content-factory', 'raw-vods');
     const audioDir = path.join(DATA_DIR, 'content-factory', 'audio');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
 
-    const videoPath = path.join(outDir, `${vodId}.mp4`);
     const audioPath = path.join(audioDir, `${vodId}.mp3`);
     const cookieArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
 
-    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned VOD (kan ta 10–40 min)...');
-    await execAsync(
-      `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --merge-output-format mp4 --no-playlist ${cookieArg} -o "${videoPath}" "${twitchVodUrl}"`,
-      { maxBuffer: 1024 * 1024 * 200, timeout: 30 * 60 * 1000 }
-    );
+    // Last ned KUN lyd – mye raskere enn full video (200–400MB vs 3–8GB).
+    // Klipp-worker laster ned video separat ved behov, så vi trenger ikke video her.
+    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned lydspor (2–8 min)...');
 
-    if (!fs.existsSync(videoPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Videofil ikke funnet etter nedlasting'); return; }
+    // Heartbeat hvert 30s så "STUCK?"-varselet ikke dukker opp under normal nedlasting
+    const heartbeat = setInterval(() => {
+      oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned lydspor...');
+    }, 30_000);
 
-    oppdaterJobbStatus(vodId, 'EXTRACTING_AUDIO', 'Ekstraherer audio med FFmpeg...');
-    await execAsync(`ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${audioPath}"`, { timeout: 20 * 60 * 1000 });
-    if (!fs.existsSync(audioPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Lydfil ikke funnet'); return; }
+    try {
+      await execAsync(
+        `yt-dlp -f "audio_only/bestaudio/best" --no-playlist -x --audio-format mp3 --audio-quality 4 ${cookieArg} -o "${audioPath}" "${twitchVodUrl}"`,
+        { maxBuffer: 1024 * 1024 * 200, timeout: 20 * 60 * 1000 }
+      );
+    } finally {
+      clearInterval(heartbeat);
+    }
+
+    if (!fs.existsSync(audioPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Lydfil ikke funnet etter nedlasting'); return; }
+
+    // Normaliser audio til 16kHz mono (Whisper-optimal) hvis ffmpeg er tilgjengelig
+    try {
+      const normalAudioPath = audioPath.replace('.mp3', '_norm.mp3');
+      await execAsync(`ffmpeg -y -i "${audioPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${normalAudioPath}"`, { timeout: 10 * 60 * 1000 });
+      if (fs.existsSync(normalAudioPath)) {
+        try { fs.unlinkSync(audioPath); } catch {}
+        fs.renameSync(normalAudioPath, audioPath);
+      }
+    } catch { /* ffmpeg normalisering feilet – bruk rå audio */ }
 
     // Transkriber direkte med Whisper – ingen Supabase Storage (unngår filstørrelsesbegrensning)
     const apiKey = process.env.OPENAI_API_KEY;
@@ -121,7 +136,6 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       if (segPath !== audioPath) try { fs.unlinkSync(segPath); } catch {}
     }
 
-    try { fs.unlinkSync(videoPath); } catch {}
     try { fs.unlinkSync(audioPath); } catch {}
 
     oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret.`, {
