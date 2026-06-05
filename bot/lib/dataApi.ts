@@ -14,7 +14,9 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
   const dir = path.join(DATA_DIR, 'content-factory');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const fil = path.join(dir, `status_${vodId}.json`);
-  fs.writeFileSync(fil, JSON.stringify({ jobId: vodId, status, melding, ...ekstra, oppdatert: new Date().toISOString() }));
+  const ts = new Date().toISOString();
+  fs.writeFileSync(fil, JSON.stringify({ jobId: vodId, status, melding, ...ekstra, oppdatert: ts, sisteOppdatering: ts }));
+  console.log(`[CF] ${vodId} → ${status}: ${melding}`);
 }
 
 async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOauth?: string) {
@@ -37,15 +39,16 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     const audioPath = path.join(audioDir, `${vodId}.mp3`);
     const cookieArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
 
+    oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp laster ned VOD (kan ta 10–40 min)...');
     await execAsync(
       `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --merge-output-format mp4 --no-playlist ${cookieArg} -o "${videoPath}" "${twitchVodUrl}"`,
-      { maxBuffer: 1024 * 1024 * 200 }
+      { maxBuffer: 1024 * 1024 * 200, timeout: 30 * 60 * 1000 }
     );
 
     if (!fs.existsSync(videoPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Videofil ikke funnet etter nedlasting'); return; }
 
     oppdaterJobbStatus(vodId, 'EXTRACTING_AUDIO', 'Ekstraherer audio med FFmpeg...');
-    await execAsync(`ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${audioPath}"`);
+    await execAsync(`ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${audioPath}"`, { timeout: 20 * 60 * 1000 });
     if (!fs.existsSync(audioPath)) { oppdaterJobbStatus(vodId, 'FAILED', 'Lydfil ikke funnet'); return; }
 
     // Transkriber direkte med Whisper – ingen Supabase Storage (unngår filstørrelsesbegrensning)

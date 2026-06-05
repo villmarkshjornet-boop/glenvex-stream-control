@@ -22,6 +22,8 @@ interface RailwayStatus {
   melding?: string;
   segmenter?: number;
   transcribed?: boolean;
+  sisteOppdatering?: string;
+  _pollTid?: string; // satt av klienten
 }
 
 interface HealthStatus { ok: boolean; melding: string; }
@@ -121,6 +123,7 @@ export default function ContentFactoryAdminPage() {
         const res = await fetch(`/api/content-factory/railway-status/${v.id}`).catch(() => null);
         if (!res?.ok) continue;
         const st: RailwayStatus = await res.json();
+        st._pollTid = new Date().toISOString();
         setRailwayStatusMap(prev => ({ ...prev, [v.id]: st }));
 
         // Oppdater Supabase via phase2 når Railway er ferdig
@@ -342,21 +345,34 @@ export default function ContentFactoryAdminPage() {
                     </p>
 
                     {/* Railway live status */}
-                    {rs && (
-                      <p className="text-[9px] mt-1">
-                        <span className="text-g-muted">Railway: </span>
-                        <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : 'text-yellow-400'}`}>
-                          {rs.status}
-                        </span>
-                        {rs.melding && <span className="text-g-muted"> – {rs.melding.slice(0, 80)}</span>}
-                        {rs.segmenter && <span className="text-g-green"> ({rs.segmenter} segmenter)</span>}
-                      </p>
-                    )}
+                    {rs && (() => {
+                      const oppdatertTs = rs.sisteOppdatering ?? rs._pollTid;
+                      const minSiden = oppdatertTs
+                        ? Math.floor((Date.now() - new Date(oppdatertTs).getTime()) / 60000)
+                        : null;
+                      const sitter = minSiden !== null && minSiden >= 5;
+                      return (
+                        <div className={`mt-1 p-1.5 rounded border text-[9px] ${sitter ? 'border-red-500/30 bg-red-500/5' : 'border-transparent'}`}>
+                          <span className="text-g-muted">Railway: </span>
+                          <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : sitter ? 'text-red-400' : 'text-yellow-400'}`}>
+                            {rs.status}
+                          </span>
+                          {rs.melding && <span className="text-g-muted"> – {rs.melding.slice(0, 80)}</span>}
+                          {rs.segmenter && <span className="text-g-green"> ({rs.segmenter} seg)</span>}
+                          {minSiden !== null && (
+                            <span className={`ml-2 ${sitter ? 'text-red-400 font-bold' : 'text-g-muted/60'}`}>
+                              · oppdatert {minSiden === 0 ? 'nå' : `${minSiden}m siden`}
+                              {sitter && ' ⚠ STUCK?'}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
-                  {/* Kjør Phase 2 */}
-                  {erRailwayFerdig && (
-                    <div className="flex-shrink-0">
+                  {/* Høyre-side: Phase 2 eller Force Reset */}
+                  <div className="flex-shrink-0 flex flex-col gap-1.5">
+                    {erRailwayFerdig ? (
                       <button
                         onClick={() => kjørPhase2(v.id)}
                         disabled={phase2Running === v.id}
@@ -364,8 +380,15 @@ export default function ContentFactoryAdminPage() {
                       >
                         {phase2Running === v.id ? '⏳...' : '◆ Kjør Phase 2'}
                       </button>
-                    </div>
-                  )}
+                    ) : null}
+                    <button
+                      onClick={() => retryRailway(v.id)}
+                      className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded hover:border-red-500/30 hover:text-red-400 transition-all"
+                      title="Avbryt og start på nytt"
+                    >
+                      ↺ Force Reset
+                    </button>
+                  </div>
                 </div>
 
                 {/* Phase 2 resultat */}
