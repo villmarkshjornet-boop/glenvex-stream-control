@@ -82,6 +82,13 @@ export async function kjørFullPipeline(
 
         if (railwayRes.ok) {
           const d = await railwayRes.json() as any;
+
+          // Sjekk at dette faktisk er content-factory svar (ikke rot-endepunkt)
+          if (!d.ok || d.status === 'GLENVEX Bot Data API') {
+            steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
+            steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: 'Railway kjører gammel versjon uten content-factory støtte. Redeploy Railway!' });
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'DOWNLOAD_VIDEO feilet' });
+          } else {
           steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
           steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
 
@@ -111,6 +118,7 @@ export async function kjørFullPipeline(
           } else {
             steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: `Railway returnerte ingen signedUrl eller storagePath. Rå svar: ${JSON.stringify(d).slice(0, 200)}` });
           }
+          } // lukk else-blokken for d.ok-sjekk
         } else {
           const err = await railwayRes.json() as any;
           steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
