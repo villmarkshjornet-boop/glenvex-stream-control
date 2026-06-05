@@ -53,7 +53,7 @@ export function trackRaid(username: string, viewers: number) {
   const data = load();
   data.raids.push({ username, viewers, timestamp: new Date().toISOString() });
   save(data);
-  // Sync til Supabase
+  // Sync raid til Supabase
   const db = getBotDb();
   if (db) {
     db.from('role_change_log').insert({
@@ -64,7 +64,7 @@ export function trackRaid(username: string, viewers: number) {
       handling: 'lagt_til',
       aarsak: `Raid med ${viewers} seere`,
       utfort_av: 'bot',
-    }).catch(() => {});
+    }).then(() => {}).catch(() => {});
   }
 }
 
