@@ -33,6 +33,7 @@ export default function ContentFactoryAdminPage() {
   const [starter, setStarter] = useState(false);
   const [startRes, setStartRes] = useState<any>(null);
   const [feil, setFeil] = useState('');
+  const [jobbStatus, setJobbStatus] = useState<any>(null);
   const [valgtHøydepunkt, setValgtHøydepunkt] = useState<string>('');
 
   useEffect(() => {
@@ -70,9 +71,24 @@ export default function ContentFactoryAdminPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setStartRes(data);
-      // Oppdater VOD-liste
       const vodsRes = await fetch('/api/content-factory').then(r => r.json());
       setVods(vodsRes.vods ?? []);
+
+      // Hvis Railway-jobb er startet, poll status fra nettleseren
+      if (data.steg?.find((s: any) => s.steg === 'UPLOAD_AUDIO' && s.status === 'VENTER')) {
+        const botUrl = process.env.NEXT_PUBLIC_BOT_API_URL;
+        if (botUrl && data.vodId) {
+          const pollInterval = setInterval(async () => {
+            const st = await fetch(`${botUrl}/content-factory/status/${data.vodId}`).then(r => r.json()).catch(() => null);
+            if (st) {
+              setJobbStatus(st);
+              if (st.status === 'COMPLETE' || st.status === 'FAILED') {
+                clearInterval(pollInterval);
+              }
+            }
+          }, 15000);
+        }
+      }
     } catch (e) {
       setFeil((e as Error).message);
     }
@@ -141,6 +157,15 @@ export default function ContentFactoryAdminPage() {
           ) : '◆ Start Pipeline'}
         </button>
         {feil && <p className="text-xs text-red-400 font-mono p-2 bg-red-500/10 rounded">✗ {feil}</p>}
+
+        {jobbStatus && (
+          <div className={`p-3 rounded border text-xs font-mono space-y-1 ${jobbStatus.status === 'COMPLETE' ? 'border-g-green/30 bg-g-green/5' : jobbStatus.status === 'FAILED' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-400/30 bg-yellow-400/5'}`}>
+            <p className={jobbStatus.status === 'COMPLETE' ? 'text-g-green font-bold' : jobbStatus.status === 'FAILED' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold'}>
+              Railway jobb: {jobbStatus.status}
+            </p>
+            <p className="text-g-muted">{jobbStatus.melding}</p>
+          </div>
+        )}
         {startRes && (
           <div className="p-3 bg-g-bg border border-g-green/20 rounded-lg space-y-2">
             <p className="text-xs text-g-green font-bold">✓ Pipeline fullført</p>

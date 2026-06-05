@@ -85,40 +85,12 @@ export async function kjørFullPipeline(
 
           if (d.status === 'PROCESSING' || d.ok) {
             steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
-            steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'Jobb startet på Railway – poller status...' });
-
-            // Poll Railway status hvert 15. sek i maks 15 min
-            const maxVentetid = 15 * 60 * 1000;
-            const pollIntervall = 15_000;
-            const startTid = Date.now();
-            let jobbFerdig = false;
-
-            while (Date.now() - startTid < maxVentetid) {
-              await new Promise(r => setTimeout(r, pollIntervall));
-              try {
-                const statusRes = await fetch(`${botApiUrl}/content-factory/status/${vod.id}`);
-                const statusData = await statusRes.json() as any;
-
-                if (statusData.status === 'COMPLETE' && statusData.signedUrl) {
-                  signedAudioUrl = statusData.signedUrl;
-                  steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Audio klar i Supabase Storage` });
-                  jobbFerdig = true;
-                  break;
-                } else if (statusData.status === 'FAILED') {
-                  steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: statusData.melding ?? 'Jobb feilet på Railway' });
-                  jobbFerdig = true;
-                  break;
-                }
-                // Fortsett polling hvis DOWNLOADING/EXTRACTING_AUDIO/UPLOADING
-              } catch {}
-            }
-
-            if (!jobbFerdig) {
-              steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: 'Timeout etter 15 min – Railway jobber kanskje fortsatt' });
-            }
+            steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'Jobb startet på Railway – laster ned i bakgrunnen' });
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'VENTER', melding: `Railway prosesserer – poll status via: ${botApiUrl}/content-factory/status/${vod.id}` });
+            // Ikke poll her – klienten poller via admin-UI
           } else {
             steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
-            steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: `Railway gammel versjon: ${JSON.stringify(d).slice(0, 100)}` });
+            steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: `Railway: ${JSON.stringify(d).slice(0, 100)}` });
             steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'DOWNLOAD_VIDEO feilet' });
           }
         } else {
@@ -137,8 +109,8 @@ export async function kjørFullPipeline(
     steg.push({ steg: 'UPLOAD_AUDIO', status: 'HOPPET OVER', melding: 'Ingen nedlasting' });
   }
 
-  // STEG 2: TRANSCRIBE – Bruk signed URL fra Supabase Storage, ekstern URL, eller hopp over
-  const audioStiEllerUrl = signedAudioUrl ?? opts.audioUrl;
+  // STEG 2: TRANSCRIBE – Bruk ekstern audioUrl hvis Railway ikke er ferdig ennå
+  const audioStiEllerUrl = opts.audioUrl ?? signedAudioUrl;
   if (audioStiEllerUrl) {
     try {
       const { transkriber } = await import('../transcripts/whisperService');
