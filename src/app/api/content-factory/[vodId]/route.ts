@@ -4,6 +4,33 @@ import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { vodId: string } }
+) {
+  const { vodId } = params;
+  if (!vodId) return NextResponse.json({ error: 'vodId mangler' }, { status: 400 });
+
+  const db = getDb();
+  if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
+
+  const [highlightsRes, copyRes] = await Promise.all([
+    db.from('content_highlights')
+      .select('*')
+      .eq('vod_id', vodId)
+      .order('rank', { ascending: true }),
+    db.from('content_copy')
+      .select('*')
+      .eq('vod_id', vodId),
+  ]);
+
+  return NextResponse.json({
+    vodId,
+    highlights: highlightsRes.data ?? [],
+    copy: copyRes.data ?? [],
+  });
+}
+
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: { vodId: string } }
