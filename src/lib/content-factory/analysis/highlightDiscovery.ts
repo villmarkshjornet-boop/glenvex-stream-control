@@ -132,7 +132,7 @@ ${topp.map((k, i) => `${i}. [${k.startTime.toFixed(0)}s-${k.endTime.toFixed(0)}s
         highlights.push({
           id: data.id, vodId, startTime: kandidat.startTime, endTime: kandidat.endTime,
           score: kandidat.score, category: ai.category as HighlightCategory,
-          title: ai.title, begrunnelse: ai.begrunnelse, signals: kandidat.signals, status: 'PENDING',
+          title: ai.title, begrunnelse: ai.begrunnelse, signals: kandidat.signals.map(s => s.description), status: 'PENDING',
         });
       }
     }
