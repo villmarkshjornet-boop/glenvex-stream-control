@@ -12,11 +12,15 @@ import { rangerHighlights, hentToppHighlights } from '../ranking/highlightRanker
 import { genererCopyForAlle } from '../copywriter/copywriterService';
 import { leggIReviewKø } from '../review/reviewQueue';
 import { logPipeline } from './pipelineLogger';
+import { lastNedVod, videoFinnes, hentAudioSti } from '../vod/vodDownloader';
+import fs from 'fs';
 
 export interface OrchestratorOptions {
   streamId: string;
-  audioUrl?: string;           // URL til lydfil for Whisper
-  antallHighlights?: number;   // Antall highlights å produsere (standard: 10)
+  twitchVodUrl?: string;       // Twitch VOD URL (f.eks. https://twitch.tv/videos/123)
+  audioUrl?: string;           // Alternativ: ekstern lyd-URL for Whisper
+  userOauth?: string;          // Twitch user OAuth token (for private VODs)
+  antallHighlights?: number;
   streamData?: {
     raids?: { username: string; viewers: number; timestamp?: string }[];
     chatSpikes?: { timestamp: number; intensity: number }[];
@@ -52,17 +56,35 @@ export async function kjørFullPipeline(
 
   await oppdaterVodStatus(vod.id, 'ANALYZING');
 
-  // STEG 2: TRANSCRIBE – Transkriber VOD
-  if (opts.audioUrl) {
+  // STEG 1b: DOWNLOAD – Last ned VOD med yt-dlp hvis URL er oppgitt
+  let lokaltAudioSti: string | null = null;
+  if (opts.twitchVodUrl) {
+    try {
+      const nedlastet = await lastNedVod(vod.id, opts.twitchVodUrl, opts.userOauth);
+      if (nedlastet) {
+        lokaltAudioSti = nedlastet.audioPath;
+        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
+      } else {
+        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: 'yt-dlp ikke tilgjengelig eller feil' });
+      }
+    } catch (err) {
+      steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: (err as Error).message });
+    }
+  }
+
+  // STEG 2: TRANSCRIBE – Bruk lokalt audio, ekstern URL, eller hopp over
+  const audioStiEllerUrl = lokaltAudioSti ?? opts.audioUrl;
+  if (audioStiEllerUrl) {
     try {
       const { transkriber } = await import('../transcripts/whisperService');
-      await transkriber(vod.id, opts.audioUrl);
+      // Hvis lokal fil – les til buffer og send, ellers bruk URL direkte
+      await transkriber(vod.id, audioStiEllerUrl);
       steg.push({ steg: 'TRANSCRIBE', status: 'OK' });
     } catch (err) {
       steg.push({ steg: 'TRANSCRIBE', status: 'FEILET', melding: (err as Error).message });
     }
   } else {
-    steg.push({ steg: 'TRANSCRIBE', status: 'HOPPET OVER', melding: 'Ingen audioUrl oppgitt' });
+    steg.push({ steg: 'TRANSCRIBE', status: 'HOPPET OVER', melding: 'Ingen lyd tilgjengelig – oppgi twitchVodUrl eller audioUrl' });
   }
 
   // STEG 3: DISCOVER – Oppdage highlights

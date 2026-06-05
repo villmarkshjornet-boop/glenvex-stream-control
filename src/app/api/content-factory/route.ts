@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     streamId: string;
+    twitchVodUrl?: string;
     audioUrl?: string;
+    userOauth?: string;
     antallHighlights?: number;
     streamData?: any;
   };
@@ -51,11 +53,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'streamId kreves' }, { status: 400 });
   }
 
+  // Auto-bygg Twitch VOD URL hvis ikke oppgitt
+  const twitchVodUrl = body.twitchVodUrl
+    ?? (body.streamId ? `https://www.twitch.tv/videos/${body.streamId}` : undefined);
+
   try {
     const { kjørFullPipeline } = await import('@/lib/content-factory/jobs/orchestrator');
     const resultat = await kjørFullPipeline({
       streamId: body.streamId,
+      twitchVodUrl,
       audioUrl: body.audioUrl,
+      userOauth: body.userOauth ?? process.env.TWITCH_USER_OAUTH,
       antallHighlights: body.antallHighlights ?? 10,
       streamData: body.streamData,
     });
