@@ -85,25 +85,31 @@ export async function kjørFullPipeline(
           steg.splice(steg.findIndex(s => s.steg === 'DOWNLOAD_VIDEO'), 1);
           steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
 
-          // Generer signed URL fra Vercel (Vercel har egne Supabase-credentials)
-          const storagePath = d.storagePath ?? `content-factory/audio/${vod.id}.mp3`;
-          try {
-            const { getDb } = await import('@/lib/db');
-            const db = getDb();
-            if (!db) throw new Error('Supabase ikke tilkoblet fra Vercel');
-
-            const { data: signedData, error: signErr } = await db.storage
-              .from('glenvex-assets')
-              .createSignedUrl(storagePath, 3600);
-
-            if (signErr || !signedData?.signedUrl) {
-              throw new Error(`Signed URL feil: ${signErr?.message ?? 'tom URL'}`);
+          // Bruk signed URL fra Railway direkte (Railway genererte den lokalt)
+          if (d.signedUrl) {
+            signedAudioUrl = d.signedUrl;
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Audio i Supabase Storage – URL klar` });
+          } else if (d.storagePath) {
+            // Fallback: prøv å generere fra Vercel
+            try {
+              const { getDb } = await import('@/lib/db');
+              const db = getDb();
+              if (db) {
+                const { data: sd } = await db.storage
+                  .from('glenvex-assets')
+                  .createSignedUrl(d.storagePath, 3600);
+                if (sd?.signedUrl) {
+                  signedAudioUrl = sd.signedUrl;
+                  steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: 'Signed URL generert fra Vercel' });
+                } else {
+                  steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: 'Ingen signed URL returnert' });
+                }
+              }
+            } catch (e) {
+              steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: (e as Error).message });
             }
-
-            signedAudioUrl = signedData.signedUrl;
-            steg.push({ steg: 'UPLOAD_AUDIO', status: 'OK', melding: `Audio i Supabase Storage – signed URL generert` });
-          } catch (signErr) {
-            steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: (signErr as Error).message });
+          } else {
+            steg.push({ steg: 'UPLOAD_AUDIO', status: 'FEILET', melding: `Railway returnerte ingen signedUrl eller storagePath. Rå svar: ${JSON.stringify(d).slice(0, 200)}` });
           }
         } else {
           const err = await railwayRes.json() as any;
