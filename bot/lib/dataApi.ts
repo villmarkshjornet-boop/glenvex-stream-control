@@ -129,7 +129,15 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       segmenter: totalSegmenter,
     });
 
-    console.log(`[ContentFactory] ✓ Jobb ferdig: ${vodId}`);
+    // Oppdater Supabase → TRANSCRIBED slik at Vercel auto-trigger Phase 2
+    await sb.from('content_vods').update({
+      status: 'TRANSCRIBED',
+      current_step: 'DISCOVER',
+      progress_percent: 30,
+      status_message: `Transkribering ferdig (${totalSegmenter} segmenter) – Phase 2 starter automatisk`,
+    }).eq('id', vodId);
+
+    console.log(`[ContentFactory] ✓ Jobb ferdig: ${vodId} – ${totalSegmenter} segmenter, status satt til TRANSCRIBED`);
   } catch (err: any) {
     console.error(`[ContentFactory] ✗ Jobb feilet: ${err.message}`);
     oppdaterJobbStatus(vodId, 'FAILED', err.message);

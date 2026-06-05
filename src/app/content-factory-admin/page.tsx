@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 interface Vod {
@@ -84,6 +84,7 @@ export default function ContentFactoryAdminPage() {
   const [railwayStatusMap, setRailwayStatusMap] = useState<Record<string, RailwayStatus>>({});
   const [phase2Running, setPhase2Running] = useState<string | null>(null);
   const [phase2Res, setPhase2Res] = useState<Record<string, any>>({});
+  const autoTriggertRef = useRef<Set<string>>(new Set()); // dedup: ikke trigger Phase 2 to ganger
   const [aktivertVod, setAktivertVod] = useState<string | null>(null);
   const [aktivert, setAktivert] = useState<boolean | null>(null);
 
@@ -113,6 +114,18 @@ export default function ContentFactoryAdminPage() {
     const cleanupId = setInterval(kjørCleanup, 60_000); // cleanup hvert minutt
     return () => { clearInterval(id); clearInterval(cleanupId); };
   }, [hentVods, kjørCleanup]);
+
+  // ─── Auto-trigger Phase 2 når Railway er ferdig (status = TRANSCRIBED) ──────
+  useEffect(() => {
+    const transcribed = vods.filter(v => v.status === 'TRANSCRIBED');
+    for (const v of transcribed) {
+      if (!autoTriggertRef.current.has(v.id) && phase2Running !== v.id) {
+        autoTriggertRef.current.add(v.id);
+        console.log(`[AutoPhase2] Starter Phase 2 for ${v.id}`);
+        kjørPhase2(v.id);
+      }
+    }
+  }, [vods]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Health check ─────────────────────────────────────────────────────────
   const sjekkHealth = async () => {
@@ -233,7 +246,7 @@ export default function ContentFactoryAdminPage() {
     </div>
   );
 
-  const aktiveVods = vods.filter(v => ['PENDING', 'ANALYZING'].includes(v.status));
+  const aktiveVods = vods.filter(v => ['PENDING', 'ANALYZING', 'TRANSCRIBED'].includes(v.status));
   const ferdige = vods.filter(v => v.status === 'COMPLETE');
   const feilede = vods.filter(v => v.status === 'FAILED');
 
@@ -382,8 +395,11 @@ export default function ContentFactoryAdminPage() {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <p className="text-[9px] text-g-muted mt-1">
-                      {v.status_message ?? v.current_step ?? v.status} ({pct}%)
+                    <p className="text-[9px] mt-1">
+                      {v.status === 'TRANSCRIBED'
+                        ? <span className="text-g-green font-bold">✓ Transkribering ferdig – Phase 2 starter automatisk...</span>
+                        : <span className="text-g-muted">{v.status_message ?? v.current_step ?? v.status} ({pct}%)</span>
+                      }
                     </p>
 
                     {/* Railway live status */}
