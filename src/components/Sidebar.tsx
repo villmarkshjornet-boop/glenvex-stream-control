@@ -30,6 +30,7 @@ const NAV: NavSeksjon[] = [
       { label: 'Streamplan',    href: '/streamplan' },
       { label: 'AI Producer',   href: '/ai-producer' },
       { label: 'Stream Coach',  href: '/stream-coach' },
+      { label: 'Raid Manager',  href: '/raid-manager' },
       { label: 'Vekstanalyse',  href: '/statistikk' },
     ],
   },
@@ -42,7 +43,6 @@ const NAV: NavSeksjon[] = [
       { label: 'Oversikt',           href: '/discord' },
       { label: 'Community Manager',  href: '/community-manager' },
       { label: 'Moderator',          href: '/moderation' },
-      { label: 'Raid Manager',       href: '/raid-manager' },
     ],
   },
   {

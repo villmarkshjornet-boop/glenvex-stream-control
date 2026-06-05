@@ -114,54 +114,24 @@ export async function POST() {
 
     const vodId = nyVod.id;
 
-    // Kall Railway direkte
-    let railwayStartet = false;
-    let railwayFeil: string | null = null;
-    try {
-      const railRes = await fetch(`${botApiUrl}/content-factory/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vodId,
-          twitchVodUrl: vodUrl,
-          userOauth: process.env.TWITCH_USER_OAUTH,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
+    // Sett ANALYZING i DB umiddelbart
+    await db.from('content_vods').update({
+      status: 'ANALYZING',
+      current_step: 'DOWNLOAD',
+      progress_percent: 10,
+      status_message: 'Sendt til Railway – starter nedlasting...',
+    }).eq('id', vodId);
 
-      if (railRes.ok || railRes.status === 202) {
-        railwayStartet = true;
-        await db.from('content_vods').update({
-          status: 'ANALYZING',
-          current_step: 'TRANSCRIBING',
-          progress_percent: 10,
-          status_message: 'Railway laster ned og transkriberer VOD...',
-        }).eq('id', vodId);
-      } else {
-        railwayFeil = `Railway HTTP ${railRes.status}: ${(await railRes.text().catch(() => '')).slice(0, 200)}`;
-        await db.from('content_vods').update({
-          status: 'FAILED',
-          error_message: railwayFeil,
-          progress_percent: 0,
-        }).eq('id', vodId);
-      }
-    } catch (e: any) {
-      railwayFeil = `Kan ikke nå Railway: ${e.message}`;
-      await db.from('content_vods').update({
-        status: 'FAILED',
-        error_message: railwayFeil,
-        progress_percent: 0,
-      }).eq('id', vodId);
-    }
-
-    if (!railwayStartet) {
-      return NextResponse.json({
-        ok: false,
-        error: railwayFeil ?? 'Railway svarte ikke',
+    // Fire-and-forget til Railway – ikke vent på svar (Railway kan bruke lang tid på cold start)
+    fetch(`${botApiUrl}/content-factory/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         vodId,
-        hint: 'VOD er opprettet i DB men Railway-prosessen startet ikke. Sjekk at Railway er oppe.',
-      }, { status: 500 });
-    }
+        twitchVodUrl: vodUrl,
+        userOauth: process.env.TWITCH_USER_OAUTH,
+      }),
+    }).catch(() => {});
 
     return NextResponse.json({
       ok: true,

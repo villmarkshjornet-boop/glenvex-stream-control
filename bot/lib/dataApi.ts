@@ -18,7 +18,7 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
   fs.writeFileSync(fil, JSON.stringify({ jobId: vodId, status, melding, ...ekstra, oppdatert: ts, sisteOppdatering: ts }));
   console.log(`[CF] ${vodId} → ${status}: ${melding}`);
 
-  // Skriv også til Supabase – viktig ved heartbeat og Railway-restart
+  // Skriv til Supabase – all fremdrift vises i UI
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (sbUrl && sbKey) {
@@ -27,6 +27,16 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
       update.status = 'FAILED';
       update.error_message = melding;
       update.progress_percent = 0;
+      update.current_step = 'DOWNLOAD';
+    } else if (status === 'DOWNLOADING') {
+      update.status = 'ANALYZING';
+      update.current_step = 'DOWNLOAD';
+      // progress fra ekstra-argument eller default
+      update.progress_percent = ekstra?.progress ?? 15;
+    } else if (status === 'TRANSCRIBING') {
+      update.status = 'ANALYZING';
+      update.current_step = 'TRANSCRIBING';
+      update.progress_percent = ekstra?.progress ?? 40;
     }
     fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vodId}`, {
       method: 'PATCH',

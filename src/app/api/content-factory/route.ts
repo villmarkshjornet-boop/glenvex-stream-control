@@ -97,67 +97,41 @@ export async function POST(req: NextRequest) {
   if (dbErr) return NextResponse.json({ error: `DB-feil: ${dbErr.message}` }, { status: 500 });
 
   const vodId = vod.id;
-
-  // Kall Railway Phase 1 asynkront
   const botApiUrl = process.env.BOT_API_URL;
-  let railwayStartet = false;
-  let railwayFeil: string | null = null;
 
   if (!botApiUrl) {
-    railwayFeil = 'BOT_API_URL er ikke satt i Vercel – Railway kan ikke nås';
     await db.from('content_vods').update({
       status: 'FAILED',
-      error_message: railwayFeil,
-      current_step: 'DOWNLOAD',
+      error_message: 'BOT_API_URL er ikke satt i Vercel – Railway kan ikke nås',
       progress_percent: 0,
     }).eq('id', vodId);
-  } else {
-    try {
-      const res = await fetch(`${botApiUrl}/content-factory/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vodId,
-          twitchVodUrl,
-          userOauth: process.env.TWITCH_USER_OAUTH,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-
-      if (res.ok || res.status === 202) {
-        railwayStartet = true;
-        await db.from('content_vods').update({
-          status: 'ANALYZING',
-          current_step: 'TRANSCRIBING',
-          progress_percent: 10,
-          status_message: 'Railway laster ned og transkriberer VOD...',
-        }).eq('id', vodId);
-      } else {
-        const body = await res.text().catch(() => '');
-        railwayFeil = `Railway HTTP ${res.status}: ${body.slice(0, 300)}`;
-        await db.from('content_vods').update({
-          status: 'FAILED',
-          error_message: railwayFeil,
-          current_step: 'DOWNLOAD',
-          progress_percent: 0,
-        }).eq('id', vodId);
-      }
-    } catch (e: any) {
-      railwayFeil = `Kan ikke nå Railway: ${e.message}`;
-      await db.from('content_vods').update({
-        status: 'FAILED',
-        error_message: railwayFeil,
-        current_step: 'DOWNLOAD',
-        progress_percent: 0,
-      }).eq('id', vodId);
-    }
+    return NextResponse.json({ ok: false, vodId, railwayFeil: 'BOT_API_URL mangler' });
   }
 
+  // Sett ANALYZING umiddelbart
+  await db.from('content_vods').update({
+    status: 'ANALYZING',
+    current_step: 'DOWNLOAD',
+    progress_percent: 10,
+    status_message: 'Sendt til Railway – starter nedlasting...',
+  }).eq('id', vodId);
+
+  // Fire-and-forget – ikke vent på Railway (kan være treg ved cold start)
+  fetch(`${botApiUrl}/content-factory/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      vodId,
+      twitchVodUrl,
+      userOauth: process.env.TWITCH_USER_OAUTH,
+    }),
+  }).catch(() => {});
+
   return NextResponse.json({
-    ok: railwayStartet,
+    ok: true,
     vodId,
     vodTitle: vodMeta.title,
-    railwayStartet,
-    railwayFeil,
+    railwayStartet: true,
+    railwayFeil: null,
   });
 }
