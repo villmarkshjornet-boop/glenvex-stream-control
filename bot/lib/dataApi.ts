@@ -72,6 +72,66 @@ export function startDataApi(port = 4242) {
     }
   });
 
+  // ── Content Factory: VOD-nedlasting og transkripsjon ───────────────────────
+  if (url === '/content-factory/process' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk: any) => { body += chunk; });
+    req.on('end', async () => {
+      res.setHeader('Content-Type', 'application/json');
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'FEATURE_DISABLED' }));
+        return;
+      }
+      try {
+        const { vodId, twitchVodUrl, userOauth } = JSON.parse(body);
+        const { execSync } = require('child_process');
+
+        // Sjekk om yt-dlp finnes
+        let ytDlpOk = false;
+        try { execSync('yt-dlp --version', { stdio: 'ignore' }); ytDlpOk = true; } catch {}
+
+        if (!ytDlpOk) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: 'yt-dlp ikke tilgjengelig på denne serveren' }));
+          return;
+        }
+
+        const path = require('path');
+        const fsMod = require('fs');
+        const { promisify } = require('util');
+        const execAsync = promisify(require('child_process').exec);
+
+        const outDir = path.join(process.cwd(), 'data', 'content-factory', 'raw-vods');
+        const audioDir = path.join(process.cwd(), 'data', 'content-factory', 'transcripts');
+        if (!fsMod.existsSync(outDir)) fsMod.mkdirSync(outDir, { recursive: true });
+        if (!fsMod.existsSync(audioDir)) fsMod.mkdirSync(audioDir, { recursive: true });
+
+        const videoPath = path.join(outDir, `${vodId}.mp4`);
+        const audioPath = path.join(audioDir, `${vodId}.mp3`);
+
+        // Last ned med yt-dlp
+        const cookieArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
+        await execAsync(`yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --merge-output-format mp4 --no-playlist ${cookieArg} -o "${videoPath}" "${twitchVodUrl}"`);
+
+        // Ekstraher audio
+        await execAsync(`ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${audioPath}"`);
+
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ok: true,
+          videoPath,
+          audioPath,
+          audioSize: fsMod.statSync(audioPath).size,
+        }));
+      } catch (err: any) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   server.listen(port, () => {
     console.log(`  ✓ Data API kjører på port ${port}`);
   });

@@ -56,24 +56,41 @@ export async function kjørFullPipeline(
 
   await oppdaterVodStatus(vod.id, 'ANALYZING');
 
-  // STEG 1b: DOWNLOAD – Last ned VOD med yt-dlp hvis URL er oppgitt
-  let lokaltAudioSti: string | null = null;
+  // STEG 1b: DOWNLOAD – Kall Railway-boten for yt-dlp nedlasting (Vercel støtter ikke dette)
+  let railwayAudioSti: string | null = null;
   if (opts.twitchVodUrl) {
-    try {
-      const nedlastet = await lastNedVod(vod.id, opts.twitchVodUrl, opts.userOauth);
-      if (nedlastet) {
-        lokaltAudioSti = nedlastet.audioPath;
-        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: 'VOD lastet ned og audio ekstrahert' });
-      } else {
-        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: 'yt-dlp ikke tilgjengelig eller feil' });
+    const botApiUrl = process.env.BOT_API_URL;
+    if (botApiUrl) {
+      try {
+        const railwayRes = await fetch(`${botApiUrl}/content-factory/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vodId: vod.id,
+            twitchVodUrl: opts.twitchVodUrl,
+            userOauth: opts.userOauth ?? process.env.TWITCH_USER_OAUTH,
+          }),
+          signal: AbortSignal.timeout(300_000), // 5 min timeout
+        });
+        if (railwayRes.ok) {
+          const railwayData = await railwayRes.json() as any;
+          // Railway lagrer audio lokalt – vi bruker Railway BOT API URL for Whisper
+          railwayAudioSti = railwayData.audioPath;
+          steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'OK', melding: `Lastet ned via Railway – audio klar` });
+        } else {
+          const err = await railwayRes.json() as any;
+          steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: err.error ?? 'Railway feil' });
+        }
+      } catch (err) {
+        steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: (err as Error).message });
       }
-    } catch (err) {
-      steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'FEILET', melding: (err as Error).message });
+    } else {
+      steg.push({ steg: 'DOWNLOAD_VIDEO', status: 'HOPPET OVER', melding: 'BOT_API_URL ikke satt i Vercel' });
     }
   }
 
-  // STEG 2: TRANSCRIBE – Bruk lokalt audio, ekstern URL, eller hopp over
-  const audioStiEllerUrl = lokaltAudioSti ?? opts.audioUrl;
+  // STEG 2: TRANSCRIBE – Bruk Railway-audio (lokal fil), ekstern URL, eller hopp over
+  const audioStiEllerUrl = railwayAudioSti ?? opts.audioUrl;
   if (audioStiEllerUrl) {
     try {
       const { transkriber } = await import('../transcripts/whisperService');
