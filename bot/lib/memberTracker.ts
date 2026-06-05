@@ -97,7 +97,7 @@ export async function lasterMedlemmerFraSupabase(): Promise<void> {
       { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
     );
     if (!res.ok) return;
-    const rows: any[] = await res.json();
+    const rows = await res.json() as any[];
     if (!rows || rows.length === 0) return;
 
     const members: Record<string, MemberProfile> = {};

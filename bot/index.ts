@@ -780,14 +780,14 @@ async function gjenopprettStuckeVods() {
       headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
     });
     if (!res.ok) return;
-    const stucke: any[] = await res.json();
+    const stucke = await res.json() as any[];
     for (const vod of stucke) {
       await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vod.id}`, {
         method: 'PATCH',
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify({ status: 'FAILED', error_message: 'Railway restartet midt i prosessen – kjør på nytt via Force Reset', progress_percent: 0 }),
       });
-      addLog('warn', `Satte stuck VOD til FAILED etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
+      addLog('warning', `Satte stuck VOD til FAILED etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
     }
     if (stucke.length > 0) console.log(`[Recovery] Satte ${stucke.length} stuck VOD(er) til FAILED`);
   } catch {}
