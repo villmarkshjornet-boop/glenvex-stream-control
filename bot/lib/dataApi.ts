@@ -234,17 +234,22 @@ export function startDataApi(port = 4242) {
       if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
         res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
       }
-      const { createClient } = require('@supabase/supabase-js');
-      const ws = require('ws');
-      const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
-      await sb.from('content_highlights').update({
-        clip_status: 'READY_FOR_CLIP',
-        clip_error: null,
-        clip_url: null,
-        vertical_clip_url: null,
-      }).eq('id', highlightId);
-      res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, melding: `Highlight ${highlightId} resatt til READY_FOR_CLIP` }));
+      (async () => {
+        const { createClient } = require('@supabase/supabase-js');
+        const ws = require('ws');
+        const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { realtime: { transport: ws } });
+        await sb.from('content_highlights').update({
+          clip_status: 'READY_FOR_CLIP',
+          clip_error: null,
+          clip_url: null,
+          vertical_clip_url: null,
+        }).eq('id', highlightId);
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, melding: `Highlight ${highlightId} resatt til READY_FOR_CLIP` }));
+      })().catch((err: any) => {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+      });
       return;
     }
 
