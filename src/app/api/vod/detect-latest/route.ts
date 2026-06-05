@@ -1,16 +1,10 @@
-/**
- * /api/vod/detect-latest POST
- * Henter siste arkiverte VOD fra Twitch og starter Content Factory pipeline
- * hvis den ikke allerede er behandlet. Brukes som manuell fallback når
- * Railway-boten ikke detekterte stream-slutt automatisk.
- */
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 20;
+export const maxDuration = 25;
 
 async function getTwitchToken(): Promise<string | null> {
   const clientId = process.env.TWITCH_CLIENT_ID;
@@ -26,6 +20,23 @@ async function getTwitchToken(): Promise<string | null> {
   } catch { return null; }
 }
 
+async function getTwitchUserId(clientId: string, token: string, username: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(username)}`, {
+      headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json() as any;
+    return data.data?.[0]?.id ?? null;
+  } catch { return null; }
+}
+
+function parseDurationSek(duration: string): number {
+  const m = (duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+  if (!m) return 0;
+  return (parseInt(m[1] ?? '0') * 3600) + (parseInt(m[2] ?? '0') * 60) + parseInt(m[3] ?? '0');
+}
+
 export async function POST() {
   if (!isContentFactoryEnabled()) {
     return NextResponse.json({ error: 'Content Factory er deaktivert' }, { status: 403 });
@@ -33,10 +44,13 @@ export async function POST() {
 
   const clientId = process.env.TWITCH_CLIENT_ID;
   const username = process.env.TWITCH_USERNAME;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+  const botApiUrl = process.env.BOT_API_URL;
 
   if (!clientId || !username) {
     return NextResponse.json({ error: 'TWITCH_CLIENT_ID eller TWITCH_USERNAME mangler' }, { status: 500 });
+  }
+  if (!botApiUrl) {
+    return NextResponse.json({ error: 'BOT_API_URL mangler – Railway kan ikke nås' }, { status: 500 });
   }
 
   const token = await getTwitchToken();
@@ -44,18 +58,11 @@ export async function POST() {
     return NextResponse.json({ error: 'Kunne ikke hente Twitch-token – sjekk TWITCH_CLIENT_SECRET' }, { status: 500 });
   }
 
-  // Hent bruker-ID
-  const userRes = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(username)}`, {
-    headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(8000),
-  });
-  const userData = await userRes.json() as any;
-  const userId = userData.data?.[0]?.id;
+  const userId = await getTwitchUserId(clientId, token, username);
   if (!userId) {
     return NextResponse.json({ error: `Fant ikke Twitch-bruker: ${username}` }, { status: 404 });
   }
 
-  // Hent siste 3 arkiverte VODs (type=archive)
   const vodRes = await fetch(`https://api.twitch.tv/helix/videos?user_id=${userId}&type=archive&first=3`, {
     headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(8000),
@@ -64,10 +71,12 @@ export async function POST() {
   const vods: any[] = vodData.data ?? [];
 
   if (vods.length === 0) {
-    return NextResponse.json({ error: 'Ingen arkiverte VODs funnet på Twitch', hint: 'VODs kan ta noen minutter å dukke opp etter stream-slutt' }, { status: 404 });
+    return NextResponse.json({
+      error: 'Ingen arkiverte VODs funnet på Twitch',
+      hint: 'VODs kan ta noen minutter å dukke opp etter stream-slutt',
+    }, { status: 404 });
   }
 
-  // Finn første VOD som ikke allerede er behandlet
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
 
@@ -77,32 +86,80 @@ export async function POST() {
       .eq('workspace_id', getWorkspaceId())
       .eq('twitch_vod_id', vod.id);
 
-    if ((count ?? 0) > 0) continue; // allerede behandlet
+    if ((count ?? 0) > 0) continue;
 
-    // Parse varighet
-    let durationSek = 0;
-    const m = (vod.duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
-    if (m) durationSek = (parseInt(m[1] ?? '0') * 3600) + (parseInt(m[2] ?? '0') * 60) + parseInt(m[3] ?? '0');
-
+    const durationSek = parseDurationSek(vod.duration ?? '');
     const vodUrl = `https://www.twitch.tv/videos/${vod.id}`;
 
-    // Start Content Factory pipeline
-    if (!appUrl) {
-      return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL mangler – kan ikke starte pipeline' }, { status: 500 });
-    }
-    const base = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
-    const pipelineRes = await fetch(`${base}/api/content-factory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ streamId: vod.id, twitchVodUrl: vodUrl }),
-    });
-    const pipelineData = await pipelineRes.json().catch(() => ({}));
+    // Opprett VOD-rad direkte i DB (ingen self-referencing HTTP kall)
+    const { data: nyVod, error: dbErr } = await db.from('content_vods').insert({
+      workspace_id: getWorkspaceId(),
+      stream_id: vod.id,
+      twitch_vod_id: vod.id,
+      title: vod.title,
+      category: vod.game_name ?? 'Ukjent',
+      duration_seconds: durationSek,
+      started_at: vod.published_at,
+      vod_url: vodUrl,
+      thumbnail_url: (vod.thumbnail_url ?? '').replace('%{width}', '640').replace('%{height}', '360'),
+      status: 'PENDING',
+      current_step: 'DOWNLOAD',
+      progress_percent: 5,
+      status_message: 'VOD opprettet via manuell deteksjon – starter Railway...',
+    }).select().single();
 
-    if (!pipelineRes.ok) {
+    if (dbErr) {
+      return NextResponse.json({ error: `DB-feil: ${dbErr.message}` }, { status: 500 });
+    }
+
+    const vodId = nyVod.id;
+
+    // Kall Railway direkte
+    let railwayStartet = false;
+    let railwayFeil: string | null = null;
+    try {
+      const railRes = await fetch(`${botApiUrl}/content-factory/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vodId,
+          twitchVodUrl: vodUrl,
+          userOauth: process.env.TWITCH_USER_OAUTH,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (railRes.ok || railRes.status === 202) {
+        railwayStartet = true;
+        await db.from('content_vods').update({
+          status: 'ANALYZING',
+          current_step: 'TRANSCRIBING',
+          progress_percent: 10,
+          status_message: 'Railway laster ned og transkriberer VOD...',
+        }).eq('id', vodId);
+      } else {
+        railwayFeil = `Railway HTTP ${railRes.status}: ${(await railRes.text().catch(() => '')).slice(0, 200)}`;
+        await db.from('content_vods').update({
+          status: 'FAILED',
+          error_message: railwayFeil,
+          progress_percent: 0,
+        }).eq('id', vodId);
+      }
+    } catch (e: any) {
+      railwayFeil = `Kan ikke nå Railway: ${e.message}`;
+      await db.from('content_vods').update({
+        status: 'FAILED',
+        error_message: railwayFeil,
+        progress_percent: 0,
+      }).eq('id', vodId);
+    }
+
+    if (!railwayStartet) {
       return NextResponse.json({
-        error: 'Pipeline-start feilet',
-        detalj: pipelineData.error ?? pipelineData.railwayFeil ?? 'Ukjent feil',
-        vod: { id: vod.id, title: vod.title, duration: vod.duration, url: vodUrl },
+        ok: false,
+        error: railwayFeil ?? 'Railway svarte ikke',
+        vodId,
+        hint: 'VOD er opprettet i DB men Railway-prosessen startet ikke. Sjekk at Railway er oppe.',
       }, { status: 500 });
     }
 
@@ -110,11 +167,10 @@ export async function POST() {
       ok: true,
       melding: `Pipeline startet for: "${vod.title}"`,
       vod: { id: vod.id, title: vod.title, duration: vod.duration, durationSek, url: vodUrl, publishedAt: vod.published_at },
-      vodId: pipelineData.vodId,
+      vodId,
     });
   }
 
-  // Alle VODs er allerede behandlet
   return NextResponse.json({
     ok: false,
     alleredeBehandlet: true,
@@ -124,7 +180,6 @@ export async function POST() {
 }
 
 export async function GET() {
-  // Hent liste over siste VODs uten å starte pipeline – for preview
   const clientId = process.env.TWITCH_CLIENT_ID;
   const username = process.env.TWITCH_USERNAME;
 
@@ -136,12 +191,7 @@ export async function GET() {
   if (!token) return NextResponse.json({ vods: [], error: 'Token-feil' });
 
   try {
-    const userRes = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(username)}`, {
-      headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    const userData = await userRes.json() as any;
-    const userId = userData.data?.[0]?.id;
+    const userId = await getTwitchUserId(clientId, token, username);
     if (!userId) return NextResponse.json({ vods: [] });
 
     const vodRes = await fetch(`https://api.twitch.tv/helix/videos?user_id=${userId}&type=archive&first=5`, {

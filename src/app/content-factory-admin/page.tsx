@@ -248,7 +248,8 @@ export default function ContentFactoryAdminPage() {
     } else if (d.alleredeBehandlet) {
       setDetektFeil(d.melding);
     } else {
-      setDetektFeil(d.error ?? d.detalj ?? 'Ukjent feil');
+      const detalj = d.hint ? ` – ${d.hint}` : '';
+      setDetektFeil((d.error ?? d.detalj ?? 'Ukjent feil') + detalj);
     }
     setDetekterer(false);
   }

@@ -23,7 +23,7 @@ import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers } from './lib/memberTracker';
-import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession } from './lib/streamHistory';
+import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
@@ -136,6 +136,11 @@ async function checkLive() {
       await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
       await postPreLiveHype(stream.title ?? '', stream.game ?? '');
     } else if (stream.isLive && stream.id) {
+      // Gjenopprett session hvis boten restartet mens stream var live
+      if (!getActiveSession()) {
+        startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
+        addLog('info', `Stream Coach: gjenopprettet session for pågående stream "${stream.title}"`, 'OK');
+      }
       updateSession(stream.viewerCount ?? 0);
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
