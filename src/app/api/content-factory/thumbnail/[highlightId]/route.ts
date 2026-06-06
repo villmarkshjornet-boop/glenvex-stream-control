@@ -153,37 +153,44 @@ export async function POST(
     const ytPrompt = byggPrompt('youtube', h, vod, copy);
     const ttPrompt = byggPrompt('tiktok', h, vod, copy);
 
-    // Generer begge thumbnails parallelt – fang faktisk feilmelding
-    let ytErr: string | null = null;
-    let ttErr: string | null = null;
-    const [ytRes, ttRes] = await Promise.all([
-      client.images.generate({
-        model: 'dall-e-3', prompt: ytPrompt, n: 1,
-        size: '1792x1024', quality: 'standard',
-      }).catch((e: any) => { ytErr = String(e?.message ?? e).slice(0, 300); return null; }),
-      client.images.generate({
-        model: 'dall-e-3', prompt: ttPrompt, n: 1,
-        size: '1024x1792', quality: 'standard',
-      }).catch((e: any) => { ttErr = String(e?.message ?? e).slice(0, 300); return null; }),
+    // Generer begge formater parallelt med gpt-image-1
+    const genererBilde = async (
+      prompt: string,
+      size: '1536x1024' | '1024x1536',
+    ): Promise<{ buf: Buffer | null; err: string | null }> => {
+      try {
+        const res = await (client.images.generate as any)({
+          model: 'gpt-image-1', prompt, n: 1, size, quality: 'medium',
+        });
+        const item = res?.data?.[0];
+        if (item?.b64_json) return { buf: Buffer.from(item.b64_json, 'base64'), err: null };
+        if (item?.url) {
+          const r = await fetch(item.url, { signal: AbortSignal.timeout(20_000) });
+          return { buf: r.ok ? Buffer.from(await r.arrayBuffer()) : null, err: null };
+        }
+        return { buf: null, err: 'Tomt svar fra API' };
+      } catch (e: any) {
+        return { buf: null, err: String(e?.message ?? e).slice(0, 300) };
+      }
+    };
+
+    const [ytResult, ttResult] = await Promise.all([
+      genererBilde(ytPrompt, '1536x1024'),
+      genererBilde(ttPrompt, '1024x1536'),
     ]);
 
-    // Last ned PNG-bytes og last opp parallelt
-    const [ytBuf, ttBuf] = await Promise.all([
-      ytRes?.data?.[0]?.url ? hentPng(ytRes.data[0].url!) : Promise.resolve(null),
-      ttRes?.data?.[0]?.url ? hentPng(ttRes.data[0].url!) : Promise.resolve(null),
-    ]);
-
+    const baseSti = `content-factory/thumbnails/${h.vod_id}/${highlightId}`;
     const [ytUrl, ttUrl] = await Promise.all([
-      ytBuf ? lastOpp(db, ytBuf, `content-factory/thumbnails/${h.vod_id}/${highlightId}_youtube.png`) : Promise.resolve(null),
-      ttBuf ? lastOpp(db, ttBuf, `content-factory/thumbnails/${h.vod_id}/${highlightId}_tiktok.png`) : Promise.resolve(null),
+      ytResult.buf ? lastOpp(db, ytResult.buf, `${baseSti}_youtube.png`) : Promise.resolve(null),
+      ttResult.buf ? lastOpp(db, ttResult.buf, `${baseSti}_tiktok.png`) : Promise.resolve(null),
     ]);
 
     if (!ytUrl && !ttUrl) {
       const detaljer = [
-        ytErr ? `YouTube: ${ytErr}` : null,
-        ttErr ? `TikTok: ${ttErr}` : null,
+        ytResult.err ? `YouTube: ${ytResult.err}` : null,
+        ttResult.err ? `TikTok: ${ttResult.err}` : null,
       ].filter(Boolean).join(' | ');
-      throw new Error(`DALL-E feilet${detaljer ? `: ${detaljer}` : ''}`);
+      throw new Error(`Bildegenerering feilet${detaljer ? `: ${detaljer}` : ''}`);
     }
 
     // Oppdater DB

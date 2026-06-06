@@ -90,7 +90,7 @@ function byggPrompt(
     `No violence, no blood, no weapons visible. Clean graphic design.`;
 }
 
-// ── Last ned PNG fra DALL-E URL ───────────────────────────────────────────────
+// ── Last ned PNG fra URL ──────────────────────────────────────────────────────
 
 async function hentPng(url: string): Promise<Buffer | null> {
   try {
@@ -98,6 +98,30 @@ async function hentPng(url: string): Promise<Buffer | null> {
     if (!res.ok) return null;
     return Buffer.from(await res.arrayBuffer());
   } catch { return null; }
+}
+
+// ── Generer bilde med gpt-image-1 ─────────────────────────────────────────────
+
+async function genererBilde(
+  client: OpenAI,
+  prompt: string,
+  size: '1536x1024' | '1024x1536',
+): Promise<{ buf: Buffer | null; err: string | null }> {
+  try {
+    const res = await (client.images.generate as any)({
+      model: 'gpt-image-1',
+      prompt,
+      n: 1,
+      size,
+      quality: 'medium',
+    });
+    const item = res?.data?.[0];
+    if (item?.b64_json) return { buf: Buffer.from(item.b64_json, 'base64'), err: null };
+    if (item?.url) return { buf: await hentPng(item.url), err: null };
+    return { buf: null, err: 'Tomt svar fra API' };
+  } catch (e: any) {
+    return { buf: null, err: String(e?.message ?? e).slice(0, 300) };
+  }
 }
 
 // ── Last opp til Supabase Storage ─────────────────────────────────────────────
@@ -178,38 +202,24 @@ export async function POST(req: NextRequest) {
     const ytPrompt = byggPrompt('youtube', h, vod, copy);
     const ttPrompt = byggPrompt('tiktok', h, vod, copy);
 
-    // Kall DALL-E-3 parallelt for begge formater – fang faktisk feilmelding
-    let ytDalleErr: string | null = null;
-    let ttDalleErr: string | null = null;
-    const [ytDalle, ttDalle] = await Promise.all([
-      client.images.generate({
-        model: 'dall-e-3', prompt: ytPrompt,
-        n: 1, size: '1792x1024', quality: 'standard',
-      }).catch((e: any) => { ytDalleErr = String(e?.message ?? e).slice(0, 300); return null; }),
-      client.images.generate({
-        model: 'dall-e-3', prompt: ttPrompt,
-        n: 1, size: '1024x1792', quality: 'standard',
-      }).catch((e: any) => { ttDalleErr = String(e?.message ?? e).slice(0, 300); return null; }),
-    ]);
-
-    // Last ned og last opp parallelt
-    const [ytBuf, ttBuf] = await Promise.all([
-      ytDalle?.data?.[0]?.url ? hentPng(ytDalle.data[0].url!) : Promise.resolve(null),
-      ttDalle?.data?.[0]?.url ? hentPng(ttDalle.data[0].url!) : Promise.resolve(null),
+    // Generer begge formater parallelt med gpt-image-1
+    const [ytResult, ttResult] = await Promise.all([
+      genererBilde(client, ytPrompt, '1536x1024'),
+      genererBilde(client, ttPrompt, '1024x1536'),
     ]);
 
     const baseSti = `content-factory/thumbnails/${h.vod_id}/${highlightId}`;
     const [ytUrl, ttUrl] = await Promise.all([
-      ytBuf ? lastOpp(db, ytBuf, `${baseSti}_youtube.png`) : Promise.resolve(null),
-      ttBuf ? lastOpp(db, ttBuf, `${baseSti}_tiktok.png`) : Promise.resolve(null),
+      ytResult.buf ? lastOpp(db, ytResult.buf, `${baseSti}_youtube.png`) : Promise.resolve(null),
+      ttResult.buf ? lastOpp(db, ttResult.buf, `${baseSti}_tiktok.png`) : Promise.resolve(null),
     ]);
 
     if (!ytUrl && !ttUrl) {
       const detaljer = [
-        ytDalleErr ? `YouTube: ${ytDalleErr}` : null,
-        ttDalleErr ? `TikTok: ${ttDalleErr}` : null,
+        ytResult.err ? `YouTube: ${ytResult.err}` : null,
+        ttResult.err ? `TikTok: ${ttResult.err}` : null,
       ].filter(Boolean).join(' | ');
-      throw new Error(`DALL-E feilet${detaljer ? `: ${detaljer}` : ''}`);
+      throw new Error(`Bildegenerering feilet${detaljer ? `: ${detaljer}` : ''}`);
     }
 
     // Lagre til DB – clip_status røres ALDRI
