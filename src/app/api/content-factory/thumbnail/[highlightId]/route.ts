@@ -62,23 +62,15 @@ function byggPrompt(
   vod: any,
   copy: { headline: string; subheadline: string; style: string }
 ): string {
-  const spill = vod?.category ?? vod?.title ?? 'gaming';
-  const format = platform === 'youtube'
-    ? 'landscape 16:9 YouTube gaming thumbnail (1920×1080)'
-    : 'vertical 9:16 TikTok/Shorts gaming thumbnail (1080×1920)';
-  const textPos = platform === 'youtube'
-    ? 'large bold white text with dark stroke, lower or upper third'
-    : 'large bold white text centered, 10% safe margin from edges';
+  const spill = vod?.category ?? vod?.title ?? 'video game';
+  const format = platform === 'youtube' ? '1792x1024 landscape' : '1024x1792 vertical';
+  const tekstPos = platform === 'youtube' ? 'bottom third' : 'centered';
 
-  return [
-    `Ultra-high-quality ${format} for Norwegian Twitch streamer GLENVEX.`,
-    `Game: ${spill}.`,
-    `Clip type: ${highlight.category ?? 'gaming moment'}.`,
-    `Main text overlay: "${copy.headline}" as ${textPos}.`,
-    copy.subheadline ? `Subtext: "${copy.subheadline}" smaller below.` : '',
-    `Style: ${copy.style}. Dark cinematic background, neon green (#00FF87) accents, high contrast, dramatic gaming aesthetic.`,
-    'No watermarks, no channel logos, no extra text beyond specified.',
-  ].filter(Boolean).join('\n');
+  return `${format} gaming channel thumbnail. Video game scene from ${spill}. ` +
+    `Bold white text "${copy.headline}" at ${tekstPos}. ` +
+    `${copy.subheadline ? `Smaller text "${copy.subheadline}" below. ` : ''}` +
+    `Dark background, neon green color accents, high contrast, professional esports style. ` +
+    `No violence, no blood, no weapons visible. Clean graphic design.`;
 }
 
 // ── Hent PNG-bytes fra DALL-E URL ─────────────────────────────────────────────
@@ -161,16 +153,18 @@ export async function POST(
     const ytPrompt = byggPrompt('youtube', h, vod, copy);
     const ttPrompt = byggPrompt('tiktok', h, vod, copy);
 
-    // Generer begge thumbnails parallelt
+    // Generer begge thumbnails parallelt – fang faktisk feilmelding
+    let ytErr: string | null = null;
+    let ttErr: string | null = null;
     const [ytRes, ttRes] = await Promise.all([
       client.images.generate({
         model: 'dall-e-3', prompt: ytPrompt, n: 1,
         size: '1792x1024', quality: 'standard', response_format: 'url',
-      }).catch(() => null),
+      }).catch((e: any) => { ytErr = String(e?.message ?? e).slice(0, 300); return null; }),
       client.images.generate({
         model: 'dall-e-3', prompt: ttPrompt, n: 1,
         size: '1024x1792', quality: 'standard', response_format: 'url',
-      }).catch(() => null),
+      }).catch((e: any) => { ttErr = String(e?.message ?? e).slice(0, 300); return null; }),
     ]);
 
     // Last ned PNG-bytes og last opp parallelt
@@ -184,7 +178,13 @@ export async function POST(
       ttBuf ? lastOpp(db, ttBuf, `content-factory/thumbnails/${h.vod_id}/${highlightId}_tiktok.png`) : Promise.resolve(null),
     ]);
 
-    if (!ytUrl && !ttUrl) throw new Error('Begge DALL-E-genereringer feilet');
+    if (!ytUrl && !ttUrl) {
+      const detaljer = [
+        ytErr ? `YouTube: ${ytErr}` : null,
+        ttErr ? `TikTok: ${ttErr}` : null,
+      ].filter(Boolean).join(' | ');
+      throw new Error(`DALL-E feilet${detaljer ? `: ${detaljer}` : ''}`);
+    }
 
     // Oppdater DB
     await db.from('content_highlights').update({
