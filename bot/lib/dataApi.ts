@@ -1,7 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { triggerClipNow } from './clipWorker';
+import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWorker';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -362,6 +362,26 @@ export function startDataApi(port = 4242) {
       res.writeHead(202);
       res.end(JSON.stringify({ ok: true, melding: 'Clip worker trigget' }));
       triggerClipNow().catch(console.error);
+      return;
+    }
+
+    // ── Worker-status: env, aktive klipp, siste log-hendelser ───────────────
+    if (url === '/content-factory/worker-status' && method === 'GET') {
+      res.writeHead(200);
+      res.end(JSON.stringify(getWorkerStatus()));
+      return;
+    }
+
+    // ── Force-klipp: klipper ett spesifikt highlight direkte (bypass kø) ────
+    if (url.startsWith('/content-factory/clip-force/') && method === 'POST') {
+      const highlightId = url.replace('/content-factory/clip-force/', '');
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+      }
+      // Svar umiddelbart, kjør klipping i bakgrunnen
+      res.writeHead(202);
+      res.end(JSON.stringify({ ok: true, melding: `Force-klipp startet for ${highlightId}` }));
+      forceKlippHighlight(highlightId).catch(console.error);
       return;
     }
 

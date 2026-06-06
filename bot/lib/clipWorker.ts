@@ -1,12 +1,11 @@
 /**
  * Clip Worker – Bulletproof videoklipping fra Twitch VOD
  *
- * Strategi:
- * 1. Hent direkte HLS-URL via yt-dlp (sekunder, ingen nedlasting)
- * 2. ffmpeg klipper direkte fra HLS-stream (seek i HLS, kun nødvendige segmenter)
- * 3. Fallback: yt-dlp --download-sections 720p
- * 4. Fallback 2: yt-dlp laveste kvalitet
- * 5. Alle feil: reset til READY_FOR_CLIP (aldri CLIP_FAILED – automatisk retry)
+ * Strategier:
+ * 1. HLS-URL via yt-dlp + ffmpeg direkte (raskest)
+ * 2. yt-dlp --download-sections 720p
+ * 3. yt-dlp laveste kvalitet
+ * Alle feil: reset til READY_FOR_CLIP (aldri permanent FAILED)
  */
 
 import fs from 'fs';
@@ -19,6 +18,40 @@ const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
 
 const klipperNå = new Set<string>();
 const execAsync = require('util').promisify(require('child_process').exec);
+
+// ── Logging ring-buffer (siste 150 hendelser eksponert via /worker-status) ────
+const LOG_RING: Array<{ ts: string; level: string; event: string; data?: Record<string, any> }> = [];
+let syklusTeller = 0;
+let sisteSyklusTid: string | null = null;
+
+function wLog(level: 'INFO' | 'WARN' | 'ERROR', event: string, data?: Record<string, any>) {
+  const entry: { ts: string; level: string; event: string; data?: Record<string, any> } = {
+    ts: new Date().toISOString(),
+    level,
+    event,
+  };
+  if (data) entry.data = data;
+  LOG_RING.push(entry);
+  if (LOG_RING.length > 150) LOG_RING.shift();
+  const suffix = data ? ' ' + JSON.stringify(data) : '';
+  console.log(`[ClipWorker][${level}] ${event}${suffix}`);
+}
+
+export function getWorkerStatus() {
+  return {
+    enabled: process.env.CONTENT_FACTORY_ENABLED === 'true',
+    env: {
+      supabase_url: !!process.env.SUPABASE_URL,
+      supabase_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      twitch_oauth: !!process.env.TWITCH_USER_OAUTH,
+      content_factory_enabled: process.env.CONTENT_FACTORY_ENABLED,
+    },
+    activeClips: Array.from(klipperNå),
+    pollCount: syklusTeller,
+    lastPollAt: sisteSyklusTid,
+    lastLogs: LOG_RING.slice(-30),
+  };
+}
 
 function getDb() {
   const url = process.env.SUPABASE_URL;
@@ -60,7 +93,7 @@ async function ffmpegKlipp(
     );
     return fs.existsSync(utPath) && fs.statSync(utPath).size > 20_000;
   } catch (err: any) {
-    console.error(`[ClipWorker] ffmpeg feil (${path.basename(utPath)}):`, err.message?.slice(0, 200));
+    wLog('ERROR', 'FFMPEG_FAIL', { path: path.basename(utPath), err: err.message?.slice(0, 200) });
     return false;
   }
 }
@@ -87,10 +120,11 @@ async function lastOppTilSupabase(sb: any, lokalSti: string, storageSti: string)
       upsert: true,
     });
     if (error) throw error;
-    const { data: sd } = await sb.storage.from('glenvex-assets').createSignedUrl(storageSti, 7 * 24 * 3600);
-    return sd?.signedUrl ?? null;
+    // Hent public URL (ikke signed – unngår utløp)
+    const { data: publicData } = sb.storage.from('glenvex-assets').getPublicUrl(storageSti);
+    return publicData?.publicUrl ?? null;
   } catch (err: any) {
-    console.error('[ClipWorker] Opplasting feilet:', err.message);
+    wLog('ERROR', 'UPLOAD_FAIL', { path: storageSti, err: err.message?.slice(0, 200) });
     return null;
   }
 }
@@ -102,15 +136,20 @@ async function lastOppOgFerdigstill(
   let clipUrl: string | null = null;
   let verticalClipUrl: string | null = null;
 
+  wLog('INFO', 'UPLOAD_STARTED', { highlightId: hId });
+
   if (ok16 && fs.existsSync(p16x9)) {
     clipUrl = await lastOppTilSupabase(db, p16x9, `content-factory/clips/${vodId}/${hId}_16x9.mp4`);
+    wLog('INFO', 'UPLOAD_16x9', { ok: !!clipUrl });
   }
   if (ok9 && fs.existsSync(p9x16)) {
     verticalClipUrl = await lastOppTilSupabase(db, p9x16, `content-factory/clips/${vodId}/${hId}_9x16.mp4`);
+    wLog('INFO', 'UPLOAD_9x16', { ok: !!verticalClipUrl });
   }
   ryddFil(p16x9, p9x16);
 
   if (clipUrl || verticalClipUrl) {
+    wLog('INFO', 'UPLOAD_DONE', { highlightId: hId, har16x9: !!clipUrl, har9x16: !!verticalClipUrl });
     await db.from('content_highlights').update({
       clip_status: 'CLIPPED',
       clip_url: clipUrl,
@@ -118,27 +157,32 @@ async function lastOppOgFerdigstill(
       clip_finished_at: new Date().toISOString(),
       clip_error: null,
     }).eq('id', hId);
+    wLog('INFO', 'DB_UPDATED_DONE', { highlightId: hId });
     logBotEvent('klipp_ferdig', { id: hId });
-    console.log(`[ClipWorker] ✓ Ferdig: ${hId} – 16:9: ${!!clipUrl}, 9:16: ${!!verticalClipUrl}`);
     return true;
   }
 
-  // Opplasting feilet – reset til READY_FOR_CLIP for automatisk retry
+  // Opplasting feilet – reset til READY_FOR_CLIP
+  wLog('WARN', 'UPLOAD_ALL_FAILED', { highlightId: hId });
   await db.from('content_highlights').update({
     clip_status: 'READY_FOR_CLIP',
-    clip_error: 'Klipping OK – opplasting til Supabase Storage feilet, retry automatisk',
+    clip_error: 'Klipping OK – opplasting feilet, retry automatisk',
   }).eq('id', hId);
   return false;
 }
 
 async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
   const db = getDb();
-  if (!db) return;
+  if (!db) { wLog('ERROR', 'NO_DB', { highlightId: highlight.id }); return; }
 
-  const hId = highlight.id;
-  const startSek = Math.max(0, Math.floor(highlight.start_time) - 3);
-  const varighetSek = Math.ceil(highlight.end_time - highlight.start_time) + 6;
-  const vodId = highlight.vod_id;
+  const hId: string = highlight.id;
+  // Eksplisitt parseFloat – Supabase NUMERIC returneres som string
+  const startSek = Math.max(0, Math.floor(parseFloat(String(highlight.start_time))) - 3);
+  const endSek = parseFloat(String(highlight.end_time));
+  const varighetSek = Math.ceil(endSek - (startSek + 3)) + 6;
+  const vodId: string = highlight.vod_id;
+
+  wLog('INFO', 'CLIP_STARTED', { highlightId: hId, startSek, varighetSek, vodUrl: vodUrl.slice(0, 60) });
 
   sikreDir(path.join(CLIPS_DIR, vodId));
   const p16x9 = path.join(CLIPS_DIR, vodId, `${hId}_16x9.mp4`);
@@ -150,9 +194,8 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
   const vf16x9 = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2';
   const vf9x16 = 'scale=-2:1280,crop=720:1280';
 
-  console.log(`[ClipWorker] Starter klipping: ${hId} [t=${startSek}s, dur=${varighetSek}s]`);
-
-  // ── Forsøk 1: HLS-URL fra yt-dlp + ffmpeg direkte ─────────────────────────
+  // ── Forsøk 1: HLS-URL + ffmpeg ────────────────────────────────────────────
+  wLog('INFO', 'TRY_1_HLS', { highlightId: hId });
   const hlsUrl = await hentHlsUrl(vodUrl, authArg);
   if (hlsUrl) {
     const [ok16, ok9] = await Promise.all([
@@ -160,15 +203,18 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
       ffmpegKlipp(hlsUrl, p9x16, startSek, varighetSek, vf9x16, 26),
     ]);
     if (ok16 || ok9) {
+      wLog('INFO', 'CLIP_DONE_TRY1', { highlightId: hId, ok16, ok9 });
       await komprimerHvisForStor(p16x9);
       await komprimerHvisForStor(p9x16);
       const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
       if (ok) { klipperNå.delete(hId); return; }
     }
+  } else {
+    wLog('WARN', 'HLS_URL_MISSING', { highlightId: hId });
   }
-  console.log(`[ClipWorker] Forsøk 1 feilet – prøver forsøk 2 (yt-dlp --download-sections)`);
 
   // ── Forsøk 2: yt-dlp --download-sections ──────────────────────────────────
+  wLog('INFO', 'TRY_2_SECTIONS', { highlightId: hId });
   ryddFil(p16x9, p9x16);
   const seg2 = path.join(CLIPS_DIR, vodId, `${hId}_raw2.mp4`);
   try {
@@ -182,6 +228,7 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
         ffmpegKlipp(seg2, p9x16, 0, varighetSek, vf9x16, 28),
       ]);
       if (ok16 || ok9) {
+        wLog('INFO', 'CLIP_DONE_TRY2', { highlightId: hId, ok16, ok9 });
         await komprimerHvisForStor(p16x9);
         await komprimerHvisForStor(p9x16);
         const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
@@ -190,12 +237,11 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
       }
     }
   } catch (err: any) {
-    console.error(`[ClipWorker] Forsøk 2 feilet:`, err.message?.slice(0, 200));
+    wLog('ERROR', 'TRY2_FAIL', { highlightId: hId, err: err.message?.slice(0, 200) });
   } finally { ryddFil(seg2); }
 
-  console.log(`[ClipWorker] Forsøk 2 feilet – prøver forsøk 3 (laveste kvalitet)`);
-
   // ── Forsøk 3: laveste mulige kvalitet ─────────────────────────────────────
+  wLog('INFO', 'TRY_3_LOWEST', { highlightId: hId });
   ryddFil(p16x9, p9x16);
   const seg3 = path.join(CLIPS_DIR, vodId, `${hId}_raw3.mp4`);
   try {
@@ -211,86 +257,186 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
         ffmpegKlipp(seg3, p9x16, 0, varighetSek, vf480_9x16, 32),
       ]);
       if (ok16 || ok9) {
+        wLog('INFO', 'CLIP_DONE_TRY3', { highlightId: hId, ok16, ok9 });
         const ok = await lastOppOgFerdigstill(db, hId, vodId, p16x9, p9x16, ok16, ok9);
         ryddFil(seg3);
         if (ok) { klipperNå.delete(hId); return; }
       }
     }
   } catch (err: any) {
-    console.error(`[ClipWorker] Forsøk 3 feilet:`, err.message?.slice(0, 200));
+    wLog('ERROR', 'TRY3_FAIL', { highlightId: hId, err: err.message?.slice(0, 200) });
   } finally { ryddFil(seg3); }
 
-  // Alle 3 forsøk feilet – reset til READY_FOR_CLIP (aldri CLIP_FAILED)
+  // Alle 3 forsøk feilet
+  wLog('ERROR', 'ALL_TRIES_FAILED', { highlightId: hId });
   await db.from('content_highlights').update({
     clip_status: 'READY_FOR_CLIP',
-    clip_error: 'Alle 3 forsøk feilet – prøves igjen automatisk om 1 minutt',
+    clip_error: 'Alle 3 forsøk feilet – prøves igjen automatisk',
   }).eq('id', hId);
-  console.error(`[ClipWorker] ✗ Alle forsøk feilet for ${hId} – resatt til READY_FOR_CLIP`);
 
   klipperNå.delete(hId);
 }
 
-// ── Syklus: hent og start jobber ─────────────────────────────────────────────
+// ── Syklus: hent og start READY_FOR_CLIP-jobber ──────────────────────────────
 async function kjørSyklus(): Promise<void> {
   if (process.env.CONTENT_FACTORY_ENABLED !== 'true') return;
   const db = getDb();
-  if (!db) return;
-
-  try {
-    const lock = Array.from(klipperNå);
-    const { data: highlights } = await db
-      .from('content_highlights')
-      .select('id,vod_id,start_time,end_time,title')
-      .eq('clip_status', 'READY_FOR_CLIP')
-      .not('id', 'in', `(${lock.length > 0 ? lock.join(',') : 'null'})`)
-      .limit(2);
-
-    if (!highlights || highlights.length === 0) return;
-
-    const vodIds = [...new Set(highlights.map((h: any) => h.vod_id))];
-    const { data: vods } = await db
-      .from('content_vods')
-      .select('id,vod_url,twitch_vod_id')
-      .in('id', vodIds);
-
-    const vodMap = new Map((vods ?? []).map((v: any) => [
-      v.id,
-      v.vod_url ?? (v.twitch_vod_id ? `https://www.twitch.tv/videos/${v.twitch_vod_id}` : null),
-    ]));
-
-    for (const h of highlights) {
-      const vodUrl = vodMap.get(h.vod_id);
-      if (!vodUrl) {
-        console.error(`[ClipWorker] Ingen VOD-URL for highlight ${h.id}`);
-        continue;
-      }
-      await db.from('content_highlights').update({ clip_status: 'CLIPPING', clip_error: null }).eq('id', h.id);
-      klipperNå.add(h.id);
-      logBotEvent('klipp_start', { title: h.title ?? h.id, vod_id: h.vod_id });
-      klippHighlight(h, vodUrl).catch((err: any) => {
-        console.error('[ClipWorker] Uventet krasj:', err.message);
-        klipperNå.delete(h.id);
-        getDb()?.from('content_highlights').update({
-          clip_status: 'READY_FOR_CLIP',
-          clip_error: `Uventet feil: ${err.message?.slice(0, 200)}`,
-        }).eq('id', h.id).then(() => {});
-      });
-    }
-  } catch (err: any) {
-    console.error('[ClipWorker] Syklus-feil:', err.message);
+  if (!db) {
+    wLog('ERROR', 'POLL_NO_DB');
+    return;
   }
+
+  syklusTeller++;
+  sisteSyklusTid = new Date().toISOString();
+  const lock = Array.from(klipperNå);
+
+  // ── KRITISK FIX: IKKE bruk .not('id','in','(null)') når lock er tom ────────
+  // PostgreSQL: `id NOT IN (NULL)` returnerer alltid 0 rader (NULL-sammenligning)
+  const baseQuery = db
+    .from('content_highlights')
+    .select('id,vod_id,start_time,end_time,title')
+    .eq('clip_status', 'READY_FOR_CLIP')
+    .limit(3);
+
+  const { data: highlights, error } = lock.length > 0
+    ? await baseQuery.not('id', 'in', `(${lock.join(',')})`)
+    : await baseQuery;
+
+  if (error) {
+    wLog('ERROR', 'POLL_QUERY_ERROR', { err: error.message });
+    return;
+  }
+
+  wLog('INFO', 'POLL_CYCLE', { syklus: syklusTeller, funnet: highlights?.length ?? 0, aktive: lock.length });
+
+  if (!highlights || highlights.length === 0) return;
+
+  wLog('INFO', 'JOBS_FOUND', { antall: highlights.length, ids: highlights.map((h: any) => h.id) });
+
+  const vodIds = Array.from(new Set<string>(highlights.map((h: any) => h.vod_id as string)));
+  const { data: vods } = await db
+    .from('content_vods')
+    .select('id,vod_url,twitch_vod_id')
+    .in('id', vodIds);
+
+  const vodMap = new Map((vods ?? []).map((v: any) => [
+    v.id,
+    v.vod_url ?? (v.twitch_vod_id ? `https://www.twitch.tv/videos/${v.twitch_vod_id}` : null),
+  ]));
+
+  for (const h of highlights) {
+    const vodUrl = vodMap.get(h.vod_id);
+    if (!vodUrl) {
+      wLog('ERROR', 'NO_VOD_URL', { highlightId: h.id, vodId: h.vod_id });
+      await db.from('content_highlights').update({
+        clip_status: 'READY_FOR_CLIP',
+        clip_error: 'Ingen VOD-URL funnet – sjekk at vod_url/twitch_vod_id er satt i content_vods',
+      }).eq('id', h.id);
+      continue;
+    }
+
+    wLog('INFO', 'JOB_CLAIMED', { highlightId: h.id, title: h.title });
+    await db.from('content_highlights').update({ clip_status: 'CLIPPING', clip_error: null }).eq('id', h.id);
+    klipperNå.add(h.id);
+    logBotEvent('klipp_start', { title: h.title ?? h.id, vod_id: h.vod_id });
+
+    klippHighlight(h, vodUrl).catch((err: any) => {
+      wLog('ERROR', 'CLIP_CRASH', { highlightId: h.id, err: err.message?.slice(0, 300) });
+      klipperNå.delete(h.id);
+      getDb()?.from('content_highlights').update({
+        clip_status: 'READY_FOR_CLIP',
+        clip_error: `Krasj: ${err.message?.slice(0, 200)}`,
+      }).eq('id', h.id).then(() => {});
+    });
+  }
+}
+
+// ── Direkte klipp av spesifikt highlight (bypass kø) ─────────────────────────
+export async function forceKlippHighlight(highlightId: string): Promise<{ ok: boolean; melding: string }> {
+  if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+    return { ok: false, melding: 'CONTENT_FACTORY_ENABLED er ikke true' };
+  }
+  if (klipperNå.has(highlightId)) {
+    return { ok: false, melding: 'Klipper allerede dette highlightet' };
+  }
+
+  const db = getDb();
+  if (!db) return { ok: false, melding: 'Supabase ikke tilkoblet' };
+
+  const { data: h } = await db
+    .from('content_highlights')
+    .select('id,vod_id,start_time,end_time,title')
+    .eq('id', highlightId)
+    .single();
+
+  if (!h) return { ok: false, melding: `Highlight ${highlightId} ikke funnet` };
+
+  const { data: vod } = await db
+    .from('content_vods')
+    .select('vod_url,twitch_vod_id')
+    .eq('id', h.vod_id)
+    .single();
+
+  const vodUrl = vod?.vod_url ?? (vod?.twitch_vod_id ? `https://www.twitch.tv/videos/${vod.twitch_vod_id}` : null);
+  if (!vodUrl) return { ok: false, melding: `Ingen VOD-URL for vod_id ${h.vod_id}` };
+
+  wLog('INFO', 'FORCE_CLIP_TRIGGERED', { highlightId, vodUrl: vodUrl.slice(0, 60) });
+  await db.from('content_highlights').update({ clip_status: 'CLIPPING', clip_error: null }).eq('id', highlightId);
+  klipperNå.add(highlightId);
+  logBotEvent('klipp_start', { title: h.title ?? highlightId, vod_id: h.vod_id });
+
+  klippHighlight(h, vodUrl).catch((err: any) => {
+    wLog('ERROR', 'FORCE_CLIP_CRASH', { highlightId, err: err.message?.slice(0, 300) });
+    klipperNå.delete(highlightId);
+    getDb()?.from('content_highlights').update({
+      clip_status: 'READY_FOR_CLIP',
+      clip_error: `Force-clip krasj: ${err.message?.slice(0, 200)}`,
+    }).eq('id', highlightId).then(() => {});
+  });
+
+  return { ok: true, melding: `Force-klipp startet for ${highlightId}` };
 }
 
 export async function startClipWorker(): Promise<void> {
   if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-    console.log('[ClipWorker] Deaktivert');
+    console.log('[ClipWorker] Deaktivert (CONTENT_FACTORY_ENABLED != true)');
     return;
   }
-  console.log('[ClipWorker] ✓ Startet – sjekker READY_FOR_CLIP hvert minutt');
+
+  wLog('INFO', 'WORKER_STARTED', {
+    supabase_url: !!process.env.SUPABASE_URL,
+    supabase_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    twitch_oauth: !!process.env.TWITCH_USER_OAUTH,
+  });
+
+  const db = getDb();
+  if (!db) {
+    wLog('ERROR', 'ENV_MISSING', { melding: 'SUPABASE_URL eller SUPABASE_SERVICE_ROLE_KEY mangler' });
+    return;
+  }
+
+  wLog('INFO', 'ENV_OK');
+
+  // Reset CLIPPING → READY_FOR_CLIP ved oppstart (Railway-restart dreper aktive jobs)
+  const { data: stucke } = await db
+    .from('content_highlights')
+    .select('id')
+    .eq('clip_status', 'CLIPPING');
+
+  if (stucke && stucke.length > 0) {
+    await db.from('content_highlights').update({
+      clip_status: 'READY_FOR_CLIP',
+      clip_error: 'Resatt ved worker-restart',
+    }).eq('clip_status', 'CLIPPING');
+    wLog('WARN', 'STARTUP_CLIPPING_RESET', { antall: stucke.length });
+  }
+
+  wLog('INFO', 'POLL_STARTED', { intervallMs: 60_000 });
   await kjørSyklus();
   setInterval(kjørSyklus, 60_000);
 }
 
 export async function triggerClipNow(): Promise<void> {
+  wLog('INFO', 'MANUAL_TRIGGER');
   await kjørSyklus();
 }

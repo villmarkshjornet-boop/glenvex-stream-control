@@ -276,87 +276,133 @@ export default function HighlightViewerPage() {
                 {/* Utvidet visning */}
                 {erValgt && (
                   <div className="border-t border-g-border p-4 space-y-4">
-                    {/* Video / Preview / Download */}
+                    {/* Klipp-status og handlinger */}
                     <div className="bg-g-bg border border-g-border rounded-lg p-4 space-y-3">
+                      {/* Status-header */}
                       <div className="flex items-center justify-between">
                         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Videoklipp</p>
                         <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
-                          h.clip_status === 'CLIPPED' ? 'text-g-green border-g-green/30' :
-                          h.clip_status === 'CLIPPING' ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
-                          h.clip_status === 'CLIP_FAILED' ? 'text-red-400 border-red-400/30' :
+                          h.clip_status === 'CLIPPED'        ? 'text-g-green border-g-green/30 bg-g-green/5' :
+                          h.clip_status === 'CLIPPING'       ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
+                          h.clip_status === 'READY_FOR_CLIP' ? 'text-blue-400 border-blue-400/30' :
+                          h.clip_status === 'CLIP_FAILED'    ? 'text-red-400 border-red-400/30' :
                           'text-g-muted border-g-border'
                         }`}>{h.clip_status ?? 'READY_FOR_CLIP'}</span>
                       </div>
 
-                      <div className="flex items-start gap-3">
-                        <div className="flex-1 text-xs space-y-0.5">
-                          <p className="text-g-text">Start: <span className="text-g-green font-mono font-bold">{tidFormat(h.start_time)}</span></p>
-                          <p className="text-g-text">Slutt: <span className="text-g-green font-mono font-bold">{tidFormat(h.end_time)}</span></p>
-                          <p className="text-g-text">Varighet: <span className="text-g-green font-mono font-bold">{Math.round(h.end_time - h.start_time)}s</span></p>
-                          {/* Status-melding */}
-                          {(h.clip_status === 'READY_FOR_CLIP') && (
-                            <p className="text-yellow-400 text-[9px] mt-1 flex items-center gap-1">
-                              <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin inline-block" />
-                              I kø – Railway plukker opp innen 30 sekunder...
-                            </p>
-                          )}
-                          {(h.clip_status === 'CLIPPING') && (
-                            <p className="text-yellow-400 text-[9px] mt-1 flex items-center gap-1">
-                              <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin inline-block" />
-                              Klipper – laster ned segment og koder video (2–5 min)...
-                            </p>
-                          )}
-                          {h.clip_error && <p className="text-red-400 text-[9px] mt-1 break-all">✗ {h.clip_error}</p>}
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                          {h.clip_status !== 'CLIPPING' && h.clip_status !== 'READY_FOR_CLIP' && (
-                            <button onClick={() => genererKlipp(h.id)} disabled={klipperH === h.id}
-                              className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded hover:bg-g-green/20 transition-all disabled:opacity-40">
-                              {klipperH === h.id ? '⏳ Sender...' : h.clip_status === 'CLIPPED' ? '↻ Re-generer' : '▶ Generer klipp'}
-                            </button>
-                          )}
-                          {(h.clip_status === 'CLIP_FAILED') && (
-                            <button onClick={async () => {
-                              await fetch('/api/content-factory/clip-retry', {
-                                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ highlightId: h.id }),
-                              });
-                              await hentHighlights(valgtVod);
-                              setPollerKlipp(true);
-                            }} className="px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 text-yellow-400 text-[10px] font-bold rounded hover:bg-yellow-400/20 transition-all">
-                              ↺ Retry
-                            </button>
-                          )}
-                        </div>
+                      {/* Synlig statusboks */}
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                        <span className="text-g-muted">Highlight ID</span>
+                        <span className="text-g-text truncate">{h.id}</span>
+                        <span className="text-g-muted">Start → Slutt</span>
+                        <span className="text-g-green">{tidFormat(h.start_time)} → {tidFormat(h.end_time)} ({Math.round(h.end_time - h.start_time)}s)</span>
+                        <span className="text-g-muted">Status</span>
+                        <span className={h.clip_status === 'CLIPPED' ? 'text-g-green' : h.clip_status === 'CLIPPING' ? 'text-yellow-400' : 'text-g-muted'}>
+                          {h.clip_status ?? 'READY_FOR_CLIP'}
+                        </span>
+                        {h.clip_finished_at && <>
+                          <span className="text-g-muted">Ferdig</span>
+                          <span className="text-g-muted">{sikkerDato(h.clip_finished_at)}</span>
+                        </>}
+                        {h.clip_url && <>
+                          <span className="text-g-muted">16:9 URL</span>
+                          <span className="text-g-green truncate">✓ Tilgjengelig</span>
+                        </>}
+                        {h.vertical_clip_url && <>
+                          <span className="text-g-muted">9:16 URL</span>
+                          <span className="text-g-green truncate">✓ Tilgjengelig</span>
+                        </>}
+                        {h.clip_error && <>
+                          <span className="text-red-400">Feil</span>
+                          <span className="text-red-400 break-all">{h.clip_error}</span>
+                        </>}
                       </div>
 
-                      {/* Video preview */}
-                      {h.clip_url && (
-                        <div className="space-y-2">
-                          <p className="text-[9px] text-g-muted font-bold uppercase">16:9 – YouTube / Twitch</p>
-                          <video controls className="w-full rounded border border-g-border" style={{ maxHeight: '200px' }}>
-                            <source src={h.clip_url} type="video/mp4" />
-                          </video>
-                          <a href={h.clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
-                            className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-                            ↓ Last ned 16:9
-                          </a>
+                      {/* Statusmeldinger */}
+                      {h.clip_status === 'READY_FOR_CLIP' && (
+                        <div className="flex items-center gap-2 p-2 bg-blue-400/5 border border-blue-400/20 rounded text-[10px] text-blue-400">
+                          <span className="w-2 h-2 border border-blue-400/40 border-t-blue-400 rounded-full animate-spin flex-shrink-0" />
+                          I kø – bruk «Force klipp nå» for øyeblikkelig klipping
+                        </div>
+                      )}
+                      {h.clip_status === 'CLIPPING' && (
+                        <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
+                          <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
+                          Railway klipper nå – laster ned og koder video (2–5 min)...
                         </div>
                       )}
 
-                      {h.vertical_clip_url && (
-                        <div className="space-y-2">
-                          <p className="text-[9px] text-g-muted font-bold uppercase">9:16 – TikTok / Shorts / Reel</p>
-                          <video controls className="mx-auto rounded border border-g-border" style={{ maxHeight: '300px', maxWidth: '170px' }}>
-                            <source src={h.vertical_clip_url} type="video/mp4" />
-                          </video>
-                          <a href={h.vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
-                            className="inline-block px-3 py-1.5 bg-g-bg border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-                            ↓ Last ned 9:16
-                          </a>
-                        </div>
-                      )}
+                      {/* Handlingsknapper */}
+                      <div className="flex flex-wrap gap-2">
+                        {/* Force klipp – alltid tilgjengelig unntatt når CLIPPING */}
+                        {h.clip_status !== 'CLIPPING' && (
+                          <button
+                            onClick={async () => {
+                              setKlipperH(h.id);
+                              await fetch('/api/content-factory/clip-force', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ highlightId: h.id }),
+                              });
+                              setKlipperH(null);
+                              setPollerKlipp(true);
+                              await hentHighlights(valgtVod);
+                            }}
+                            disabled={klipperH === h.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-g-green/10 border border-g-green/30 text-g-green text-[10px] font-black rounded hover:bg-g-green/20 transition-all disabled:opacity-40"
+                          >
+                            {klipperH === h.id ? (
+                              <><span className="w-2.5 h-2.5 border border-g-green/40 border-t-g-green rounded-full animate-spin" /> Starter...</>
+                            ) : (
+                              <>{h.clip_status === 'CLIPPED' ? '↻' : '▶'} {h.clip_status === 'CLIPPED' ? 'Re-klipp' : 'Force klipp nå'}</>
+                            )}
+                          </button>
+                        )}
+
+                        {/* Vanlig Generer klipp (via syklus) */}
+                        {(h.clip_status === 'CLIP_FAILED' || !h.clip_status) && (
+                          <button
+                            onClick={() => genererKlipp(h.id)}
+                            className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all"
+                          >
+                            ↺ Legg i kø (60s polling)
+                          </button>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Nedlasting av ferdige videoer */}
+                    {(h.clip_url || h.vertical_clip_url) && (
+                      <div className="bg-g-bg border border-g-green/20 rounded-lg p-4 space-y-3">
+                        <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">Klar for nedlasting</p>
+
+                        {h.clip_url && (
+                          <div className="space-y-2">
+                            <p className="text-[9px] text-g-muted font-bold uppercase">16:9 – YouTube / Twitch</p>
+                            <video controls className="w-full rounded border border-g-border" style={{ maxHeight: '200px' }}>
+                              <source src={h.clip_url} type="video/mp4" />
+                            </video>
+                            <a href={h.clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
+                              className="inline-block px-3 py-1.5 bg-g-bg border border-g-green/30 rounded text-[10px] text-g-green hover:bg-g-green/10 transition-all font-bold">
+                              ↓ Last ned 16:9 MP4
+                            </a>
+                          </div>
+                        )}
+
+                        {h.vertical_clip_url && (
+                          <div className="space-y-2">
+                            <p className="text-[9px] text-g-muted font-bold uppercase">9:16 – TikTok / Shorts / Reel</p>
+                            <video controls className="mx-auto rounded border border-g-border" style={{ maxHeight: '300px', maxWidth: '170px' }}>
+                              <source src={h.vertical_clip_url} type="video/mp4" />
+                            </video>
+                            <a href={h.vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
+                              className="inline-block px-3 py-1.5 bg-g-bg border border-g-green/30 rounded text-[10px] text-g-green hover:bg-g-green/10 transition-all font-bold">
+                              ↓ Last ned 9:16 MP4
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* ZIP-pakke */}
                     <div className="flex items-center gap-3 pt-1">
