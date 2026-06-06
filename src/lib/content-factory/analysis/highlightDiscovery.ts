@@ -58,11 +58,11 @@ export async function oppdagHighlights(
   const transkripter = await hentTranskripsjon(vodId);
   if (transkripter.length === 0) throw new Error('Ingen transkripsjon funnet');
 
-  // Last inn AI Producer-kunnskap for semantisk scoring med historikk
-  let knowledge: { channelProfile: string; contentStrategy: string; communityContext: string; gameContext: string; streamCount: number } | null = null;
+  // Hent delt kanalkontext fra Global AI Memory
+  let knowledge: import('@/lib/ai/creatorContext').CreatorContext | null = null;
   try {
-    const { hentKnowledgeBase } = await import('../ai-producer/knowledgeBase');
-    knowledge = await hentKnowledgeBase();
+    const { getCreatorContext } = await import('@/lib/ai/creatorContext');
+    knowledge = await getCreatorContext({ limit: 15 });
   } catch { /* kjør uten historikk */ }
 
   // Grupper i 60s vinduer med 30s overlapp
@@ -140,18 +140,15 @@ export async function oppdagHighlights(
 
   if (apiKey && unikKandidater.length > 0) {
     const openai = new OpenAI({ apiKey });
-    const harHistorikk = (knowledge?.streamCount ?? 0) > 0;
 
-    const kontekst = harHistorikk && knowledge
-      ? `
-KANALKUNNSKAP (basert på ${knowledge.streamCount} analyserte streams):
-- Profil: ${knowledge.channelProfile}
-- Innholdsstrategi: ${knowledge.contentStrategy}
-- Community: ${knowledge.communityContext}
-- Spill-kunnskap: ${knowledge.gameContext}
-
-Bruk denne kunnskapen aktivt: gi HØYERE score til øyeblikk som historisk fungerer bra for GLENVEX.`
-      : `\nKanal: GLENVEX – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.`;
+    // Bygg rik kontekst fra delt AI-minne
+    let kontekst: string;
+    if (knowledge && (knowledge.streamCount > 0 || knowledge.topViewers.length > 0 || knowledge.runningJokes.length > 0)) {
+      const { buildContextPrompt } = await import('@/lib/ai/creatorContext');
+      kontekst = buildContextPrompt(knowledge);
+    } else {
+      kontekst = 'Kanal: GLENVEX – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
+    }
 
     const begrenset = unikKandidater.slice(0, 12);
 
@@ -236,7 +233,7 @@ ${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s–${Math.round(k.e
     status: 'COMPLETE',
     durationMs: Date.now() - start,
     outputCount: highlights.length,
-    message: `${highlights.length} highlights funnet (${knowledge && knowledge.streamCount > 0 ? `${knowledge.streamCount} streams i AI-minnet` : 'ingen historikk ennå'})`,
+    message: `${highlights.length} highlights funnet (${knowledge && knowledge.streamCount > 0 ? `${knowledge.streamCount} streams + ${knowledge.topViewers.length} seere i AI-minnet` : 'ingen historikk ennå'})`,
   });
 
   return highlights;

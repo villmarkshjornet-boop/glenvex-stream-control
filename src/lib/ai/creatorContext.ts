@@ -1,0 +1,235 @@
+/**
+ * getCreatorContext() – én felles inngang til all akkumulert kunnskap.
+ * Brukes av: highlightDiscovery, learningLoop, aiProducer, dashboardAssistant
+ * Aldri kall memory-tabeller direkte fra agenter – bruk alltid denne.
+ */
+
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
+
+export interface MemoryEntry {
+  key: string;
+  summary: string;
+  confidenceScore: number;
+  occurrenceCount: number;
+  lastSeen?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface CreatorContext {
+  workspaceId: string;
+  // Kjente seere og Discord-membres
+  topViewers: MemoryEntry[];
+  topMembers: MemoryEntry[];
+  // Community-kunnskap
+  runningJokes: MemoryEntry[];
+  communityPhrases: MemoryEntry[];
+  // Innholds- og spillmønstre
+  contentPatterns: MemoryEntry[];
+  gamePatterns: MemoryEntry[];
+  streamPatterns: MemoryEntry[];
+  // Kanalnivå-kunnskap (komprimert)
+  channelProfile: string;
+  contentStrategy: string;
+  communityContext: string;
+  // Siste innsikter fra aggregering
+  recentInsights: { title: string; summary: string; confidenceScore: number; createdAt: string }[];
+  // Antall streams analysert (proxy for modenhet)
+  streamCount: number;
+}
+
+const FALLBACK_CONTEXT: Omit<CreatorContext, 'workspaceId'> = {
+  topViewers: [],
+  topMembers: [],
+  runningJokes: [],
+  communityPhrases: [],
+  contentPatterns: [],
+  gamePatterns: [],
+  streamPatterns: [],
+  channelProfile: 'GLENVEX – norsk gaming streamer. Spiller Tarkov, GTA RP og andre spill.',
+  contentStrategy: 'Fokus på genuine reaksjoner, episke øyeblikk og community-interaksjon.',
+  communityContext: 'Norsk gaming community, engasjerte seere.',
+  recentInsights: [],
+  streamCount: 0,
+};
+
+export async function getCreatorContext(options?: {
+  limit?: number;
+}): Promise<CreatorContext> {
+  const db = getDb();
+  const workspaceId = getWorkspaceId();
+  if (!db) return { ...FALLBACK_CONTEXT, workspaceId };
+
+  const limit = options?.limit ?? 25;
+
+  const [memoryRes, insightsRes, legacyKnowledge] = await Promise.all([
+    db.from('ai_agent_memory')
+      .select('agent_type,memory_type,key,summary,confidence_score,occurrence_count,last_seen_at,metadata')
+      .eq('workspace_id', workspaceId)
+      .order('occurrence_count', { ascending: false })
+      .limit(300),
+
+    db.from('ai_agent_insights')
+      .select('title,summary,confidence_score,created_at')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .limit(10),
+
+    // Lese fra gamle tabeller som fallback
+    db.from('ai_producer_knowledge')
+      .select('category,content,stream_count')
+      .eq('workspace_id', workspaceId),
+  ]);
+
+  const memory: any[] = memoryRes.data ?? [];
+  const insights: any[] = insightsRes.data ?? [];
+  const legacy: any[] = legacyKnowledge.data ?? [];
+
+  const byType = (memType: string): MemoryEntry[] =>
+    memory
+      .filter(m => m.memory_type === memType)
+      .slice(0, limit)
+      .map(m => ({
+        key: m.key,
+        summary: m.summary,
+        confidenceScore: m.confidence_score ?? 0.5,
+        occurrenceCount: m.occurrence_count ?? 1,
+        lastSeen: m.last_seen_at,
+        metadata: m.metadata,
+      }));
+
+  const legacyGet = (cat: string) => legacy.find((e: any) => e.category === cat)?.content ?? '';
+  const legacyStreamCount = legacy.length > 0 ? Math.max(...legacy.map((e: any) => e.stream_count ?? 0)) : 0;
+
+  // Ny memory har prioritet over gammel
+  const channelProfileMem = memory.find(m => m.memory_type === 'stream_pattern' && m.key === 'channel_profile');
+  const contentStratMem = memory.find(m => m.memory_type === 'content_pattern' && m.key === 'content_strategy');
+  const communityMem = memory.find(m => m.memory_type === 'community_pattern' && m.key === 'community_context');
+
+  const streamCount =
+    memory.filter(m => m.memory_type === 'stream_pattern' && m.key !== 'channel_profile').length
+    || legacyStreamCount;
+
+  return {
+    workspaceId,
+    topViewers: byType('viewer'),
+    topMembers: byType('member'),
+    runningJokes: byType('joke'),
+    communityPhrases: byType('topic'),
+    contentPatterns: byType('content_pattern'),
+    gamePatterns: byType('game_pattern'),
+    streamPatterns: byType('stream_pattern'),
+    channelProfile: channelProfileMem?.summary || legacyGet('channel_profile') || FALLBACK_CONTEXT.channelProfile,
+    contentStrategy: contentStratMem?.summary || legacyGet('content_strategy') || FALLBACK_CONTEXT.contentStrategy,
+    communityContext: communityMem?.summary || legacyGet('community_context') || FALLBACK_CONTEXT.communityContext,
+    recentInsights: insights.map((i: any) => ({
+      title: i.title,
+      summary: i.summary,
+      confidenceScore: i.confidence_score ?? 0.5,
+      createdAt: i.created_at,
+    })),
+    streamCount,
+  };
+}
+
+export async function upsertMemory(entry: {
+  agent_type: string;
+  memory_type: string;
+  key: string;
+  summary: string;
+  confidence_score?: number;
+  metadata?: Record<string, any>;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const workspaceId = getWorkspaceId();
+  const now = new Date().toISOString();
+
+  try {
+    const { data: existing } = await db
+      .from('ai_agent_memory')
+      .select('id,occurrence_count')
+      .eq('workspace_id', workspaceId)
+      .eq('agent_type', entry.agent_type)
+      .eq('memory_type', entry.memory_type)
+      .eq('key', entry.key)
+      .single();
+
+    if (existing) {
+      await db.from('ai_agent_memory').update({
+        summary: entry.summary,
+        confidence_score: entry.confidence_score ?? 0.7,
+        occurrence_count: existing.occurrence_count + 1,
+        last_seen_at: now,
+        updated_at: now,
+        ...(entry.metadata ? { metadata: entry.metadata } : {}),
+      }).eq('id', existing.id);
+    } else {
+      await db.from('ai_agent_memory').insert({
+        workspace_id: workspaceId,
+        agent_type: entry.agent_type,
+        memory_type: entry.memory_type,
+        key: entry.key,
+        summary: entry.summary,
+        confidence_score: entry.confidence_score ?? 0.5,
+        occurrence_count: 1,
+        last_seen_at: now,
+        metadata: entry.metadata ?? {},
+      });
+    }
+  } catch { /* silent – memory er best-effort */ }
+}
+
+export async function addInsight(insight: {
+  title: string;
+  summary: string;
+  confidence_score?: number;
+  source_data?: Record<string, any>;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.from('ai_agent_insights').insert({
+      workspace_id: getWorkspaceId(),
+      title: insight.title,
+      summary: insight.summary,
+      confidence_score: insight.confidence_score ?? 0.7,
+      source_data: insight.source_data ?? {},
+    });
+  } catch {}
+}
+
+export function buildContextPrompt(ctx: CreatorContext): string {
+  if (ctx.streamCount === 0 && ctx.topViewers.length === 0 && ctx.runningJokes.length === 0) {
+    return 'Kanal: GLENVEX – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
+  }
+
+  const deler: string[] = [`KANALKUNNSKAP (${ctx.streamCount} streams analysert):`];
+
+  if (ctx.channelProfile) deler.push(`- Profil: ${ctx.channelProfile}`);
+  if (ctx.contentStrategy) deler.push(`- Strategi: ${ctx.contentStrategy}`);
+  if (ctx.communityContext) deler.push(`- Community: ${ctx.communityContext}`);
+
+  if (ctx.topViewers.length > 0) {
+    deler.push(`- Kjente seere: ${ctx.topViewers.slice(0, 5).map(v => v.key).join(', ')}`);
+  }
+
+  if (ctx.runningJokes.length > 0) {
+    deler.push(`- Interne vitser/uttrykk: ${ctx.runningJokes.slice(0, 5).map(j => j.key).join(', ')}`);
+  }
+
+  if (ctx.contentPatterns.length > 0) {
+    deler.push(`- Historiske mønstre:\n${ctx.contentPatterns.slice(0, 5).map(p => `  • ${p.key}: score ${Math.round(p.confidenceScore * 100)} (${p.occurrenceCount}×)`).join('\n')}`);
+  }
+
+  if (ctx.gamePatterns.length > 0) {
+    deler.push(`- Spillkunnskap:\n${ctx.gamePatterns.slice(0, 3).map(g => `  • ${g.key}: ${g.summary}`).join('\n')}`);
+  }
+
+  if (ctx.recentInsights.length > 0) {
+    deler.push(`- Siste innsikter:\n${ctx.recentInsights.slice(0, 2).map(i => `  • ${i.title}: ${i.summary}`).join('\n')}`);
+  }
+
+  deler.push('\nBruk denne kunnskapen aktivt: gi HØYERE score til øyeblikk som historisk fungerer bra for GLENVEX.');
+  return deler.join('\n');
+}

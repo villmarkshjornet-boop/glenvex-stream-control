@@ -49,7 +49,7 @@ export async function GET() {
   const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, workspaceRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,status_message,error_message')
       .eq('workspace_id', getWorkspaceId())
@@ -63,6 +63,12 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(300),
 
+    db.from('ai_agent_insights')
+      .select('title,summary,confidence_score,created_at')
+      .eq('workspace_id', getWorkspaceId())
+      .order('created_at', { ascending: false })
+      .limit(3),
+
     db.from('workspaces')
       .select('settings_json')
       .eq('id', getWorkspaceId())
@@ -71,6 +77,7 @@ export async function GET() {
 
   const vods: any[] = vodsRes.data ?? [];
   const highlights: any[] = highlightsRes.data ?? [];
+  const nyesteInnsikter: any[] = insightsRes.data ?? [];
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
 
   // ── Aktive jobber ────────────────────────────────────────────────────────
@@ -174,6 +181,12 @@ export async function GET() {
   const liveEvents: any[] = (workspaceRes.data?.settings_json?.live_events ?? []).slice(0, 30);
 
   return NextResponse.json({
+    nyesteInnsikter: nyesteInnsikter.map(i => ({
+      title: i.title,
+      summary: i.summary,
+      confidenceScore: i.confidence_score,
+      createdAt: i.created_at,
+    })),
     activeJobs,
     nesteStream: nesteStream
       ? {

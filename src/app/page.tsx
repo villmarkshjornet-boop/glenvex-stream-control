@@ -48,12 +48,20 @@ interface KlippetHighlight {
   clippedAt: string;
 }
 
+interface AiInnsikt {
+  title: string;
+  summary: string;
+  confidenceScore: number;
+  createdAt: string;
+}
+
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string }[];
   sjekkliste: { label: string; done: boolean; href: string }[];
   sisteResultater: { id: string; title: string; status: string; createdAt: string; highlights: number; klipp: number; readyForClip: number; clipping: number }[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
   clipStatus: { clipping: number; readyForClip: number; sisteKlippede: KlippetHighlight[] };
+  nyesteInnsikter: AiInnsikt[];
   liveEvents: LiveEvent[];
   ts: string;
 }
@@ -331,6 +339,34 @@ function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteR
   );
 }
 
+// ─── AI Insights Widget ────────────────────────────────────────────────────────
+
+function AiInnsikterWidget({ innsikter, loading }: { innsikter: AiInnsikt[] | undefined; loading: boolean }) {
+  if (loading) return null;
+  if (!innsikter || innsikter.length === 0) return null;
+
+  return (
+    <div className="bg-g-card border border-g-green/10 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-g-green" />
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI lærte nylig</p>
+        </div>
+        <Link href="/ai-memory" className="text-[9px] text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        {innsikter.map((ins, i) => (
+          <div key={i} className="flex-1 min-w-52 bg-g-bg/50 border border-g-border/30 rounded-lg p-3">
+            <p className="text-[10px] font-bold text-g-green mb-0.5">◆ {ins.title}</p>
+            <p className="text-[10px] text-g-muted leading-snug">{ins.summary.slice(0, 100)}</p>
+            <p className="text-[9px] text-g-muted/40 mt-1">{tidSiden(ins.createdAt)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Clip Status Widget ────────────────────────────────────────────────────────
 
 function ClipStatusWidget({ cs, loading }: { cs: LiveData['clipStatus'] | undefined; loading: boolean }) {
@@ -549,6 +585,9 @@ export default function Dashboard() {
           <StreamStatus slow={slow} live={live} />
         </div>
       </div>
+
+      {/* ── AI Innsikter ─────────────────────────────────────────────────────── */}
+      <AiInnsikterWidget innsikter={live?.nyesteInnsikter} loading={loadingLive} />
 
       {/* ── Klipp-status ─────────────────────────────────────────────────────── */}
       <ClipStatusWidget cs={live?.clipStatus} loading={loadingLive} />

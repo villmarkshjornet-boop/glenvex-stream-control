@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { trackRaid, trackGiftSub } from './eventTracker';
 import { getSettings } from '@/lib/settings';
 import { getBroadcasterId } from '@/lib/twitch';
+import { logBotAgentEvent, upsertBotMemory } from './agentLogger';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
@@ -136,9 +137,13 @@ async function sjekkNyeFollowers() {
     // Log til dashboard
     const navnListe = (data.data ?? []).slice(0, antallNye).map((f: any) => f.user_name).filter(Boolean);
     if (navnListe.length > 0) {
-      for (const navn of navnListe) logHendelse('follow', { username: navn, total: nyAntall });
+      for (const navn of navnListe) {
+        logHendelse('follow', { username: navn, total: nyAntall });
+        logBotAgentEvent({ source: 'twitch', event_type: 'follow', username: navn, importance_score: 40, metadata: { total: nyAntall } });
+      }
     } else {
       logHendelse('follow', { count: antallNye, total: nyAntall });
+      logBotAgentEvent({ source: 'twitch', event_type: 'follow', importance_score: 30, metadata: { count: antallNye, total: nyAntall } });
     }
 
     // Nyeste følgere (tilgjengelig ved user token, tom liste ellers)
@@ -273,6 +278,8 @@ export function startTwitchBot() {
   client.on('raided', async (channel, username, viewers) => {
     trackRaid(username, viewers);
     logHendelse('raid', { username, viewers });
+    logBotAgentEvent({ source: 'twitch', event_type: 'raid', username, importance_score: Math.min(100, viewers / 2), metadata: { viewers } });
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet GLENVEX med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
 
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
     const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom! Sjekk Discord: ${DISCORD_URL}`;
@@ -298,6 +305,8 @@ export function startTwitchBot() {
 
   client.on('subscription', async (channel, username, _method, _message, _userstate) => {
     logHendelse('sub', { username });
+    logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`).catch(() => {});
 
@@ -310,6 +319,8 @@ export function startTwitchBot() {
 
   client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
     logHendelse('resub', { username, months });
+    logBotAgentEvent({ source: 'twitch', event_type: 'resub', username, importance_score: 75, metadata: { months } });
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
   });
@@ -319,6 +330,8 @@ export function startTwitchBot() {
   client.on('subgift', async (channel, username, _streakMonths, recipient, _methods, _userstate) => {
     trackGiftSub(username, 1);
     logHendelse('giftsub', { username, recipient });
+    logBotAgentEvent({ source: 'twitch', event_type: 'giftsub', username, importance_score: 85, metadata: { recipient } });
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`).catch(() => {});
   });
@@ -326,6 +339,8 @@ export function startTwitchBot() {
   client.on('submysterygift', async (channel, username, numbOfSubs, _methods, _userstate) => {
     trackGiftSub(username, numbOfSubs);
     logHendelse('mystery_gift', { username, count: numbOfSubs });
+    logBotAgentEvent({ source: 'twitch', event_type: 'mystery_gift', username, importance_score: 90, metadata: { count: numbOfSubs } });
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Mass gift-giver – ${numbOfSubs} subs`, confidence_score: 0.95, metadata: { gifter: true, totalGifts: numbOfSubs } }).catch(() => {});
 
     const svar = await aiSvar(`${username} giftet ${numbOfSubs} subs til random seere! Lag en episk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter ${numbOfSubs} subs! HVEM ER DETTE MENNESKET?! PogChamp`).catch(() => {});
@@ -347,11 +362,27 @@ export function startTwitchBot() {
     const bits = userstate.bits ?? '?';
     const username = userstate.username ?? 'Noen';
     logHendelse('cheer', { username, bits });
+    const bitsNum = typeof bits === 'string' ? parseInt(bits) || 0 : bits;
+    logBotAgentEvent({ source: 'twitch', event_type: 'cheer', username, importance_score: Math.min(90, bitsNum / 10), metadata: { bits: bitsNum } });
+    if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på GLENVEX`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`).catch(() => {});
   });
 
   // ─── Meldinger ─────────────────────────────────────────────────────────────
+
+  // Telletabell for aktive chat-brukere (oppdateres i minne, flusher til memory via aggregering)
+  const chatActivity = new Map<string, number>();
+  setInterval(() => {
+    // Topp 5 aktive chatters → logg som events for aggregering
+    const sorted = Array.from(chatActivity.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    for (const [username, count] of sorted) {
+      if (count >= 3) {
+        logBotAgentEvent({ source: 'twitch', event_type: 'active_chatter', username, importance_score: Math.min(60, count * 5), metadata: { messageCount: count } });
+      }
+    }
+    chatActivity.clear();
+  }, 10 * 60_000); // Hvert 10. min
 
   client.on('message', async (channel, tags, message, self) => {
     if (self) return;
@@ -359,6 +390,9 @@ export function startTwitchBot() {
 
     const brukernavn = tags.username.toLowerCase();
     const tekst = message.trim();
+
+    // Spor chat-aktivitet (billig – bare telle)
+    chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
 
     if (tekst.startsWith('!') || tekst.startsWith('/')) return;
     if (brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements')) return;

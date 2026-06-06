@@ -70,6 +70,16 @@ const NAV: NavSeksjon[] = [
     ],
   },
   {
+    id: 'ai',
+    label: 'AI Intelligence',
+    href: '/ai-memory',
+    icon: '◆',
+    items: [
+      { label: 'AI Memory', href: '/ai-memory' },
+      { label: 'AI Producer', href: '/ai-producer' },
+    ],
+  },
+  {
     id: 'team',
     label: 'Team',
     href: '/team',
@@ -100,6 +110,7 @@ function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
   if (seksjon.items?.some(i => pathname.startsWith(i.href) && i.href !== '/')) return true;
   if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
   if (seksjon.id === 'dashboard' && pathname === '/') return true;
+  if (seksjon.id === 'ai' && (pathname.startsWith('/ai-memory') || pathname.startsWith('/ai-producer'))) return true;
   return false;
 }
 

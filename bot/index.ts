@@ -29,6 +29,8 @@ import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
 import { addContent } from '@/lib/contentLibrary';
+import { logBotAgentEvent, upsertBotMemory } from './lib/agentLogger';
+import { startLearningAggregator } from './lib/learningAggregator';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -138,6 +140,7 @@ async function checkLive() {
       await postPreLiveHype(stream.title ?? '', stream.game ?? '');
       updateStreamSyklus({ stream_start_at: new Date().toISOString(), sist_live_id: stream.id }).catch(() => {});
       logBotEvent('stream_live', { tittel: stream.title ?? '', spill: stream.game ?? '' });
+      logBotAgentEvent({ source: 'twitch', event_type: 'stream_live', importance_score: 100, metadata: { title: stream.title, game: stream.game, streamId: stream.id } });
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
@@ -149,6 +152,7 @@ async function checkLive() {
       saveSettings({ lastNotifiedStreamId: null });
       endSession(0);
       logBotEvent('stream_offline', {});
+      logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
       // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
       setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
     }
@@ -783,6 +787,9 @@ async function postTopClip() {
 // ─── Velkomstmelding ─────────────────────────────────────────────────────────
 
 client.on('guildMemberAdd', async (member) => {
+  logBotAgentEvent({ source: 'discord', event_type: 'member_join', username: member.user.username, importance_score: 50, metadata: { userId: member.user.id } });
+  upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: member.user.id, summary: `${member.displayName} ble med i GLENVEX Discord`, confidence_score: 0.6, metadata: { username: member.user.username } }).catch(() => {});
+
   const kanal = finnChatKanal();
   if (!kanal) return;
 
@@ -942,6 +949,7 @@ client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
+  startLearningAggregator();
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
@@ -971,6 +979,14 @@ client.on('messageCreate', async (message) => {
   if (message.guild) {
     upsertMember(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
     incrementChatMessages();
+    // Discord activity tracking for learning (ikke logg hver melding – bare hvert 10. svar fra aktive)
+    const member = getMember(message.author.id);
+    if (member && (member.messages ?? 0) % 10 === 0 && (member.messages ?? 0) > 0) {
+      logBotAgentEvent({ source: 'discord', event_type: 'active_member', username: message.author.username, importance_score: Math.min(70, (member.messages ?? 0) / 10), metadata: { messages: member.messages, level: member.level } });
+      if ((member.messages ?? 0) >= 50) {
+        upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: message.author.id, summary: `${member.displayName ?? message.author.username} – aktiv Discord-member (${member.messages} meldinger, Level ${member.level})`, confidence_score: 0.75, metadata: { username: message.author.username, messages: member.messages, level: member.level } }).catch(() => {});
+      }
+    }
     const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
     if (xpResult?.leveledUp) {
       message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
