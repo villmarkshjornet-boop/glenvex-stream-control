@@ -605,15 +605,81 @@ async function delSocialsSubtilt() {
   addToMemory({ type: 'socials', innhold: 'delt sosiale lenker' });
 }
 
+// Roterer mellom: partner → stream → community → partner → ...
+let proaktivRunde = 0;
+
+async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
+  const sbUrl = process.env.SUPABASE_URL;
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!sbUrl || !sbKey) return;
+  try {
+    const r = await fetch(`${sbUrl}/rest/v1/partners?aktiv=eq.true&select=navn,beskrivelse,affiliate_link,rabattkode&order=prioritet.desc&limit=5`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    });
+    const partnere = await r.json() as any[];
+    if (!partnere || partnere.length === 0) return;
+    const partner = partnere[Math.floor(Math.random() * partnere.length)];
+    const apiKey = process.env.OPENAI_API_KEY;
+    let tekst = `🤝 **${partner.navn}** – ${partner.beskrivelse ?? ''}${partner.affiliate_link ? `\n${partner.affiliate_link}` : ''}${partner.rabattkode ? ` (kode: ${partner.rabattkode})` : ''}`;
+    if (apiKey) {
+      const openai = new OpenAI({ apiKey });
+      const res2 = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: `Skriv en kort, autentisk norsk promo-melding (maks 2 setninger) for GLENVEXs partner: ${partner.navn} – ${partner.beskrivelse ?? ''}. Avslutning: ${partner.affiliate_link ?? ''}${partner.rabattkode ? ` – bruk kode ${partner.rabattkode}` : ''}. Naturlig tone, ikke salesy.` }],
+        max_tokens: 100,
+        temperature: 0.8,
+      });
+      const ai = res2.choices[0]?.message?.content ?? '';
+      if (ai) tekst = `🤝 ${ai}`;
+    }
+    await kanal.send(tekst);
+    addToMemory({ type: 'proaktiv', innhold: `partner: ${partner.navn}` });
+  } catch {}
+}
+
+async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
+  const plan = await getStreamplan();
+  const aktive = plan.filter((d: any) => d.aktiv);
+  if (aktive.length === 0) return;
+  const DAGER = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
+  const idag = new Date().getDay();
+  const neste = aktive.find((d: any) => DAGER.indexOf(d.dag) >= idag) ?? aktive[0];
+  const apiKey = process.env.OPENAI_API_KEY;
+  let tekst = `📅 Neste stream: **${neste.dag}** kl. ${neste.tid} – **${neste.spill}**${neste.tittel ? ` – *${neste.tittel}*` : ''}\nFølg med på twitch.tv/glenvex 🔴`;
+  if (apiKey) {
+    const openai = new OpenAI({ apiKey });
+    const res2 = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: `Skriv en kort og energisk norsk Discord-melding (maks 2 setninger) om at GLENVEX streamer ${neste.spill} ${neste.dag} kl. ${neste.tid}${neste.tittel ? ` med tittelen "${neste.tittel}"` : ''}. Ikke start med emoji.` }],
+      max_tokens: 80,
+      temperature: 0.9,
+    });
+    const ai = res2.choices[0]?.message?.content ?? '';
+    if (ai) tekst = `📅 ${ai}\ntwitch.tv/glenvex`;
+  }
+  await kanal.send(tekst).catch(() => {});
+  addToMemory({ type: 'proaktiv', innhold: `stream-info: ${neste.spill}` });
+}
+
 async function sendProaktivMelding() {
   const botSettings = getBotSettings();
   if (!botSettings.aktiv || botSettings.pauseDiscord) return;
   const kanal = finnChatKanal();
   if (!kanal) return;
-  const melding = getProaktivMelding();
+
+  const runde = proaktivRunde % 3;
+  proaktivRunde++;
+
   try {
-    await kanal.send(melding);
-    addToMemory({ type: 'proaktiv', innhold: melding });
+    if (runde === 0) {
+      await sendPartnerPromoMelding(kanal);
+    } else if (runde === 1) {
+      await sendStreamInfoMelding(kanal);
+    } else {
+      const melding = getProaktivMelding();
+      await kanal.send(melding);
+      addToMemory({ type: 'proaktiv', innhold: melding });
+    }
   } catch {}
 }
 
@@ -768,7 +834,7 @@ client.on('threadCreate', async (thread: ThreadChannel) => {
 // ─── Schedulers ──────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL        = 2  * 60 * 1000;
-const PROAKTIV_INTERVAL    = 4  * 60 * 60 * 1000;
+const PROAKTIV_INTERVAL    = 8  * 60 * 60 * 1000;
 const CLIP_INTERVAL        = 12 * 60 * 60 * 1000;
 const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
 const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
