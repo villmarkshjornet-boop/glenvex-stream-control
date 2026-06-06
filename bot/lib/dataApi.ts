@@ -2,6 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWorker';
+import { forceThumbnail, getThumbnailWorkerStatus } from './thumbnailGenerator';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -365,10 +366,25 @@ export function startDataApi(port = 4242) {
       return;
     }
 
-    // ── Worker-status: env, aktive klipp, siste log-hendelser ───────────────
+    // ── Worker-status: clip + thumbnail worker ───────────────────────────────
     if (url === '/content-factory/worker-status' && method === 'GET') {
       res.writeHead(200);
-      res.end(JSON.stringify(getWorkerStatus()));
+      res.end(JSON.stringify({
+        ...getWorkerStatus(),
+        thumbnail: getThumbnailWorkerStatus(),
+      }));
+      return;
+    }
+
+    // ── Thumbnail force-trigger (bypass 90s polling) ──────────────────────────
+    if (url.startsWith('/content-factory/thumbnail-force/') && method === 'POST') {
+      const highlightId = url.replace('/content-factory/thumbnail-force/', '');
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+      }
+      res.writeHead(202);
+      res.end(JSON.stringify({ ok: true, melding: `Thumbnail-generering startet for ${highlightId}` }));
+      forceThumbnail(highlightId).catch(console.error);
       return;
     }
 
