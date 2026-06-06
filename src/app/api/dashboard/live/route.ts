@@ -204,5 +204,6 @@ export async function GET() {
     clipStatus,
     liveEvents,
     ts: new Date().toISOString(),
+    _debug: { vodsError: vodsRes.error?.message ?? null, vodsCount: vods.length, vodsIds: vods.map(v => v.id), workspaceId: getWorkspaceId() },
   });
 }
