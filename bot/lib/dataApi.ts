@@ -128,7 +128,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       return;
     }
 
-    // Normaliser audio til 16kHz mono (Whisper-optimal) hvis ffmpeg er tilgjengelig
+    // Normaliser audio til 16kHz mono (optimal for transkribering) hvis ffmpeg er tilgjengelig
     try {
       const normalAudioPath = audioPath.replace('.mp3', '_norm.mp3');
       await execAsync(`ffmpeg -y -i "${audioPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${normalAudioPath}"`, { timeout: 10 * 60 * 1000 });
@@ -138,9 +138,9 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       }
     } catch { /* ffmpeg normalisering feilet – bruk rå audio */ }
 
-    // Transkriber direkte med Whisper – ingen Supabase Storage (unngår filstørrelsesbegrensning)
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) { oppdaterJobbStatus(vodId, 'FAILED', 'OPENAI_API_KEY mangler'); return; }
+    // Transkriber med Deepgram Nova-2 (4-5× billigere enn Whisper, støtter norsk)
+    const deepgramKey = process.env.DEEPGRAM_API_KEY;
+    if (!deepgramKey) { oppdaterJobbStatus(vodId, 'FAILED', 'DEEPGRAM_API_KEY mangler'); return; }
 
     const { createClient } = require('@supabase/supabase-js');
     const ws = require('ws');
@@ -149,15 +149,16 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     // Slett gamle transkripsjoner
     await sb.from('content_transcripts').delete().eq('vod_id', vodId);
 
-    const MAX_BYTES = 24 * 1024 * 1024; // 24MB Whisper-grense
+    // Deepgram håndterer opptil 250MB – del bare ved svært store filer (>180MB)
+    const MAX_BYTES = 180 * 1024 * 1024;
     const audioSize = fs.statSync(audioPath).size;
     const segmentPaths: { filePath: string; offset: number }[] = [];
 
     if (audioSize > MAX_BYTES) {
-      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Stor fil (${Math.round(audioSize/1024/1024)}MB) – deler i 20-min segmenter...`);
+      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Stor fil (${Math.round(audioSize/1024/1024)}MB) – deler i 60-min segmenter...`);
       const { stdout: durStr } = await execAsync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`);
       const totalSek = parseFloat(durStr.trim());
-      const segSek = 1200;
+      const segSek = 3600; // 60 min per segment
       let start = 0; let idx = 0;
       while (start < totalSek) {
         const segPath = audioPath.replace('.mp3', `_s${idx}.mp3`);
@@ -172,35 +173,44 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     let totalSegmenter = 0;
     for (let i = 0; i < segmentPaths.length; i++) {
       const { filePath: segPath, offset } = segmentPaths[i];
-      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Whisper transkriberer segment ${i+1}/${segmentPaths.length}...`);
+      const segSize = Math.round(fs.statSync(segPath).size / 1024 / 1024);
+      oppdaterJobbStatus(vodId, 'TRANSCRIBING', `Deepgram transkriberer segment ${i+1}/${segmentPaths.length} (${segSize}MB)...`);
 
       const segBuf = fs.readFileSync(segPath);
-      const boundary = `----formdata-${Date.now()}`;
-      const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`;
-      const middle = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\nverbose_json\r\n--${boundary}--\r\n`;
-      const bodyBuf = Buffer.concat([Buffer.from(header), segBuf, Buffer.from(middle)]);
 
-      const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-        body: bodyBuf,
-      });
+      const dgRes = await fetch(
+        'https://api.deepgram.com/v1/listen?model=nova-2&language=no&punctuate=true&utterances=true&utt_split=2',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${deepgramKey}`,
+            'Content-Type': 'audio/mpeg',
+          },
+          body: segBuf,
+        }
+      );
 
-      if (!wRes.ok) {
-        const errTxt = await wRes.text();
-        oppdaterJobbStatus(vodId, 'FAILED', `Whisper feil: ${errTxt.slice(0, 200)}`);
+      if (!dgRes.ok) {
+        const errTxt = await dgRes.text();
+        oppdaterJobbStatus(vodId, 'FAILED', `Deepgram feil: ${errTxt.slice(0, 200)}`);
         return;
       }
 
-      const wData = await wRes.json() as any;
-      const segs = wData.segments ?? [];
+      const dgData = await dgRes.json() as any;
+
+      // Deepgram returnerer utterances (setningsgrupper) eller words – bruk utterances
+      const utterances: any[] = dgData.results?.utterances ?? [];
+      const paragraphs: any[] = dgData.results?.channels?.[0]?.alternatives?.[0]?.paragraphs?.paragraphs ?? [];
+      const segs = utterances.length > 0 ? utterances : paragraphs;
 
       for (const seg of segs) {
+        const text: string = seg.transcript ?? seg.text ?? '';
+        if (!text.trim()) continue;
         await sb.from('content_transcripts').insert({
           vod_id: vodId,
-          start_time: seg.start + offset,
-          end_time: seg.end + offset,
-          text: seg.text,
+          start_time: (seg.start ?? 0) + offset,
+          end_time: (seg.end ?? 0) + offset,
+          text: text.trim(),
         });
         totalSegmenter++;
       }
@@ -210,7 +220,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
 
     try { fs.unlinkSync(audioPath); } catch {}
 
-    oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret.`, {
+    oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret (Deepgram Nova-2).`, {
       transcribed: true,
       segmenter: totalSegmenter,
     });
@@ -220,7 +230,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       status: 'TRANSCRIBED',
       current_step: 'DISCOVER',
       progress_percent: 30,
-      status_message: `Transkribering ferdig (${totalSegmenter} segmenter) – Phase 2 starter automatisk`,
+      status_message: `Deepgram ferdig (${totalSegmenter} segmenter) – Phase 2 starter automatisk`,
     }).eq('id', vodId);
 
     console.log(`[ContentFactory] ✓ Jobb ferdig: ${vodId} – ${totalSegmenter} segmenter, status satt til TRANSCRIBED`);

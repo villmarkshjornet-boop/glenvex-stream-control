@@ -83,6 +83,7 @@ export default function HighlightViewerPage() {
   const [pollerKlipp, setPollerKlipp] = useState(false);
   const [phase2Running, setPhase2Running] = useState(false);
   const [phase2Res, setPhase2Res] = useState<any>(null);
+  const [lasterZip, setLasterZip] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => {
@@ -155,6 +156,22 @@ export default function HighlightViewerPage() {
     setPhase2Res(d);
     setPhase2Running(false);
     if (d.ok) await hentHighlights(valgtVod);
+  }
+
+  async function lastNedZip(highlightId: string, tittel: string) {
+    setLasterZip(highlightId);
+    try {
+      const res = await fetch(`/api/content-factory/zip/${highlightId}`);
+      if (!res.ok) { console.error('ZIP feil:', await res.text()); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `glenvex_highlight_${tittel.replace(/\s+/g, '_').slice(0, 40)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error('ZIP nedlasting feil:', e); }
+    setLasterZip(null);
   }
 
   const hCopy = (h: Highlight) => copies.filter(c => c.highlight_id === h.id);
@@ -339,6 +356,27 @@ export default function HighlightViewerPage() {
                           </a>
                         </div>
                       )}
+                    </div>
+
+                    {/* ZIP-pakke */}
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        onClick={() => lastNedZip(h.id, h.title ?? 'highlight')}
+                        disabled={lasterZip === h.id}
+                        className="flex items-center gap-2 px-4 py-2 bg-g-green/10 border border-g-green/30 text-g-green text-xs font-bold rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+                      >
+                        {lasterZip === h.id ? (
+                          <>
+                            <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
+                            Pakker...
+                          </>
+                        ) : (
+                          <>
+                            ↓ Last ned pakke (ZIP)
+                          </>
+                        )}
+                      </button>
+                      <p className="text-[9px] text-g-muted">tekster + metadata · videoer lastes ned separat</p>
                     </div>
 
                     {/* Captions */}

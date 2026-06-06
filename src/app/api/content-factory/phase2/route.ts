@@ -104,6 +104,16 @@ export async function POST(req: NextRequest) {
 
   await oppdaterVodStatus(vodId, 'COMPLETE');
 
+  // Fire-and-forget: læringsloop oppdaterer AI Producer-kunnskap i bakgrunnen
+  setImmediate(async () => {
+    try {
+      const { kjørLearningLoop } = await import('@/lib/content-factory/ai-producer/learningLoop');
+      await kjørLearningLoop(vodId);
+    } catch (err) {
+      console.error('[Phase2] LearningLoop feil:', (err as Error).message?.slice(0, 200));
+    }
+  });
+
   const antallHighlights = db
     ? await db.from('content_highlights').select('id', { count: 'exact', head: true }).eq('vod_id', vodId).then(r => r.count ?? 0)
     : 0;
