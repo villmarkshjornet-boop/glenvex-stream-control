@@ -16,7 +16,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -945,6 +945,42 @@ async function sjekkPreHype() {
   }
 }
 
+const STATUS_KANAL_ID = '1511722714623381645';
+
+async function tildelTwitchSubRolle(twitchUsername: string): Promise<void> {
+  const guild = client.guilds.cache.first();
+  if (!guild) return;
+  const ROLLE_NAVN = '⭐ Twitch Sub';
+  let rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
+  if (!rolle) {
+    rolle = await guild.roles.create({ name: ROLLE_NAVN, color: 0x9146FF, reason: 'Auto-opprettet for Twitch subs' });
+  }
+  const lower = twitchUsername.toLowerCase();
+  const members = await guild.members.fetch().catch(() => guild.members.cache);
+  const match = [...members.values()].find(m =>
+    m.user.username.toLowerCase() === lower ||
+    (m.nickname ?? '').toLowerCase() === lower
+  );
+  if (match && !match.roles.cache.has(rolle.id)) {
+    await match.roles.add(rolle, 'Twitch sub verifisert').catch(() => {});
+  }
+}
+
+async function sikkerAdminTilGkarlsen(): Promise<void> {
+  const guild = client.guilds.cache.first();
+  if (!guild) return;
+  const members = await guild.members.fetch().catch(() => guild.members.cache);
+  const gkarlsen = [...members.values()].find(m => m.user.username.toLowerCase() === 'gkarlsen');
+  if (!gkarlsen) return;
+  let adminRolle = guild.roles.cache.find(r => r.permissions.has('Administrator'));
+  if (!adminRolle) {
+    adminRolle = await guild.roles.create({ name: '👑 Admin', permissions: ['Administrator'], reason: 'Admin-rolle for gkarlsen' });
+  }
+  if (!gkarlsen.roles.cache.has(adminRolle.id)) {
+    await gkarlsen.roles.add(adminRolle, 'gkarlsen er serveradministrator').catch(() => {});
+  }
+}
+
 client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
@@ -957,6 +993,22 @@ client.once('clientReady', () => {
   console.log(`  Kommandoer: ${commands.size}`);
   console.log('\n  System aktivert. Kaoset starter nå.\n');
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
+
+  setOnSubCallback(tildelTwitchSubRolle);
+  sikkerAdminTilGkarlsen().catch(() => {});
+
+  const statusKanal = client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined;
+  if (statusKanal) {
+    const meldinger = [
+      'Jeg ble oppdatert, jeg føler meg mye smartere 🧠',
+      'Oppdatering lastet inn – ny versjon, samme ego 😎',
+      'Er tilbake, og bedre enn noen gang. Jeg ble oppdatert 🚀',
+      'Oppdatert og klar. Prøv meg 👀',
+      'Ny versjon, hvem dis? Jeg ble oppdatert nettopp ⚡',
+    ];
+    const tekst = meldinger[Math.floor(Math.random() * meldinger.length)];
+    statusKanal.send(tekst).catch(() => {});
+  }
 
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
   setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min

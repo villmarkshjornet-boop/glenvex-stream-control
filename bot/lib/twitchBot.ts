@@ -13,6 +13,12 @@ const cooldowns = new Map<string, number>();
 const COOLDOWN_MS = 15_000;
 const SVAR_SJANSE = 0.35;
 
+// Callback som index.ts setter for å tildele Discord Twitch-Sub-rolle
+let _onSubCallback: ((username: string) => Promise<void>) | null = null;
+export function setOnSubCallback(cb: (username: string) => Promise<void>): void {
+  _onSubCallback = cb;
+}
+
 const DISCORD_MELDINGER = [
   `Bli med i GLENVEX sitt Discord! Snakk med community, se klipp og få live-varsling: ${DISCORD_URL} GlitchCat`,
   `Har du ikke jotnet Discord ennå? Kom innom: ${DISCORD_URL} PogChamp`,
@@ -309,6 +315,7 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`).catch(() => {});
+    _onSubCallback?.(username).catch(() => {});
 
     await postTilDiscord(chatKanalId(), {
       content: `🌟 **${username}** er nå subscriber! Takk for støtten! FeelsGoodMan`,
@@ -323,6 +330,7 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
+    _onSubCallback?.(username).catch(() => {});
   });
 
   // ─── GIFT SUB ──────────────────────────────────────────────────────────────
@@ -334,6 +342,7 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`).catch(() => {});
+    _onSubCallback?.(recipient).catch(() => {}); // recipient får sub-rollen
   });
 
   client.on('submysterygift', async (channel, username, numbOfSubs, _methods, _userstate) => {
