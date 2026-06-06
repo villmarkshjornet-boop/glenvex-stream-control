@@ -103,8 +103,9 @@ async function komprimerHvisForStor(filPath: string): Promise<void> {
   if (!fs.existsSync(filPath) || fs.statSync(filPath).size <= MAX) return;
   const tmp = filPath.replace('.mp4', '_c.mp4');
   try {
+    // Hard bitrate-cap: 2000k video + 64k audio = maks ~50 MB for klipp opp til 3 min
     await execAsync(
-      `ffmpeg -y -i "${filPath}" -c:v libx264 -preset fast -crf 32 -c:a aac -b:a 64k -movflags +faststart "${tmp}"`,
+      `ffmpeg -y -i "${filPath}" -c:v libx264 -preset fast -crf 33 -maxrate 2000k -bufsize 4000k -c:a aac -b:a 64k -movflags +faststart "${tmp}"`,
       { timeout: 180_000 }
     );
     if (fs.existsSync(tmp) && fs.statSync(tmp).size > 10_000) fs.renameSync(tmp, filPath);

@@ -58,7 +58,7 @@ interface AiInnsikt {
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string }[];
   sjekkliste: { label: string; done: boolean; href: string }[];
-  sisteResultater: { id: string; title: string; status: string; createdAt: string; highlights: number; klipp: number; readyForClip: number; clipping: number }[];
+  sisteResultater: { id: string; title: string; status: string; progressPercent: number | null; statusMessage: string | null; errorMessage: string | null; createdAt: string; highlights: number; klipp: number; readyForClip: number; clipping: number }[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
   clipStatus: { clipping: number; readyForClip: number; sisteKlippede: KlippetHighlight[] };
   nyesteInnsikter: AiInnsikt[];
@@ -317,8 +317,17 @@ function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteR
                   <p className="text-[11px] font-bold text-g-text truncate">{r.title}</p>
                   <div className="flex gap-2 items-center mt-0.5">
                     <span className={`text-[9px] font-bold ${st.color}`}>{st.label}</span>
+                    {r.progressPercent != null && r.status !== 'COMPLETE' && r.status !== 'ERROR' && (
+                      <span className="text-[9px] text-g-muted">{r.progressPercent}%</span>
+                    )}
                     <span className="text-[9px] text-g-muted">{tidSiden(r.createdAt)}</span>
                   </div>
+                  {r.status !== 'COMPLETE' && r.statusMessage && (
+                    <p className="text-[9px] text-g-muted truncate mt-0.5">{r.statusMessage}</p>
+                  )}
+                  {r.status === 'ERROR' && r.errorMessage && (
+                    <p className="text-[9px] text-red-400 truncate mt-0.5">{r.errorMessage}</p>
+                  )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0 text-[9px]">
                   {r.highlights > 0 && <span className="text-g-muted">{r.highlights}H</span>}

@@ -4,7 +4,7 @@ import { getDb } from '@/lib/db';
 import JSZip from 'jszip';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export async function GET(
   _req: NextRequest,
@@ -136,6 +136,26 @@ export async function GET(
   ].join('\n');
 
   zip.file('README.txt', readme, { compression: 'DEFLATE' });
+
+  // ─── Videofiler fra Supabase Storage ───────────────────────────────────────
+
+  async function hentVideoBuf(url: string): Promise<ArrayBuffer | null> {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+      if (!res.ok) return null;
+      return await res.arrayBuffer();
+    } catch { return null; }
+  }
+
+  if (h.clip_url) {
+    const buf = await hentVideoBuf(h.clip_url);
+    if (buf) zip.file(`${tittelSlug}_16x9.mp4`, buf, { compression: 'STORE' });
+  }
+
+  if (h.vertical_clip_url) {
+    const buf = await hentVideoBuf(h.vertical_clip_url);
+    if (buf) zip.file(`${tittelSlug}_9x16.mp4`, buf, { compression: 'STORE' });
+  }
 
   // ─── Generer og returner ZIP ────────────────────────────────────────────────
 

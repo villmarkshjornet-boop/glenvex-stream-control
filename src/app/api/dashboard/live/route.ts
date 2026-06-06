@@ -133,11 +133,8 @@ export async function GET() {
     { label: 'Klar for publisering', done: harKlipp, href: '/innhold/publisering' },
   ];
 
-  // ── Siste resultater – vis nyeste VODs (COMPLETE + siste 48t uansett status) ──
-  const cutoff48t = new Date(Date.now() - 48 * 3600_000).toISOString();
-  const completeVods = vods.filter(v => v.status === 'COMPLETE').slice(0, 5);
-  const pågåendeVods = vods.filter(v => v.status !== 'COMPLETE' && v.created_at > cutoff48t);
-  const visibleVods = [...pågåendeVods, ...completeVods].slice(0, 8);
+  // ── Siste resultater – vis de 8 nyeste VODsene uansett status ──────────────
+  const visibleVods = vods.slice(0, 8);
 
   const sisteResultater = visibleVods.map(v => {
     const vH = highlights.filter(h => h.vod_id === v.id);
@@ -145,6 +142,9 @@ export async function GET() {
       id: v.id,
       title: v.title,
       status: v.status,
+      progressPercent: v.progress_percent ?? null,
+      statusMessage: v.status_message ?? null,
+      errorMessage: v.error_message ?? null,
       createdAt: v.created_at,
       highlights: vH.length,
       klipp: vH.filter(h => h.clip_status === 'CLIPPED').length,
