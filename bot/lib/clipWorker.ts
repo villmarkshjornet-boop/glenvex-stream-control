@@ -157,6 +157,7 @@ async function lastOppOgFerdigstill(
       vertical_clip_url: verticalClipUrl,
       clip_finished_at: new Date().toISOString(),
       clip_error: null,
+      thumbnail_status: 'PENDING', // Thumbnail-worker plukker opp isolert
     }).eq('id', hId);
     wLog('INFO', 'DB_UPDATED_DONE', { highlightId: hId });
     logBotEvent('klipp_ferdig', { id: hId });

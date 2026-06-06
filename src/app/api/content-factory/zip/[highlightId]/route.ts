@@ -139,23 +139,52 @@ export async function GET(
 
   // ─── Videofiler fra Supabase Storage ───────────────────────────────────────
 
-  async function hentVideoBuf(url: string): Promise<ArrayBuffer | null> {
+  async function hentBinærBuf(url: string, timeoutMs = 45_000): Promise<ArrayBuffer | null> {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) return null;
       return await res.arrayBuffer();
     } catch { return null; }
   }
 
   if (h.clip_url) {
-    const buf = await hentVideoBuf(h.clip_url);
+    const buf = await hentBinærBuf(h.clip_url);
     if (buf) zip.file(`${tittelSlug}_16x9.mp4`, buf, { compression: 'STORE' });
   }
 
   if (h.vertical_clip_url) {
-    const buf = await hentVideoBuf(h.vertical_clip_url);
+    const buf = await hentBinærBuf(h.vertical_clip_url);
     if (buf) zip.file(`${tittelSlug}_9x16.mp4`, buf, { compression: 'STORE' });
   }
+
+  // ─── Thumbnail-filer (valgfrie – ZIP fungerer uten dem) ─────────────────────
+
+  if (h.thumbnail_youtube_url) {
+    const buf = await hentBinærBuf(h.thumbnail_youtube_url, 30_000);
+    if (buf) zip.file('thumbnail_youtube.png', buf, { compression: 'STORE' });
+  }
+
+  if (h.thumbnail_tiktok_url) {
+    const buf = await hentBinærBuf(h.thumbnail_tiktok_url, 30_000);
+    if (buf) zip.file('thumbnail_tiktok.png', buf, { compression: 'STORE' });
+  }
+
+  if (h.thumbnail_prompt) {
+    zip.file('thumbnail_prompt.txt', h.thumbnail_prompt, { compression: 'DEFLATE' });
+  }
+
+  const thumbMetadata = {
+    highlight_id:          highlightId,
+    vod_id:                h.vod_id,
+    category:              h.category ?? null,
+    headline:              h.thumbnail_headline ?? null,
+    subheadline:           h.thumbnail_subheadline ?? null,
+    source_frame_time:     null,
+    thumbnail_status:      h.thumbnail_status ?? null,
+    youtube_thumbnail_url: h.thumbnail_youtube_url ?? null,
+    tiktok_thumbnail_url:  h.thumbnail_tiktok_url ?? null,
+  };
+  zip.file('thumbnail_metadata.json', JSON.stringify(thumbMetadata, null, 2), { compression: 'DEFLATE' });
 
   // ─── Generer og returner ZIP ────────────────────────────────────────────────
 

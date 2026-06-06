@@ -18,6 +18,12 @@ interface Highlight {
   vertical_clip_url?: string | null;
   clip_finished_at?: string | null;
   clip_error?: string | null;
+  thumbnail_status?: string | null;
+  thumbnail_youtube_url?: string | null;
+  thumbnail_tiktok_url?: string | null;
+  thumbnail_error?: string | null;
+  thumbnail_headline?: string | null;
+  thumbnail_subheadline?: string | null;
 }
 
 interface Copy {
@@ -84,6 +90,7 @@ export default function HighlightViewerPage() {
   const [phase2Running, setPhase2Running] = useState(false);
   const [phase2Res, setPhase2Res] = useState<any>(null);
   const [lasterZip, setLasterZip] = useState<string | null>(null);
+  const [regenerererThumb, setRegenerererThumb] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => {
@@ -125,7 +132,8 @@ export default function HighlightViewerPage() {
     if (!pollerKlipp || !valgtVod) return;
     if (!pollerStartRef.current) pollerStartRef.current = Date.now();
     const harAktiv = highlights.some(h =>
-      h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP'
+      h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP' ||
+      h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING'
     );
     const timeoutNådd = Date.now() - pollerStartRef.current > 15 * 60 * 1000;
     if (!harAktiv || timeoutNådd) {
@@ -404,6 +412,102 @@ export default function HighlightViewerPage() {
                       </div>
                     )}
 
+                    {/* AI Thumbnails – kun når klippet er ferdig */}
+                    {h.clip_status === 'CLIPPED' && (
+                      <div className="bg-g-bg border border-purple-400/20 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[9px] text-purple-400 uppercase tracking-widest font-bold">AI Thumbnails</p>
+                          <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
+                            h.thumbnail_status === 'DONE'      ? 'text-purple-400 border-purple-400/30 bg-purple-400/5' :
+                            h.thumbnail_status === 'GENERATING'? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
+                            h.thumbnail_status === 'PENDING'   ? 'text-blue-400 border-blue-400/30' :
+                            h.thumbnail_status === 'FAILED'    ? 'text-red-400 border-red-400/30' :
+                            'text-g-muted border-g-border'
+                          }`}>
+                            {h.thumbnail_status ?? 'IKKE GENERERT'}
+                          </span>
+                        </div>
+
+                        {(h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING') && (
+                          <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
+                            <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
+                            {h.thumbnail_status === 'GENERATING'
+                              ? 'Railway genererer AI-thumbnails – 1–2 min...'
+                              : 'Thumbnail i kø – Railway plukker opp innen 90s...'}
+                          </div>
+                        )}
+
+                        {h.thumbnail_youtube_url && (
+                          <div className="space-y-1.5">
+                            <p className="text-[9px] text-g-muted font-bold uppercase">▶ YouTube 16:9</p>
+                            <img
+                              src={h.thumbnail_youtube_url}
+                              alt="YouTube thumbnail"
+                              className="w-full rounded border border-g-border"
+                              style={{ maxHeight: '160px', objectFit: 'cover' }}
+                            />
+                            {h.thumbnail_headline && (
+                              <p className="text-[9px] text-purple-400 font-bold">
+                                {h.thumbnail_headline}
+                                {h.thumbnail_subheadline ? ` · ${h.thumbnail_subheadline}` : ''}
+                              </p>
+                            )}
+                            <a
+                              href={h.thumbnail_youtube_url}
+                              download="thumbnail_youtube.png"
+                              className="inline-block px-3 py-1 bg-g-bg border border-purple-400/30 rounded text-[10px] text-purple-400 hover:bg-purple-400/10 transition-all font-bold"
+                            >
+                              ↓ Last ned YouTube thumbnail
+                            </a>
+                          </div>
+                        )}
+
+                        {h.thumbnail_tiktok_url && (
+                          <div className="space-y-1.5">
+                            <p className="text-[9px] text-g-muted font-bold uppercase">♪ TikTok 9:16</p>
+                            <img
+                              src={h.thumbnail_tiktok_url}
+                              alt="TikTok thumbnail"
+                              className="mx-auto rounded border border-g-border"
+                              style={{ maxHeight: '210px', maxWidth: '120px', objectFit: 'cover' }}
+                            />
+                            <a
+                              href={h.thumbnail_tiktok_url}
+                              download="thumbnail_tiktok.png"
+                              className="inline-block px-3 py-1 bg-g-bg border border-purple-400/30 rounded text-[10px] text-purple-400 hover:bg-purple-400/10 transition-all font-bold"
+                            >
+                              ↓ Last ned TikTok thumbnail
+                            </a>
+                          </div>
+                        )}
+
+                        {h.thumbnail_error && (
+                          <p className="text-[9px] text-red-400 break-all">Feil: {h.thumbnail_error}</p>
+                        )}
+
+                        {/* Regenerer-knapp – alltid tilgjengelig unntatt mens GENERATING */}
+                        {h.thumbnail_status !== 'GENERATING' && (
+                          <button
+                            onClick={async () => {
+                              setRegenerererThumb(h.id);
+                              await fetch(`/api/content-factory/thumbnail/${h.id}`, { method: 'POST' });
+                              setRegenerererThumb(null);
+                              setPollerKlipp(true);
+                              await hentHighlights(valgtVod);
+                            }}
+                            disabled={regenerererThumb === h.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-g-bg border border-purple-400/30 text-purple-400 text-[10px] font-black rounded hover:bg-purple-400/10 transition-all disabled:opacity-40"
+                          >
+                            {regenerererThumb === h.id ? (
+                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Starter...</>
+                            ) : (
+                              <>↻ {h.thumbnail_status === 'DONE' ? 'Regenerer thumbnail' : 'Generer thumbnail'}</>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* ZIP-pakke */}
                     <div className="flex items-center gap-3 pt-1">
                       <button
@@ -422,7 +526,7 @@ export default function HighlightViewerPage() {
                           </>
                         )}
                       </button>
-                      <p className="text-[9px] text-g-muted">tekster + metadata · videoer lastes ned separat</p>
+                      <p className="text-[9px] text-g-muted">tekster + metadata + thumbnails (hvis klare)</p>
                     </div>
 
                     {/* Captions */}

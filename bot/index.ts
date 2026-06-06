@@ -17,6 +17,7 @@ import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot, setOnSubCallback } from './lib/twitchBot';
+import { startThumbnailWorker } from './lib/thumbnailGenerator';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -984,6 +985,7 @@ async function sikkerAdminTilGkarlsen(): Promise<void> {
 client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
+  startThumbnailWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
   startLearningAggregator();
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
