@@ -494,7 +494,11 @@ export default function HighlightViewerPage() {
                               setHighlights(prev => prev.map(x =>
                                 x.id === h.id ? { ...x, thumbnail_status: 'GENERATING' } : x
                               ));
-                              const res = await fetch(`/api/content-factory/thumbnail/${h.id}`, { method: 'POST' });
+                              const res = await fetch('/api/content-factory/thumbnails/generate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ highlight_id: h.id }),
+                              });
                               const d = await res.json().catch(() => ({}));
                               setRegenerererThumb(null);
                               if (!res.ok) {

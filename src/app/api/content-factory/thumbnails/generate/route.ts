@@ -1,0 +1,240 @@
+/**
+ * POST /api/content-factory/thumbnails/generate
+ *
+ * Isolert AI-thumbnail-generator på Vercel.
+ * - Ingen ffmpeg
+ * - Ingen store videofiler lastes ned
+ * - Thumbnail-feil setter aldri clip_status
+ * - maxDuration=60 for å gi DALL-E nok tid
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { isContentFactoryEnabled } from '@/lib/content-factory';
+import { getDb } from '@/lib/db';
+import OpenAI from 'openai';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+// ── Copy-generering ───────────────────────────────────────────────────────────
+
+async function lagCopy(
+  client: OpenAI,
+  highlight: any,
+  vod: any,
+  copies: any[]
+): Promise<{ headline: string; subheadline: string; style: string }> {
+  const ytCopy = copies.find((c: any) => c.platform === 'youtube');
+  const ttCopy = copies.find((c: any) => c.platform === 'tiktok');
+
+  try {
+    const res = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Du er ekspert på gaming YouTube/TikTok thumbnails for norsk streamer GLENVEX.
+Svar KUN med JSON: {"headline":"...","subheadline":"...","style":"..."}
+headline: 2–5 ORD, STORE BOKSTAVER, norsk, høy klikkverdi
+Eksempler: "DETTE VAR SYKT", "HAN HADDE IKKE SJANS", "BOSSEN BLE KNUST", "RP DRAMA ESKALERTE"
+subheadline: maks 5 ord eller tom string
+style: én setning visuell retning`,
+        },
+        {
+          role: 'user',
+          content: [
+            `Klipp: ${highlight.title ?? 'Ukjent'}`,
+            `Kategori: ${highlight.category ?? ''}`,
+            `Spill: ${vod?.category ?? vod?.title ?? ''}`,
+            highlight.begrunnelse ? `Begrunnelse: ${highlight.begrunnelse}` : '',
+            ytCopy?.tittel ? `YouTube-tittel: ${ytCopy.tittel}` : '',
+            ttCopy?.caption ? `TikTok-caption: ${ttCopy.caption}` : '',
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      max_tokens: 120,
+      temperature: 0.85,
+    });
+    const text = res.choices[0]?.message?.content ?? '';
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (match) return JSON.parse(match[0]);
+  } catch {}
+
+  const headline =
+    highlight.category === 'FUNNY'     ? 'DETTE VAR SYKT' :
+    highlight.category === 'CLUTCH'    ? 'UTROLIG REDNING' :
+    highlight.category === 'FAIL'      ? 'DETTE GIKK GALT' :
+    highlight.category === 'RAGE'      ? 'HAN MISTET DET' :
+    highlight.category === 'RP_MOMENT' ? 'RP DRAMA' :
+    'SJEKK DETTE';
+  return { headline, subheadline: '', style: 'Dramatisk og mørk med neon-grønt' };
+}
+
+// ── DALL-E-3 prompt ───────────────────────────────────────────────────────────
+
+function byggPrompt(
+  platform: 'youtube' | 'tiktok',
+  highlight: any,
+  vod: any,
+  copy: { headline: string; subheadline: string; style: string }
+): string {
+  const spill = vod?.category ?? vod?.title ?? 'gaming';
+  const format = platform === 'youtube'
+    ? 'landscape 16:9 YouTube gaming thumbnail'
+    : 'vertical 9:16 TikTok/Shorts gaming thumbnail';
+  const tekstPos = platform === 'youtube'
+    ? 'large bold white text with dark stroke, placed in lower or upper third'
+    : 'large bold white text centered, with 10% safe margin from all edges';
+
+  return [
+    `Ultra-high-quality ${format} for Norwegian Twitch streamer GLENVEX.`,
+    `Game: ${spill}. Clip type: ${highlight.category ?? 'gaming'}.`,
+    `Main text overlay: "${copy.headline}" as ${tekstPos}.`,
+    copy.subheadline ? `Subtext: "${copy.subheadline}" smaller below main text.` : '',
+    `Style: ${copy.style}. Dark cinematic background, neon green (#00FF87) accent lighting, high contrast, intense dramatic mood.`,
+    'No watermarks, no channel logos, no extra text beyond specified.',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Last ned PNG fra DALL-E URL ───────────────────────────────────────────────
+
+async function hentPng(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch { return null; }
+}
+
+// ── Last opp til Supabase Storage ─────────────────────────────────────────────
+
+async function lastOpp(db: any, buf: Buffer, sti: string): Promise<string | null> {
+  try {
+    const { error } = await db.storage.from('glenvex-assets').upload(sti, buf, {
+      contentType: 'image/png',
+      upsert: true,
+    });
+    if (error) return null;
+    const { data } = db.storage.from('glenvex-assets').getPublicUrl(sti);
+    return (data as any)?.publicUrl ?? null;
+  } catch { return null; }
+}
+
+// ── Hoved-handler ─────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  if (!isContentFactoryEnabled()) {
+    return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: 'OPENAI_API_KEY mangler' }, { status: 500 });
+
+  let highlightId: string;
+  try {
+    const body = await req.json();
+    highlightId = body.highlight_id;
+  } catch {
+    return NextResponse.json({ error: 'Ugyldig JSON – send { highlight_id }' }, { status: 400 });
+  }
+  if (!highlightId) return NextResponse.json({ error: 'highlight_id kreves' }, { status: 400 });
+
+  const db = getDb();
+  if (!db) return NextResponse.json({ error: 'DB ikke tilkoblet' }, { status: 500 });
+
+  // Hent highlight (bare nødvendige felt)
+  const { data: h, error: hErr } = await db
+    .from('content_highlights')
+    .select('id,vod_id,title,category,begrunnelse,clip_status,clip_url,vertical_clip_url')
+    .eq('id', highlightId)
+    .single();
+
+  if (hErr || !h) {
+    return NextResponse.json({ error: 'Highlight ikke funnet' }, { status: 404 });
+  }
+  if (h.clip_status !== 'CLIPPED') {
+    return NextResponse.json(
+      { error: `Highlight er ikke klippet ennå (clip_status = ${h.clip_status})` },
+      { status: 400 }
+    );
+  }
+  if (!h.clip_url && !h.vertical_clip_url) {
+    return NextResponse.json({ error: 'Ingen video-URL på highlightet' }, { status: 400 });
+  }
+
+  // Sett GENERATING – ALDRI rør clip_status
+  await db.from('content_highlights')
+    .update({ thumbnail_status: 'GENERATING', thumbnail_error: null })
+    .eq('id', highlightId);
+
+  try {
+    const client = new OpenAI({ apiKey });
+
+    // Hent vod + captions parallelt
+    const [vodRes, copiesRes] = await Promise.all([
+      db.from('content_vods').select('id,title,category').eq('id', h.vod_id).single(),
+      db.from('content_copy').select('platform,tittel,caption').eq('highlight_id', highlightId),
+    ]);
+    const vod = vodRes.data;
+    const copies = copiesRes.data ?? [];
+
+    // Lag thumbnail-tekst
+    const copy = await lagCopy(client, h, vod, copies);
+
+    const ytPrompt = byggPrompt('youtube', h, vod, copy);
+    const ttPrompt = byggPrompt('tiktok', h, vod, copy);
+
+    // Kall DALL-E-3 parallelt for begge formater
+    const [ytDalle, ttDalle] = await Promise.all([
+      client.images.generate({
+        model: 'dall-e-3', prompt: ytPrompt,
+        n: 1, size: '1792x1024', quality: 'standard', response_format: 'url',
+      }).catch(() => null),
+      client.images.generate({
+        model: 'dall-e-3', prompt: ttPrompt,
+        n: 1, size: '1024x1792', quality: 'standard', response_format: 'url',
+      }).catch(() => null),
+    ]);
+
+    // Last ned og last opp parallelt
+    const [ytBuf, ttBuf] = await Promise.all([
+      ytDalle?.data?.[0]?.url ? hentPng(ytDalle.data[0].url!) : Promise.resolve(null),
+      ttDalle?.data?.[0]?.url ? hentPng(ttDalle.data[0].url!) : Promise.resolve(null),
+    ]);
+
+    const baseSti = `content-factory/thumbnails/${h.vod_id}/${highlightId}`;
+    const [ytUrl, ttUrl] = await Promise.all([
+      ytBuf ? lastOpp(db, ytBuf, `${baseSti}_youtube.png`) : Promise.resolve(null),
+      ttBuf ? lastOpp(db, ttBuf, `${baseSti}_tiktok.png`) : Promise.resolve(null),
+    ]);
+
+    if (!ytUrl && !ttUrl) throw new Error('Ingen thumbnails ble generert');
+
+    // Lagre til DB – clip_status røres ALDRI
+    await db.from('content_highlights').update({
+      thumbnail_status:       'DONE',
+      thumbnail_youtube_url:  ytUrl ?? null,
+      thumbnail_tiktok_url:   ttUrl ?? null,
+      thumbnail_prompt:       ytPrompt,
+      thumbnail_headline:     copy.headline,
+      thumbnail_subheadline:  copy.subheadline || null,
+      thumbnail_generated_at: new Date().toISOString(),
+      thumbnail_error:        null,
+    }).eq('id', highlightId);
+
+    return NextResponse.json({
+      ok: true,
+      thumbnail_youtube_url: ytUrl,
+      thumbnail_tiktok_url:  ttUrl,
+    });
+
+  } catch (err: any) {
+    const msg = (err.message ?? 'Ukjent feil').slice(0, 300);
+    // Sett FAILED – clip_status røres ALDRI
+    await db.from('content_highlights').update({
+      thumbnail_status: 'FAILED',
+      thumbnail_error:  msg,
+    }).eq('id', highlightId).catch(() => {});
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
