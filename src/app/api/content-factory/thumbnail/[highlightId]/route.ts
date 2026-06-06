@@ -159,11 +159,11 @@ export async function POST(
     const [ytRes, ttRes] = await Promise.all([
       client.images.generate({
         model: 'dall-e-3', prompt: ytPrompt, n: 1,
-        size: '1792x1024', quality: 'standard', response_format: 'url',
+        size: '1792x1024', quality: 'standard',
       }).catch((e: any) => { ytErr = String(e?.message ?? e).slice(0, 300); return null; }),
       client.images.generate({
         model: 'dall-e-3', prompt: ttPrompt, n: 1,
-        size: '1024x1792', quality: 'standard', response_format: 'url',
+        size: '1024x1792', quality: 'standard',
       }).catch((e: any) => { ttErr = String(e?.message ?? e).slice(0, 300); return null; }),
     ]);
 

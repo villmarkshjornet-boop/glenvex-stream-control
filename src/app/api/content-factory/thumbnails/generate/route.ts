@@ -184,11 +184,11 @@ export async function POST(req: NextRequest) {
     const [ytDalle, ttDalle] = await Promise.all([
       client.images.generate({
         model: 'dall-e-3', prompt: ytPrompt,
-        n: 1, size: '1792x1024', quality: 'standard', response_format: 'url',
+        n: 1, size: '1792x1024', quality: 'standard',
       }).catch((e: any) => { ytDalleErr = String(e?.message ?? e).slice(0, 300); return null; }),
       client.images.generate({
         model: 'dall-e-3', prompt: ttPrompt,
-        n: 1, size: '1024x1792', quality: 'standard', response_format: 'url',
+        n: 1, size: '1024x1792', quality: 'standard',
       }).catch((e: any) => { ttDalleErr = String(e?.message ?? e).slice(0, 300); return null; }),
     ]);
 
