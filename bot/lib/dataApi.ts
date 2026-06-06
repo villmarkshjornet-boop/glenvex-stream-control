@@ -33,8 +33,8 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
     } else if (status === 'DOWNLOADING') {
       update.status = 'ANALYZING';
       update.current_step = 'DOWNLOAD';
-      // progress fra ekstra-argument eller default
       update.progress_percent = ekstra?.progress ?? 15;
+      update.updated_at = new Date().toISOString();
     } else if (status === 'TRANSCRIBING') {
       update.status = 'ANALYZING';
       update.current_step = 'TRANSCRIBING';

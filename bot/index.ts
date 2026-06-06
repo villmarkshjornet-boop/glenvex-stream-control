@@ -841,13 +841,36 @@ const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
 const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
 const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
 
-async function gjenopprettStuckeVods() {
-  // Reset ANALYZING-VODs som er eldre enn 30 min til PENDING etter Railway-restart
+async function resetAnalyzerendeVods(grunn: string) {
+  // Reset ALLE ANALYZING-VODs – Railway-restart dreper alle prosesser, ingen er aktive
   try {
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!sbUrl || !sbKey) return;
-    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const res = await fetch(`${sbUrl}/rest/v1/content_vods?status=eq.ANALYZING&select=id,title`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    });
+    if (!res.ok) return;
+    const stucke = await res.json() as any[];
+    for (const vod of stucke) {
+      await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vod.id}`, {
+        method: 'PATCH',
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: 'PENDING', error_message: grunn, progress_percent: 0, updated_at: new Date().toISOString() }),
+      });
+      addLog('warning', `Reset ANALYZING VOD til PENDING: ${vod.title ?? vod.id}`, 'RECOVERY');
+    }
+    if (stucke.length > 0) console.log(`[Recovery] Reset ${stucke.length} ANALYZING VOD(er) til PENDING (${grunn})`);
+  } catch {}
+}
+
+async function sjekkStuckeVodsPeriodisk() {
+  // Periodisk sjekk: ANALYZING-VODs som ikke er oppdatert på 2+ timer er garantert stuck
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!sbUrl || !sbKey) return;
+    const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const res = await fetch(`${sbUrl}/rest/v1/content_vods?status=eq.ANALYZING&updated_at=lt.${cutoff}&select=id,title`, {
       headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
     });
@@ -857,11 +880,10 @@ async function gjenopprettStuckeVods() {
       await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vod.id}`, {
         method: 'PATCH',
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: JSON.stringify({ status: 'PENDING', error_message: 'Railway restartet – klikk Retry for å kjøre på nytt', progress_percent: 0 }),
+        body: JSON.stringify({ status: 'PENDING', error_message: 'Stuck etter 2t – resatt automatisk', progress_percent: 0, updated_at: new Date().toISOString() }),
       });
-      addLog('warning', `Satte stuck VOD til PENDING etter restart: ${vod.title ?? vod.id}`, 'RECOVERY');
+      addLog('warning', `Periodisk reset: stuck VOD ${vod.title ?? vod.id}`, 'RECOVERY');
     }
-    if (stucke.length > 0) console.log(`[Recovery] Satte ${stucke.length} stuck VOD(er) til PENDING`);
   } catch {}
 }
 
@@ -920,8 +942,8 @@ client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
-  gjenopprettStuckeVods().catch(() => {});
-  lasterMedlemmerFraSupabase().catch(() => {}); // Gjenopprett membres fra Supabase ved Railway-restart
+  resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
+  lasterMedlemmerFraSupabase().catch(() => {});
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);
@@ -936,6 +958,7 @@ client.once('clientReady', () => {
   setTimeout(() => { sjekkGoals(); setInterval(sjekkGoals, GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
+  setInterval(() => sjekkStuckeVodsPeriodisk().catch(() => {}), 30 * 60 * 1000); // Stuck-sjekk hvert 30. min
   setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
 });
 
