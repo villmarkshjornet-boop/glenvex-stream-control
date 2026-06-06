@@ -80,6 +80,12 @@ export async function GET() {
   const nyesteInnsikter: any[] = insightsRes.data ?? [];
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
 
+  // TEMP DEBUG
+  console.log('[DEBUG] vodsRes.error:', vodsRes.error?.message);
+  console.log('[DEBUG] vods.length:', vods.length);
+  console.log('[DEBUG] vods ids:', vods.map(v => v.id + '|' + v.created_at).join(', '));
+  console.log('[DEBUG] highlightsRes.error:', highlightsRes.error?.message);
+
   // ── Aktive jobber ────────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v => ['PENDING', 'ANALYZING', 'TRANSCRIBED'].includes(v.status));
   const clippingNå = highlights.filter(h => h.clip_status === 'CLIPPING').length;
