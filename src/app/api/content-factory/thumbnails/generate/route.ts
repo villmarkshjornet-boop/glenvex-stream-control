@@ -231,10 +231,12 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     const msg = (err.message ?? 'Ukjent feil').slice(0, 300);
     // Sett FAILED – clip_status røres ALDRI
-    await db.from('content_highlights').update({
-      thumbnail_status: 'FAILED',
-      thumbnail_error:  msg,
-    }).eq('id', highlightId).catch(() => {});
+    try {
+      await db.from('content_highlights').update({
+        thumbnail_status: 'FAILED',
+        thumbnail_error:  msg,
+      }).eq('id', highlightId);
+    } catch {}
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
