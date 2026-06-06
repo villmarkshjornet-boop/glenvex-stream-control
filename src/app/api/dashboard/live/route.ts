@@ -46,6 +46,8 @@ export async function GET() {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
 
+  const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
   const [vodsRes, highlightsRes, workspaceRes] = await Promise.all([
     db.from('content_vods')
@@ -54,11 +56,12 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(20),
 
+    // Alle highlights siste 7 dager (ingen clip_status-filter – ellers telles ikke nye highlights)
     db.from('content_highlights')
-      .select('id,vod_id,clip_status,created_at')
-      .in('clip_status', ['READY_FOR_CLIP', 'CLIPPING', 'CLIPPED'])
+      .select('id,vod_id,title,start_time,clip_status,clip_url_16_9,clip_url_9_16,clip_error,updated_at,created_at')
+      .gt('created_at', cutoff7d)
       .order('created_at', { ascending: false })
-      .limit(100),
+      .limit(300),
 
     db.from('workspaces')
       .select('settings_json')
@@ -106,6 +109,7 @@ export async function GET() {
   // ── Sjekkliste (siste 72t) ────────────────────────────────────────────────
   const cutoff72t = new Date(Date.now() - 72 * 3600_000).toISOString();
   const sisteVod = vods.find(v => v.created_at > cutoff72t) ?? null;
+  // Alle highlights for siste VOD (inkludert de uten clip_status)
   const sisteVodHighlights = sisteVod ? highlights.filter(h => h.vod_id === sisteVod.id) : [];
   const harKlipp = sisteVodHighlights.some(h => h.clip_status === 'CLIPPED');
   const syklus = workspaceRes.data?.settings_json?.stream_syklus ?? {};
@@ -122,18 +126,49 @@ export async function GET() {
     { label: 'Klar for publisering', done: harKlipp, href: '/innhold/publisering' },
   ];
 
-  // ── Siste resultater ──────────────────────────────────────────────────────
-  const ferdigeVods = vods.filter(v => v.status === 'COMPLETE').slice(0, 5);
-  const sisteResultater = ferdigeVods.map(v => {
+  // ── Siste resultater – vis nyeste VODs (COMPLETE + siste 48t uansett status) ──
+  const cutoff48t = new Date(Date.now() - 48 * 3600_000).toISOString();
+  const completeVods = vods.filter(v => v.status === 'COMPLETE').slice(0, 5);
+  const pågåendeVods = vods.filter(v => v.status !== 'COMPLETE' && v.created_at > cutoff48t);
+  const visibleVods = [...pågåendeVods, ...completeVods].slice(0, 8);
+
+  const sisteResultater = visibleVods.map(v => {
     const vH = highlights.filter(h => h.vod_id === v.id);
     return {
       id: v.id,
       title: v.title,
+      status: v.status,
       createdAt: v.created_at,
       highlights: vH.length,
       klipp: vH.filter(h => h.clip_status === 'CLIPPED').length,
+      readyForClip: vH.filter(h => h.clip_status === 'READY_FOR_CLIP').length,
+      clipping: vH.filter(h => h.clip_status === 'CLIPPING').length,
     };
   });
+
+  // ── Clip-status for eget panel på dashbordet ──────────────────────────────
+  const sisteKlippede = highlights
+    .filter(h => h.clip_status === 'CLIPPED' && (h.clip_url_16_9 || h.clip_url_9_16))
+    .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime())
+    .slice(0, 5)
+    .map(h => {
+      const vodTitle = vods.find(v => v.id === h.vod_id)?.title ?? null;
+      return {
+        id: h.id,
+        vodId: h.vod_id,
+        title: h.title ?? null,
+        vodTitle,
+        clip_url_16_9: h.clip_url_16_9 ?? null,
+        clip_url_9_16: h.clip_url_9_16 ?? null,
+        clippedAt: h.updated_at ?? h.created_at,
+      };
+    });
+
+  const clipStatus = {
+    clipping: clippingNå,
+    readyForClip,
+    sisteKlippede,
+  };
 
   // ── Live hendelser fra bot ────────────────────────────────────────────────
   const liveEvents: any[] = (workspaceRes.data?.settings_json?.live_events ?? []).slice(0, 30);
@@ -152,6 +187,7 @@ export async function GET() {
       : null,
     sjekkliste,
     sisteResultater,
+    clipStatus,
     liveEvents,
     ts: new Date().toISOString(),
   });

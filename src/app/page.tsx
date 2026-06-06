@@ -38,11 +38,22 @@ interface LiveEvent {
   minutter_til?: number;
 }
 
+interface KlippetHighlight {
+  id: string;
+  vodId: string;
+  title: string | null;
+  vodTitle: string | null;
+  clip_url_16_9: string | null;
+  clip_url_9_16: string | null;
+  clippedAt: string;
+}
+
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string }[];
   sjekkliste: { label: string; done: boolean; href: string }[];
-  sisteResultater: { id: string; title: string; createdAt: string; highlights: number; klipp: number }[];
+  sisteResultater: { id: string; title: string; status: string; createdAt: string; highlights: number; klipp: number; readyForClip: number; clipping: number }[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
+  clipStatus: { clipping: number; readyForClip: number; sisteKlippede: KlippetHighlight[] };
   liveEvents: LiveEvent[];
   ts: string;
 }
@@ -265,33 +276,128 @@ function Sjekkliste({ items, loading }: { items: LiveData['sjekkliste']; loading
 
 // ─── Siste Resultater ──────────────────────────────────────────────────────────
 
+const VOD_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  PENDING:     { label: 'Venter',         color: 'text-g-muted' },
+  ANALYZING:   { label: 'Analyserer...',  color: 'text-yellow-400' },
+  TRANSCRIBED: { label: 'Transkribert',   color: 'text-yellow-400' },
+  COMPLETE:    { label: 'Ferdig',         color: 'text-g-green' },
+  ERROR:       { label: 'Feil',           color: 'text-red-400' },
+};
+
 function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteResultater']; loading: boolean }) {
   if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />;
   return (
     <div className="bg-g-card border border-g-border rounded-xl p-4">
       <div className="flex justify-between items-center mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Siste resultater</p>
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Siste VODs</p>
         <Link href="/content-factory-admin" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Se alle →</Link>
       </div>
       {resultater.length === 0 ? (
-        <p className="text-xs text-g-muted">Ingen fullførte VODs ennå.</p>
+        <p className="text-xs text-g-muted">Ingen VODs ennå.</p>
       ) : (
         <div className="space-y-2">
-          {resultater.map(r => (
-            <div key={r.id} className="flex items-center gap-3 py-2 border-b border-g-border/20 last:border-0">
-              <span className="text-g-green text-xs flex-shrink-0">✓</span>
+          {resultater.map(r => {
+            const st = VOD_STATUS_LABEL[r.status] ?? { label: r.status, color: 'text-g-muted' };
+            const isPågående = r.status !== 'COMPLETE' && r.status !== 'ERROR';
+            return (
+              <div key={r.id} className={`flex items-center gap-3 py-2 border-b border-g-border/20 last:border-0 ${isPågående ? 'opacity-90' : ''}`}>
+                {isPågående
+                  ? <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
+                  : <span className="text-g-green text-xs flex-shrink-0">✓</span>
+                }
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold text-g-text truncate">{r.title}</p>
+                  <div className="flex gap-2 items-center mt-0.5">
+                    <span className={`text-[9px] font-bold ${st.color}`}>{st.label}</span>
+                    <span className="text-[9px] text-g-muted">{tidSiden(r.createdAt)}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-shrink-0 text-[9px]">
+                  {r.highlights > 0 && <span className="text-g-muted">{r.highlights}H</span>}
+                  {r.clipping > 0 && <span className="text-yellow-400 font-bold animate-pulse">{r.clipping} klipper</span>}
+                  {r.readyForClip > 0 && <span className="text-blue-400 font-bold">{r.readyForClip} kø</span>}
+                  {r.klipp > 0 && <span className="text-g-green font-bold">{r.klipp} klipp</span>}
+                </div>
+                <Link href={`/content-factory-admin/highlights?vod=${r.id}`}
+                  className="px-2 py-1 bg-g-green/5 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/10 transition-all flex-shrink-0">
+                  ▶ Åpne
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Clip Status Widget ────────────────────────────────────────────────────────
+
+function ClipStatusWidget({ cs, loading }: { cs: LiveData['clipStatus'] | undefined; loading: boolean }) {
+  if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  if (!cs) return null;
+
+  const harAktivitet = cs.clipping > 0 || cs.readyForClip > 0 || cs.sisteKlippede.length > 0;
+
+  return (
+    <div className={`bg-g-card border rounded-xl p-4 ${cs.clipping > 0 ? 'border-yellow-400/20' : 'border-g-border'}`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Klipp-status</p>
+        <Link href="/content-factory-admin/highlights" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Alle highlights →</Link>
+      </div>
+
+      {/* Status badges */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        {cs.clipping > 0 && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5 text-[10px] font-bold text-yellow-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+            Klipper {cs.clipping} nå
+          </span>
+        )}
+        {cs.readyForClip > 0 && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-blue-400/30 bg-blue-400/5 text-[10px] font-bold text-blue-400">
+            {cs.readyForClip} i kø
+          </span>
+        )}
+        {cs.clipping === 0 && cs.readyForClip === 0 && cs.sisteKlippede.length > 0 && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-g-green/20 bg-g-green/5 text-[10px] font-bold text-g-green">
+            ✓ Klar
+          </span>
+        )}
+        {!harAktivitet && (
+          <span className="text-[10px] text-g-muted">Ingen aktive klippejobber</span>
+        )}
+      </div>
+
+      {/* Siste ferdige klipp */}
+      {cs.sisteKlippede.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Siste klipp</p>
+          {cs.sisteKlippede.map(h => (
+            <div key={h.id} className="flex items-center gap-2 py-1.5 border-b border-g-border/20 last:border-0">
+              <span className="text-g-green text-[10px] flex-shrink-0">🎬</span>
               <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-bold text-g-text truncate">{r.title}</p>
-                <p className="text-[9px] text-g-muted">{tidSiden(r.createdAt)}</p>
+                <p className="text-[10px] font-bold text-g-text truncate">
+                  {h.title ?? (h.vodTitle ? h.vodTitle.slice(0, 40) : `Highlight ${h.id.slice(0, 6)}`)}
+                </p>
+                {h.vodTitle && h.title && (
+                  <p className="text-[9px] text-g-muted truncate">{h.vodTitle}</p>
+                )}
               </div>
-              <div className="flex gap-2 flex-shrink-0 text-[9px]">
-                {r.highlights > 0 && <span className="text-g-muted">{r.highlights} highlights</span>}
-                {r.klipp > 0 && <span className="text-g-green font-bold">{r.klipp} klipp</span>}
+              <div className="flex gap-1.5 flex-shrink-0">
+                {h.clip_url_16_9 && (
+                  <a href={h.clip_url_16_9} target="_blank" rel="noreferrer"
+                    className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/20 transition-all">
+                    16:9
+                  </a>
+                )}
+                {h.clip_url_9_16 && (
+                  <a href={h.clip_url_9_16} target="_blank" rel="noreferrer"
+                    className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/20 transition-all">
+                    9:16
+                  </a>
+                )}
               </div>
-              <Link href={`/content-factory-admin/highlights?vod=${r.id}`}
-                className="px-2 py-1 bg-g-green/5 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/10 transition-all flex-shrink-0">
-                ▶ Åpne
-              </Link>
             </div>
           ))}
         </div>
@@ -443,6 +549,9 @@ export default function Dashboard() {
           <StreamStatus slow={slow} live={live} />
         </div>
       </div>
+
+      {/* ── Klipp-status ─────────────────────────────────────────────────────── */}
+      <ClipStatusWidget cs={live?.clipStatus} loading={loadingLive} />
 
       {/* ── Live hendelser + Sjekkliste + Siste resultater ──────────────────── */}
       <div className="grid grid-cols-3 gap-4">
