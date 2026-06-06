@@ -432,8 +432,8 @@ export default function HighlightViewerPage() {
                           <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
                             <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
                             {h.thumbnail_status === 'GENERATING'
-                              ? 'Railway genererer AI-thumbnails – 1–2 min...'
-                              : 'Thumbnail i kø – Railway plukker opp innen 90s...'}
+                              ? 'Genererer AI-thumbnail V2 (~30–50s)...'
+                              : 'Thumbnail i kø – plukkes opp automatisk...'}
                           </div>
                         )}
 
@@ -494,7 +494,7 @@ export default function HighlightViewerPage() {
                               setHighlights(prev => prev.map(x =>
                                 x.id === h.id ? { ...x, thumbnail_status: 'GENERATING' } : x
                               ));
-                              const res = await fetch('/api/content-factory/thumbnails/generate', {
+                              const res = await fetch('/api/content-factory/thumbnails/generate-v2', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ highlight_id: h.id }),
@@ -510,7 +510,7 @@ export default function HighlightViewerPage() {
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-g-bg border border-purple-400/30 text-purple-400 text-[10px] font-black rounded hover:bg-purple-400/10 transition-all disabled:opacity-40"
                           >
                             {regenerererThumb === h.id ? (
-                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Genererer (~30s)...</>
+                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Genererer V2 (~40s)...</>
                             ) : (
                               <>↻ {h.thumbnail_status === 'DONE' ? 'Regenerer thumbnail' : 'Generer thumbnail'}</>
                             )}
