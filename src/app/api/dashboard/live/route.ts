@@ -58,7 +58,7 @@ export async function GET() {
 
     // Alle highlights siste 7 dager (ingen clip_status-filter – ellers telles ikke nye highlights)
     db.from('content_highlights')
-      .select('id,vod_id,title,start_time,clip_status,clip_url_16_9,clip_url_9_16,clip_error,updated_at,created_at')
+      .select('id,vod_id,title,start_time,clip_status,clip_url,vertical_clip_url,updated_at,created_at')
       .gt('created_at', cutoff7d)
       .order('created_at', { ascending: false })
       .limit(300),
@@ -80,11 +80,6 @@ export async function GET() {
   const nyesteInnsikter: any[] = insightsRes.data ?? [];
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
 
-  // TEMP DEBUG
-  console.log('[DEBUG] vodsRes.error:', vodsRes.error?.message);
-  console.log('[DEBUG] vods.length:', vods.length);
-  console.log('[DEBUG] vods ids:', vods.map(v => v.id + '|' + v.created_at).join(', '));
-  console.log('[DEBUG] highlightsRes.error:', highlightsRes.error?.message);
 
   // ── Aktive jobber ────────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v => ['PENDING', 'ANALYZING', 'TRANSCRIBED'].includes(v.status));
@@ -161,7 +156,7 @@ export async function GET() {
 
   // ── Clip-status for eget panel på dashbordet ──────────────────────────────
   const sisteKlippede = highlights
-    .filter(h => h.clip_status === 'CLIPPED' && (h.clip_url_16_9 || h.clip_url_9_16))
+    .filter(h => h.clip_status === 'CLIPPED' && (h.clip_url || h.vertical_clip_url))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime())
     .slice(0, 5)
     .map(h => {
@@ -171,8 +166,8 @@ export async function GET() {
         vodId: h.vod_id,
         title: h.title ?? null,
         vodTitle,
-        clip_url_16_9: h.clip_url_16_9 ?? null,
-        clip_url_9_16: h.clip_url_9_16 ?? null,
+        clip_url_16_9: h.clip_url ?? null,
+        clip_url_9_16: h.vertical_clip_url ?? null,
         clippedAt: h.updated_at ?? h.created_at,
       };
     });
