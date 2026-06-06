@@ -51,7 +51,7 @@ export async function GET() {
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
   const [vodsRes, highlightsRes, insightsRes, workspaceRes] = await Promise.all([
     db.from('content_vods')
-      .select('id,title,status,created_at,current_step,progress_percent,status_message,error_message')
+      .select('*')
       .eq('workspace_id', getWorkspaceId())
       .order('created_at', { ascending: false })
       .limit(20),
