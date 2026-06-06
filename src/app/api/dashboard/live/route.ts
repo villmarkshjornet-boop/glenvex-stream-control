@@ -51,7 +51,7 @@ export async function GET() {
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
   const [vodsRes, highlightsRes, insightsRes, workspaceRes] = await Promise.all([
     db.from('content_vods')
-      .select('*')
+      .select('id,title,status,created_at,current_step,progress_percent,error_message')
       .eq('workspace_id', getWorkspaceId())
       .order('created_at', { ascending: false })
       .limit(20),
@@ -144,7 +144,7 @@ export async function GET() {
       title: v.title,
       status: v.status,
       progressPercent: v.progress_percent ?? null,
-      statusMessage: v.status_message ?? null,
+      statusMessage: v.current_step ?? null,
       errorMessage: v.error_message ?? null,
       createdAt: v.created_at,
       highlights: vH.length,
@@ -204,6 +204,5 @@ export async function GET() {
     clipStatus,
     liveEvents,
     ts: new Date().toISOString(),
-    _debug: { vodsError: vodsRes.error?.message ?? null, vodsCount: vods.length, vodsIds: vods.map(v => v.id), workspaceId: getWorkspaceId() },
   });
 }
