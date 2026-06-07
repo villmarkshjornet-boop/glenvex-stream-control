@@ -156,6 +156,42 @@ export async function getEventsKanalId(): Promise<string | null> {
   return getChatKanalId();
 }
 
+export async function getSubsKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.subs) return prefs.subs;
+  return getChatKanalId();
+}
+
+export async function getPreHypeKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.pre_hype) return prefs.pre_hype;
+  return getAnnonseringsKanalId();
+}
+
+export async function getRaidKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.raid) return prefs.raid;
+  return getChatKanalId();
+}
+
+export async function getAiProducerKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.ai_producer) return prefs.ai_producer;
+  return getChatKanalId();
+}
+
+export async function getContentFactoryKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.content_factory) return prefs.content_factory;
+  return getChatKanalId();
+}
+
+export async function getErrorsKanalId(): Promise<string | null> {
+  const prefs = await loadPrefs();
+  if (prefs.errors) return prefs.errors;
+  return null;
+}
+
 // Nullstill cache (kalles etter kanalinnstillinger er lagret)
 export function nullstillKanalCache() {
   prefsCache = null;

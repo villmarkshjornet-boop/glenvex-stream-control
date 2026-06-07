@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { getClipsKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,7 @@ export async function PATCH(req: NextRequest) {
 
   // Publiser godkjent clip i Discord
   if (status === 'godkjent') {
-    const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
+    const kanalId = await getClipsKanalId();
     if (kanalId && process.env.DISCORD_BOT_TOKEN) {
       await fetch(`${DISCORD_API}/channels/${kanalId}/messages`, {
         method: 'POST',

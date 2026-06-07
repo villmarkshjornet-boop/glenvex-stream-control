@@ -6,6 +6,8 @@ import { getBroadcasterId } from '@/lib/twitch';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger';
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
+import { logSystemEvent } from './systemEvents';
+import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
@@ -287,6 +289,7 @@ export function startTwitchBot() {
     trackRaid(username, viewers);
     logHendelse('raid', { username, viewers });
     logBotAgentEvent({ source: 'twitch', event_type: 'raid', username, importance_score: Math.min(100, viewers / 2), metadata: { viewers } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_EVENT_RECEIVED', title: `Raid fra ${username}: ${viewers} seere`, severity: 'info', metadata: { type: 'raid', username, viewers } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet GLENVEX med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
 
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
@@ -294,7 +297,7 @@ export function startTwitchBot() {
 
     client?.say(channel, melding).catch(() => {});
 
-    await postTilDiscord(liveKanalId(), {
+    await postTilDiscord(await getBotRaidKanalId() || liveKanalId(), {
       embeds: [{
         title: `🚨 RAID – ${username}`,
         description: `**${username}** raidet med **${viewers} seere!**\n\nGi dem en varm velkomst! PogChamp`,
@@ -314,12 +317,13 @@ export function startTwitchBot() {
   client.on('subscription', async (channel, username, _method, _message, _userstate) => {
     logHendelse('sub', { username });
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`).catch(() => {});
     _onSubCallback?.(username).catch(() => {});
 
-    await postTilDiscord(chatKanalId(), {
+    await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       content: `🌟 **${username}** er nå subscriber! Takk for støtten! FeelsGoodMan`,
     });
   });
@@ -329,6 +333,7 @@ export function startTwitchBot() {
   client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
     logHendelse('resub', { username, months });
     logBotAgentEvent({ source: 'twitch', event_type: 'resub', username, importance_score: 75, metadata: { months } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Resub: ${username} (${months} mnd)`, severity: 'info', metadata: { type: 'resub', giver: username, mottaker: username, months } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
@@ -341,22 +346,27 @@ export function startTwitchBot() {
     trackGiftSub(username, 1);
     logHendelse('giftsub', { username, recipient });
     logBotAgentEvent({ source: 'twitch', event_type: 'giftsub', username, importance_score: 85, metadata: { recipient } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_GIFT_SUB_RECEIVED', title: `Gift sub: ${username} → ${recipient ?? 'ukjent'}`, severity: 'info', metadata: { type: 'gift_sub', giver: username, mottaker: recipient ?? 'ukjent', antall: 1 } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`).catch(() => {});
     _onSubCallback?.(recipient).catch(() => {}); // recipient får sub-rollen
+    await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
+      content: `🎁 **${username}** giftet sub til **${recipient ?? 'noen'}**! Sjenerøst! PogChamp`,
+    });
   });
 
   client.on('submysterygift', async (channel, username, numbOfSubs, _methods, _userstate) => {
     trackGiftSub(username, numbOfSubs);
     logHendelse('mystery_gift', { username, count: numbOfSubs });
     logBotAgentEvent({ source: 'twitch', event_type: 'mystery_gift', username, importance_score: 90, metadata: { count: numbOfSubs } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_GIFT_SUB_RECEIVED', title: `Mystery gift: ${username} giftet ${numbOfSubs} subs til community`, severity: 'info', metadata: { type: 'mystery_gift', giver: username, mottaker: 'community', antall: numbOfSubs } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Mass gift-giver – ${numbOfSubs} subs`, confidence_score: 0.95, metadata: { gifter: true, totalGifts: numbOfSubs } }).catch(() => {});
 
     const svar = await aiSvar(`${username} giftet ${numbOfSubs} subs til random seere! Lag en episk takkemelding på norsk. Maks 1 setning.`);
     client?.say(channel, svar || `@${username} gifter ${numbOfSubs} subs! HVEM ER DETTE MENNESKET?! PogChamp`).catch(() => {});
 
-    await postTilDiscord(chatKanalId(), {
+    await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       embeds: [{
         title: `🎁 MASSE GIFT SUBS – ${username}`,
         description: `**${username}** giftet **${numbOfSubs} subs** til chatten! Dette er sjenerøsitet på et annet nivå! 👑`,

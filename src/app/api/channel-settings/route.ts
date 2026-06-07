@@ -17,6 +17,12 @@ export interface KanalPreferanser {
   partner: string;
   streamplan: string;
   events: string;
+  subs: string;
+  pre_hype: string;
+  raid: string;
+  ai_producer: string;
+  content_factory: string;
+  errors: string;
 }
 
 async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
@@ -122,6 +128,12 @@ export async function GET() {
     partner: lagret.partner ?? '',
     streamplan: lagret.streamplan ?? '',
     events: lagret.events ?? '',
+    subs: lagret.subs ?? '',
+    pre_hype: lagret.pre_hype ?? '',
+    raid: lagret.raid ?? '',
+    ai_producer: lagret.ai_producer ?? '',
+    content_factory: lagret.content_factory ?? '',
+    errors: lagret.errors ?? '',
   };
 
   return NextResponse.json({ kanaler, preferanser });

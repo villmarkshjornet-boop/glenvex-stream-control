@@ -18,6 +18,8 @@ interface Tiltak {
   innhold?: TiltakInnhold;
 }
 
+type TipStatus = 'suggested' | 'done' | 'dismissed';
+
 interface ProducerData {
   isLive: boolean;
   stream: { title: string; game: string; viewerCount: number; thumbnailUrl?: string } | null;
@@ -183,9 +185,16 @@ const PLATTFORM_IKON: Record<string, string> = {
   generelt: '◆ Innhold',
 };
 
-function TiltakKort({ tiltak }: { tiltak: Tiltak }) {
+const STATUS_STIL: Record<TipStatus, string> = {
+  suggested: '',
+  done:      'opacity-50',
+  dismissed: 'opacity-30 line-through',
+};
+
+function TiltakKort({ tiltak, streamGame, streamViewers }: { tiltak: Tiltak; streamGame?: string; streamViewers?: number }) {
   const [åpen, setÅpen] = useState(false);
   const [kopiert, setKopiert] = useState<string | null>(null);
+  const [status, setStatus] = useState<TipStatus>('suggested');
   const harInnhold = tiltak.innhold && Object.keys(tiltak.innhold).length > 0;
 
   function kopier(tekst: string, platform: string) {
@@ -194,18 +203,53 @@ function TiltakKort({ tiltak }: { tiltak: Tiltak }) {
     setTimeout(() => setKopiert(null), 2000);
   }
 
+  async function settStatus(nyStatus: 'done' | 'dismissed') {
+    setStatus(nyStatus);
+    fetch('/api/ai-producer/tips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipTekst: tiltak.tekst, status: nyStatus, streamGame, streamViewers }),
+    }).catch(() => {});
+  }
+
   return (
-    <div className={`rounded-xl border overflow-hidden ${PRIORITET_STIL[tiltak.prioritet]}`}>
-      <button
-        className="w-full flex items-center gap-3 p-3 text-left"
-        onClick={() => harInnhold && setÅpen(o => !o)}
-      >
-        <span className="text-[10px] font-black uppercase tracking-widest w-16 flex-shrink-0">{tiltak.prioritet}</span>
-        <p className="text-xs font-semibold flex-1">{tiltak.tekst}</p>
-        {harInnhold && (
-          <span className="text-[9px] text-current/60 flex-shrink-0">{åpen ? '▲' : '▼ innhold'}</span>
+    <div className={`rounded-xl border overflow-hidden transition-opacity ${PRIORITET_STIL[tiltak.prioritet]} ${STATUS_STIL[status]}`}>
+      <div className="flex items-center gap-3 p-3">
+        <button
+          className="flex items-center gap-3 flex-1 text-left"
+          onClick={() => harInnhold && setÅpen(o => !o)}
+        >
+          <span className="text-[10px] font-black uppercase tracking-widest w-16 flex-shrink-0">{tiltak.prioritet}</span>
+          <p className={`text-xs font-semibold flex-1 ${status === 'done' ? 'line-through opacity-70' : ''}`}>{tiltak.tekst}</p>
+          {harInnhold && (
+            <span className="text-[9px] text-current/60 flex-shrink-0">{åpen ? '▲' : '▼ innhold'}</span>
+          )}
+        </button>
+        {status === 'suggested' && (
+          <div className="flex gap-1 flex-shrink-0">
+            <button
+              onClick={() => settStatus('done')}
+              className="px-2 py-0.5 text-[9px] font-black bg-g-green/20 border border-g-green/40 text-g-green rounded hover:bg-g-green/30 transition-all"
+              title="Merk som utført"
+            >
+              Utført
+            </button>
+            <button
+              onClick={() => settStatus('dismissed')}
+              className="px-2 py-0.5 text-[9px] font-black border border-current/20 text-current/50 rounded hover:bg-black/20 transition-all"
+              title="Avvis"
+            >
+              Avvis
+            </button>
+          </div>
         )}
-      </button>
+        {status === 'done' && (
+          <span className="text-[9px] text-g-green font-bold flex-shrink-0">✓ Utført</span>
+        )}
+        {status === 'dismissed' && (
+          <span className="text-[9px] text-g-muted flex-shrink-0">Avvist</span>
+        )}
+      </div>
 
       {harInnhold && åpen && (
         <div className="border-t border-current/10 bg-black/20 p-3 space-y-2">
@@ -331,7 +375,7 @@ export default function AIProducerPage() {
                 )}
               </div>
               {data.tiltak.map((t, i) => (
-                <TiltakKort key={i} tiltak={t} />
+                <TiltakKort key={i} tiltak={t} streamGame={data.stream?.game} streamViewers={data.metrics?.viewers} />
               ))}
             </div>
           )}

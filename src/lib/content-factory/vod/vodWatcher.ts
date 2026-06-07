@@ -7,6 +7,7 @@
 import { isContentFactoryEnabled } from '../index';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 const TWITCH_API = 'https://api.twitch.tv/helix';
 
@@ -76,6 +77,7 @@ export async function sjekkForNyVod(
   if (forrigeStream && !erLive) {
     offlineSiden = new Date();
     console.log('[VODWatcher] Stream gikk offline – venter 15 min');
+    logSystemEvent({ source: 'vod_watcher', event_type: 'STREAM_OFFLINE_DETECTED', title: 'Stream gikk offline – venter 15 min før VOD-søk', severity: 'info' }).catch(() => {});
   }
   forrigeStream = erLive;
 
@@ -92,11 +94,15 @@ export async function sjekkForNyVod(
   }
 
   // Finn nyeste VOD
+  logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_LOOKUP_STARTED', title: 'Søker etter ny VOD på Twitch', severity: 'info' }).catch(() => {});
   const token = await getTwitchToken();
   if (!token) return { funnet: false, melding: 'Ingen Twitch-token' };
 
   const vod = await hentSisteVod(token);
-  if (!vod) return { funnet: false, melding: 'Ingen VOD funnet på Twitch' };
+  if (!vod) {
+    logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_NOT_FOUND', title: 'Ingen VOD funnet på Twitch', severity: 'warning' }).catch(() => {});
+    return { funnet: false, melding: 'Ingen VOD funnet på Twitch' };
+  }
 
   // Duplikatsjekk
   const alleredeBehandlet = await erVodAlleredeBehandlet(vod.id);
@@ -106,6 +112,7 @@ export async function sjekkForNyVod(
   }
 
   console.log(`[VODWatcher] Ny VOD funnet: "${vod.title}" (${vod.id}) – starter pipeline`);
+  logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_AUTO_QUEUE_STARTED', title: `VOD satt i kø: "${vod.title}"`, severity: 'info', metadata: { vodId: vod.id, title: vod.title, category: vod.category, duration: vod.duration } }).catch(() => {});
   offlineSiden = null; // Reset så vi ikke starter flere ganger
 
   // Start pipeline asynkront
