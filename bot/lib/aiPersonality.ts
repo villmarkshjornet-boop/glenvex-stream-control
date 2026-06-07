@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { getRecentCrossPlatformContext } from './crossPlatformContext';
+import { logBotAgentEvent } from './agentLogger';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -171,16 +173,22 @@ export async function generateChatReply(
   const hist = history.get(channelId) ?? [];
   hist.push({ role: 'user', content: `${username}: ${message}` });
 
-  // Hent kontekst parallelt
-  const [kommunitetKontekst, topSpill] = await Promise.all([
+  // Hent kontekst parallelt – inkluder fersk Twitch-aktivitet
+  const vilHaTwitchInfo = /twitch|stream|chat|hva skjedde|hva sa|boss|fight|raid|sub/i.test(message);
+  const [kommunitetKontekst, topSpill, twitchCtx] = await Promise.all([
     hentKommunitetKontekst(),
     erSpillTipForespørsel(message) ? hentTopTwitchSpill() : Promise.resolve([] as string[]),
+    getRecentCrossPlatformContext({ includeTwitch: true, includeDiscord: false, minutesBack: 60, maxMessages: 20 }),
   ]);
 
   // Bygg dynamisk systemmelding
   let systemMelding = SYSTEM_PROMPT;
   if (kommunitetKontekst) systemMelding += `\n\nCommunity-kunnskap (bruk dette aktivt):\n${kommunitetKontekst}`;
   if (topSpill.length > 0) systemMelding += `\n\nDette er de mest sette spillene på Twitch akkurat nå (bruk som utgangspunkt for anbefalinger):\n${topSpill.slice(0, 10).join(', ')}`;
+  if (twitchCtx) {
+    systemMelding += `\n\nFersk Twitch-aktivitet (bruk for å svare på "hva skjedde på Twitch" etc.):\n${twitchCtx}`;
+    logBotAgentEvent({ source: 'discord', event_type: 'cross_platform_context_used', metadata: { type: 'DISCORD_BOT_USED_TWITCH_CONTEXT' } });
+  }
 
   const erBilde = erBildeForespørsel(message);
 

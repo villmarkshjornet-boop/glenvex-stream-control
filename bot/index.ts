@@ -30,9 +30,10 @@ import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
 import { addContent } from '@/lib/contentLibrary';
-import { logBotAgentEvent, upsertBotMemory } from './lib/agentLogger';
+import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
+import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -1105,10 +1106,49 @@ client.on('messageCreate', async (message) => {
   const erITrad = message.channel instanceof ThreadChannel;
 
   if (!erTagget && !erIChatKanal && !erITrad) return;
-  if (isOnCooldown(message.author.id)) return;
+
+  // ── Logg Discord-meldinger for cross-platform context ─────────────────────
+  // Ingen DM-er (krever guild), ingen bots – allerede filtrert ovenfor
+  if (message.guild && !message.author.bot) {
+    const ordTelling = message.content.split(/\s+/).filter(w => w.length > 0).length;
+    if (ordTelling >= 3 && message.content.length <= 600) {
+      logChatMessage({
+        source:       'discord',
+        username:     message.author.username,
+        message_text: message.content.slice(0, 500),
+        channel_id:   message.channelId,
+        importance_score: 20,
+        metadata: { guildId: message.guild.id },
+      });
+    }
+  }
 
   const tekst = message.content.replace(/<@!?[\d]+>/g, '').trim();
   if (!tekst) return;
+
+  // ── Cross-platform tekst-kommandoer ───────────────────────────────────────
+  const tekLower = tekst.toLowerCase();
+
+  if (tekLower === '!twitchsiste' || tekLower === '!twitchtema') {
+    if (isCommandCooldown(message.channelId, tekLower)) return;
+    setCommandCooldown(message.channelId, tekLower);
+    await message.channel.sendTyping();
+    const oppsummering = await summarizeRecentActivity('twitch', 60);
+    await message.reply(`📺 **Twitch-oppsummering:** ${oppsummering}`).catch(() => {});
+    logBotAgentEvent({ source: 'discord', event_type: 'cross_platform_context_used', metadata: { command: tekLower, type: 'DISCORD_BOT_USED_TWITCH_CONTEXT' } });
+    return;
+  }
+
+  if (tekLower === '!communitymemory') {
+    if (isCommandCooldown(message.channelId, tekLower)) return;
+    setCommandCooldown(message.channelId, tekLower);
+    await message.channel.sendTyping();
+    const memory = await hentCommunityMemorySummary();
+    await message.reply(memory).catch(() => {});
+    return;
+  }
+
+  if (isOnCooldown(message.author.id)) return;
 
   setCooldown(message.author.id);
 

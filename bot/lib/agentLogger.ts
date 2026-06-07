@@ -19,6 +19,8 @@ interface BotAgentEvent {
   source: 'twitch' | 'discord' | 'content_factory';
   event_type: string;
   username?: string;
+  message_text?: string;
+  channel_id?: string;
   importance_score?: number;
   metadata?: Record<string, any>;
 }
@@ -44,15 +46,37 @@ async function flushEvents(): Promise<void> {
   try {
     await sb.from('ai_agent_events').insert(
       batch.map(e => ({
-        workspace_id: WORKSPACE_ID,
-        source: e.source,
-        event_type: e.event_type,
-        username: e.username ?? null,
+        workspace_id:    WORKSPACE_ID,
+        source:          e.source,
+        event_type:      e.event_type,
+        username:        e.username        ?? null,
+        message_text:    e.message_text    ?? null,
+        channel_id:      e.channel_id      ?? null,
         importance_score: e.importance_score ?? 0,
-        metadata: e.metadata ?? {},
+        metadata:        e.metadata        ?? {},
       }))
     );
   } catch { /* silent */ }
+}
+
+/** Logg en chat-melding (Twitch eller Discord) til ai_agent_events. */
+export function logChatMessage(params: {
+  source: 'twitch' | 'discord';
+  username: string;
+  message_text: string;
+  channel_id?: string;
+  importance_score?: number;
+  metadata?: Record<string, any>;
+}): void {
+  logBotAgentEvent({
+    source:          params.source,
+    event_type:      params.source === 'twitch' ? 'chat_message' : 'discord_message',
+    username:        params.username,
+    message_text:    params.message_text,
+    channel_id:      params.channel_id,
+    importance_score: params.importance_score ?? 20,
+    metadata:        params.metadata ?? {},
+  });
 }
 
 export async function upsertBotMemory(entry: {

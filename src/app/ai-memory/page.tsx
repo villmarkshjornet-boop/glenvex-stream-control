@@ -153,15 +153,74 @@ function SummaryCard({ label, value, sub }: { label: string; value: string | num
 
 // ─── Side ─────────────────────────────────────────────────────────────────────
 
+interface CrossEvent {
+  event_type: string;
+  username: string | null;
+  message_text: string | null;
+  importance_score: number;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+interface CrossCtxRead {
+  source: string;
+  event_type: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+interface CrossData {
+  twitchEvents:  CrossEvent[];
+  discordEvents: CrossEvent[];
+  contextReads:  CrossCtxRead[];
+  generertKl:    string;
+}
+
+function hhMM(iso: string): string {
+  return new Date(iso).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' });
+}
+
+function CrossEventRow({ e, source }: { e: CrossEvent; source: 'twitch' | 'discord' }) {
+  const typeColors: Record<string, string> = {
+    chat_message: 'text-green-400', discord_message: 'text-blue-400',
+    raid: 'text-yellow-400', sub: 'text-purple-400', resub: 'text-purple-300',
+    cheer: 'text-yellow-300', active_chatter: 'text-cyan-400', active_member: 'text-cyan-400',
+  };
+  const typeLabels: Record<string, string> = {
+    chat_message: 'CHAT', discord_message: 'MSG', raid: 'RAID', sub: 'SUB',
+    resub: 'RESUB', cheer: 'BITS', active_chatter: 'AKTIV', active_member: 'AKTIV',
+  };
+  const tekst = e.message_text
+    ?? (e.event_type === 'raid'    ? `${e.metadata?.viewers ?? '?'} viewers` : null)
+    ?? (e.event_type === 'cheer'   ? `${e.metadata?.bits ?? '?'} bits` : null)
+    ?? (e.event_type === 'active_chatter' ? `${e.metadata?.messageCount ?? '?'} meldinger` : null)
+    ?? '';
+  return (
+    <div className="flex items-start gap-2 py-1 border-b border-white/5 text-[11px]">
+      <span className="font-mono text-g-muted shrink-0 w-10 pt-0.5">{hhMM(e.created_at)}</span>
+      <span className={`font-bold shrink-0 ${typeColors[e.event_type] ?? 'text-gray-400'}`}>
+        [{typeLabels[e.event_type] ?? e.event_type.toUpperCase().slice(0,5)}]
+      </span>
+      <span className={`font-medium shrink-0 ${source === 'twitch' ? 'text-purple-300' : 'text-blue-300'}`}>{e.username ?? '?'}</span>
+      {tekst && <span className="text-g-muted truncate">{tekst}</span>}
+    </div>
+  );
+}
+
 export default function AiMemoryPage() {
   const [data, setData] = useState<MemoryData | null>(null);
+  const [crossData, setCrossData] = useState<CrossData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [aktivTab, setAktivTab] = useState<'community' | 'content' | 'insights' | 'events'>('community');
+  const [aktivTab, setAktivTab] = useState<'community' | 'content' | 'insights' | 'events' | 'cross'>('community');
 
   const hent = useCallback(async () => {
     try {
-      const res = await fetch('/api/ai-memory');
-      if (res.ok) setData(await res.json());
+      const [memRes, crossRes] = await Promise.all([
+        fetch('/api/ai-memory'),
+        fetch('/api/cross-platform-context?minutesBack=60'),
+      ]);
+      if (memRes.ok) setData(await memRes.json());
+      if (crossRes.ok) setCrossData(await crossRes.json());
     } catch {}
     setLoading(false);
   }, []);
@@ -181,9 +240,10 @@ export default function AiMemoryPage() {
 
   const tabs = [
     { id: 'community', label: 'Community' },
-    { id: 'content', label: 'Content & Spill' },
-    { id: 'insights', label: 'Innsikter' },
-    { id: 'events', label: 'Hendelser' },
+    { id: 'content',   label: 'Content & Spill' },
+    { id: 'insights',  label: 'Innsikter' },
+    { id: 'events',    label: 'Hendelser' },
+    { id: 'cross',     label: '🔗 Cross-Platform' },
   ] as const;
 
   return (
@@ -336,6 +396,79 @@ export default function AiMemoryPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Cross-Platform-tab */}
+          {aktivTab === 'cross' && (
+            <div className="space-y-4">
+              {/* Memory-lesinger */}
+              {crossData && crossData.contextReads.length > 0 && (
+                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">↗ Siste 10 Memory-lesinger av botene</p>
+                  <div className="space-y-1">
+                    {crossData.contextReads.map((r, i) => {
+                      const t = r.metadata?.type ?? '';
+                      const isTwitch = t.includes('TWITCH');
+                      return (
+                        <div key={i} className="flex items-center gap-3 text-[11px] py-0.5">
+                          <span className="font-mono text-g-muted w-10">{hhMM(r.created_at)}</span>
+                          <span className={isTwitch ? 'text-purple-400' : 'text-blue-400'}>
+                            {isTwitch ? 'Twitch-bot leste Discord' : 'Discord-bot leste Twitch'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Twitch */}
+                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 rounded-full bg-purple-500" />
+                    <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Twitch Chat (60 min)</p>
+                    <span className="ml-auto text-[9px] text-g-green">{crossData?.twitchEvents.length ?? 0} events</span>
+                  </div>
+                  {!crossData?.twitchEvents.length ? (
+                    <p className="text-xs text-g-muted">Ingen Twitch-events ennå. Loggres automatisk fra chat.</p>
+                  ) : (
+                    <div className="max-h-72 overflow-y-auto">
+                      {crossData.twitchEvents.map((e, i) => <CrossEventRow key={i} e={e} source="twitch" />)}
+                    </div>
+                  )}
+                </div>
+
+                {/* Discord */}
+                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 rounded-full bg-blue-500" />
+                    <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Discord (60 min)</p>
+                    <span className="ml-auto text-[9px] text-g-green">{crossData?.discordEvents.length ?? 0} events</span>
+                  </div>
+                  {!crossData?.discordEvents.length ? (
+                    <p className="text-xs text-g-muted">Ingen Discord-events ennå. Loggres automatisk fra chat-kanal.</p>
+                  ) : (
+                    <div className="max-h-72 overflow-y-auto">
+                      {crossData.discordEvents.map((e, i) => <CrossEventRow key={i} e={e} source="discord" />)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Kommandoguide */}
+              <div className="bg-g-card/60 border border-g-border rounded-xl p-4 text-[11px]">
+                <p className="font-bold text-g-text mb-2">Kommandoer for cross-platform context</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-1 font-mono text-g-muted">
+                  <span><span className="text-blue-400">Discord</span>  !twitchsiste — AI-oppsummering av siste Twitch-chat</span>
+                  <span><span className="text-purple-400">Twitch</span>  !discordsiste — oppsummering av siste Discord</span>
+                  <span><span className="text-blue-400">Discord</span>  !twitchtema — gjengående Twitch-temaer</span>
+                  <span><span className="text-purple-400">Twitch</span>  !discordtema — gjengående Discord-temaer</span>
+                  <span><span className="text-blue-400">Discord</span>  !communitymemory — alt AI husker om communityet</span>
+                </div>
+                <p className="mt-2 text-[9px] text-g-muted/60">Alle kommandoer har 30s cooldown per kanal. Generert kl. {crossData?.generertKl ?? '—'}</p>
               </div>
             </div>
           )}

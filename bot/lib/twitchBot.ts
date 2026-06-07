@@ -3,8 +3,9 @@ import OpenAI from 'openai';
 import { trackRaid, trackGiftSub } from './eventTracker';
 import { getSettings } from '@/lib/settings';
 import { getBroadcasterId } from '@/lib/twitch';
-import { logBotAgentEvent, upsertBotMemory } from './agentLogger';
+import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger';
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
+import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
@@ -63,15 +64,32 @@ function chatKanalId(): string {
   return process.env.DISCORD_CHAT_CHANNEL_ID || '';
 }
 
-async function aiSvar(kontekst: string): Promise<string> {
+// Cache for Discord-kontekst (oppdateres hvert 5. min, ikke per melding)
+let _discordCtxCache = '';
+let _discordCtxLastFetch = 0;
+const DISCORD_CTX_CACHE_MS = 5 * 60_000;
+
+async function hentDiscordKontekst(): Promise<string> {
+  if (Date.now() - _discordCtxLastFetch < DISCORD_CTX_CACHE_MS && _discordCtxCache) return _discordCtxCache;
+  _discordCtxCache = await getRecentCrossPlatformContext({ includeDiscord: true, includeTwitch: false, minutesBack: 60, maxMessages: 20 });
+  _discordCtxLastFetch = Date.now();
+  return _discordCtxCache;
+}
+
+async function aiSvar(kontekst: string, discordCtx?: string): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return '';
   try {
     const openai = new OpenAI({ apiKey });
+    let systemPrompt = SYSTEM_PROMPT;
+    if (discordCtx) {
+      systemPrompt += `\n\nFersk Discord-aktivitet (bruk til å svare på Discord-spørsmål):\n${discordCtx}`;
+      logBotAgentEvent({ source: 'twitch', event_type: 'cross_platform_context_used', metadata: { type: 'TWITCH_BOT_USED_DISCORD_CONTEXT' } });
+    }
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: kontekst },
       ],
       max_tokens: 60,
@@ -383,19 +401,38 @@ export function startTwitchBot() {
 
     const brukernavn = tags.username.toLowerCase();
     const tekst = message.trim();
+    const tekLower = tekst.toLowerCase();
 
     // Spor chat-aktivitet (billig – bare telle)
     chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
 
+    const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
+
+    // ── Cross-platform kommandoer (BEFORE vanlig kommando-filter) ───────────
+    if (tekLower === '!discordsiste' || tekLower === '!discordtema') {
+      if (isCommandCooldown(channel, tekLower)) return;
+      setCommandCooldown(channel, tekLower);
+      const oppsummering = await summarizeRecentActivity('discord', 60);
+      client?.say(channel, oppsummering.slice(0, 490)).catch(() => {});
+      logBotAgentEvent({ source: 'twitch', event_type: 'cross_platform_context_used', metadata: { command: tekLower, type: 'TWITCH_BOT_USED_DISCORD_CONTEXT' } });
+      return;
+    }
+
+    // ── Logg chat-meldinger (relevante, ≥3 ord, ikke bot) ───────────────────
+    if (!erBot && !tekst.startsWith('!') && !tekst.startsWith('/')) {
+      const ordTelling = tekst.split(/\s+/).filter(w => w.length > 0).length;
+      if (ordTelling >= 3) {
+        logChatMessage({ source: 'twitch', username: tags.username, message_text: tekst.slice(0, 500), metadata: { channel } });
+      }
+    }
+
     if (tekst.startsWith('!') || tekst.startsWith('/')) return;
-    if (brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements')) return;
+    if (erBot) return;
 
     const sist = cooldowns.get(brukernavn);
     if (sist && Date.now() - sist < COOLDOWN_MS) return;
 
-    const tekLower = tekst.toLowerCase();
     const spørOmDiscord = tekLower.includes('discord') || tekLower.includes('server');
-
     if (spørOmDiscord) {
       cooldowns.set(brukernavn, Date.now());
       client?.say(channel, `@${tags.username} Discord er her: ${DISCORD_URL} PogChamp`).catch(() => {});
@@ -411,7 +448,11 @@ export function startTwitchBot() {
 
     cooldowns.set(brukernavn, Date.now());
 
-    const svar = await aiSvar(`${tags.username}: ${tekst}`);
+    // Bruk Discord-kontekst hvis brukeren spør om community/discord
+    const vilHaDiscordInfo = tekLower.includes('discord') || tekLower.includes('community') || tekLower.includes('hva skjer');
+    const discordCtx = vilHaDiscordInfo ? await hentDiscordKontekst() : undefined;
+
+    const svar = await aiSvar(`${tags.username}: ${tekst}`, discordCtx || undefined);
     if (svar) client?.say(channel, `@${tags.username} ${svar}`).catch(() => {});
   });
 
