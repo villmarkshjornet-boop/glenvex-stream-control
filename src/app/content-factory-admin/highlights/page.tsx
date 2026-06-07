@@ -24,6 +24,8 @@ interface Highlight {
   thumbnail_error?: string | null;
   thumbnail_headline?: string | null;
   thumbnail_subheadline?: string | null;
+  thumbnail_quality_score?: number | null;
+  thumbnail_source_frame?: number | null;
 }
 
 interface Copy {
@@ -427,6 +429,26 @@ export default function HighlightViewerPage() {
                             {h.thumbnail_status ?? 'IKKE GENERERT'}
                           </span>
                         </div>
+
+                        {/* Quality score + source frame */}
+                        {h.thumbnail_status === 'DONE' && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {h.thumbnail_quality_score != null && (
+                              <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
+                                h.thumbnail_quality_score >= 80 ? 'text-green-400 border-green-400/30 bg-green-400/5' :
+                                h.thumbnail_quality_score >= 60 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
+                                'text-red-400 border-red-400/30 bg-red-400/5'
+                              }`}>
+                                ★ Score {h.thumbnail_quality_score}/100
+                              </span>
+                            )}
+                            {h.thumbnail_source_frame != null && (
+                              <span className="text-[9px] text-g-muted">
+                                Frame @ {h.thumbnail_source_frame.toFixed(1)}s
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {(h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING') && (
                           <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">

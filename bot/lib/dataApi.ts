@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWorker';
 import { forceThumbnail, getThumbnailWorkerStatus } from './thumbnailGenerator';
+import { buildThumbnailV2 } from './thumbnailBuilderV2';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -478,6 +479,20 @@ export function startDataApi(port = 4242) {
       })().catch((e: any) => {
         res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
       });
+      return;
+    }
+
+    // ── Thumbnail V2: frame-basert bygging (async) ───────────────────────────
+    if (url.startsWith('/content-factory/thumbnail-build-v2/') && method === 'POST') {
+      const highlightId = url.replace('/content-factory/thumbnail-build-v2/', '');
+      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
+      }
+      res.writeHead(202);
+      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V2 startet for ${highlightId}` }));
+      buildThumbnailV2(highlightId).catch((e: any) =>
+        console.error('[DataApi] thumbnailV2 feil:', e.message)
+      );
       return;
     }
 
