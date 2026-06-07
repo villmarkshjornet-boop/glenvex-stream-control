@@ -452,14 +452,14 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
   const sb     = createClient(sbUrl, sbKey, { realtime: { transport: require('ws') } });
   const client = new OpenAI({ apiKey });
 
-  // Claim jobben – sett GENERATING + started_at (atomic: aksepterer PENDING eller GENERATING)
-  try {
-    await sb.from('content_highlights').update({
-      thumbnail_status:    'GENERATING',
-      thumbnail_started_at: new Date().toISOString(),
-      thumbnail_error:     null,
-    }).eq('id', highlightId).in('thumbnail_status', ['PENDING', 'GENERATING']);
-  } catch {}
+  // Claim jobben – sett GENERATING (atomic: aksepterer PENDING eller GENERATING)
+  // thumbnail_started_at settes separat for å unngå avhengighet av thumbnail-v2b-migration.sql
+  await sb.from('content_highlights').update({
+    thumbnail_status: 'GENERATING',
+    thumbnail_error:  null,
+  }).eq('id', highlightId).in('thumbnail_status', ['PENDING', 'GENERATING']);
+  // V2b: stale-timer – ignorer feil om kolonne ikke eksisterer ennå
+  await sb.from('content_highlights').update({ thumbnail_started_at: new Date().toISOString() }).eq('id', highlightId);
 
   log('JOB_CLAIMED', highlightId);
 
@@ -472,7 +472,9 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     if (hErr || !h) throw new Error('Highlight ikke funnet');
     if (h.clip_status !== 'CLIPPED') throw new Error(`clip_status = ${h.clip_status}`);
-    if (!h.clip_url)                 throw new Error('Ingen clip_url');
+
+    const videoUrl = h.clip_url ?? h.vertical_clip_url;
+    if (!videoUrl) throw new Error('Ingen clip_url eller vertical_clip_url');
 
     const [vodRes, copiesRes] = await Promise.all([
       sb.from('content_vods').select('id,title,category').eq('id', h.vod_id).single(),
@@ -485,8 +487,8 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     // ── Frame extraction ──────────────────────────────────────────────────────
     log('FRAME_EXTRACTION_STARTED', highlightId);
-    const duration = await getClipDuration(h.clip_url);
-    const rawFrames = await extractCandidateFrames(h.clip_url, duration);
+    const duration = await getClipDuration(videoUrl);
+    const rawFrames = await extractCandidateFrames(videoUrl, duration);
     log('FRAMES_EXTRACTED', `${rawFrames.length}/${FRAME_COUNT} OK`);
 
     if (rawFrames.length === 0) throw new Error('Ingen frames kunne ekstraheres');
@@ -570,18 +572,23 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     if (!ytUrl && !ttUrl) throw new Error('Opplasting til Supabase Storage feilet');
 
-    // ── Oppdater DB ───────────────────────────────────────────────────────────
+    // ── Oppdater DB – safe (kjerne-kolonner som alltid finnes) ───────────────
+    const { error: doneErr } = await sb.from('content_highlights').update({
+      thumbnail_status:      'DONE',
+      thumbnail_youtube_url: ytUrl  ?? null,
+      thumbnail_tiktok_url:  ttUrl  ?? null,
+      thumbnail_headline:    copy.headline,
+      thumbnail_subheadline: copy.subheadline || null,
+      thumbnail_generated_at: new Date().toISOString(),
+      thumbnail_error:        null,
+      thumbnail_prompt:       null,
+    }).eq('id', highlightId);
+    if (doneErr) throw new Error('DB DONE-oppdatering feilet: ' + doneErr.message);
+
+    // V2-metadata – ignorer feil om kolonner ikke eksisterer ennå (krever thumbnail-v2-migration.sql)
     await sb.from('content_highlights').update({
-      thumbnail_status:        'DONE',
-      thumbnail_youtube_url:   ytUrl  ?? null,
-      thumbnail_tiktok_url:    ttUrl  ?? null,
-      thumbnail_headline:      copy.headline,
-      thumbnail_subheadline:   copy.subheadline || null,
       thumbnail_source_frame:  usedFrameT,
       thumbnail_quality_score: bestScore,
-      thumbnail_generated_at:  new Date().toISOString(),
-      thumbnail_error:         null,
-      thumbnail_prompt:        null, // V2 bruker ikke prompt
     }).eq('id', highlightId);
 
     log('THUMBNAIL_V2_DONE', `score=${bestScore} frame=${usedFrameT.toFixed(1)}s yt=${!!ytUrl} tt=${!!ttUrl}`);

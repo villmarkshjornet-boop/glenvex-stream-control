@@ -48,13 +48,15 @@ export async function POST(req: NextRequest) {
 
   // Sett PENDING – Railway-worker claimer jobben og setter GENERATING
   // clip_status røres ALDRI
-  try {
-    await db.from('content_highlights').update({
-      thumbnail_status:    'PENDING',
-      thumbnail_error:     null,
-      thumbnail_started_at: null,
-    }).eq('id', highlightId);
-  } catch {}
+  const { error: pendingErr } = await db.from('content_highlights').update({
+    thumbnail_status: 'PENDING',
+    thumbnail_error:  null,
+  }).eq('id', highlightId);
+  if (pendingErr) {
+    return NextResponse.json({ error: 'Klarte ikke sette PENDING: ' + pendingErr.message }, { status: 500 });
+  }
+  // V2b: reset stale-timer – ignorer feil (kolonne krever thumbnail-v2b-migration.sql)
+  await db.from('content_highlights').update({ thumbnail_started_at: null }).eq('id', highlightId);
 
   // Signal Railway om å starte umiddelbart (fast-path).
   // Hvis HTTP feiler: status forblir PENDING og Railway-polleren plukker opp innen 90s.

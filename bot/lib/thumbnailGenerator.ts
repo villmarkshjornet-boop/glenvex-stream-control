@@ -581,20 +581,22 @@ async function kjørThumbnailSyklus(): Promise<void> {
     generererNå.add(h.id);
 
     // Atomic claim – sikrer mot race med HTTP fast-path
+    // thumbnail_started_at settes separat for å unngå avhengighet av thumbnail-v2b-migration.sql
     let claimed = false;
-    try {
-      const { data: claimedRows } = await db
-        .from('content_highlights')
-        .update({
-          thumbnail_status:    'GENERATING',
-          thumbnail_started_at: new Date().toISOString(),
-          thumbnail_error:     null,
-        })
-        .eq('id', h.id)
-        .eq('thumbnail_status', 'PENDING')  // guard: bare claim hvis fortsatt PENDING
-        .select('id');
-      claimed = (claimedRows?.length ?? 0) > 0;
-    } catch {}
+    const { data: claimedRows, error: claimErr } = await db
+      .from('content_highlights')
+      .update({
+        thumbnail_status: 'GENERATING',
+        thumbnail_error:  null,
+      })
+      .eq('id', h.id)
+      .eq('thumbnail_status', 'PENDING')
+      .select('id');
+    claimed = !claimErr && (claimedRows?.length ?? 0) > 0;
+    // V2b: sett stale-timer (ignorer feil om kolonne ikke eksisterer ennå)
+    if (claimed) {
+      await db.from('content_highlights').update({ thumbnail_started_at: new Date().toISOString() }).eq('id', h.id);
+    }
 
     if (!claimed) {
       // HTTP fast-path slo til først – hopp over
@@ -634,10 +636,12 @@ export async function startThumbnailWorker(): Promise<void> {
   // Reset GENERATING → PENDING ved Railway-restart (alle pågående bygg er avbrutt)
   try {
     const { data: stuck } = await db.from('content_highlights')
-      .update({ thumbnail_status: 'PENDING', thumbnail_started_at: null, thumbnail_error: 'Resatt ved worker-restart' })
+      .update({ thumbnail_status: 'PENDING', thumbnail_error: 'Resatt ved worker-restart' })
       .eq('thumbnail_status', 'GENERATING')
       .select('id');
     if (stuck?.length) wLog('INFO', 'THUMBNAIL_STARTUP_RESET', { antall: stuck.length });
+    // V2b: reset stale-timer på alle PENDING (ignorer feil om kolonne ikke eksisterer ennå)
+    await db.from('content_highlights').update({ thumbnail_started_at: null }).eq('thumbnail_status', 'PENDING');
   } catch {}
 
   const POLL_MS = 60_000; // 1 minutt
