@@ -18,6 +18,7 @@ import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { logBotEvent } from './botEvents';
+import { logSystemEvent } from './systemEvents';
 
 const execAsync = require('util').promisify(require('child_process').exec);
 
@@ -479,6 +480,19 @@ export async function genererThumbnail(highlightId: string): Promise<{ ok: boole
     }).eq('id', highlightId);
 
     logBotEvent('thumbnail_ferdig', { id: highlightId, harYt: !!ytUrl, harTt: !!ttUrl });
+    logSystemEvent({
+      source: 'thumbnail_worker',
+      event_type: 'THUMBNAIL_GENERATED',
+      title: `Thumbnail generert for highlight ${highlightId}`,
+      severity: 'info',
+      metadata: {
+        highlightId,
+        vodId: h.vod_id,
+        harYoutube: !!ytUrl,
+        harTikTok: !!ttUrl,
+        headline: copyMedKontekst.headline,
+      },
+    });
     wLog('INFO', 'THUMBNAIL_DONE', { highlightId });
 
     return { ok: true, melding: `Thumbnails generert for ${highlightId}` };

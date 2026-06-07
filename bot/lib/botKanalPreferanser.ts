@@ -40,7 +40,7 @@ export async function getSubsKanalId(): Promise<string> {
 
 export async function getClipsKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
-  return prefs.clips || process.env.DISCORD_CHAT_CHANNEL_ID || '';
+  return prefs.clips || prefs.chat || process.env.DISCORD_CHAT_CHANNEL_ID || '';
 }
 
 export async function getChatKanalId(): Promise<string> {

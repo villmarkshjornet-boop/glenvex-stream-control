@@ -23,7 +23,7 @@ import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
-import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase } from './lib/memberTracker';
+import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
@@ -51,6 +51,7 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
@@ -121,9 +122,38 @@ async function checkLive() {
       const botSettings = getBotSettings();
       if (botSettings.pauseLiveVarsler) return;
 
-      await postLiveEmbed(stream, settings);
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'LIVE_DETECTED',
+        title: `Stream er live: ${stream.title?.slice(0, 60) ?? 'Ingen tittel'}`,
+        description: `Spill: ${stream.game ?? 'Ukjent'} · Seere: ${stream.viewerCount ?? 0}`,
+        severity: 'info',
+        metadata: { streamId: stream.id, title: stream.title, game: stream.game, viewerCount: stream.viewerCount },
+      });
+
+      let liveEmbedOk = false;
+      try {
+        await postLiveEmbed(stream, settings);
+        liveEmbedOk = true;
+        logSystemEvent({
+          source: 'discord_bot',
+          event_type: 'DISCORD_LIVE_ANNOUNCEMENT_SENT',
+          title: `Discord live-varsel postet: ${stream.title?.slice(0, 60) ?? ''}`,
+          severity: 'info',
+          metadata: { streamId: stream.id, channelId: settings.discordLiveChannelId },
+        });
+      } catch (liveErr: any) {
+        logSystemEvent({
+          source: 'discord_bot',
+          event_type: 'DISCORD_LIVE_ANNOUNCEMENT_FAILED',
+          title: `Discord live-varsel feilet: ${liveErr.message?.slice(0, 100)}`,
+          severity: 'error',
+          metadata: { streamId: stream.id, error: liveErr.message },
+        });
+      }
+
       saveSettings({ lastNotifiedStreamId: stream.id });
-      addLog('success', `Auto live-varsel postet: ${stream.title}`, 'OK');
+      addLog(liveEmbedOk ? 'success' : 'warning', `Auto live-varsel ${liveEmbedOk ? 'postet' : 'feilet'}: ${stream.title}`, liveEmbedOk ? 'OK' : 'WARN');
       startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
 
       // Lagre til content library
@@ -158,6 +188,13 @@ async function checkLive() {
       endSession(0);
       logBotEvent('stream_offline', {});
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'STREAM_OFFLINE_DETECTED',
+        title: 'Stream gikk offline – VOD-watcher starter om 15 min',
+        severity: 'info',
+        metadata: { resetSyklusOm: '2t' },
+      });
       // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
       setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
     }
@@ -830,6 +867,11 @@ async function postTopClip() {
 client.on('guildMemberAdd', async (member) => {
   logBotAgentEvent({ source: 'discord', event_type: 'member_join', username: member.user.username, importance_score: 50, metadata: { userId: member.user.id } });
   upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: member.user.id, summary: `${member.displayName} ble med i GLENVEX Discord`, confidence_score: 0.6, metadata: { username: member.user.username } }).catch(() => {});
+  upsertMember(member.user.id, member.user.username, member.displayName);
+  if (member.guild) {
+    const { tildeltSpesialRolle } = await import('./lib/roleManager');
+    tildeltSpesialRolle(member.guild, member, 'new_member').catch(() => {});
+  }
 
   const kanal = finnChatKanal();
   if (!kanal) return;
@@ -937,17 +979,43 @@ async function sjekkStuckeVodsPeriodisk() {
 
 const DAGNAVN_BOT = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
 
+// Oslo-timezone-sikker tidsberegning (Railway kjører UTC)
+function getOsloTime(): { day: number; minutes: number; dagNavn: string } {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Oslo',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const weekday = parts.find(p => p.type === 'weekday')?.value ?? 'Mon';
+  const hourStr = parts.find(p => p.type === 'hour')?.value ?? '0';
+  const minStr  = parts.find(p => p.type === 'minute')?.value ?? '0';
+  // Intl hour12:false kan gi '24' ved midnatt på noen systemer
+  const hour = parseInt(hourStr) % 24;
+  const min  = parseInt(minStr);
+  const day  = weekdayMap[weekday] ?? new Date().getDay();
+  return { day, minutes: hour * 60 + min, dagNavn: DAGNAVN_BOT[day] ?? weekday };
+}
+
 async function sjekkPreHype() {
   try {
     const syklus = await getStreamSyklus();
     if (syklus.pre_hype_sendt_at) return; // allerede sendt
+
     const plan = await getStreamplan();
     const aktive = plan.filter((d: any) => d.aktiv);
-    if (aktive.length === 0) return;
+    if (aktive.length === 0) {
+      return;
+    }
 
-    const now = new Date();
-    const idag = now.getDay();
-    const minutter = now.getHours() * 60 + now.getMinutes();
+    // Bruk Europe/Oslo-tid (Railway kjører UTC – uten dette er planleggeren 1-2 timer feil)
+    const { day: idag, minutes: minutter, dagNavn } = getOsloTime();
+
+    let planlagtStream: any = null;
+    let diffTilStream = 9999;
 
     for (const dag of aktive) {
       const dagIdx = DAGNAVN_BOT.indexOf(dag.dag);
@@ -955,34 +1023,61 @@ async function sjekkPreHype() {
       const [timer, min] = (dag.tid ?? '20:00').split(':').map(Number);
       const streamMin = timer * 60 + min;
       const diff = streamMin - minutter;
-      if (diff > 0 && diff <= 60) {
-        // Stream innen 60 min – send pre-hype
-        const kanal = finnChatKanal();
-        if (!kanal) return;
-        const apiKey = process.env.OPENAI_API_KEY;
-        let melding = `🔥 **GLENVEX** streamer om ${diff} minutt${diff > 1 ? 'er' : ''}! ${dag.spill} starter kl. ${dag.tid}`;
-        if (apiKey) {
-          try {
-            const openai = new OpenAI({ apiKey });
-            const res2 = await openai.chat.completions.create({
-              model: 'gpt-4o-mini',
-              messages: [{ role: 'user', content: `GLENVEX streamer ${dag.spill} om ${diff} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
-              max_tokens: 80,
-              temperature: 0.9,
-            });
-            const ai = res2.choices[0]?.message?.content ?? '';
-            if (ai) melding = `🔥 ${ai}`;
-          } catch {}
-        }
-        await kanal.send(melding).catch(() => {});
-        await updateStreamSyklus({ pre_hype_sendt_at: new Date().toISOString() });
-        logBotEvent('pre_hype', { spill: dag.spill, tittel: dag.tittel ?? '', minutter_til: diff });
-        addLog('success', `Pre-hype sendt: ${dag.spill} om ${diff}min`, 'OK');
-        break;
+      if (diff > 0 && diff <= 60 && diff < diffTilStream) {
+        diffTilStream = diff;
+        planlagtStream = dag;
       }
     }
+
+    if (!planlagtStream) return;
+
+    logSystemEvent({
+      source: 'scheduler',
+      event_type: 'PREHYPE_SCHEDULED',
+      title: `Pre-hype: stream om ${diffTilStream} min (${planlagtStream.spill})`,
+      description: `Oslo-tid dag=${dagNavn} minutter=${minutter}. Stream kl. ${planlagtStream.tid}.`,
+      severity: 'info',
+      metadata: { spill: planlagtStream.spill, dag: planlagtStream.dag, tid: planlagtStream.tid, diffMinutter: diffTilStream, osloDag: dagNavn, osloMinutter: minutter },
+    });
+
+    const kanal = finnChatKanal();
+    if (!kanal) {
+      logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_SCHEDULED', title: 'Pre-hype: Discord-kanal ikke funnet', severity: 'warning', metadata: { spill: planlagtStream.spill } });
+      return;
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    let melding = `🔥 **GLENVEX** streamer om ${diffTilStream} minutt${diffTilStream > 1 ? 'er' : ''}! ${planlagtStream.spill} starter kl. ${planlagtStream.tid}`;
+    if (apiKey) {
+      try {
+        const openai = new OpenAI({ apiKey });
+        const res2 = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: `GLENVEX streamer ${planlagtStream.spill} om ${diffTilStream} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
+          max_tokens: 80,
+          temperature: 0.9,
+        });
+        const ai = res2.choices[0]?.message?.content ?? '';
+        if (ai) melding = `🔥 ${ai}`;
+      } catch {}
+    }
+
+    const sendtOk = await kanal.send(melding).then(() => true).catch(() => false);
+    await updateStreamSyklus({ pre_hype_sendt_at: new Date().toISOString() });
+    logBotEvent('pre_hype', { spill: planlagtStream.spill, tittel: planlagtStream.tittel ?? '', minutter_til: diffTilStream });
+
+    logSystemEvent({
+      source: 'scheduler',
+      event_type: 'PREHYPE_SENT',
+      title: `Pre-hype sendt: ${planlagtStream.spill} om ${diffTilStream} min`,
+      severity: sendtOk ? 'info' : 'warning',
+      metadata: { spill: planlagtStream.spill, kanal: kanal.id, sendtOk, diffMinutter: diffTilStream },
+    });
+
+    addLog(sendtOk ? 'success' : 'warning', `Pre-hype ${sendtOk ? 'sendt' : 'feilet'}: ${planlagtStream.spill} om ${diffTilStream}min`, sendtOk ? 'OK' : 'WARN');
   } catch (err: any) {
     console.error('[PreHype] Feil:', err.message);
+    logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_SCHEDULED', title: `Pre-hype feil: ${err.message.slice(0, 100)}`, severity: 'error' });
   }
 }
 
@@ -1085,6 +1180,10 @@ client.on('messageCreate', async (message) => {
       }
     }
     const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+    // Track stream attendance (once per stream day when bot knows stream is live)
+    if (getActiveSession()) {
+      addStreamAttendance(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+    }
     if (xpResult?.leveledUp) {
       message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
       logBotEvent('level_up', { username: message.author.displayName ?? message.author.username, level: xpResult.newLevel });
@@ -1217,6 +1316,37 @@ client.on('interactionCreate', async (interaction: Interaction) => {
 client.on('error', (error) => {
   console.error('Discord client feil:', error);
   addLog('error', `Discord client feil: ${error.message}`, 'ERROR');
+});
+
+// ── Community Intelligence: Reaction tracking ─────────────────────────────────
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+  try {
+    const member = await reaction.message.guild?.members.fetch(user.id).catch(() => null);
+    if (!member) return;
+    addReaction(user.id, user.username, member.displayName);
+  } catch {}
+});
+
+// ── Community Intelligence: Voice activity tracking ───────────────────────────
+const voiceJoinTimes = new Map<string, number>();
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  const userId = newState.member?.id ?? oldState.member?.id;
+  const username = newState.member?.user.username ?? oldState.member?.user.username ?? '';
+  const displayName = newState.member?.displayName ?? username;
+  if (!userId || newState.member?.user.bot) return;
+
+  if (!oldState.channelId && newState.channelId) {
+    voiceJoinTimes.set(userId, Date.now());
+  } else if (oldState.channelId && !newState.channelId) {
+    const joinTime = voiceJoinTimes.get(userId);
+    if (joinTime) {
+      const minutes = Math.floor((Date.now() - joinTime) / 60_000);
+      voiceJoinTimes.delete(userId);
+      if (minutes > 0) addVoiceMinutes(userId, username, displayName, minutes);
+    }
+  }
 });
 
 client.login(token);

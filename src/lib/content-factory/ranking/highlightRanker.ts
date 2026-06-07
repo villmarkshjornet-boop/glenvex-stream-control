@@ -2,6 +2,7 @@ import { assertContentFactoryEnabled } from '../index';
 import { getDb } from '@/lib/db';
 import { hentHighlights } from '../analysis/highlightDiscovery';
 import { logPipeline } from '../jobs/pipelineLogger';
+import { logSystemEvent } from '@/lib/systemEvents';
 import type { ContentHighlight } from '../types';
 
 export async function rangerHighlights(vodId: string): Promise<ContentHighlight[]> {
@@ -26,6 +27,19 @@ export async function rangerHighlights(vodId: string): Promise<ContentHighlight[
   }
 
   await logPipeline({ vodId, step: 'RANK', status: 'COMPLETE', outputCount: rangert.length });
+
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'HIGHLIGHTS_RANKED',
+    title: `${rangert.length} highlights rangert for VOD ${vodId}`,
+    severity: 'info',
+    metadata: {
+      vodId,
+      antall: rangert.length,
+      høyesteScore: rangert[0]?.score ?? 0,
+      toppHighlight: rangert[0]?.title ?? null,
+    },
+  });
 
   return rangert;
 }

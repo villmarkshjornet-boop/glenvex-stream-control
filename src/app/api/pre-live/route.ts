@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getChatKanalId } from '@/lib/discordChannel';
+import { getChatKanalId, getPreHypeKanalId } from '@/lib/discordChannel';
 import OpenAI from 'openai';
 import { logSystemEvent } from '@/lib/systemEvents';
 
@@ -19,8 +19,10 @@ const MELDINGER = {
 
 export async function POST(req: NextRequest) {
   const { type, spill } = await req.json() as { type: '30min' | '15min' | 'live'; spill: string };
-  const kanalId = process.env.DISCORD_CHAT_CHANNEL_ID || process.env.DISCORD_LIVE_CHANNEL_ID;
-  if (!kanalId) return NextResponse.json({ error: 'DISCORD_CHAT_CHANNEL_ID mangler i Vercel env vars' }, { status: 400 });
+  const kanalId = await getPreHypeKanalId()
+    ?? process.env.DISCORD_CHAT_CHANNEL_ID
+    ?? process.env.DISCORD_LIVE_CHANNEL_ID;
+  if (!kanalId) return NextResponse.json({ error: 'Ingen Discord-kanal konfigurert for pre-hype (sett pre_hype i kanalpreferanser eller DISCORD_CHAT_CHANNEL_ID)' }, { status: 400 });
 
   const apiKey = process.env.OPENAI_API_KEY;
   let melding = MELDINGER[type]?.(spill) ?? '';

@@ -7,6 +7,7 @@ import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { getStreamInfo } from '@/lib/twitch';
 import OpenAI from 'openai';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -108,6 +109,21 @@ Svar KUN med JSON i dette formatet:
     highlights: highlights.length,
     is_live: stream?.isLive ?? false,
   };
+
+  await logSystemEvent({
+    source: 'stream_briefing',
+    event_type: 'PRE_STREAM_BRIEFING_GENERATED',
+    title: `Pre-stream briefing generert: "${briefing.overskrift ?? 'Ukjent'}"`,
+    severity: 'info',
+    metadata: {
+      overskrift: briefing.overskrift ?? null,
+      isLive: stream?.isLive ?? false,
+      innsikter: insights.length,
+      discordEvents: discord.length,
+      twitchEvents: twitch.length,
+      highlights: highlights.length,
+    },
+  }).catch(() => {});
 
   return NextResponse.json(briefing);
 }

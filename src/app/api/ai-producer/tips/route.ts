@@ -16,10 +16,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'tipTekst og status er påkrevd' }, { status: 400 });
     }
 
-    const eventType = status === 'done' ? 'AI_PRODUCER_TIP_DONE' : 'AI_PRODUCER_TIP_DISMISSED';
+    const eventType = status === 'done' ? 'AI_PRODUCER_RECOMMENDATION_COMPLETED' : 'AI_PRODUCER_RECOMMENDATION_DISMISSED';
     const title = status === 'done'
-      ? `AI-tips utført: "${tipTekst.slice(0, 60)}"`
-      : `AI-tips avvist: "${tipTekst.slice(0, 60)}"`;
+      ? `AI-anbefaling utført: "${tipTekst.slice(0, 60)}"`
+      : `AI-anbefaling avvist: "${tipTekst.slice(0, 60)}"`;
 
     await logSystemEvent({
       source: 'ai_producer',

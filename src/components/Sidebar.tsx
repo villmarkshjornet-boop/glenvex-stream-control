@@ -43,8 +43,9 @@ const NAV: NavSeksjon[] = [
     icon: '◈',
     items: [
       { label: 'Oversikt',           href: '/discord' },
-      { label: 'Community Manager',  href: '/community-manager' },
-      { label: 'Moderator',          href: '/moderation' },
+      { label: 'Community Manager',     href: '/community-manager' },
+      { label: 'Community Intelligence', href: '/community-intelligence' },
+      { label: 'Moderator',             href: '/moderation' },
     ],
   },
   {

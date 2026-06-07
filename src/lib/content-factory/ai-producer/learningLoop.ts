@@ -5,6 +5,7 @@ import { lagreStreamMemory, oppdaterContentPatterns } from './streamMemory';
 import { oppdaterKnowledge, hentStreamMemory, hentContentPatterns } from './knowledgeBase';
 import { upsertMemory, addInsight } from '@/lib/ai/creatorContext';
 import { logAgentDecision } from '@/lib/ai/eventLogger';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export async function kjørLearningLoop(vodId: string): Promise<void> {
   const db = getDb();
@@ -14,6 +15,7 @@ export async function kjørLearningLoop(vodId: string): Promise<void> {
   if (!apiKey) return;
 
   const workspaceId = getWorkspaceId();
+  const loopStart = Date.now();
 
   const { data: highlights } = await db
     .from('content_highlights')
@@ -114,37 +116,9 @@ Returner KUN JSON:
 
     const nyStreamCount = tidligereAntall + 1;
 
-    // ── Skriv til gamle tabeller (backwards compat) ───────────────────────────
+    // DEL 4: Legacy table writes disabled — monitoring for 7 days from 2026-06-07
+    // Only ai_agent_* tables are written to now. Remove this comment block after 2026-06-14 if stable.
     const topCategories = Array.from(new Set(highlights.map((h: any) => h.category as string)));
-    await lagreStreamMemory(vodId, {
-      streamTitle: vod?.title,
-      game: vod?.category,
-      durationSeconds: vod?.duration_seconds,
-      highlightsCount: highlights.length,
-      topCategories,
-      summary: analyse.sammendrag,
-    });
-
-    if (analyse.spillKunnskap && vod?.category) {
-      await oppdaterKnowledge('game_context', `${vod.category}: ${analyse.spillKunnskap}`, nyStreamCount);
-    }
-
-    if (analyse.innholdsFunn) {
-      await oppdaterKnowledge('content_strategy', `Basert på ${nyStreamCount} streams: ${analyse.innholdsFunn}`, nyStreamCount);
-    }
-
-    if (nyStreamCount >= 2 && contentPatterns.length > 0) {
-      const toppKat = contentPatterns
-        .sort((a: any, b: any) => b.avg_score - a.avg_score)
-        .slice(0, 3)
-        .map((p: any) => `${p.category} (snitt ${p.avg_score})`)
-        .join(', ');
-      await oppdaterKnowledge(
-        'channel_profile',
-        `GLENVEX – norsk gaming streamer. ${nyStreamCount} streams analysert. Beste highlight-typer: ${toppKat}. Aktive spill: ${vod?.category ?? 'ulike'}.`,
-        nyStreamCount
-      );
-    }
 
     // ── Skriv til Global AI Memory (nye tabeller) ─────────────────────────────
 
@@ -249,10 +223,33 @@ Returner KUN JSON:
       outcome: 'success',
     });
 
+    await logSystemEvent({
+      source: 'learning_loop',
+      event_type: 'LEARNING_LOOP_EXECUTED',
+      title: `Learning Loop fullført: "${vod?.title ?? vodId}"`,
+      severity: 'info',
+      metadata: {
+        vodId,
+        highlightsAnalysert: highlights.length,
+        memoryOppdatert: true,
+        innsikterLagret: analyse.innsikt?.tittel ? 1 : 0,
+        communitySignaler: (analyse.communitySignaler ?? []).length,
+        executionTime: Date.now() - loopStart,
+        game: vod?.category ?? null,
+        streamCount: nyStreamCount,
+      },
+    });
     console.log(
       `[LearningLoop] ✓ ${vodId} – global memory oppdatert (${nyStreamCount} streams i minnet)`
     );
   } catch (err: any) {
+    await logSystemEvent({
+      source: 'learning_loop',
+      event_type: 'LEARNING_LOOP_EXECUTED',
+      title: `Learning Loop feilet: ${vodId}`,
+      severity: 'error',
+      metadata: { vodId, error: err.message?.slice(0, 200), executionTime: Date.now() - loopStart },
+    }).catch(() => {});
     console.error('[LearningLoop] Feil:', err.message?.slice(0, 200));
   }
 }

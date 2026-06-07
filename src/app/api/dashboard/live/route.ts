@@ -12,6 +12,20 @@ export const maxDuration = 15;
 
 const DAGNAVN = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
 
+function osloNow(): { day: number; minuteOfDay: number; utcOffsetHours: number } {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Oslo',
+    weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  const parts = fmt.formatToParts(new Date());
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const day = dayMap[parts.find(p => p.type === 'weekday')?.value ?? 'Mon'] ?? 0;
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0') % 24;
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+  const utcOffsetHours = ((hour - new Date().getUTCHours()) + 24) % 24; // 1 or 2
+  return { day, minuteOfDay: hour * 60 + minute, utcOffsetHours };
+}
+
 function formaterNedtelling(ms: number): string {
   if (ms <= 0) return 'Nå';
   const timer = Math.floor(ms / 3_600_000);
@@ -27,17 +41,17 @@ function nesteStreamTidspunkt(neste: any): Date | null {
   const dagIdx = DAGNAVN.indexOf(neste.dag);
   if (dagIdx < 0) return null;
   const [timer, min] = (neste.tid ?? '20:00').split(':').map(Number);
-  const now = new Date();
-  let dagerTil = dagIdx - now.getDay();
+  const oslo = osloNow();
+  let dagerTil = dagIdx - oslo.day;
   if (dagerTil < 0) dagerTil += 7;
   if (dagerTil === 0) {
-    const c = new Date(now);
-    c.setHours(timer, min, 0, 0);
-    if (c <= now) dagerTil = 7;
+    const streamMin = timer * 60 + min;
+    if (streamMin <= oslo.minuteOfDay) dagerTil = 7;
   }
-  const d = new Date(now);
-  d.setDate(d.getDate() + dagerTil);
-  d.setHours(timer, min, 0, 0);
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + dagerTil);
+  // Convert Oslo stream time to UTC for accurate countdown
+  d.setUTCHours(timer - oslo.utcOffsetHours, min, 0, 0);
   return d;
 }
 
@@ -64,9 +78,10 @@ export async function GET() {
   const ws = getWorkspaceId();
   const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
   const cutoff1h = new Date(Date.now() - 60 * 60_000).toISOString();
+  const cutoff24h = new Date(Date.now() - 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -96,6 +111,14 @@ export async function GET() {
       .gte('created_at', cutoff1h)
       .order('created_at', { ascending: false })
       .limit(60),
+
+    // Siste event per subsystem (siste 24t) for kontrollsenter-widgets
+    db.from('system_events')
+      .select('source,event_type,title,severity,created_at')
+      .eq('workspace_id', ws)
+      .gte('created_at', cutoff24h)
+      .order('created_at', { ascending: false })
+      .limit(500),
   ]);
 
   const vods: any[]       = vodsRes.data ?? [];
@@ -104,6 +127,7 @@ export async function GET() {
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
   const syklus: any       = workspaceRes.data?.settings_json?.stream_syklus ?? {};
   const systemEvents: any[] = systemEventsRes.data ?? [];
+  const subsystemEvents: any[] = subsystemEventsRes.data ?? [];
 
   // ── Aktive VOD-jobber ─────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v =>
@@ -149,7 +173,7 @@ export async function GET() {
 
   // ── Neste stream ─────────────────────────────────────────────────────────
   const aktiveStreamdager = streamplan.filter((d: any) => d.aktiv);
-  const idag = new Date().getDay();
+  const idag = osloNow().day; // Oslo-tid – ikke UTC
   const nesteStream = aktiveStreamdager.find((d: any) => DAGNAVN.indexOf(d.dag) >= idag) ?? aktiveStreamdager[0] ?? null;
   const nesteTidspunkt = nesteStreamTidspunkt(nesteStream);
   const msTilNeste = nesteTidspunkt ? nesteTidspunkt.getTime() - Date.now() : null;
@@ -280,6 +304,38 @@ export async function GET() {
   // ── Live hendelser (legacy) ───────────────────────────────────────────────
   const liveEvents: any[] = (workspaceRes.data?.settings_json?.live_events ?? []).slice(0, 20);
 
+  // ── Kontrollsenter: subsystem-status fra system_events siste 24t ─────────
+  const SUBSYSTEMER = [
+    { key: 'live',         label: 'Live Detection',      events: ['LIVE_DETECTED', 'STREAM_OFFLINE_DETECTED'] },
+    { key: 'pre_hype',     label: 'Pre-hype',            events: ['PRE_HYPE_SENT', 'STREAM_STARTED'] },
+    { key: 'vod',          label: 'VOD Pipeline',        events: ['VOD_AUTO_QUEUE_STARTED', 'VOD_NOT_FOUND', 'VOD_LOOKUP_STARTED'] },
+    { key: 'discovery',    label: 'Highlight Discovery', events: ['HIGHLIGHTS_DISCOVERED'] },
+    { key: 'ranking',      label: 'Highlight Ranking',   events: ['HIGHLIGHTS_RANKED'] },
+    { key: 'clip_factory', label: 'Clip Factory',        events: ['CLIP_EXTRACTED'] },
+    { key: 'thumbnail',    label: 'Thumbnail Generator', events: ['THUMBNAIL_GENERATED'] },
+    { key: 'learning',     label: 'Learning Engine',     events: ['LEARNING_LOOP_EXECUTED'] },
+    { key: 'aggregator',   label: 'Aggregator',          events: ['AGGREGATION_COMPLETE'] },
+    { key: 'ai_producer',  label: 'AI Producer',         events: ['AI_PRODUCER_ANALYSIS_COMPLETE', 'AI_PRODUCER_RECOMMENDATION_COMPLETED', 'AI_PRODUCER_RECOMMENDATION_DISMISSED'] },
+    { key: 'raid',         label: 'Raid Manager',        events: ['RAID_CANDIDATES_CHECKED', 'RAID_RECOMMENDATION_CREATED'] },
+    { key: 'community',    label: 'Community',           events: ['DISCORD_ROLE_ASSIGNED'] },
+    { key: 'briefing',     label: 'Stream Briefing',     events: ['PRE_STREAM_BRIEFING_GENERATED'] },
+  ];
+
+  const kontrollsenter = SUBSYSTEMER.map(sub => {
+    const relevante = subsystemEvents.filter(e => sub.events.includes(e.event_type));
+    const siste = relevante[0] ?? null;
+    const harFeil = relevante.some(e => e.severity === 'error');
+    return {
+      key: sub.key,
+      label: sub.label,
+      status: siste ? (harFeil ? 'feil' : 'ok') : 'ingen_aktivitet',
+      sisteKjøring: siste?.created_at ?? null,
+      sisteEvent: siste?.event_type ?? null,
+      sisteTitle: siste?.title ?? null,
+      antall24h: relevante.length,
+    };
+  });
+
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
       title: i.title, summary: i.summary,
@@ -302,6 +358,7 @@ export async function GET() {
     clipStatus,
     systemEvents,
     liveEvents,
+    kontrollsenter,
     debug,
     ts: new Date().toISOString(),
   });

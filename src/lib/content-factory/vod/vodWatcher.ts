@@ -74,10 +74,10 @@ export async function sjekkForNyVod(
   if (!isContentFactoryEnabled()) return { funnet: false, melding: 'Content Factory deaktivert' };
 
   // Detekter overgang fra live til offline
+  // STREAM_OFFLINE_DETECTED eies av bot/index.ts — logg ikke her for å unngå duplikater
   if (forrigeStream && !erLive) {
     offlineSiden = new Date();
     console.log('[VODWatcher] Stream gikk offline – venter 15 min');
-    logSystemEvent({ source: 'vod_watcher', event_type: 'STREAM_OFFLINE_DETECTED', title: 'Stream gikk offline – venter 15 min før VOD-søk', severity: 'info' }).catch(() => {});
   }
   forrigeStream = erLive;
 

@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { logBotEvent } from './botEvents';
+import { logSystemEvent } from './systemEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
@@ -157,10 +158,23 @@ async function lastOppOgFerdigstill(
       vertical_clip_url: verticalClipUrl,
       clip_finished_at: new Date().toISOString(),
       clip_error: null,
-      thumbnail_status: 'PENDING', // Thumbnail-worker plukker opp isolert
+      thumbnail_status: 'PENDING',
     }).eq('id', hId);
     wLog('INFO', 'DB_UPDATED_DONE', { highlightId: hId });
     logBotEvent('klipp_ferdig', { id: hId });
+    logSystemEvent({
+      source: 'clip_worker',
+      event_type: 'CLIP_EXTRACTED',
+      title: `Klipp ekstrahert: ${hId}`,
+      severity: 'info',
+      metadata: {
+        highlightId: hId,
+        vodId,
+        har16x9: !!clipUrl,
+        har9x16: !!verticalClipUrl,
+        eksportformat: '16x9+9x16',
+      },
+    });
     return true;
   }
 

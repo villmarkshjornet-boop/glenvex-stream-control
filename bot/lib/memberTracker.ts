@@ -8,13 +8,19 @@ export interface MemberProfile {
   id: string;
   username: string;
   displayName: string;
+  twitchId: string | null;
   xp: number;
   level: number;
   messages: number;
+  reactions: number;
+  voiceMinutes: number;
   streamsWatched: number;
+  streamsAttended: number;
   subs: number;
   giftSubs: number;
   raids: number;
+  engagementScore: number;
+  communityScore: number;
   joinedAt: string;
   lastSeen: string;
   lastWelcomed: string | null;
@@ -61,15 +67,22 @@ function syncToSupabase(m: MemberProfile): void {
     workspace_id: WORKSPACE_ID,
     username: m.username,
     display_name: m.displayName,
+    twitch_id: m.twitchId ?? null,
     xp: m.xp,
     level: m.level,
     messages: m.messages,
+    reactions: m.reactions,
+    voice_minutes: m.voiceMinutes,
+    streams_attended: m.streamsAttended,
     subs: m.subs,
     gift_subs: m.giftSubs,
     raids: m.raids,
+    engagement_score: m.engagementScore,
+    community_score: m.communityScore,
     badges: m.badges,
     last_seen: m.lastSeen,
     last_welcomed: m.lastWelcomed,
+    joined_at: m.joinedAt,
   };
 
   fetch(`${sbUrl}/rest/v1/community_members`, {
@@ -106,14 +119,20 @@ export async function lasterMedlemmerFraSupabase(): Promise<void> {
         id: r.discord_id,
         username: r.username,
         displayName: r.display_name,
+        twitchId: r.twitch_id ?? null,
         xp: r.xp ?? 0,
         level: r.level ?? 1,
         messages: r.messages ?? 0,
+        reactions: r.reactions ?? 0,
+        voiceMinutes: r.voice_minutes ?? 0,
         streamsWatched: 0,
+        streamsAttended: r.streams_attended ?? 0,
         subs: r.subs ?? 0,
         giftSubs: r.gift_subs ?? 0,
         raids: r.raids ?? 0,
-        joinedAt: r.created_at ?? new Date().toISOString(),
+        engagementScore: r.engagement_score ?? 0,
+        communityScore: r.community_score ?? 0,
+        joinedAt: r.joined_at ?? r.created_at ?? new Date().toISOString(),
         lastSeen: r.last_seen ?? new Date().toISOString(),
         lastWelcomed: r.last_welcomed ?? null,
         badges: r.badges ?? [],
@@ -134,12 +153,28 @@ export function getAllMembers(): MemberProfile[] {
   return Object.values(load()).sort((a, b) => b.xp - a.xp);
 }
 
+function computeScores(m: MemberProfile): void {
+  m.engagementScore = Math.min(100, Math.round(
+    Math.min(m.messages / 10, 30) +
+    Math.min(m.reactions / 20, 15) +
+    Math.min(m.voiceMinutes / 60, 20) +
+    Math.min(m.streamsAttended * 2, 20) +
+    Math.min((m.subs + m.giftSubs * 2 + m.raids * 3) * 3, 15)
+  ));
+  m.communityScore = Math.min(100, Math.round(
+    m.engagementScore * 0.5 +
+    Math.min(m.level * 2, 25) +
+    Math.min(m.badges.length * 5, 25)
+  ));
+}
+
 export function upsertMember(id: string, username: string, displayName: string): MemberProfile {
   const members = load();
   if (!members[id]) {
     members[id] = {
-      id, username, displayName, xp: 0, level: 1, messages: 0,
-      streamsWatched: 0, subs: 0, giftSubs: 0, raids: 0,
+      id, username, displayName, twitchId: null, xp: 0, level: 1,
+      messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
+      subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
       joinedAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
       lastWelcomed: null, badges: [],
     };
@@ -147,6 +182,7 @@ export function upsertMember(id: string, username: string, displayName: string):
     members[id].lastSeen = new Date().toISOString();
     members[id].displayName = displayName;
   }
+  computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
   return members[id];
@@ -159,8 +195,9 @@ export function addMessageXP(id: string, username: string, displayName: string):
 
   const members = load();
   const m: MemberProfile = members[id] ?? {
-    id, username, displayName, xp: 0, level: 1, messages: 0,
-    streamsWatched: 0, subs: 0, giftSubs: 0, raids: 0,
+    id, username, displayName, twitchId: null, xp: 0, level: 1,
+    messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
+    subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
     joinedAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
     lastWelcomed: null, badges: [],
   };
@@ -176,6 +213,7 @@ export function addMessageXP(id: string, username: string, displayName: string):
   if (m.messages === 500) addBadge(m, '500 Meldinger');
 
   members[id] = m;
+  computeScores(m);
   save(members);
   syncToSupabase(m);
 
@@ -187,6 +225,7 @@ export function addSub(id: string, username: string, displayName: string) {
   const m = upsertMember(id, username, displayName);
   members[id] = { ...m, subs: (m.subs || 0) + 1, xp: m.xp + 200 };
   if (members[id].subs === 1) addBadge(members[id], 'Første Sub');
+  computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
 }
@@ -195,6 +234,7 @@ export function addGiftSub(id: string, username: string, displayName: string, co
   const members = load();
   const m = upsertMember(id, username, displayName);
   members[id] = { ...m, giftSubs: (m.giftSubs || 0) + count, xp: m.xp + count * 100 };
+  computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
 }
@@ -203,6 +243,39 @@ export function addRaid(id: string, username: string, displayName: string) {
   const members = load();
   const m = upsertMember(id, username, displayName);
   members[id] = { ...m, raids: (m.raids || 0) + 1, xp: m.xp + 500 };
+  computeScores(members[id]);
+  save(members);
+  syncToSupabase(members[id]);
+}
+
+export function addReaction(id: string, username: string, displayName: string) {
+  const members = load();
+  const m = upsertMember(id, username, displayName);
+  members[id] = { ...m, reactions: (m.reactions || 0) + 1, xp: m.xp + 2 };
+  computeScores(members[id]);
+  save(members);
+  syncToSupabase(members[id]);
+}
+
+export function addVoiceMinutes(id: string, username: string, displayName: string, minutes: number) {
+  const members = load();
+  const m = upsertMember(id, username, displayName);
+  members[id] = { ...m, voiceMinutes: (m.voiceMinutes || 0) + minutes, xp: m.xp + minutes };
+  computeScores(members[id]);
+  save(members);
+  syncToSupabase(members[id]);
+}
+
+export function addStreamAttendance(id: string, username: string, displayName: string) {
+  const members = load();
+  const m = getMember(id);
+  if (!m) { upsertMember(id, username, displayName); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const lastAttendDate = (m as any)._lastAttendDate;
+  if (lastAttendDate === today) return;
+  (members[id] as any)._lastAttendDate = today;
+  members[id] = { ...members[id], streamsAttended: (m.streamsAttended || 0) + 1, xp: m.xp + 50 };
+  computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
 }

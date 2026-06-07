@@ -9,6 +9,7 @@
 
 import { upsertBotMemory } from './agentLogger';
 import OpenAI from 'openai';
+import { logSystemEvent } from './systemEvents';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
 let lastRun = 0;
@@ -28,6 +29,8 @@ export async function kjørAggregering(): Promise<void> {
 
   const sb = getSb();
   if (!sb) return;
+
+  const aggrStart = Date.now();
 
   // Hent hendelser siden forrige kjøring (eller siste 20 min ved oppstart)
   const cutoff = new Date(lastRun || Date.now() - 20 * 60_000).toISOString();
@@ -163,10 +166,30 @@ Returner KUN JSON:
       });
     }
 
+    logSystemEvent({
+      source: 'learning_aggregator',
+      event_type: 'AGGREGATION_COMPLETE',
+      title: `Aggregering fullført: ${events.length} events → ${innsikter.length} innsikter`,
+      severity: 'info',
+      metadata: {
+        eventsAnalysert: events.length,
+        innsikterFunnet: innsikter.length,
+        memoryOppdatert: (analyse.aktiveSeere ?? []).length,
+        communitySignaler: (analyse.communitySignaler ?? []).length,
+        executionTime: Date.now() - aggrStart,
+      },
+    });
     if (innsikter.length > 0 || (analyse.aktiveSeere ?? []).length > 0) {
       console.log(`[LearningAggregator] ✓ ${events.length} hendelser → ${innsikter.length} innsikter, ${(analyse.aktiveSeere ?? []).length} brukere oppdatert`);
     }
   } catch (err: any) {
+    logSystemEvent({
+      source: 'learning_aggregator',
+      event_type: 'AGGREGATION_COMPLETE',
+      title: `Aggregering feilet: ${err.message?.slice(0, 80)}`,
+      severity: 'error',
+      metadata: { error: err.message?.slice(0, 200), executionTime: Date.now() - aggrStart },
+    });
     console.error('[LearningAggregator] Feil:', err.message?.slice(0, 100));
   }
 }

@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db';
 import OpenAI from 'openai';
 import { hentTranskripsjon } from '../transcripts/whisperService';
 import { logPipeline } from '../jobs/pipelineLogger';
+import { logSystemEvent } from '@/lib/systemEvents';
 import type { ContentHighlight, HighlightSignal, HighlightCategory } from '../types';
 
 // Beregner et råsignal-score basert på tekstinnhold (aktivitet, reaksjoner)
@@ -227,13 +228,30 @@ ${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s–${Math.round(k.e
     }
   }
 
+  const durationMs = Date.now() - start;
   await logPipeline({
     vodId,
     step: 'DISCOVER',
     status: 'COMPLETE',
-    durationMs: Date.now() - start,
+    durationMs,
     outputCount: highlights.length,
     message: `${highlights.length} highlights funnet (${knowledge && knowledge.streamCount > 0 ? `${knowledge.streamCount} streams + ${knowledge.topViewers.length} seere i AI-minnet` : 'ingen historikk ennå'})`,
+  });
+
+  const scores = highlights.map(h => h.score);
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'HIGHLIGHTS_DISCOVERED',
+    title: `${highlights.length} highlights oppdaget for VOD ${vodId}`,
+    severity: 'info',
+    metadata: {
+      vodId,
+      segmenterAnalysert: grupper.length,
+      highlightsFunnet: highlights.length,
+      avgScore: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
+      topScore: scores.length > 0 ? Math.max(...scores) : 0,
+      executionTime: durationMs,
+    },
   });
 
   return highlights;

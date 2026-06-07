@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { getStreamInfo } from '@/lib/twitch';
 import { hentBotData } from '@/lib/botData';
 import { getDb } from '@/lib/db';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -142,6 +143,20 @@ Gi 3-5 tiltak. Alltid generer faktisk innhold for tiltak som krever en tekst. Ti
       (Math.min(viewerCount, 100) / 100) * 60 +
       (Math.min(activeMembers, 20) / 20) * 40
     ));
+
+    await logSystemEvent({
+      source: 'ai_producer',
+      event_type: 'AI_PRODUCER_ANALYSIS_COMPLETE',
+      title: `AI Producer analyserte stream: ${stream.game ?? 'Ukjent spill'}`,
+      severity: 'info',
+      metadata: {
+        stream: stream.game,
+        viewers: viewerCount,
+        tiltakGenerert: tiltak.length,
+        harHistorikk: streamHistorikk.length > 0,
+        engagementScore,
+      },
+    }).catch(() => {});
 
     return NextResponse.json({
       isLive: true,
