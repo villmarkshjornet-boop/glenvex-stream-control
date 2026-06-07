@@ -26,7 +26,6 @@ import * as os from 'os';
 import * as path from 'path';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
-import ws from 'ws';
 
 const execAsync = promisify(exec);
 
@@ -450,7 +449,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     return;
   }
 
-  const sb     = createClient(sbUrl, sbKey, { realtime: { transport: ws } });
+  const sb     = createClient(sbUrl, sbKey, { realtime: { transport: require('ws') } });
   const client = new OpenAI({ apiKey });
 
   // Claim jobben – sett GENERATING + started_at (atomic: aksepterer PENDING eller GENERATING)
