@@ -453,13 +453,16 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
   const sb     = createClient(sbUrl, sbKey, { realtime: { transport: ws } });
   const client = new OpenAI({ apiKey });
 
-  // Sett GENERATING
+  // Claim jobben – sett GENERATING + started_at (atomic: aksepterer PENDING eller GENERATING)
   try {
     await sb.from('content_highlights').update({
-      thumbnail_status: 'GENERATING',
-      thumbnail_error:  null,
-    }).eq('id', highlightId);
+      thumbnail_status:    'GENERATING',
+      thumbnail_started_at: new Date().toISOString(),
+      thumbnail_error:     null,
+    }).eq('id', highlightId).in('thumbnail_status', ['PENDING', 'GENERATING']);
   } catch {}
+
+  log('JOB_CLAIMED', highlightId);
 
   try {
     // ── Hent data ─────────────────────────────────────────────────────────────

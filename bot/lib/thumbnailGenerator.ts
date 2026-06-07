@@ -499,42 +499,114 @@ export async function genererThumbnail(highlightId: string): Promise<{ ok: boole
   }
 }
 
-// ── Worker-syklus ─────────────────────────────────────────────────────────────
+// ── Worker-syklus (V2) ────────────────────────────────────────────────────────
 
 async function kjørThumbnailSyklus(): Promise<void> {
   if (process.env.CONTENT_FACTORY_ENABLED !== 'true') return;
-  if (!process.env.OPENAI_API_KEY) return;
 
   const db = getDb();
   if (!db) return;
 
   syklusTeller++;
 
+  // ── Stale reset: GENERATING > 5 min ──────────────────────────────────────
+  const staleCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+  let generatingStaleFound = 0;
+  try {
+    const { data: stale } = await db
+      .from('content_highlights')
+      .select('id')
+      .eq('thumbnail_status', 'GENERATING')
+      .lt('thumbnail_started_at', staleCutoff);
+
+    generatingStaleFound = stale?.length ?? 0;
+    for (const s of (stale ?? [])) {
+      await db.from('content_highlights').update({
+        thumbnail_status: 'FAILED',
+        thumbnail_error:  'Thumbnail job timed out/stale (>5 min ingen oppdatering)',
+      }).eq('id', s.id);
+      wLog('WARN', 'THUMBNAIL_STALE_RESET', { id: s.id });
+      generererNå.delete(s.id);
+    }
+  } catch {}
+
+  // ── Tell ventende jobber (for logging) ────────────────────────────────────
+  let pendingFound = 0;
+  let doneFound = 0;
+  try {
+    const [pRes, dRes] = await Promise.all([
+      db.from('content_highlights').select('id', { count: 'exact', head: true })
+        .eq('clip_status', 'CLIPPED').eq('thumbnail_status', 'PENDING').not('clip_url', 'is', null),
+      db.from('content_highlights').select('id', { count: 'exact', head: true })
+        .eq('clip_status', 'CLIPPED').eq('thumbnail_status', 'DONE'),
+    ]);
+    pendingFound = (pRes as any).count ?? 0;
+    doneFound    = (dRes as any).count ?? 0;
+  } catch {}
+
+  wLog('INFO', 'THUMBNAIL_POLL_CYCLE', {
+    syklus: syklusTeller,
+    pending_found: pendingFound,
+    generating_stale_found: generatingStaleFound,
+    done_found: doneFound,
+    aktive: generererNå.size,
+    filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
+  });
+
+  // ── Hent jobber å starte ──────────────────────────────────────────────────
   const ledig = MAX_CONCURRENT - generererNå.size;
   if (ledig <= 0) return;
+  if (pendingFound === 0) return;
 
   const lock = Array.from(generererNå);
   const baseQuery = db
     .from('content_highlights')
-    .select('id')
+    .select('id,clip_url')
     .eq('clip_status', 'CLIPPED')
     .eq('thumbnail_status', 'PENDING')
+    .not('clip_url', 'is', null)
     .limit(ledig);
 
   const { data: highlights, error } = lock.length > 0
     ? await baseQuery.not('id', 'in', `(${lock.join(',')})`)
     : await baseQuery;
 
-  if (error) { wLog('ERROR', 'THUMBNAIL_POLL_ERROR', { err: error.message }); return; }
+  if (error) { wLog('ERROR', 'THUMBNAIL_POLL_ERROR', { err: error.message, filter: baseQuery }); return; }
   if (!highlights || highlights.length === 0) return;
 
-  wLog('INFO', 'THUMBNAIL_JOBS_FOUND', { antall: highlights.length });
+  wLog('INFO', 'THUMBNAIL_JOB_FOUND', { antall: highlights.length, ids: highlights.map((h: any) => h.id) });
 
   for (const h of highlights) {
     if (generererNå.has(h.id)) continue;
     generererNå.add(h.id);
 
-    genererThumbnail(h.id)
+    // Atomic claim – sikrer mot race med HTTP fast-path
+    let claimed = false;
+    try {
+      const { data: claimedRows } = await db
+        .from('content_highlights')
+        .update({
+          thumbnail_status:    'GENERATING',
+          thumbnail_started_at: new Date().toISOString(),
+          thumbnail_error:     null,
+        })
+        .eq('id', h.id)
+        .eq('thumbnail_status', 'PENDING')  // guard: bare claim hvis fortsatt PENDING
+        .select('id');
+      claimed = (claimedRows?.length ?? 0) > 0;
+    } catch {}
+
+    if (!claimed) {
+      // HTTP fast-path slo til først – hopp over
+      wLog('INFO', 'THUMBNAIL_JOB_SKIP_ALREADY_CLAIMED', { id: h.id });
+      generererNå.delete(h.id);
+      continue;
+    }
+
+    wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
+
+    const { buildThumbnailV2 } = require('./thumbnailBuilderV2');
+    buildThumbnailV2(h.id)
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -553,26 +625,29 @@ export async function startThumbnailWorker(): Promise<void> {
     console.log('[ThumbnailWorker] Deaktivert (CONTENT_FACTORY_ENABLED != true)');
     return;
   }
-  if (!process.env.OPENAI_API_KEY) {
-    console.log('[ThumbnailWorker] Deaktivert – OPENAI_API_KEY mangler');
-    return;
-  }
 
   wLog('INFO', 'WORKER_STARTED');
 
   const db = getDb();
   if (!db) return;
 
-  // Reset GENERATING → PENDING ved Railway-restart (pågående jobs avbrytes)
+  // Reset GENERATING → PENDING ved Railway-restart (alle pågående bygg er avbrutt)
   try {
-    await db.from('content_highlights')
-      .update({ thumbnail_status: 'PENDING', thumbnail_error: 'Resatt ved worker-restart' })
-      .eq('thumbnail_status', 'GENERATING');
+    const { data: stuck } = await db.from('content_highlights')
+      .update({ thumbnail_status: 'PENDING', thumbnail_started_at: null, thumbnail_error: 'Resatt ved worker-restart' })
+      .eq('thumbnail_status', 'GENERATING')
+      .select('id');
+    if (stuck?.length) wLog('INFO', 'THUMBNAIL_STARTUP_RESET', { antall: stuck.length });
   } catch {}
 
-  wLog('INFO', 'THUMBNAIL_POLL_STARTED', { intervallMs: 90_000 });
+  const POLL_MS = 60_000; // 1 minutt
+  wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
+    intervallMs: POLL_MS,
+    versjon: 'V2 (Sharp + Vision – ingen DALL-E)',
+    filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
+  });
   await kjørThumbnailSyklus();
-  setInterval(kjørThumbnailSyklus, 90_000);
+  setInterval(kjørThumbnailSyklus, POLL_MS);
 }
 
 // ── Manuell force-trigger (fra dataApi.ts) ────────────────────────────────────

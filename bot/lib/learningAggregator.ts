@@ -2,6 +2,9 @@
  * 15-minutters batch-aggregering.
  * Leser siste hendelser → ett GPT-kall → oppdaterer ai_agent_memory + ai_agent_insights.
  * Billig: én GPT-4o-mini kall per 15 min, ikke per melding.
+ *
+ * Støtter både Twitch og Discord events.
+ * Kjører cross-platform matching etter aggregering.
  */
 
 import { upsertBotMemory } from './agentLogger';
@@ -38,7 +41,17 @@ export async function kjørAggregering(): Promise<void> {
     .order('created_at', { ascending: false })
     .limit(100);
 
-  if (!events || events.length < 3) return; // For lite å lære av
+  if (!events || events.length < 3) return;
+
+  // Bygg username→kilde-map for korrekt agent_type-tildeling
+  const userSourceMap = new Map<string, Set<string>>();
+  for (const ev of events) {
+    if (ev.username) {
+      const lower = (ev.username as string).toLowerCase();
+      if (!userSourceMap.has(lower)) userSourceMap.set(lower, new Set());
+      userSourceMap.get(lower)!.add(ev.source as string);
+    }
+  }
 
   // Kompakt event-sammendrag for GPT
   const eventLinjer = events
@@ -71,9 +84,9 @@ Finn og returner:
 
 Returner KUN JSON:
 {
-  "aktiveSeere": [{"username": "...", "hvorfor": "..."}],
+  "aktiveSeere": [{"username": "...", "hvorfor": "...", "source": "twitch|discord"}],
   "innsikter": [{"tittel": "...", "sammendrag": "...", "confidence": 0.8}],
-  "communitySignaler": [{"signal": "...", "type": "joke|phrase|pattern"}]
+  "communitySignaler": [{"signal": "...", "type": "joke|phrase|pattern", "source": "twitch|discord"}]
 }`,
         },
       ],
@@ -85,17 +98,40 @@ Returner KUN JSON:
     let analyse: any = {};
     try { analyse = JSON.parse(res.choices[0]?.message?.content ?? '{}'); } catch {}
 
-    // Oppdater viewer-minne
+    // Oppdater minne per bruker – bruk korrekt agent_type basert på kilde
     for (const seer of (analyse.aktiveSeere ?? []).slice(0, 5)) {
       if (!seer.username) continue;
-      await upsertBotMemory({
-        agent_type: 'twitch',
-        memory_type: 'viewer',
-        key: seer.username.toLowerCase(),
-        summary: seer.hvorfor ?? `Aktiv seer på GLENVEX`,
-        confidence_score: 0.6,
-        metadata: { lastSeen: new Date().toISOString() },
-      });
+      const lower = (seer.username as string).toLowerCase();
+      const sources = userSourceMap.get(lower) ?? new Set([seer.source ?? 'twitch']);
+
+      const isTwitch = sources.has('twitch');
+      const isDiscord = sources.has('discord');
+
+      if (isTwitch) {
+        await upsertBotMemory({
+          agent_type: 'twitch',
+          memory_type: 'viewer',
+          key: lower,
+          summary: seer.hvorfor ?? `Aktiv seer på GLENVEX`,
+          confidence_score: 0.6,
+          metadata: { lastSeen: new Date().toISOString(), source: 'twitch' },
+        });
+      }
+      if (isDiscord) {
+        await upsertBotMemory({
+          agent_type: 'discord',
+          memory_type: 'member',
+          key: lower,
+          summary: seer.hvorfor ?? `Aktiv Discord-member i GLENVEX`,
+          confidence_score: 0.6,
+          metadata: { lastSeen: new Date().toISOString(), source: 'discord' },
+        });
+      }
+
+      // Kryss-plattform: samme brukernavn sett på begge → høy confidence
+      if (isTwitch && isDiscord) {
+        upsertCrossPlatformMatch(sb, lower, lower, 0.75).catch(() => {});
+      }
     }
 
     // Legg til innsikter i databasen
@@ -114,11 +150,12 @@ Returner KUN JSON:
       } catch {}
     }
 
-    // Oppdater community-minne
+    // Oppdater community-minne med korrekt kilde
     for (const cs of (analyse.communitySignaler ?? []).slice(0, 5)) {
       if (!cs.signal || cs.signal.length < 3) continue;
+      const agentType = cs.source === 'discord' ? 'discord' : 'twitch';
       await upsertBotMemory({
-        agent_type: 'twitch',
+        agent_type: agentType,
         memory_type: cs.type === 'joke' ? 'joke' : 'topic',
         key: cs.signal.toLowerCase().slice(0, 80),
         summary: cs.signal,
@@ -127,15 +164,57 @@ Returner KUN JSON:
     }
 
     if (innsikter.length > 0 || (analyse.aktiveSeere ?? []).length > 0) {
-      console.log(`[LearningAggregator] ✓ ${events.length} hendelser → ${innsikter.length} innsikter, ${(analyse.aktiveSeere ?? []).length} seere oppdatert`);
+      console.log(`[LearningAggregator] ✓ ${events.length} hendelser → ${innsikter.length} innsikter, ${(analyse.aktiveSeere ?? []).length} brukere oppdatert`);
     }
   } catch (err: any) {
     console.error('[LearningAggregator] Feil:', err.message?.slice(0, 100));
   }
 }
 
+async function upsertCrossPlatformMatch(
+  sb: any,
+  twitchUsername: string,
+  discordUsername: string,
+  confidence: number,
+): Promise<void> {
+  try {
+    // Sjekk om match allerede finnes
+    const { data: existing } = await sb
+      .from('cross_platform_users')
+      .select('id,confidence_score,match_status')
+      .eq('workspace_id', WORKSPACE_ID)
+      .eq('twitch_username', twitchUsername)
+      .eq('discord_username', discordUsername)
+      .maybeSingle();
+
+    if (existing) {
+      // Oppdater confidence og last_seen_at hvis eksisterer
+      if (existing.match_status === 'pending') {
+        await sb.from('cross_platform_users').update({
+          confidence_score: Math.min(1.0, Math.max(existing.confidence_score, confidence)),
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', existing.id);
+      }
+      return;
+    }
+
+    await sb.from('cross_platform_users').insert({
+      workspace_id: WORKSPACE_ID,
+      twitch_username: twitchUsername,
+      discord_username: discordUsername,
+      display_name: twitchUsername,
+      platform_sources: ['twitch', 'discord'],
+      confidence_score: confidence,
+      match_status: 'pending',
+      match_notes: `Auto-detektert: identisk brukernavn på Twitch og Discord`,
+    });
+
+    console.log(`[CrossPlatform] Ny match: ${twitchUsername} ↔ ${discordUsername} (confidence: ${confidence})`);
+  } catch {}
+}
+
 export function startLearningAggregator(): void {
-  // Vent 2 min etter oppstart, deretter hvert 15. min
   setTimeout(async () => {
     await kjørAggregering().catch(() => {});
     setInterval(() => kjørAggregering().catch(() => {}), 15 * 60_000);

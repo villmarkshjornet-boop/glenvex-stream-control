@@ -1,7 +1,7 @@
 /**
  * POST /api/content-factory/thumbnails/generate-v2
  *
- * Setter thumbnail_status = GENERATING og delegerer til Railway.
+ * Setter thumbnail_status = PENDING og signalerer Railway via HTTP.
  * Railway gjør alt: frame extraction, Vision-utvalg, Sharp compositing.
  * Returnerer umiddelbart – UI poller DB for DONE/FAILED.
  *
@@ -46,39 +46,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Ingen video-URL på highlightet' }, { status: 400 });
   }
 
-  // Sett GENERATING umiddelbart – ALDRI rør clip_status
+  // Sett PENDING – Railway-worker claimer jobben og setter GENERATING
+  // clip_status røres ALDRI
   try {
     await db.from('content_highlights').update({
-      thumbnail_status: 'GENERATING',
-      thumbnail_error:  null,
+      thumbnail_status:    'PENDING',
+      thumbnail_error:     null,
+      thumbnail_started_at: null,
     }).eq('id', highlightId);
   } catch {}
 
-  // Fyr Railway asynkront (fire and forget)
+  // Signal Railway om å starte umiddelbart (fast-path).
+  // Hvis HTTP feiler: status forblir PENDING og Railway-polleren plukker opp innen 90s.
   const botUrl = process.env.BOT_API_URL;
-  if (botUrl) {
-    fetch(`${botUrl}/content-factory/thumbnail-build-v2/${highlightId}`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(8_000),
-    }).catch(async () => {
-      // Railway ikke tilgjengelig – sett FAILED
-      try {
-        await db.from('content_highlights').update({
-          thumbnail_status: 'FAILED',
-          thumbnail_error:  'Railway (BOT_API_URL) ikke tilgjengelig',
-        }).eq('id', highlightId);
-      } catch {}
-    });
-  } else {
-    // Ingen BOT_API_URL – sett FAILED
+  if (!botUrl) {
+    // Ingen Railway – ingen som kan plukke opp PENDING-jobben
     try {
       await db.from('content_highlights').update({
         thumbnail_status: 'FAILED',
-        thumbnail_error:  'BOT_API_URL ikke satt – kan ikke starte thumbnail-generering',
+        thumbnail_error:  'BOT_API_URL ikke satt – Railway ikke tilkoblet',
       }).eq('id', highlightId);
     } catch {}
     return NextResponse.json({ error: 'BOT_API_URL mangler' }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, status: 'GENERATING' });
+  fetch(`${botUrl}/content-factory/thumbnail-build-v2/${highlightId}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => {
+    // HTTP-signal feilet – status er fortsatt PENDING, Railway-poller tar det opp
+    console.warn(`[ThumbnailV2] Railway HTTP-signal feilet for ${highlightId} – poller tar det opp`);
+  });
+
+  return NextResponse.json({ ok: true, status: 'PENDING' });
 }

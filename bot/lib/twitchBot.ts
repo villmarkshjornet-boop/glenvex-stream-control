@@ -4,6 +4,7 @@ import { trackRaid, trackGiftSub } from './eventTracker';
 import { getSettings } from '@/lib/settings';
 import { getBroadcasterId } from '@/lib/twitch';
 import { logBotAgentEvent, upsertBotMemory } from './agentLogger';
+import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
@@ -235,23 +236,6 @@ setInterval(flushHendelser, 30_000);
 
 // ─── Partner-promo via Supabase ───────────────────────────────────────────────
 
-async function hentAktivePartnere(): Promise<any[]> {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return [];
-  try {
-    const { createClient } = require('@supabase/supabase-js');
-    const ws = require('ws');
-    const sb = createClient(url, key, { realtime: { transport: ws } });
-    const { data } = await sb
-      .from('partners')
-      .select('navn,beskrivelse,affiliate_link,rabattkode,prioritet')
-      .eq('aktiv', true)
-      .order('prioritet', { ascending: false })
-      .limit(10);
-    return data ?? [];
-  } catch { return []; }
-}
 
 export function startTwitchBot() {
   const oauth = process.env.TWITCH_BOT_OAUTH;
@@ -461,21 +445,25 @@ export function startTwitchBot() {
     if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
     sistePartnerPromo = Date.now();
 
-    const partnere = await hentAktivePartnere();
-    if (partnere.length === 0) return;
+    const partner = await getRandomActivePartner();
+    if (!partner) return; // ingen URL eller ingen aktive partnere
 
-    // Velg tilfeldig blant topp 3 (prioritet)
-    const kandidater = partnere.slice(0, 3);
-    const partner = kandidater[Math.floor(Math.random() * kandidater.length)];
-
-    // La AI formulere reklamen naturlig med kanalens tone
-    const link = partner.affiliate_link ?? '';
     const kode = partner.rabattkode ? ` – Bruk kode: ${partner.rabattkode}` : '';
     const ai = await aiSvar(
-      `Lag en naturlig, kort Twitch-chat-reklame for partneren vår "${partner.navn}": ${partner.beskrivelse}. Lenke: ${link}${kode}. Maks 200 tegn. Norsk, avslappet tone.`
+      `Lag en naturlig, kort Twitch-chat-reklame for partneren vår "${partner.navn}": ${partner.beskrivelse}. Lenke: ${partner.finalUrl}${kode}. Maks 200 tegn. Norsk, avslappet tone.`
     );
-    const melding = ai || `🤝 ${partner.navn}: ${partner.beskrivelse}${kode} ${link}`;
+    const melding = ai || `🤝 ${partner.navn}: ${partner.beskrivelse}${kode} ${partner.finalUrl}`;
     client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
+
+    logPartnerPromoResult({
+      partnerName: partner.navn,
+      platform: 'twitch',
+      channel: `#${KANAL}`,
+      affiliateUrlUsed: partner.finalUrl,
+      hadAffiliateUrl: partner.affiliateUrl !== null,
+      missingAffiliate: partner.missedAffiliate,
+      copyText: melding,
+    }).catch(() => {});
   }, 15 * 60 * 1000);
 }
 

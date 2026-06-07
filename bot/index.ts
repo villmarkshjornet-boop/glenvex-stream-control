@@ -32,6 +32,7 @@ import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemo
 import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
+import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -613,33 +614,69 @@ async function delSocialsSubtilt() {
 // Roterer mellom: partner → stream → community → partner → ...
 let proaktivRunde = 0;
 
-async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
+async function hentBotContext(): Promise<{ jokes: string[]; topics: string[] }> {
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!sbUrl || !sbKey) return;
+  if (!sbUrl || !sbKey) return { jokes: [], topics: [] };
   try {
-    const r = await fetch(`${sbUrl}/rest/v1/partners?aktiv=eq.true&select=navn,beskrivelse,affiliate_link,rabattkode&order=prioritet.desc&limit=5`, {
-      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
-    });
-    const partnere = await r.json() as any[];
-    if (!partnere || partnere.length === 0) return;
-    const partner = partnere[Math.floor(Math.random() * partnere.length)];
-    const apiKey = process.env.OPENAI_API_KEY;
-    let tekst = `🤝 **${partner.navn}** – ${partner.beskrivelse ?? ''}${partner.affiliate_link ? `\n${partner.affiliate_link}` : ''}${partner.rabattkode ? ` (kode: ${partner.rabattkode})` : ''}`;
-    if (apiKey) {
+    const wid = encodeURIComponent(process.env.WORKSPACE_ID || 'glenvex-default');
+    const r = await fetch(
+      `${sbUrl}/rest/v1/ai_agent_memory?workspace_id=eq.${wid}&memory_type=in.(joke,topic)&order=occurrence_count.desc&limit=10&select=memory_type,summary`,
+      { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } },
+    );
+    const data = await r.json() as any[];
+    return {
+      jokes: data.filter((m: any) => m.memory_type === 'joke').map((m: any) => m.summary as string).slice(0, 3),
+      topics: data.filter((m: any) => m.memory_type === 'topic').map((m: any) => m.summary as string).slice(0, 3),
+    };
+  } catch { return { jokes: [], topics: [] }; }
+}
+
+async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
+  const partner = await getRandomActivePartner();
+  if (!partner) return; // mangler URL eller ingen aktive partnere
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  const kode = partner.rabattkode ? ` (kode: ${partner.rabattkode})` : '';
+  let tekst = `🤝 **${partner.navn}** – ${partner.beskrivelse ?? ''}\n${partner.finalUrl}${kode}`;
+
+  if (apiKey) {
+    try {
+      const ctx = await hentBotContext();
+      const contextHints = [
+        ctx.jokes.length > 0 ? `Community inside jokes: ${ctx.jokes.slice(0, 2).join(', ')}` : '',
+        ctx.topics.length > 0 ? `Aktuelle topics: ${ctx.topics.slice(0, 2).join(', ')}` : '',
+      ].filter(Boolean).join('. ');
+
       const openai = new OpenAI({ apiKey });
-      const res2 = await openai.chat.completions.create({
+      const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `Skriv en kort, autentisk norsk promo-melding (maks 2 setninger) for GLENVEXs partner: ${partner.navn} – ${partner.beskrivelse ?? ''}. Avslutning: ${partner.affiliate_link ?? ''}${partner.rabattkode ? ` – bruk kode ${partner.rabattkode}` : ''}. Naturlig tone, ikke salesy.` }],
-        max_tokens: 100,
+        messages: [{
+          role: 'user',
+          content: `Skriv en autentisk norsk Discord-promo (maks 2 setninger) for GLENVEXs partner: ${partner.navn} – ${partner.beskrivelse ?? ''}.${partner.rabattkode ? ` Kode: ${partner.rabattkode}.` : ''} Lenke: ${partner.finalUrl}.${contextHints ? ` Community-kontekst: ${contextHints}.` : ''} Naturlig tone, ikke salesy.`,
+        }],
+        max_tokens: 120,
         temperature: 0.8,
       });
-      const ai = res2.choices[0]?.message?.content ?? '';
+      const ai = res.choices[0]?.message?.content ?? '';
       if (ai) tekst = `🤝 ${ai}`;
-    }
-    await kanal.send(tekst);
-    addToMemory({ type: 'proaktiv', innhold: `partner: ${partner.navn}` });
-  } catch {}
+    } catch {}
+  }
+
+  const msg = await kanal.send(tekst).catch(() => null);
+
+  logPartnerPromoResult({
+    partnerName: partner.navn,
+    platform: 'discord',
+    channel: kanal.name,
+    affiliateUrlUsed: partner.finalUrl,
+    hadAffiliateUrl: partner.affiliateUrl !== null,
+    missingAffiliate: partner.missedAffiliate,
+    copyText: tekst,
+    discordMessageId: msg?.id,
+  }).catch(() => {});
+
+  addToMemory({ type: 'proaktiv', innhold: `partner: ${partner.navn}` });
 }
 
 async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
