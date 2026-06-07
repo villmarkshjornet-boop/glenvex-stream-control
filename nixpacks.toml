@@ -2,4 +2,4 @@
 nixPkgs = ["nodejs_20", "ffmpeg", "python312Packages.yt-dlp"]
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm install --no-audit --no-fund"]
