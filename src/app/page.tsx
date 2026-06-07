@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 
-// ─── Typer ────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface HealthItem { ok: boolean; melding: string; }
 interface HealthData {
@@ -13,56 +13,43 @@ interface HealthData {
 interface SlowData {
   health: HealthData;
   streamStatus: {
-    isLive: boolean; viewers: number; game: string | null; title: string | null; thumbnailUrl: string | null;
+    isLive: boolean; viewers: number; game: string | null; title: string | null;
+    thumbnailUrl: string | null;
     nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
   };
   meta: { hentetKl: string };
 }
-interface LiveEvent {
-  type: 'follow' | 'sub' | 'resub' | 'giftsub' | 'mystery_gift' | 'raid' | 'cheer'
-      | 'klipp_start' | 'klipp_ferdig' | 'level_up' | 'stream_live' | 'stream_offline'
-      | 'discord_varsel' | 'pre_hype';
-  ts: string;
-  username?: string;
-  viewers?: number;
-  months?: number;
-  recipient?: string;
-  count?: number;
-  bits?: string | number;
-  total?: number;
-  title?: string;
-  level?: number;
-  tittel?: string;
-  spill?: string;
-  melding?: string;
-  minutter_til?: number;
-}
-
-interface KlippetHighlight {
+interface SystemEvent {
   id: string;
-  vodId: string;
-  title: string | null;
-  vodTitle: string | null;
-  clip_url_16_9: string | null;
-  clip_url_9_16: string | null;
-  clippedAt: string;
-}
-
-interface AiInnsikt {
+  source: string;
+  event_type: string;
   title: string;
-  summary: string;
-  confidenceScore: number;
-  createdAt: string;
+  description?: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  metadata?: Record<string, any>;
+  created_at: string;
 }
-
+interface KlippetHighlight {
+  id: string; vodId: string; title: string | null; vodTitle: string | null;
+  clip_url_16_9: string | null; clip_url_9_16: string | null; clippedAt: string;
+}
+interface AiInnsikt {
+  title: string; summary: string; confidenceScore: number; createdAt: string;
+}
+interface VodStatus {
+  id: string; title: string; status: string; progressPercent: number | null;
+  statusMessage: string | null; errorMessage: string | null; createdAt: string;
+  highlights: number; klipp: number; readyForClip: number; clipping: number;
+}
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string }[];
-  sjekkliste: { label: string; done: boolean; href: string }[];
-  sisteResultater: { id: string; title: string; status: string; progressPercent: number | null; statusMessage: string | null; errorMessage: string | null; createdAt: string; highlights: number; klipp: number; readyForClip: number; clipping: number }[];
+  sjekkliste:  { label: string; done: boolean; href: string }[];
+  sisteResultater: VodStatus[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
   clipStatus: { clipping: number; readyForClip: number; sisteKlippede: KlippetHighlight[] };
   nyesteInnsikter: AiInnsikt[];
-  liveEvents: LiveEvent[];
+  liveEvents: any[];
+  systemEvents: SystemEvent[];
   ts: string;
 }
 
@@ -70,38 +57,71 @@ interface LiveData {
 
 function tidSiden(iso: string): string {
   const sek = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (sek < 60) return 'akkurat nå';
-  if (sek < 3600) return `${Math.floor(sek / 60)}m siden`;
+  if (sek < 60)    return 'akkurat nå';
+  if (sek < 3600)  return `${Math.floor(sek / 60)}m siden`;
   if (sek < 86400) return `${Math.floor(sek / 3600)}t siden`;
   return `${Math.floor(sek / 86400)}d siden`;
 }
 
-// ─── System Health Bar ─────────────────────────────────────────────────────────
+// ─── 1. LIVE SYSTEM STATUS ────────────────────────────────────────────────────
 
 const HEALTH_LABELS: [string, keyof HealthData][] = [
-  ['Twitch', 'twitch'],
-  ['Discord Bot', 'discord'],
-  ['Scheduler', 'scheduler'],
+  ['Twitch',          'twitch'],
+  ['Discord Bot',     'discord'],
+  ['Scheduler',       'scheduler'],
   ['Content Factory', 'contentFactory'],
-  ['Clip Worker', 'clipWorker'],
-  ['Supabase', 'supabase'],
-  ['OpenAI', 'openai'],
+  ['Clip Worker',     'clipWorker'],
+  ['Supabase',        'supabase'],
+  ['OpenAI',          'openai'],
 ];
 
-function SystemHealthBar({ health, loading }: { health: HealthData | null; loading: boolean }) {
+function LiveSystemStatus({
+  health, slow, live, loadingSlow, loadingLive,
+}: {
+  health: HealthData | null; slow: SlowData | null; live: LiveData | null;
+  loadingSlow: boolean; loadingLive: boolean;
+}) {
+  const [nedtelling, setNedtelling] = useState<string | null>(null);
+  const nesteStream = live?.nesteStream ?? slow?.streamStatus?.nesteStream ?? null;
+  const isLive      = slow?.streamStatus?.isLive ?? false;
+
+  useEffect(() => {
+    if (!nesteStream?.tidspunkt) { setNedtelling(null); return; }
+    const oppdater = () => {
+      const ms = new Date(nesteStream.tidspunkt!).getTime() - Date.now();
+      if (ms <= 0) { setNedtelling('Nå'); return; }
+      const t = Math.floor(ms / 3_600_000), m = Math.floor((ms % 3_600_000) / 60_000), s = Math.floor((ms % 60_000) / 1000);
+      if (t >= 24)  setNedtelling(`${Math.floor(t / 24)}d ${t % 24}t`);
+      else if (t > 0) setNedtelling(`${t}t ${m}m`);
+      else          setNedtelling(`${m}m ${s}s`);
+    };
+    oppdater();
+    const id = setInterval(oppdater, 1000);
+    return () => clearInterval(id);
+  }, [nesteStream?.tidspunkt]);
+
   const altOk = health && Object.values(health).every(h => h.ok);
+
   return (
-    <div className={`border rounded-xl p-3 ${altOk ? 'border-g-green/10 bg-g-green/[0.02]' : loading ? 'border-g-border' : 'border-red-500/20 bg-red-500/[0.02]'}`}>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Systemstatus</p>
-        {altOk && <span className="text-[9px] text-g-green font-bold">✓ Alt kjører</span>}
-        {health && !altOk && <span className="text-[9px] text-red-400 font-bold">⚠ Feil oppdaget</span>}
-        {loading && !health && <span className="text-[9px] text-g-muted/50">sjekker...</span>}
+    <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Live System Status</p>
+        <div className="flex items-center gap-2">
+          {live && <span className="text-[8px] text-g-green/40 font-mono">↻ 5s</span>}
+          {isLive && (
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 border border-red-500/30 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+              <span className="text-[9px] font-black text-red-400">LIVE · {slow?.streamStatus?.viewers ?? 0} seere</span>
+            </span>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      {/* Service health pills */}
+      <div className="flex flex-wrap gap-1.5">
         {HEALTH_LABELS.map(([label, key]) => {
-          if (loading && !health) {
-            return <div key={key} className="h-6 w-28 bg-g-border/30 rounded animate-pulse" />;
+          if (loadingSlow && !health) {
+            return <div key={key} className="h-6 w-28 bg-g-border/30 rounded-full animate-pulse" />;
           }
           if (!health) return null;
           const h = health[key];
@@ -112,14 +132,130 @@ function SystemHealthBar({ health, loading }: { health: HealthData | null; loadi
               }`}>
               <span className={`w-1.5 h-1.5 rounded-full ${h.ok ? 'bg-g-green' : 'bg-red-400 animate-pulse'}`} />
               {label}
+              {!h.ok && <span className="text-[8px] opacity-70">{h.melding.slice(0, 20)}</span>}
             </div>
           );
         })}
+        {health && !altOk && (
+          <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-red-500/30 text-[10px] font-bold text-red-400 bg-red-500/5">
+            ⚠ Feil oppdaget
+          </span>
+        )}
       </div>
-      {health && !altOk && (
-        <div className="mt-2 space-y-0.5">
-          {HEALTH_LABELS.filter(([, k]) => !health[k].ok).map(([label, key]) => (
-            <p key={key} className="text-[9px] text-red-400">✗ {label}: {health[key].melding}</p>
+
+      {/* Active jobs inline */}
+      {live && live.activeJobs.length > 0 && (
+        <div className="space-y-1.5 border-t border-g-border/30 pt-3">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Aktive jobber</p>
+          {live.activeJobs.map((job, i) => (
+            <Link key={i} href={job.href}
+              className="flex items-center gap-3 py-1.5 px-2 rounded-lg bg-g-bg/50 hover:bg-g-green/[0.03] transition-all group">
+              <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-[9px] text-g-muted font-bold uppercase">{job.agent}</span>
+                <span className="text-[9px] text-g-muted mx-1.5">·</span>
+                <span className="text-[10px] text-g-text">{job.task}</span>
+              </div>
+              {job.progress > 0 && job.progress < 100 && (
+                <div className="h-1 w-24 bg-g-border rounded-full overflow-hidden flex-shrink-0">
+                  <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${job.progress}%` }} />
+                </div>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
+      {live && live.activeJobs.length === 0 && !loadingLive && (
+        <div className="flex items-center gap-2 pt-1 border-t border-g-border/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-g-muted/20" />
+          <p className="text-[10px] text-g-muted">Ingen aktive jobber</p>
+        </div>
+      )}
+
+      {/* Next stream */}
+      {nesteStream && (
+        <div className="flex items-center justify-between border-t border-g-border/30 pt-3">
+          <div>
+            <p className="text-[9px] text-g-muted font-bold">Neste stream</p>
+            <p className="text-sm font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid} · {nesteStream.spill}</p>
+          </div>
+          {nedtelling && (
+            <span className="font-mono font-black text-g-green text-sm">{nedtelling}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 2. GLOBAL ACTIVITY FEED ──────────────────────────────────────────────────
+
+const SEV_STYLE: Record<string, string> = {
+  info:     'text-g-text border-g-border/30',
+  warning:  'text-yellow-300 border-yellow-400/30',
+  error:    'text-red-300 border-red-400/30',
+  critical: 'text-red-400 border-red-500/50 font-bold',
+};
+
+const SEV_DOT: Record<string, string> = {
+  info:     'bg-g-muted/40',
+  warning:  'bg-yellow-400',
+  error:    'bg-red-400',
+  critical: 'bg-red-500 animate-pulse',
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  thumbnail:       'Thumbnail',
+  clip_worker:     'Clip Worker',
+  content_factory: 'Content Factory',
+  discord_bot:     'Discord Bot',
+  twitch_bot:      'Twitch Bot',
+  recovery_engine: 'Recovery',
+  learning:        'AI Learning',
+};
+
+function GlobalActivityFeed({ events, loading }: { events: SystemEvent[]; loading: boolean }) {
+  if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+
+  return (
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Global aktivitetsfeed</p>
+        <div className="flex items-center gap-2">
+          {events.length > 0 && (
+            <>
+              <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
+              <span className="text-[9px] text-g-green">{events.length} events</span>
+            </>
+          )}
+          <Link href="/api/system-events?limit=100" target="_blank" className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+            Se alle →
+          </Link>
+        </div>
+      </div>
+
+      {events.length === 0 ? (
+        <p className="text-[11px] text-g-muted">Ingen system-events ennå – events dukker opp her automatisk fra alle moduler.</p>
+      ) : (
+        <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
+          {events.map((e) => (
+            <div key={e.id}
+              className={`flex items-start gap-2.5 py-1.5 border-b last:border-0 ${SEV_STYLE[e.severity] ?? SEV_STYLE.info}`}>
+              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${SEV_DOT[e.severity] ?? SEV_DOT.info}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-[9px] text-g-muted font-bold uppercase">
+                    {SOURCE_LABEL[e.source] ?? e.source}
+                  </span>
+                  <span className="text-[9px] text-g-muted/40">{e.event_type}</span>
+                </div>
+                <p className="text-[10px] leading-snug mt-0.5">{e.title}</p>
+                {e.description && (
+                  <p className="text-[9px] text-g-muted/60 leading-snug">{e.description}</p>
+                )}
+              </div>
+              <span className="text-[9px] text-g-muted/40 flex-shrink-0 mt-1">{tidSiden(e.created_at)}</span>
+            </div>
           ))}
         </div>
       )}
@@ -127,232 +263,126 @@ function SystemHealthBar({ health, loading }: { health: HealthData | null; loadi
   );
 }
 
-// ─── Aktive Jobber ─────────────────────────────────────────────────────────────
+// ─── 3. JOB MONITOR ──────────────────────────────────────────────────────────
 
-function AktiveJobber({ jobs, loading }: { jobs: LiveData['activeJobs']; loading: boolean }) {
-  if (loading) {
-    return <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-14 bg-g-card border border-g-border rounded-xl animate-pulse" />)}</div>;
-  }
-  if (jobs.length === 0) {
-    return (
-      <div className="flex items-center gap-2 py-3 px-4 bg-g-card border border-g-border rounded-xl">
-        <span className="w-2 h-2 rounded-full bg-g-muted/30" />
-        <p className="text-xs text-g-muted">Ingen aktive jobber akkurat nå</p>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      {jobs.map((job, i) => (
-        <Link key={i} href={job.href}
-          className="flex items-center gap-4 p-3 bg-g-card border border-g-border rounded-xl hover:border-g-green/20 transition-all group">
-          <div className="flex-shrink-0">
-            <span className="w-2 h-2 rounded-full bg-g-green animate-pulse block" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] text-g-muted font-bold uppercase tracking-wider">{job.agent}</p>
-            <p className="text-xs text-g-text truncate">{job.task}</p>
-            {job.progress > 0 && job.progress < 100 && (
-              <div className="mt-1.5 h-1 bg-g-border rounded-full overflow-hidden w-48">
-                <div className="h-full bg-yellow-400 rounded-full transition-all duration-500" style={{ width: `${job.progress}%` }} />
-              </div>
-            )}
-          </div>
-          <span className="text-[9px] text-g-muted group-hover:text-g-green transition-colors">→</span>
-        </Link>
-      ))}
-    </div>
-  );
+const VOD_STEPS = [
+  { key: 'transcription', label: 'Transkripsjon', statuses: ['PENDING', 'ANALYZING'] },
+  { key: 'highlights',    label: 'Highlights',    statuses: ['TRANSCRIBED'] },
+  { key: 'clipping',      label: 'Klipp',         statuses: ['CLIPPING', 'READY_FOR_CLIP'] },
+  { key: 'thumbnail',     label: 'Thumbnail',     statuses: [] },
+  { key: 'done',          label: 'Ferdig',        statuses: ['COMPLETE'] },
+];
+
+function vodCurrentStep(vod: VodStatus): number {
+  if (vod.status === 'COMPLETE') return 4;
+  if (vod.clipping > 0 || vod.readyForClip > 0) return 3;
+  if (vod.highlights > 0) return 3;
+  if (vod.status === 'TRANSCRIBED') return 2;
+  if (vod.status === 'ANALYZING')   return 1;
+  return 0;
 }
 
-// ─── Stream Status ─────────────────────────────────────────────────────────────
-
-function StreamStatus({ slow, live }: { slow: SlowData | null; live: LiveData | null }) {
-  const [nedtelling, setNedtelling] = useState<string | null>(null);
-
-  // nesteStream comes from live (fast, from streamplan) — fallback to slow
-  const nesteStream = live?.nesteStream ?? slow?.streamStatus?.nesteStream ?? null;
-  const isLive = slow?.streamStatus?.isLive ?? false;
-
-  useEffect(() => {
-    if (!nesteStream?.tidspunkt) { setNedtelling(null); return; }
-    const oppdater = () => {
-      const ms = new Date(nesteStream.tidspunkt!).getTime() - Date.now();
-      if (ms <= 0) { setNedtelling('Nå'); return; }
-      const timer = Math.floor(ms / 3_600_000);
-      const min = Math.floor((ms % 3_600_000) / 60_000);
-      const sek = Math.floor((ms % 60_000) / 1000);
-      if (timer >= 24) setNedtelling(`${Math.floor(timer / 24)}d ${timer % 24}t`);
-      else if (timer > 0) setNedtelling(`${timer}t ${min}m`);
-      else setNedtelling(`${min}m ${sek}s`);
-    };
-    oppdater();
-    const id = setInterval(oppdater, 1000);
-    return () => clearInterval(id);
-  }, [nesteStream?.tidspunkt]);
-
-  if (!slow && !live) return <div className="h-24 bg-g-card border border-g-border rounded-xl animate-pulse" />;
-
-  if (isLive && slow?.streamStatus) {
-    const s = slow.streamStatus;
-    return (
-      <div className="bg-g-card border border-red-500/20 rounded-xl p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-          <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">LIVE NÅ</p>
-          <p className="text-[10px] text-red-400 font-mono font-black ml-auto">{s.viewers} seere</p>
-        </div>
-        {s.thumbnailUrl && (
-          <img src={s.thumbnailUrl.replace('{width}', '320').replace('{height}', '180')} alt="" className="w-full rounded mb-2 border border-g-border" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
-        )}
-        <p className="text-[9px] text-g-muted font-bold">{s.game}</p>
-        <p className="text-xs font-bold text-g-text mt-0.5 truncate">{s.title}</p>
-        <Link href="/ai-producer" className="mt-3 flex items-center justify-center gap-2 py-2 bg-g-green/10 border border-g-green/20 rounded text-xs text-g-green font-bold hover:bg-g-green/20 transition-all">
-          ◆ Åpne AI Producer
-        </Link>
-      </div>
-    );
-  }
-
-  if (!nesteStream) {
-    return (
-      <div className="bg-g-card border border-g-border rounded-xl p-4">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Neste stream</p>
-        <p className="text-xs text-g-muted">Ingen streamplan satt opp</p>
-        <Link href="/streamplan" className="mt-3 block text-center py-2 border border-dashed border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-          + Sett opp streamplan
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Neste stream</p>
-      <div className="space-y-1">
-        <div className="flex justify-between items-baseline">
-          <p className="text-base font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid}</p>
-          {nedtelling && <p className="text-[10px] font-mono font-black text-g-green">{nedtelling}</p>}
-        </div>
-        <p className="text-sm text-g-green font-semibold">{nesteStream.spill}</p>
-        {nesteStream.tittel && <p className="text-[10px] text-g-muted italic">{nesteStream.tittel}</p>}
-      </div>
-      <div className="mt-3 flex gap-2">
-        <Link href="/pre-live" className="flex-1 py-1.5 text-center bg-g-green/10 border border-g-green/20 rounded text-[10px] text-g-green font-bold hover:bg-g-green/20 transition-all">
-          Pre-Hype
-        </Link>
-        <Link href="/streamplan" className="flex-1 py-1.5 text-center border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-          Rediger
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-// ─── Sjekkliste ────────────────────────────────────────────────────────────────
-
-function Sjekkliste({ items, loading }: { items: LiveData['sjekkliste']; loading: boolean }) {
+function JobMonitor({ resultater, clipStatus, loading }: {
+  resultater: VodStatus[]; clipStatus: LiveData['clipStatus'] | undefined; loading: boolean;
+}) {
   if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />;
-  if (!items.length) return null;
-  const ferdig = items.filter(i => i.done).length;
-  const pct = Math.round((ferdig / items.length) * 100);
+
+  const aktive = resultater.filter(v => v.status !== 'COMPLETE' && v.status !== 'ERROR');
+  const fullforte = resultater.filter(v => v.status === 'COMPLETE' || v.status === 'ERROR').slice(0, 3);
+
   return (
     <div className="bg-g-card border border-g-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Stream-syklus</p>
-        <p className="text-[10px] font-mono font-black text-g-green">{ferdig}/{items.length}</p>
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Job Monitor – VOD Pipeline</p>
+        <Link href="/content-factory-admin" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Content Factory →</Link>
       </div>
-      <div className="mb-3 h-1 bg-g-border rounded-full overflow-hidden">
-        <div className="h-full bg-g-green rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="space-y-1.5">
-        {items.map((item, i) => (
-          <Link key={i} href={item.href}
-            className={`flex items-center gap-2.5 py-1 px-1 rounded hover:bg-white/[0.02] transition-all group ${item.done ? '' : 'opacity-70'}`}>
-            <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 text-[9px] font-black transition-all ${
-              item.done ? 'border-g-green bg-g-green/10 text-g-green' : 'border-g-border/40 text-transparent'
-            }`}>✓</span>
-            <span className={`text-[11px] ${item.done ? 'text-g-text' : 'text-g-muted'} group-hover:text-g-text transition-colors`}>
-              {item.label}
-            </span>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-// ─── Siste Resultater ──────────────────────────────────────────────────────────
-
-const VOD_STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  PENDING:     { label: 'Venter',         color: 'text-g-muted' },
-  ANALYZING:   { label: 'Analyserer...',  color: 'text-yellow-400' },
-  TRANSCRIBED: { label: 'Transkribert',   color: 'text-yellow-400' },
-  COMPLETE:    { label: 'Ferdig',         color: 'text-g-green' },
-  ERROR:       { label: 'Feil',           color: 'text-red-400' },
-};
-
-function SisteResultater({ resultater, loading }: { resultater: LiveData['sisteResultater']; loading: boolean }) {
-  if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />;
-  return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <div className="flex justify-between items-center mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Siste VODs</p>
-        <Link href="/content-factory-admin" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Se alle →</Link>
-      </div>
-      {resultater.length === 0 ? (
-        <p className="text-xs text-g-muted">Ingen VODs ennå.</p>
+      {/* Aktive VODs med pipeline-steps */}
+      {aktive.length === 0 && fullforte.length === 0 ? (
+        <p className="text-xs text-g-muted">Ingen VODs å vise.</p>
       ) : (
-        <div className="space-y-2">
-          {resultater.map(r => {
-            const st = VOD_STATUS_LABEL[r.status] ?? { label: r.status, color: 'text-g-muted' };
-            const isPågående = r.status !== 'COMPLETE' && r.status !== 'ERROR';
+        <div className="space-y-3">
+          {[...aktive, ...fullforte].slice(0, 5).map(vod => {
+            const step   = vodCurrentStep(vod);
+            const isPågå = vod.status !== 'COMPLETE' && vod.status !== 'ERROR';
             return (
-              <div key={r.id} className={`flex items-center gap-3 py-2 border-b border-g-border/20 last:border-0 ${isPågående ? 'opacity-90' : ''}`}>
-                {isPågående
-                  ? <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
-                  : <span className="text-g-green text-xs flex-shrink-0">✓</span>
-                }
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-bold text-g-text truncate">{r.title}</p>
-                  <div className="flex gap-2 items-center mt-0.5">
-                    <span className={`text-[9px] font-bold ${st.color}`}>{st.label}</span>
-                    {r.progressPercent != null && r.status !== 'COMPLETE' && r.status !== 'ERROR' && (
-                      <span className="text-[9px] text-g-muted">{r.progressPercent}%</span>
-                    )}
-                    <span className="text-[9px] text-g-muted">{tidSiden(r.createdAt)}</span>
-                  </div>
-                  {r.status !== 'COMPLETE' && r.statusMessage && (
-                    <p className="text-[9px] text-g-muted truncate mt-0.5">{r.statusMessage}</p>
-                  )}
-                  {r.status === 'ERROR' && r.errorMessage && (
-                    <p className="text-[9px] text-red-400 truncate mt-0.5">{r.errorMessage}</p>
-                  )}
+              <div key={vod.id} className={`rounded-lg border p-3 ${isPågå ? 'border-yellow-400/20 bg-yellow-400/[0.02]' : vod.status === 'ERROR' ? 'border-red-500/20 bg-red-500/[0.02]' : 'border-g-border/30'}`}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="text-[10px] font-bold text-g-text truncate flex-1">{vod.title}</p>
+                  <span className="text-[9px] text-g-muted flex-shrink-0">{tidSiden(vod.createdAt)}</span>
                 </div>
-                <div className="flex gap-2 flex-shrink-0 text-[9px]">
-                  {r.highlights > 0 && <span className="text-g-muted">{r.highlights}H</span>}
-                  {r.clipping > 0 && <span className="text-yellow-400 font-bold animate-pulse">{r.clipping} klipper</span>}
-                  {r.readyForClip > 0 && <span className="text-blue-400 font-bold">{r.readyForClip} kø</span>}
-                  {r.klipp > 0 && <span className="text-g-green font-bold">{r.klipp} klipp</span>}
-                </div>
-                <Link href={`/content-factory-admin/highlights?vod=${r.id}`}
-                  className="px-2 py-1 bg-g-green/5 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/10 transition-all flex-shrink-0">
-                  ▶ Åpne
-                </Link>
+
+                {vod.status === 'ERROR' ? (
+                  <p className="text-[9px] text-red-400">{vod.errorMessage?.slice(0, 100) ?? 'Ukjent feil'}</p>
+                ) : (
+                  <>
+                    {/* Pipeline progress bar */}
+                    <div className="flex items-center gap-1 mb-1.5">
+                      {VOD_STEPS.map((s, i) => {
+                        const done    = i < step;
+                        const current = i === step && isPågå;
+                        return (
+                          <div key={s.key} className="flex items-center gap-1 flex-1">
+                            <div className={`flex-1 h-1 rounded-full transition-all ${done ? 'bg-g-green' : current ? 'bg-yellow-400 animate-pulse' : 'bg-g-border/50'}`} />
+                            {i < VOD_STEPS.length - 1 && (
+                              <span className={`text-[7px] ${done ? 'text-g-green' : 'text-g-border/50'}`}>▸</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between">
+                      {VOD_STEPS.map((s, i) => (
+                        <span key={s.key} className={`text-[8px] ${i === step && isPågå ? 'text-yellow-400 font-bold' : i < step ? 'text-g-green' : 'text-g-border/50'}`}>
+                          {i === step && isPågå ? `▶ ${s.label}` : s.label}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2 mt-1.5 flex-wrap">
+                      {vod.highlights > 0 && <span className="text-[9px] text-g-muted">{vod.highlights} highlights</span>}
+                      {vod.klipp > 0 && <span className="text-[9px] text-g-green font-bold">{vod.klipp} klipp</span>}
+                      {vod.clipping > 0 && <span className="text-[9px] text-yellow-400 font-bold animate-pulse">{vod.clipping} klipper</span>}
+                      {vod.readyForClip > 0 && <span className="text-[9px] text-blue-400 font-bold">{vod.readyForClip} i kø</span>}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Clip queue summary */}
+      {clipStatus && (clipStatus.clipping > 0 || clipStatus.readyForClip > 0) && (
+        <div className="mt-3 pt-3 border-t border-g-border/30 flex gap-2">
+          {clipStatus.clipping > 0 && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5 text-[10px] font-bold text-yellow-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+              Klipper {clipStatus.clipping} nå
+            </span>
+          )}
+          {clipStatus.readyForClip > 0 && (
+            <span className="px-2.5 py-1 rounded-full border border-blue-400/30 bg-blue-400/5 text-[10px] font-bold text-blue-400">
+              {clipStatus.readyForClip} venter
+            </span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ─── AI Insights Widget ────────────────────────────────────────────────────────
+// ─── 4. RECENT AI LEARNING ────────────────────────────────────────────────────
 
-function AiInnsikterWidget({ innsikter, loading }: { innsikter: AiInnsikt[] | undefined; loading: boolean }) {
-  if (loading) return null;
-  if (!innsikter || innsikter.length === 0) return null;
+function RecentAiLearning({ innsikter, loading }: { innsikter: AiInnsikt[]; loading: boolean }) {
+  if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  if (!innsikter || innsikter.length === 0) return (
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">AI lærte nylig</p>
+      <p className="text-xs text-g-muted">Ingen nye AI-innsikter siste 24t.</p>
+    </div>
+  );
 
   return (
     <div className="bg-g-card border border-g-green/10 rounded-xl p-4">
@@ -363,12 +393,15 @@ function AiInnsikterWidget({ innsikter, loading }: { innsikter: AiInnsikt[] | un
         </div>
         <Link href="/ai-memory" className="text-[9px] text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
       </div>
-      <div className="flex gap-3 flex-wrap">
+      <div className="space-y-2">
         {innsikter.map((ins, i) => (
-          <div key={i} className="flex-1 min-w-52 bg-g-bg/50 border border-g-border/30 rounded-lg p-3">
-            <p className="text-[10px] font-bold text-g-green mb-0.5">◆ {ins.title}</p>
-            <p className="text-[10px] text-g-muted leading-snug">{ins.summary.slice(0, 100)}</p>
-            <p className="text-[9px] text-g-muted/40 mt-1">{tidSiden(ins.createdAt)}</p>
+          <div key={i} className="flex gap-3 items-start py-1.5 border-b border-g-border/20 last:border-0">
+            <span className="text-g-green text-[9px] font-black flex-shrink-0 mt-0.5">◆</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-g-green">{ins.title}</p>
+              <p className="text-[10px] text-g-muted leading-snug">{ins.summary.slice(0, 120)}</p>
+            </div>
+            <span className="text-[9px] text-g-muted/40 flex-shrink-0">{tidSiden(ins.createdAt)}</span>
           </div>
         ))}
       </div>
@@ -376,146 +409,44 @@ function AiInnsikterWidget({ innsikter, loading }: { innsikter: AiInnsikt[] | un
   );
 }
 
-// ─── Clip Status Widget ────────────────────────────────────────────────────────
+// ─── STREAM CYCLE CHECKLIST ───────────────────────────────────────────────────
 
-function ClipStatusWidget({ cs, loading }: { cs: LiveData['clipStatus'] | undefined; loading: boolean }) {
-  if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-xl animate-pulse" />;
-  if (!cs) return null;
-
-  const harAktivitet = cs.clipping > 0 || cs.readyForClip > 0 || cs.sisteKlippede.length > 0;
-
-  return (
-    <div className={`bg-g-card border rounded-xl p-4 ${cs.clipping > 0 ? 'border-yellow-400/20' : 'border-g-border'}`}>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Klipp-status</p>
-        <Link href="/content-factory-admin/highlights" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Alle highlights →</Link>
-      </div>
-
-      {/* Status badges */}
-      <div className="flex gap-2 mb-3 flex-wrap">
-        {cs.clipping > 0 && (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5 text-[10px] font-bold text-yellow-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-            Klipper {cs.clipping} nå
-          </span>
-        )}
-        {cs.readyForClip > 0 && (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-blue-400/30 bg-blue-400/5 text-[10px] font-bold text-blue-400">
-            {cs.readyForClip} i kø
-          </span>
-        )}
-        {cs.clipping === 0 && cs.readyForClip === 0 && cs.sisteKlippede.length > 0 && (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-g-green/20 bg-g-green/5 text-[10px] font-bold text-g-green">
-            ✓ Klar
-          </span>
-        )}
-        {!harAktivitet && (
-          <span className="text-[10px] text-g-muted">Ingen aktive klippejobber</span>
-        )}
-      </div>
-
-      {/* Siste ferdige klipp */}
-      {cs.sisteKlippede.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Siste klipp</p>
-          {cs.sisteKlippede.map(h => (
-            <div key={h.id} className="flex items-center gap-2 py-1.5 border-b border-g-border/20 last:border-0">
-              <span className="text-g-green text-[10px] flex-shrink-0">🎬</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold text-g-text truncate">
-                  {h.title ?? (h.vodTitle ? h.vodTitle.slice(0, 40) : `Highlight ${h.id.slice(0, 6)}`)}
-                </p>
-                {h.vodTitle && h.title && (
-                  <p className="text-[9px] text-g-muted truncate">{h.vodTitle}</p>
-                )}
-              </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                {h.clip_url_16_9 && (
-                  <a href={h.clip_url_16_9} target="_blank" rel="noreferrer"
-                    className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/20 transition-all">
-                    16:9
-                  </a>
-                )}
-                {h.clip_url_9_16 && (
-                  <a href={h.clip_url_9_16} target="_blank" rel="noreferrer"
-                    className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[9px] text-g-green font-bold hover:bg-g-green/20 transition-all">
-                    9:16
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Live Events Feed ──────────────────────────────────────────────────────────
-
-const EVENT_IKON: Record<string, string> = {
-  follow: '💚', sub: '⭐', resub: '⭐', giftsub: '🎁', mystery_gift: '🎁', raid: '🚨', cheer: '💎',
-  klipp_start: '✂', klipp_ferdig: '🎬', level_up: '🏅', stream_live: '🔴', stream_offline: '⬛',
-  discord_varsel: '📅', pre_hype: '🔥',
-};
-
-function hendelsesTekst(e: LiveEvent): string {
-  switch (e.type) {
-    case 'follow': return e.username ? `${e.username} følger nå kanalen${e.total ? ` · totalt ${e.total.toLocaleString('no-NO')}` : ''}` : `${e.count ?? 1} ny${(e.count ?? 1) > 1 ? 'e' : ''} følger${(e.count ?? 1) > 1 ? 'e' : ''}`;
-    case 'sub': return `${e.username} subscribet!`;
-    case 'resub': return `${e.username} re-subbet (${e.months} mnd)`;
-    case 'giftsub': return `${e.username} giftet sub til ${e.recipient}`;
-    case 'mystery_gift': return `${e.username} giftet ${e.count} subs!`;
-    case 'raid': return `${e.username} raidet med ${e.viewers} seere!`;
-    case 'cheer': return `${e.username} cheeret ${e.bits} bits!`;
-    case 'klipp_start': return `Klipp starter: ${e.title ?? 'highlight'}`;
-    case 'klipp_ferdig': return `Klipp ferdig: ${e.title ?? 'highlight'}`;
-    case 'level_up': return `${e.username} nådde Level ${e.level}!`;
-    case 'stream_live': return `Stream er LIVE${e.spill ? ` – ${e.spill}` : ''}${e.tittel ? `: ${e.tittel}` : ''}`;
-    case 'stream_offline': return 'Stream avsluttet';
-    case 'discord_varsel': return e.melding ?? 'Discord varslet om streamplan';
-    case 'pre_hype': return `Pre-hype sendt${e.spill ? ` – ${e.spill}` : ''}${e.minutter_til ? ` (om ${e.minutter_til}min)` : ''}`;
-    default: return JSON.stringify(e);
-  }
-}
-
-function LiveEventsFeed({ events, loading }: { events: LiveEvent[]; loading: boolean }) {
-  if (loading) return <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+function Sjekkliste({ items, loading }: { items: LiveData['sjekkliste']; loading: boolean }) {
+  if (loading) return <div className="h-52 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  if (!items.length) return null;
+  const ferdig = items.filter(i => i.done).length;
+  const pct    = Math.round((ferdig / items.length) * 100);
   return (
     <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Live hendelser</p>
-        {events.length > 0 && (
-          <div className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
-            <span className="text-[9px] text-g-green">Live</span>
-          </div>
-        )}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Stream-syklus</p>
+        <p className="text-[10px] font-mono font-black text-g-green">{ferdig}/{items.length}</p>
       </div>
-      {events.length === 0 ? (
-        <p className="text-[11px] text-g-muted">Ingen hendelser ennå – de dukker opp her under stream.</p>
-      ) : (
-        <div className="space-y-1 max-h-56 overflow-y-auto">
-          {events.map((e, i) => (
-            <div key={i} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
-              <span className="text-sm flex-shrink-0 leading-none mt-0.5">{EVENT_IKON[e.type] ?? '◆'}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-g-text font-semibold leading-snug">{hendelsesTekst(e)}</p>
-              </div>
-              <span className="text-[9px] text-g-muted flex-shrink-0">{tidSiden(e.ts)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="mb-3 h-1 bg-g-border rounded-full overflow-hidden">
+        <div className="h-full bg-g-green rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="space-y-1">
+        {items.map((item, i) => (
+          <Link key={i} href={item.href}
+            className={`flex items-center gap-2.5 py-1 px-1 rounded hover:bg-white/[0.02] transition-all group ${item.done ? '' : 'opacity-60'}`}>
+            <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 text-[9px] font-black ${
+              item.done ? 'border-g-green bg-g-green/10 text-g-green' : 'border-g-border/40 text-transparent'
+            }`}>✓</span>
+            <span className={`text-[10px] ${item.done ? 'text-g-text' : 'text-g-muted'} group-hover:text-g-text transition-colors`}>
+              {item.label}
+            </span>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
+// ─── MAIN DASHBOARD ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [slow, setSlow] = useState<SlowData | null>(null);
-  const [live, setLive] = useState<LiveData | null>(null);
+  const [slow, setSlow]               = useState<SlowData | null>(null);
+  const [live, setLive]               = useState<LiveData | null>(null);
   const [loadingLive, setLoadingLive] = useState(true);
   const [loadingSlow, setLoadingSlow] = useState(true);
   const [sistOppdatert, setSistOppdatert] = useState<string | null>(null);
@@ -553,15 +484,15 @@ export default function Dashboard() {
   return (
     <div className="max-w-5xl mx-auto space-y-4">
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Dashboard</h1>
-          <p className="text-[9px] text-g-muted mt-0.5">GLENVEX Creator OS · Kontrollrom</p>
+          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Creator Operations Center</h1>
+          <p className="text-[9px] text-g-muted mt-0.5">GLENVEX Creator OS · Ingenting skjer uten at systemet vet om det</p>
         </div>
         <div className="flex items-center gap-3">
           {sistOppdatert && (
-            <p className="text-[9px] text-g-muted/50">Live · oppdatert {tidSiden(sistOppdatert)}</p>
+            <p className="text-[9px] text-g-muted/50">Live · {tidSiden(sistOppdatert)}</p>
           )}
           <button onClick={hentAlt}
             className="px-2.5 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
@@ -570,64 +501,83 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Systemstatus ────────────────────────────────────────────────────── */}
-      <SystemHealthBar health={slow?.health ?? null} loading={loadingSlow} />
+      {/* ── SEKSJON 1: Live System Status ────────────────────────────────────── */}
+      <LiveSystemStatus
+        health={slow?.health ?? null}
+        slow={slow}
+        live={live}
+        loadingSlow={loadingSlow}
+        loadingLive={loadingLive}
+      />
 
-      {/* ── Hoved-grid: Aktive jobber + Stream + Sjekkliste ─────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* ── SEKSJON 2 + 3: Activity Feed + Job Monitor ───────────────────────── */}
+      <div className="grid grid-cols-2 gap-4">
+        <GlobalActivityFeed
+          events={live?.systemEvents ?? []}
+          loading={loadingLive}
+        />
+        <JobMonitor
+          resultater={live?.sisteResultater ?? []}
+          clipStatus={live?.clipStatus}
+          loading={loadingLive}
+        />
+      </div>
 
-        {/* Aktive jobber – 2/3 bredde */}
-        <div className="col-span-2 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">
-              Aktive jobber {live && live.activeJobs.length > 0 ? `(${live.activeJobs.length})` : ''}
-            </p>
-            {live && (
-              <span className="text-[8px] text-g-green/40 font-mono">↻ 5s</span>
-            )}
+      {/* ── SEKSJON 4: AI Learning + Sjekkliste ─────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-4">
+        <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} loading={loadingLive} />
+        <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} />
+      </div>
+
+      {/* ── Siste klipp (kompakt) ────────────────────────────────────────────── */}
+      {live?.clipStatus?.sisteKlippede && live.clipStatus.sisteKlippede.length > 0 && (
+        <div className="bg-g-card border border-g-border rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Siste klipp</p>
+            <Link href="/content-factory-admin/highlights" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Alle →</Link>
           </div>
-          <AktiveJobber jobs={live?.activeJobs ?? []} loading={loadingLive} />
+          <div className="grid grid-cols-2 gap-2">
+            {live.clipStatus.sisteKlippede.slice(0, 4).map(h => (
+              <div key={h.id} className="flex items-center gap-2 p-2 bg-g-bg/40 border border-g-border/30 rounded-lg">
+                <span className="text-g-green text-[10px] flex-shrink-0">🎬</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-g-text truncate">
+                    {h.title ?? h.vodTitle?.slice(0, 30) ?? `#${h.id.slice(0, 6)}`}
+                  </p>
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  {h.clip_url_16_9 && (
+                    <a href={h.clip_url_16_9} target="_blank" rel="noreferrer"
+                      className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[8px] text-g-green font-bold hover:bg-g-green/20">16:9</a>
+                  )}
+                  {h.clip_url_9_16 && (
+                    <a href={h.clip_url_9_16} target="_blank" rel="noreferrer"
+                      className="px-1.5 py-0.5 bg-g-green/10 border border-g-green/20 rounded text-[8px] text-g-green font-bold hover:bg-g-green/20">9:16</a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
 
-        {/* Stream status – 1/3 bredde */}
-        <div>
-          <StreamStatus slow={slow} live={live} />
-        </div>
-      </div>
-
-      {/* ── AI Innsikter ─────────────────────────────────────────────────────── */}
-      <AiInnsikterWidget innsikter={live?.nyesteInnsikter} loading={loadingLive} />
-
-      {/* ── Klipp-status ─────────────────────────────────────────────────────── */}
-      <ClipStatusWidget cs={live?.clipStatus} loading={loadingLive} />
-
-      {/* ── Live hendelser + Sjekkliste + Siste resultater ──────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-1 space-y-4">
-          <LiveEventsFeed events={live?.liveEvents ?? []} loading={loadingLive} />
-          <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} />
-        </div>
-        <div className="col-span-2">
-          <SisteResultater resultater={live?.sisteResultater ?? []} loading={loadingLive} />
-        </div>
-      </div>
-
-      {/* ── Hurtiglenker ────────────────────────────────────────────────────── */}
+      {/* ── Hurtiglenker ─────────────────────────────────────────────────────── */}
       <div>
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Hurtiglenker</p>
-        <div className="grid grid-cols-6 gap-2">
+        <div className="grid grid-cols-7 gap-2">
           {[
-            { href: '/ai-producer', icon: '◆', label: 'AI Producer' },
-            { href: '/content-factory-admin', icon: '▶', label: 'Content Factory' },
-            { href: '/content-factory-admin/highlights', icon: '◈', label: 'Highlights' },
-            { href: '/pre-live', icon: '((•))', label: 'Pre-Live' },
-            { href: '/discord', icon: '◉', label: 'Discord' },
-            { href: '/innstillinger', icon: '⚙', label: 'Innstillinger' },
+            { href: '/stream-briefing',            icon: '◆', label: 'Stream Briefing' },
+            { href: '/ai-producer',                icon: '◈', label: 'AI Producer' },
+            { href: '/content-factory-admin',      icon: '▶', label: 'Content Factory' },
+            { href: '/content-factory-admin/highlights', icon: '✂', label: 'Highlights' },
+            { href: '/pre-live',                   icon: '((•))', label: 'Pre-Live' },
+            { href: '/discord',                    icon: '◉', label: 'Discord' },
+            { href: '/ai-memory',                  icon: '⬡', label: 'AI Memory' },
           ].map(l => (
             <Link key={l.href} href={l.href}
-              className="bg-g-card border border-g-border rounded-lg p-3 hover:border-g-green/30 hover:bg-g-green/[0.02] transition-all group text-center">
+              className="bg-g-card border border-g-border rounded-lg p-2.5 hover:border-g-green/30 hover:bg-g-green/[0.02] transition-all group text-center">
               <p className="text-g-green text-sm">{l.icon}</p>
-              <p className="text-[10px] text-g-muted group-hover:text-g-text transition-colors mt-1">{l.label}</p>
+              <p className="text-[9px] text-g-muted group-hover:text-g-text transition-colors mt-1 leading-tight">{l.label}</p>
             </Link>
           ))}
         </div>

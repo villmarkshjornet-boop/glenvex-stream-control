@@ -26,6 +26,7 @@ import * as os from 'os';
 import * as path from 'path';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { logSystemEvent } from './systemEvents';
 
 const execAsync = promisify(exec);
 
@@ -462,6 +463,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
   await sb.from('content_highlights').update({ thumbnail_started_at: new Date().toISOString() }).eq('id', highlightId);
 
   log('JOB_CLAIMED', highlightId);
+  logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_JOB_CLAIMED', title: `Thumbnail claim: ${highlightId.slice(0, 8)}`, severity: 'info', metadata: { highlight_id: highlightId } });
 
   try {
     // ── Hent data ─────────────────────────────────────────────────────────────
@@ -487,9 +489,11 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     // ── Frame extraction ──────────────────────────────────────────────────────
     log('FRAME_EXTRACTION_STARTED', highlightId);
+    logSystemEvent({ source: 'thumbnail', event_type: 'FRAME_EXTRACTION_STARTED', title: `Ekstraher frames: "${(h.title ?? '').slice(0, 60)}"`, severity: 'info', metadata: { highlight_id: highlightId } });
     const duration = await getClipDuration(videoUrl);
     const rawFrames = await extractCandidateFrames(videoUrl, duration);
     log('FRAMES_EXTRACTED', `${rawFrames.length}/${FRAME_COUNT} OK`);
+    logSystemEvent({ source: 'thumbnail', event_type: 'FRAME_EXTRACTION_DONE', title: `${rawFrames.length}/${FRAME_COUNT} frames OK`, severity: 'info', metadata: { highlight_id: highlightId, frames: rawFrames.length } });
 
     if (rawFrames.length === 0) throw new Error('Ingen frames kunne ekstraheres');
 
@@ -502,10 +506,12 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     // ── Vision selection ──────────────────────────────────────────────────────
     let visionUsed = false;
     let bestIdx = 0;
+    logSystemEvent({ source: 'thumbnail', event_type: 'FRAME_SELECTION_STARTED', title: `GPT Vision velger beste frame (${scored.length} kandidater)`, severity: 'info', metadata: { highlight_id: highlightId, candidates: scored.length } });
     if (scored.length > 1) {
       bestIdx = await selectBestFrame(client, scored, h.category, game);
       visionUsed = true;
     }
+    logSystemEvent({ source: 'thumbnail', event_type: 'FRAME_SELECTED', title: `Frame valgt: t=${scored[bestIdx]?.t?.toFixed(1) ?? '?'}s`, severity: 'info', metadata: { highlight_id: highlightId, vision_used: visionUsed, frame_t: scored[bestIdx]?.t } });
 
     // Bygg liste med kandidater: best first, resten som fallbacks
     const orderedCandidates = [
@@ -519,6 +525,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     // ── Build thumbnails med retry ────────────────────────────────────────────
     log('IMAGE_BUILD_STARTED');
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_RENDER_STARTED', title: `Kompositter thumbnail: "${copy.headline}"`, severity: 'info', metadata: { highlight_id: highlightId, headline: copy.headline } });
 
     let bestYtBuf: Buffer | null = null;
     let bestTtBuf: Buffer | null = null;
@@ -560,10 +567,12 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     }
 
     log('IMAGE_BUILD_DONE', `bestScore=${bestScore} yt=${!!bestYtBuf} tt=${!!bestTtBuf}`);
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_RENDER_DONE', title: `Render ferdig – kvalitet: ${bestScore}/100`, severity: 'info', metadata: { highlight_id: highlightId, score: bestScore, has_youtube: !!bestYtBuf, has_tiktok: !!bestTtBuf } });
 
     if (!bestYtBuf && !bestTtBuf) throw new Error('Compositing feilet for alle forsøk');
 
     // ── Upload ────────────────────────────────────────────────────────────────
+    logSystemEvent({ source: 'thumbnail', event_type: 'SUPABASE_UPLOAD_STARTED', title: `Laster opp thumbnail til Supabase Storage`, severity: 'info', metadata: { highlight_id: highlightId } });
     const baseSti = `content-factory/thumbnails/${h.vod_id}/${highlightId}`;
     const [ytUrl, ttUrl] = await Promise.all([
       bestYtBuf ? uploadPng(sb, bestYtBuf, `${baseSti}_youtube.png`) : Promise.resolve(null),
@@ -571,6 +580,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     ]);
 
     if (!ytUrl && !ttUrl) throw new Error('Opplasting til Supabase Storage feilet');
+    logSystemEvent({ source: 'thumbnail', event_type: 'SUPABASE_UPLOAD_DONE', title: `Thumbnail lastet opp`, severity: 'info', metadata: { highlight_id: highlightId, yt_url: ytUrl, tt_url: ttUrl } });
 
     // ── Oppdater DB – safe (kjerne-kolonner som alltid finnes) ───────────────
     const { error: doneErr } = await sb.from('content_highlights').update({
@@ -592,10 +602,12 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     }).eq('id', highlightId);
 
     log('THUMBNAIL_V2_DONE', `score=${bestScore} frame=${usedFrameT.toFixed(1)}s yt=${!!ytUrl} tt=${!!ttUrl}`);
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_DONE', title: `Thumbnail FERDIG – score ${bestScore}/100`, description: `"${(h.title ?? '').slice(0, 80)}"`, severity: 'info', metadata: { highlight_id: highlightId, score: bestScore, frame_t: usedFrameT, yt_url: ytUrl, tt_url: ttUrl } });
 
   } catch (err: any) {
     const msg = (err.message ?? 'Ukjent feil').slice(0, 300);
     log('FAILED', msg);
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FAILED', title: `Thumbnail FEILET`, description: msg, severity: 'error', metadata: { highlight_id: highlightId, error: msg } });
     try {
       await sb.from('content_highlights').update({
         thumbnail_status: 'FAILED',

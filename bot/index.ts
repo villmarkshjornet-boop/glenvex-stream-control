@@ -34,6 +34,8 @@ import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLo
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
+import { startRecoveryEngine } from './lib/recoveryEngine';
+import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
 import OpenAI from 'openai';
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -1026,6 +1028,9 @@ client.once('clientReady', () => {
   startThumbnailWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
   startLearningAggregator();
+  startRecoveryEngine();
+  startSystemEventsFlusher();
+  logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: 'GLENVEX Bot startet', severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});
   console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);

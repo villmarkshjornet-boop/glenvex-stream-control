@@ -49,7 +49,9 @@ export async function GET() {
   const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes] = await Promise.all([
+  const cutoff1h = new Date(Date.now() - 60 * 60_000).toISOString();
+
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message')
       .eq('workspace_id', getWorkspaceId())
@@ -67,18 +69,26 @@ export async function GET() {
       .select('title,summary,confidence_score,created_at')
       .eq('workspace_id', getWorkspaceId())
       .order('created_at', { ascending: false })
-      .limit(3),
+      .limit(5),
 
     db.from('workspaces')
       .select('settings_json')
       .eq('id', getWorkspaceId())
       .single(),
+
+    db.from('system_events')
+      .select('id,source,event_type,title,description,severity,metadata,created_at')
+      .eq('workspace_id', getWorkspaceId())
+      .gte('created_at', cutoff1h)
+      .order('created_at', { ascending: false })
+      .limit(50),
   ]);
 
   const vods: any[] = vodsRes.data ?? [];
   const highlights: any[] = highlightsRes.data ?? [];
   const nyesteInnsikter: any[] = insightsRes.data ?? [];
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
+  const systemEvents: any[] = systemEventsRes.data ?? [];
 
 
   // ── Aktive jobber ────────────────────────────────────────────────────────
@@ -203,6 +213,7 @@ export async function GET() {
     sisteResultater,
     clipStatus,
     liveEvents,
+    systemEvents,
     ts: new Date().toISOString(),
   });
 }
