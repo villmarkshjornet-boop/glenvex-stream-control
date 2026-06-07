@@ -33,6 +33,7 @@ const NAV: NavSeksjon[] = [
       { label: 'Stream Coach',  href: '/stream-coach' },
       { label: 'Raid Manager',  href: '/raid-manager' },
       { label: 'Vekstanalyse',  href: '/statistikk' },
+      { label: 'Stream Briefing', href: '/stream-briefing' },
     ],
   },
   {
@@ -110,6 +111,7 @@ function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
   if (seksjon.items?.some(i => pathname.startsWith(i.href) && i.href !== '/')) return true;
   if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
   if (seksjon.id === 'dashboard' && pathname === '/') return true;
+  if (seksjon.id === 'twitch' && pathname.startsWith('/stream-briefing')) return true;
   if (seksjon.id === 'ai' && (pathname.startsWith('/ai-memory') || pathname.startsWith('/ai-producer'))) return true;
   return false;
 }
