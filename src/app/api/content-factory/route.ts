@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -116,6 +117,15 @@ export async function POST(req: NextRequest) {
     status_message: 'Sendt til Railway – starter nedlasting...',
   }).eq('id', vodId);
 
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'VOD_DETECTED',
+    title: `VOD oppdaget: ${vodMeta.title.slice(0, 60)}`,
+    description: `Twitch VOD ${vodIdTall} – sender til Railway for nedlasting`,
+    severity: 'info',
+    metadata: { vodId, twitchVodId: vodIdTall, title: vodMeta.title, durationSeconds: vodMeta.duration_seconds },
+  });
+
   // Fire-and-forget – ikke vent på Railway (kan være treg ved cold start)
   fetch(`${botApiUrl}/content-factory/process`, {
     method: 'POST',
@@ -126,6 +136,15 @@ export async function POST(req: NextRequest) {
       userOauth: process.env.TWITCH_USER_OAUTH,
     }),
   }).catch(() => {});
+
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'DOWNLOAD_STARTED',
+    title: 'Download startet på Railway',
+    description: `VOD ${vodIdTall} sendt til Railway for nedlasting og transkribering`,
+    severity: 'info',
+    metadata: { vodId, twitchVodId: vodIdTall },
+  });
 
   return NextResponse.json({
     ok: true,

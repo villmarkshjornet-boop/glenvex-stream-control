@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChatKanalId } from '@/lib/discordChannel';
 import OpenAI from 'openai';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +44,18 @@ export async function POST(req: NextRequest) {
     headers: botHeaders(),
     body: JSON.stringify({ content: melding }),
   });
+
+  if (res.ok) {
+    const eventType = type === 'live' ? 'STREAM_STARTED' : 'PRE_HYPE_SENT';
+    await logSystemEvent({
+      source: 'pre_live',
+      event_type: eventType,
+      title: type === 'live' ? `Stream er live!${spill ? ` – ${spill}` : ''}` : `Pre-hype sendt (${type})${spill ? ` – ${spill}` : ''}`,
+      description: `Discord-melding publisert i kanal ${kanalId}`,
+      severity: 'info',
+      metadata: { type, spill, kanalId },
+    });
+  }
 
   return NextResponse.json({ ok: res.ok });
 }

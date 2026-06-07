@@ -4,6 +4,7 @@ import { hentVod, oppdaterVodStatus } from '@/lib/content-factory/vod/vodService
 import { getDb } from '@/lib/db';
 import { medRetry, sikreJsonParse } from '@/lib/content-factory/utils/retry';
 import { logPipeline } from '@/lib/content-factory/jobs/pipelineLogger';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -64,6 +65,15 @@ export async function POST(req: NextRequest) {
 
   steg.push({ steg: 'TRANSCRIBE', status: 'OK', melding: `${antall} segmenter` });
 
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'DISCOVERY_STARTED',
+    title: 'Phase 2 startet: Highlight-oppdagelse',
+    description: `${antall} transkripsjonssegmenter – starter DISCOVER, RANK, COPYWRITE`,
+    severity: 'info',
+    metadata: { vodId, transcriptCount: antall, vodTitle: vod.title },
+  });
+
   // DISCOVER med retry
   const highlights = await kjørMedRetry('DISCOVER', vodId, async () => {
     const { oppdagHighlights } = await import('@/lib/content-factory/analysis/highlightDiscovery');
@@ -104,6 +114,19 @@ export async function POST(req: NextRequest) {
 
   await oppdaterVodStatus(vodId, 'COMPLETE');
 
+  const antallHighlightsForEvent = db
+    ? await db.from('content_highlights').select('id', { count: 'exact', head: true }).eq('vod_id', vodId).then(r => r.count ?? 0)
+    : 0;
+
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'VOD_PIPELINE_DONE',
+    title: `VOD fullprosessert: ${vod.title?.slice(0, 60) ?? vodId}`,
+    description: `${antallHighlightsForEvent} highlights, ${antallCopy} copy. Pipeline COMPLETE.`,
+    severity: 'info',
+    metadata: { vodId, vodTitle: vod.title, highlightCount: antallHighlightsForEvent, copyCount: antallCopy, steg },
+  });
+
   // Fire-and-forget: læringsloop oppdaterer AI Producer-kunnskap i bakgrunnen
   setImmediate(async () => {
     try {
@@ -114,14 +137,10 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  const antallHighlights = db
-    ? await db.from('content_highlights').select('id', { count: 'exact', head: true }).eq('vod_id', vodId).then(r => r.count ?? 0)
-    : 0;
-
   return NextResponse.json({
     ok: true,
     steg,
-    antallHighlights,
+    antallHighlights: antallHighlightsForEvent,
     antallCopy,
   });
 }

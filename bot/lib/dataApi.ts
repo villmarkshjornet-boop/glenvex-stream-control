@@ -5,6 +5,7 @@ import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWork
 import { forceThumbnail, getThumbnailWorkerStatus } from './thumbnailGenerator';
 import { buildThumbnailV2 } from './thumbnailBuilderV2';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
+import { logSystemEvent } from './systemEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 
@@ -62,6 +63,7 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
 
 async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOauth?: string) {
   try {
+    logSystemEvent({ source: 'content_factory', event_type: 'DOWNLOAD_STARTED', title: 'Railway: Nedlasting startet', description: `yt-dlp starter for VOD ${vodId}`, severity: 'info', metadata: { vodId, twitchVodUrl } });
     oppdaterJobbStatus(vodId, 'DOWNLOADING', 'Sjekker yt-dlp...');
 
     const { execSync } = require('child_process');
@@ -127,6 +129,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
 
     if (!nedlastingOk) {
       oppdaterJobbStatus(vodId, 'PENDING_RETRY', 'Alle 3 nedlastingsstrategier feilet – klikk Retry for å prøve igjen');
+      logSystemEvent({ source: 'content_factory', event_type: 'DOWNLOAD_FAILED', title: 'Nedlasting feilet – alle strategier utprøvd', severity: 'error', metadata: { vodId } });
       return;
     }
 
@@ -139,6 +142,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
         fs.renameSync(normalAudioPath, audioPath);
       }
     } catch { /* ffmpeg normalisering feilet – bruk rå audio */ }
+
+    logSystemEvent({ source: 'content_factory', event_type: 'DOWNLOAD_DONE', title: 'Railway: Nedlasting fullført', description: `Audio hentet for VOD ${vodId} – starter Deepgram`, severity: 'info', metadata: { vodId } });
 
     // Transkriber med Deepgram Nova-2 (4-5× billigere enn Whisper, støtter norsk)
     const deepgramKey = process.env.DEEPGRAM_API_KEY;
@@ -171,6 +176,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     } else {
       segmentPaths.push({ filePath: audioPath, offset: 0 });
     }
+
+    logSystemEvent({ source: 'content_factory', event_type: 'TRANSCRIPTION_STARTED', title: `Deepgram starter: ${segmentPaths.length} segment(er)`, severity: 'info', metadata: { vodId, segmenter: segmentPaths.length } });
 
     let totalSegmenter = 0;
     for (let i = 0; i < segmentPaths.length; i++) {
@@ -221,6 +228,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     }
 
     try { fs.unlinkSync(audioPath); } catch {}
+
+    logSystemEvent({ source: 'content_factory', event_type: 'TRANSCRIPTION_DONE', title: `Deepgram ferdig: ${totalSegmenter} segmenter`, description: `VOD ${vodId} – Phase 2 starter automatisk`, severity: 'info', metadata: { vodId, segmenter: totalSegmenter } });
 
     oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret (Deepgram Nova-2).`, {
       transcribed: true,

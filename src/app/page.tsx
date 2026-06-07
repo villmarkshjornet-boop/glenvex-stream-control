@@ -42,14 +42,16 @@ interface VodStatus {
   highlights: number; klipp: number; readyForClip: number; clipping: number;
 }
 interface LiveData {
-  activeJobs: { agent: string; task: string; progress: number; href: string }[];
+  activeJobs: { agent: string; task: string; progress: number; href: string; detail?: string }[];
   sjekkliste:  { label: string; done: boolean; href: string }[];
   sisteResultater: VodStatus[];
   nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
+  preHype: { status: 'klar'|'planlagt'|'sendt'|'ikke_planlagt'; sendtAt: string|null; tidTilUtsending: string|null } | null;
   clipStatus: { clipping: number; readyForClip: number; sisteKlippede: KlippetHighlight[] };
   nyesteInnsikter: AiInnsikt[];
   liveEvents: any[];
   systemEvents: SystemEvent[];
+  debug?: Record<string, any>;
   ts: string;
 }
 
@@ -74,6 +76,19 @@ const HEALTH_LABELS: [string, keyof HealthData][] = [
   ['Supabase',        'supabase'],
   ['OpenAI',          'openai'],
 ];
+
+const PRE_HYPE_LABEL: Record<string, string> = {
+  sendt: '✓ Pre-hype sendt',
+  planlagt: '⏳ Pre-hype planlagt',
+  klar: '🔔 Pre-hype klar',
+  ikke_planlagt: 'Pre-hype ikke satt opp',
+};
+const PRE_HYPE_COLOR: Record<string, string> = {
+  sendt: 'text-g-green border-g-green/20',
+  planlagt: 'text-yellow-300 border-yellow-400/20',
+  klar: 'text-blue-300 border-blue-400/20',
+  ikke_planlagt: 'text-g-muted border-g-border',
+};
 
 function LiveSystemStatus({
   health, slow, live, loadingSlow, loadingLive,
@@ -152,9 +167,12 @@ function LiveSystemStatus({
               className="flex items-center gap-3 py-1.5 px-2 rounded-lg bg-g-bg/50 hover:bg-g-green/[0.03] transition-all group">
               <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <span className="text-[9px] text-g-muted font-bold uppercase">{job.agent}</span>
-                <span className="text-[9px] text-g-muted mx-1.5">·</span>
-                <span className="text-[10px] text-g-text">{job.task}</span>
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-[9px] text-g-muted font-bold uppercase">{job.agent}</span>
+                  <span className="text-[9px] text-g-muted mx-0.5">·</span>
+                  <span className="text-[10px] text-g-text">{job.task}</span>
+                </div>
+                {job.detail && <p className="text-[9px] text-g-muted/60 truncate mt-0.5">{job.detail}</p>}
               </div>
               {job.progress > 0 && job.progress < 100 && (
                 <div className="h-1 w-24 bg-g-border rounded-full overflow-hidden flex-shrink-0">
@@ -172,15 +190,30 @@ function LiveSystemStatus({
         </div>
       )}
 
-      {/* Next stream */}
+      {/* Next stream + pre-hype */}
       {nesteStream && (
-        <div className="flex items-center justify-between border-t border-g-border/30 pt-3">
-          <div>
-            <p className="text-[9px] text-g-muted font-bold">Neste stream</p>
-            <p className="text-sm font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid} · {nesteStream.spill}</p>
+        <div className="border-t border-g-border/30 pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] text-g-muted font-bold">Neste stream</p>
+              <p className="text-sm font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid} · {nesteStream.spill}</p>
+            </div>
+            {nedtelling && (
+              <span className="font-mono font-black text-g-green text-sm">{nedtelling}</span>
+            )}
           </div>
-          {nedtelling && (
-            <span className="font-mono font-black text-g-green text-sm">{nedtelling}</span>
+          {live?.preHype && live.preHype.status !== 'ikke_planlagt' && (
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${PRE_HYPE_COLOR[live.preHype.status] ?? 'text-g-muted'}`}>
+                {PRE_HYPE_LABEL[live.preHype.status]}
+              </span>
+              {live.preHype.status === 'planlagt' && live.preHype.tidTilUtsending && (
+                <span className="text-[9px] text-g-muted">Om {live.preHype.tidTilUtsending}</span>
+              )}
+              {live.preHype.status === 'sendt' && live.preHype.sendtAt && (
+                <span className="text-[9px] text-g-muted">{tidSiden(live.preHype.sendtAt)}</span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -450,6 +483,7 @@ export default function Dashboard() {
   const [loadingLive, setLoadingLive] = useState(true);
   const [loadingSlow, setLoadingSlow] = useState(true);
   const [sistOppdatert, setSistOppdatert] = useState<string | null>(null);
+  const [visDebug, setVisDebug]       = useState(false);
 
   const hentLive = useCallback(async () => {
     try {
@@ -558,6 +592,27 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Debug panel ──────────────────────────────────────────────────────── */}
+      {live?.debug && (
+        <div className="border border-g-border/30 rounded-lg overflow-hidden">
+          <button onClick={() => setVisDebug(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left">
+            <span className="text-[9px] text-g-muted/60 uppercase tracking-widest font-bold">Debug</span>
+            <span className="text-[9px] text-g-muted/40">{visDebug ? '▲ Skjul' : '▼ Vis'}</span>
+          </button>
+          {visDebug && (
+            <div className="px-4 py-3 bg-g-bg/20 grid grid-cols-2 gap-x-6 gap-y-1">
+              {Object.entries(live.debug).map(([k, v]) => (
+                <div key={k} className="flex items-baseline gap-2">
+                  <span className="text-[9px] text-g-muted/50 font-mono w-32 flex-shrink-0">{k}</span>
+                  <span className="text-[9px] text-g-text font-mono truncate">{String(v ?? '—')}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

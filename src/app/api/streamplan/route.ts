@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +105,16 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ plan: data }),
     }).catch(() => {});
   }
+
+  const aktive = data.filter(d => d.aktiv);
+  await logSystemEvent({
+    source: 'streamplan',
+    event_type: 'STREAM_PLAN_SAVED',
+    title: `Streamplan lagret – ${aktive.length} aktive stream${aktive.length !== 1 ? 'er' : ''}`,
+    description: aktive.map(d => `${d.dag} ${d.tid}: ${d.spill}`).join(', ') || 'Ingen aktive streamdager',
+    severity: 'info',
+    metadata: { aktiveStreamdager: aktive.length, plan: data.slice(0, 7) },
+  });
 
   return NextResponse.json({ ok: true, lagret: dbOk ? 'supabase' : 'fil' });
 }
