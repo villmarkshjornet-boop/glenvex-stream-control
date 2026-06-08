@@ -34,16 +34,12 @@ export async function GET() {
       const { error } = await db.from('content_vods').select('id').limit(1);
       return { ok: !error, melding: error ? error.message : 'OK' };
     })(),
-    // Supabase Storage – opprett bucket automatisk hvis den mangler
+    // Supabase Storage – bruk list() i stedet for getBucket() (admin-operasjon som kan feile)
     (async () => {
       const db = getDb();
       if (!db) return { ok: false, melding: 'Supabase ikke tilkoblet' };
-      const { data, error } = await db.storage.getBucket(STORAGE_BUCKET);
-      if (!error && data) return { ok: true, melding: 'OK' };
-      // Prøv å opprette bucket
-      const { error: createErr } = await db.storage.createBucket(STORAGE_BUCKET, { public: false });
-      if (createErr) return { ok: false, melding: `Bucket mangler: ${error?.message ?? createErr.message}` };
-      return { ok: true, melding: `Bucket opprettet: ${STORAGE_BUCKET}` };
+      const { error } = await db.storage.from(STORAGE_BUCKET).list('', { limit: 1 });
+      return { ok: !error, melding: error ? `Bucket feil: ${error.message}` : 'OK' };
     })(),
     // OpenAI
     (async () => {
