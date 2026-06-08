@@ -42,21 +42,47 @@ async function flushEvents(): Promise<void> {
   if (eventBuffer.length === 0) return;
   const batch = eventBuffer.splice(0);
   const sb = getSb();
-  if (!sb) return;
+  if (!sb) {
+    console.error('[AgentLogger] Supabase ikke konfigurert (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY mangler) – events tapt');
+    return;
+  }
+  const rows = batch.map(e => ({
+    workspace_id:     WORKSPACE_ID,
+    source:           e.source,
+    event_type:       e.event_type,
+    username:         e.username        ?? null,
+    message_text:     e.message_text    ?? null,
+    channel_id:       e.channel_id      ?? null,
+    importance_score: e.importance_score ?? 0,
+    metadata:         e.metadata        ?? {},
+  }));
   try {
-    await sb.from('ai_agent_events').insert(
-      batch.map(e => ({
-        workspace_id:    WORKSPACE_ID,
-        source:          e.source,
-        event_type:      e.event_type,
-        username:        e.username        ?? null,
-        message_text:    e.message_text    ?? null,
-        channel_id:      e.channel_id      ?? null,
-        importance_score: e.importance_score ?? 0,
-        metadata:        e.metadata        ?? {},
-      }))
-    );
-  } catch { /* silent */ }
+    const { error } = await sb.from('ai_agent_events').insert(rows);
+    if (error) {
+      console.error(`[AgentLogger] Insert feilet (${error.code ?? ''}): ${error.message}`);
+      // Fallback: direkte REST for å omgå evt. RLS-problemer med JS-klienten
+      const url = process.env.SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (url && key) {
+        const res = await fetch(`${url}/rest/v1/ai_agent_events`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': key,
+            'Authorization': `Bearer ${key}`,
+            'Prefer': 'return=minimal',
+          },
+          body: JSON.stringify(rows),
+        }).catch((e2: any) => { console.error('[AgentLogger] REST fallback feilet:', e2.message); return null; });
+        if (res && !res.ok) {
+          const txt = await res.text().catch(() => res.statusText);
+          console.error('[AgentLogger] REST fallback HTTP', res.status, txt.slice(0, 200));
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error('[AgentLogger] Flush exception:', e.message?.slice(0, 100));
+  }
 }
 
 /** Logg en chat-melding (Twitch eller Discord) til ai_agent_events. */
@@ -101,15 +127,16 @@ export async function upsertBotMemory(entry: {
       .single();
 
     if (existing) {
-      await sb.from('ai_agent_memory').update({
+      const { error } = await sb.from('ai_agent_memory').update({
         summary: entry.summary,
         confidence_score: entry.confidence_score ?? 0.7,
         occurrence_count: existing.occurrence_count + 1,
         last_seen_at: now,
         updated_at: now,
       }).eq('id', existing.id);
+      if (error) console.error('[AgentLogger] memory update feilet:', error.message);
     } else {
-      await sb.from('ai_agent_memory').insert({
+      const { error } = await sb.from('ai_agent_memory').insert({
         workspace_id: WORKSPACE_ID,
         agent_type: entry.agent_type,
         memory_type: entry.memory_type,
@@ -120,6 +147,9 @@ export async function upsertBotMemory(entry: {
         last_seen_at: now,
         metadata: entry.metadata ?? {},
       });
+      if (error) console.error('[AgentLogger] memory insert feilet:', error.message);
     }
-  } catch {}
+  } catch (e: any) {
+    console.error('[AgentLogger] upsertBotMemory exception:', e.message?.slice(0, 100));
+  }
 }

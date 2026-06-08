@@ -141,7 +141,7 @@ Returner KUN JSON:
     const innsikter = (analyse.innsikter ?? []).slice(0, 3);
     if (innsikter.length > 0) {
       try {
-        await sb.from('ai_agent_insights').insert(
+        const { error: insErr } = await sb.from('ai_agent_insights').insert(
           innsikter.map((ins: any) => ({
             workspace_id: WORKSPACE_ID,
             title: ins.tittel ?? 'Ny innsikt',
@@ -150,7 +150,10 @@ Returner KUN JSON:
             source_data: { eventCount: events.length, cutoff },
           }))
         );
-      } catch {}
+        if (insErr) console.error('[LearningAggregator] insights insert feilet:', insErr.message, insErr.code);
+      } catch (e: any) {
+        console.error('[LearningAggregator] insights insert exception:', e.message);
+      }
     }
 
     // Oppdater community-minne med korrekt kilde
