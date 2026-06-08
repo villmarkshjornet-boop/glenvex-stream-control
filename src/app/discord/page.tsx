@@ -27,6 +27,10 @@ export default function DiscordPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [meldingKanal, setMeldingKanal] = useState('');
+  const [meldingTekst, setMeldingTekst] = useState('');
+  const [sendingMelding, setSendingMelding] = useState(false);
+  const [meldingResult, setMeldingResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestions | null>(null);
   const [loadingChannels, setLoadingChannels] = useState(false);
@@ -102,6 +106,29 @@ export default function DiscordPage() {
       setExecuteResult([`✗ Feil: ${(e as Error).message}`]);
     }
     setExecuting(false);
+  }
+
+  async function sendManuellMelding(e: React.FormEvent) {
+    e.preventDefault();
+    setSendingMelding(true);
+    setMeldingResult(null);
+    try {
+      const res = await fetch('/api/discord/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: meldingKanal, message: meldingTekst }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMeldingResult({ ok: true, msg: 'Melding sendt!' });
+        setMeldingTekst('');
+      } else {
+        setMeldingResult({ ok: false, msg: data.error ?? 'Feil' });
+      }
+    } catch (e) {
+      setMeldingResult({ ok: false, msg: (e as Error).message });
+    }
+    setSendingMelding(false);
   }
 
   const kategorier = channels.filter(c => c.type === 4);
@@ -320,6 +347,65 @@ export default function DiscordPage() {
             {testResult.ok ? '✓ ' : '✗ '}{testResult.msg}
           </p>
         )}
+      </div>
+
+      {/* Manuell melding */}
+      <div className="bg-g-card border border-g-border rounded-lg p-5">
+        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-1">Send melding som bot</h2>
+        <p className="text-[10px] text-g-muted mb-4">Send en melding direkte på en kanal via Discord-boten.</p>
+        <form onSubmit={sendManuellMelding} className="space-y-3">
+          <div>
+            <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Kanal</label>
+            {channels.filter(c => c.type === 0).length > 0 ? (
+              <select
+                value={meldingKanal}
+                onChange={e => setMeldingKanal(e.target.value)}
+                required
+                className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40"
+              >
+                <option value="">Velg kanal...</option>
+                {channels.filter(c => c.type === 0).sort((a, b) => a.position - b.position).map(ch => (
+                  <option key={ch.id} value={ch.id}>#{ch.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={meldingKanal}
+                  onChange={e => setMeldingKanal(e.target.value)}
+                  placeholder="Kanal-ID (hent kanaler ovenfor)"
+                  required
+                  className="flex-1 bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/40"
+                />
+                <button type="button" onClick={hentKanaler}
+                  className="px-3 py-2 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                  Hent kanaler
+                </button>
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Melding</label>
+            <textarea
+              value={meldingTekst}
+              onChange={e => setMeldingTekst(e.target.value)}
+              placeholder="Skriv meldingen her..."
+              required
+              rows={3}
+              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/40 resize-none"
+            />
+          </div>
+          {meldingResult && (
+            <p className={`text-xs font-mono ${meldingResult.ok ? 'text-g-green' : 'text-red-400'}`}>
+              {meldingResult.ok ? '✓ ' : '✗ '}{meldingResult.msg}
+            </p>
+          )}
+          <button type="submit" disabled={sendingMelding}
+            className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
+            {sendingMelding ? 'Sender...' : 'Send melding'}
+          </button>
+        </form>
       </div>
 
       {/* Slash commands */}
