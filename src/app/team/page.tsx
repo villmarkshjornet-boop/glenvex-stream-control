@@ -8,7 +8,6 @@ const SEKSJONER = [
     href: '/twitch',
     icon: '🟣',
     items: [
-      { label: 'Live-status', href: '/live-overvaking' },
       { label: 'Streamplan', href: '/streamplan' },
       { label: 'AI Producer', href: '/ai-producer' },
       { label: 'Stream Coach', href: '/stream-coach' },
@@ -20,8 +19,6 @@ const SEKSJONER = [
     href: '/discord',
     icon: '◈',
     items: [
-      { label: 'Bot-oversikt', href: '/discord-control' },
-      { label: 'Pre-Live Hype', href: '/pre-live' },
       { label: 'Community Manager', href: '/community-manager' },
       { label: 'Moderator', href: '/moderation' },
       { label: 'Raid Manager', href: '/raid-manager' },
@@ -90,9 +87,6 @@ export default function TeamHub() {
         <div className="flex gap-2 flex-wrap">
           <Link href="/innstillinger" className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
             ⚙ Innstillinger
-          </Link>
-          <Link href="/system-health" className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-            System Health
           </Link>
           <Link href="/logs" className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
             Logs

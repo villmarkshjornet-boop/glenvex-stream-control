@@ -181,8 +181,8 @@ export async function GET() {
   const sjekkliste = [
     { label: 'Streamplan lagret', done: harStreamplan, href: '/streamplan' },
     { label: 'Discord varslet', done: false, href: '/discord' }, // Discord-varslet status hentes ikke
-    { label: 'Pre-Hype planlagt', done: false, href: '/pre-live' },
-    { label: stream?.isLive ? 'Stream er live' : 'Stream startet', done: !!stream?.isLive, href: '/live-overvaking' },
+    { label: 'Pre-Hype planlagt', done: false, href: '/streamplan' },
+    { label: stream?.isLive ? 'Stream er live' : 'Stream startet', done: !!stream?.isLive, href: '/' },
     { label: 'VOD oppdaget', done: harVod, href: '/content-factory-admin' },
     { label: 'Transkribering ferdig', done: harVod && (sisteVod?.status === 'COMPLETE'), href: '/content-factory-admin' },
     { label: 'Highlights generert', done: harHighlights, href: '/content-factory-admin/highlights' },

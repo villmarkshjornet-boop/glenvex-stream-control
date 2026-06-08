@@ -749,13 +749,12 @@ export default function Dashboard() {
       {/* ── Hurtiglenker ─────────────────────────────────────────────────────── */}
       <div>
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Hurtiglenker</p>
-        <div className="grid grid-cols-7 gap-2">
+        <div className="grid grid-cols-6 gap-2">
           {[
             { href: '/stream-briefing',            icon: '◆', label: 'Stream Briefing' },
             { href: '/ai-producer',                icon: '◈', label: 'AI Producer' },
             { href: '/content-factory-admin',      icon: '▶', label: 'Content Factory' },
             { href: '/content-factory-admin/highlights', icon: '✂', label: 'Highlights' },
-            { href: '/pre-live',                   icon: '((•))', label: 'Pre-Live' },
             { href: '/discord',                    icon: '◉', label: 'Discord' },
             { href: '/ai-memory',                  icon: '⬡', label: 'AI Memory' },
           ].map(l => (

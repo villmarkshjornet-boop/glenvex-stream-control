@@ -236,16 +236,16 @@ export async function GET() {
     sjekkliste = [
       { label: 'Streamplan lagret',  done: aktiveStreamdager.length > 0, href: '/streamplan' },
       { label: 'Discord varslet',    done: !!syklus.discord_varslet_at, href: '/discord' },
-      { label: 'Pre-hype planlagt',  done: !!preHypeSendtAt || !!nesteStream, href: '/pre-live' },
-      { label: 'Venter på stream',   done: false, href: '/live-overvaking' },
+      { label: 'Pre-hype planlagt',  done: !!preHypeSendtAt || !!nesteStream, href: '/streamplan' },
+      { label: 'Venter på stream',   done: false, href: '/' },
     ];
   } else {
     // Post-stream modus – vis fullstendig syklus
     sjekkliste = [
       { label: 'Streamplan lagret',      done: aktiveStreamdager.length > 0,     href: '/streamplan' },
       { label: 'Discord varslet',        done: !!syklus.discord_varslet_at,       href: '/discord' },
-      { label: 'Pre-hype sendt',         done: !!preHypeSendtAt,                  href: '/pre-live' },
-      { label: 'Stream startet',         done: !!streamStartAt,                   href: '/live-overvaking' },
+      { label: 'Pre-hype sendt',         done: !!preHypeSendtAt,                  href: '/streamplan' },
+      { label: 'Stream startet',         done: !!streamStartAt,                   href: '/' },
       { label: 'VOD oppdaget',           done: !!sisteVod,                         href: '/content-factory-admin' },
       { label: `Transkribert${transcriptCount > 0 ? ` (${transcriptCount} seg.)` : ''}`,
                                          done: transkripertFerdig,                 href: '/content-factory-admin' },

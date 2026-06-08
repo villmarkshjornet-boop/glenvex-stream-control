@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react';
 interface StreamStatus { isLive: boolean; game?: string; title?: string; viewerCount?: number; thumbnailUrl?: string; }
 
 const VERKTOY = [
-  { href: '/live-overvaking', icon: '◉', label: 'Live-status', desc: 'Sanntids oversikt over pågående stream – seere, chat, events' },
   { href: '/streamplan', icon: '▦', label: 'Streamplan', desc: 'Sett opp ukentlig plan med spill, tider og temaer' },
   { href: '/ai-producer', icon: '◆', label: 'AI Producer', desc: 'Automatiske handlinger under stream – titler, kampanjer, merch' },
   { href: '/stream-coach', icon: '◈', label: 'Stream Coach', desc: 'AI-analyse av dine streams – tips for engagement og vekst' },
@@ -53,9 +52,6 @@ export default function TwitchHub() {
           <div className="flex flex-col gap-2 flex-shrink-0">
             <Link href="/ai-producer" className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
               ◆ AI Producer
-            </Link>
-            <Link href="/live-overvaking" className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-xs font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all">
-              Live-status
             </Link>
           </div>
         </div>
