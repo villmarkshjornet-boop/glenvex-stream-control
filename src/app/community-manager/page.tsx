@@ -34,6 +34,28 @@ function getRolle(level: number): { navn: string; farge: string } | null {
   return LEVEL_ROLLER.find(r => level >= r.level) ?? null;
 }
 
+type SegmentLabel = { navn: string; farge: string };
+
+function getMemberSegments(m: Member): SegmentLabel[] {
+  const now = Date.now();
+  const cut7d  = now - 7  * 86400_000;
+  const cut14d = now - 14 * 86400_000;
+  const lastSeenMs = m.lastSeen ? new Date(m.lastSeen).getTime() : 0;
+  const sup = (m.subs ?? 0) + (m.giftSubs ?? 0) * 2 + (m.raids ?? 0) * 3;
+  const segs: SegmentLabel[] = [];
+
+  if ((m.streamsAttended ?? 0) >= 5 && lastSeenMs > cut7d && ((m.messages ?? 0) > 10 || (m.engagementScore ?? 0) >= 20))
+    segs.push({ navn: 'Core', farge: 'text-emerald-400 border-emerald-400/30' });
+  if ((m.level ?? 0) >= 30 || sup >= 5)
+    segs.push({ navn: 'Hero', farge: 'text-yellow-400 border-yellow-400/30' });
+  else if (sup >= 3)
+    segs.push({ navn: 'Supporter', farge: 'text-pink-400 border-pink-400/30' });
+  if ((m.streamsAttended ?? 0) >= 8 && lastSeenMs > cut14d)
+    segs.push({ navn: 'Retention', farge: 'text-purple-400 border-purple-400/30' });
+
+  return segs;
+}
+
 function XPBar({ xp, level }: { xp: number; level: number }) {
   const XP_PER_LEVEL = 500;
   const currentLevelXP = (level - 1) * XP_PER_LEVEL;
@@ -74,15 +96,19 @@ function tidSiden(iso: string): string {
 
 function MemberDetail({ m, onClose }: { m: Member; onClose: () => void }) {
   const rolle = getRolle(m.level);
+  const segs = getMemberSegments(m);
   return (
     <div className="bg-g-card border border-g-green/20 rounded-xl p-4 space-y-4">
       <div className="flex justify-between items-start">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-sm font-black text-g-text">{m.displayName}</h2>
             {rolle && (
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${rolle.farge}`}>{rolle.navn}</span>
             )}
+            {segs.map(s => (
+              <span key={s.navn} className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${s.farge}`}>{s.navn}</span>
+            ))}
           </div>
           <p className="text-[10px] text-g-muted">@{m.username} · sist sett {tidSiden(m.lastSeen)}</p>
         </div>
@@ -271,11 +297,14 @@ export default function CommunityManagerPage() {
                       <span className="text-[10px] font-black text-g-green">{m.displayName?.[0]?.toUpperCase() ?? '?'}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="text-xs font-bold text-g-text truncate">{m.displayName}</p>
                         {rolle && (
                           <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border hidden sm:inline ${rolle.farge}`}>{rolle.navn}</span>
                         )}
+                        {getMemberSegments(m).map(s => (
+                          <span key={s.navn} className={`text-[7px] font-bold px-1 py-0.5 rounded border hidden md:inline ${s.farge}`}>{s.navn}</span>
+                        ))}
                       </div>
                       <XPBar xp={m.xp} level={m.level} />
                     </div>

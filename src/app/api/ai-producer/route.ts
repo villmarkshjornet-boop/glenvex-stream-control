@@ -30,18 +30,31 @@ export async function GET() {
       return Date.now() - sist < 60 * 60 * 1000;
     }).length;
 
-    // ─── Stream Coach historikk ────────────────────────────────────────────
+    // ─── Stream Coach historikk + Community-data ──────────────────────────
     let streamHistorikk: any[] = [];
+    let communityTopLine = '';
     const db = getDb();
     if (db) {
       try {
-        const { data } = await db
-          .from('stream_history')
-          .select('title,game,peak_viewers,avg_viewers,duration_minutes,followers_gained,chat_messages,subs_gained')
-          .eq('workspace_id', 'glenvex-default')
-          .order('started_at', { ascending: false })
-          .limit(10);
-        streamHistorikk = data ?? [];
+        const cut14d = new Date(Date.now() - 14 * 86400_000).toISOString();
+        const [histRes, commRes] = await Promise.all([
+          db.from('stream_history')
+            .select('title,game,peak_viewers,avg_viewers,duration_minutes,followers_gained,chat_messages,subs_gained')
+            .eq('workspace_id', 'glenvex-default')
+            .order('started_at', { ascending: false })
+            .limit(10),
+          db.from('community_members')
+            .select('display_name,username,level,xp,streams_attended,subs,gift_subs,raids,last_seen,engagement_score')
+            .eq('workspace_id', 'glenvex-default')
+            .order('xp', { ascending: false })
+            .limit(20),
+        ]);
+        streamHistorikk = histRes.data ?? [];
+        const allMembers = commRes.data ?? [];
+        const top5 = allMembers.slice(0, 5).map((m: any) => `${m.display_name ?? m.username} (Lv${m.level})`).join(', ');
+        const atRisk = allMembers.filter((m: any) => (m.last_seen ?? '') < cut14d && (m.xp ?? 0) > 100).length;
+        const heroCount = allMembers.filter((m: any) => (m.level ?? 0) >= 30 || ((m.subs ?? 0) + (m.gift_subs ?? 0) * 2 + (m.raids ?? 0) * 3) >= 5).length;
+        communityTopLine = `Topp-membres: ${top5 || 'ingen ennå'} | Community Heroes: ${heroCount} | At Risk: ${atRisk}`;
       } catch {}
     }
     if (streamHistorikk.length === 0) {
@@ -95,6 +108,9 @@ NÅVÆRENDE STREAM:
 - Aktive Discord-membres: ${activeMembers}
 - Raids i dag: ${events.raids?.length ?? 0}
 - Gift subs: ${events.giftSubs?.reduce((s: number, g: any) => s + g.count, 0) ?? 0}
+
+COMMUNITY:
+- ${communityTopLine || 'Ingen community-data ennå'}
 
 STREAM COACH HISTORIKK (siste ${streamHistorikk.length} streams):
 - Snitt peak-seere: ${avgPeak}
