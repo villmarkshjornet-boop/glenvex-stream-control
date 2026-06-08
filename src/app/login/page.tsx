@@ -16,12 +16,12 @@ export default function LoginPage() {
   const [magicSent, setMagicSent] = useState(false);
   const [useMagic, setUseMagic] = useState(false);
 
-  const supabase = createSupabaseBrowserClient();
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
+    // Create client here (client-side only — avoids SSR localStorage crash)
+    const supabase = createSupabaseBrowserClient();
 
     try {
       if (useMagic) {
@@ -38,7 +38,7 @@ export default function LoginPage() {
           options: { emailRedirectTo: `${location.origin}/api/auth/callback` },
         });
         if (error) throw error;
-        setMagicSent(true); // shows "check email" message
+        setMagicSent(true);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
