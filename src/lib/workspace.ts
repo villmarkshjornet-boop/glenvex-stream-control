@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import { dbSelect, dbInsert, dbUpsert, isDbAvailable } from './db';
 
 export interface Workspace {
@@ -15,20 +16,28 @@ export interface Workspace {
   partner_channel_id?: string;
   bot_personality: string;
   plan: string;
+  settings_json?: Record<string, any>;
   created_at: string;
   updated_at: string;
 }
 
-// For now, a single default workspace backed by env vars
-const DEFAULT_WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
-
 export function getWorkspaceId(): string {
-  return DEFAULT_WORKSPACE_ID;
+  // Try to read from request headers (injected by middleware for authenticated users)
+  try {
+    const h = headers();
+    const wsId = h.get('x-workspace-id');
+    if (wsId) return wsId;
+  } catch {
+    // headers() throws outside of request context (e.g. bot/Railway)
+  }
+  // Fallback: env var (used by Railway bot and local dev)
+  return process.env.WORKSPACE_ID ?? 'glenvex-default';
 }
 
 export async function getOrCreateWorkspace(): Promise<Workspace> {
+  const wsId = getWorkspaceId();
   const defaultWs: Workspace = {
-    id: DEFAULT_WORKSPACE_ID,
+    id: wsId,
     owner_user_id: 'glenvex',
     streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
     brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Stream Control',
@@ -45,7 +54,7 @@ export async function getOrCreateWorkspace(): Promise<Workspace> {
 
   if (!isDbAvailable()) return defaultWs;
 
-  const existing = await dbSelect<Workspace>('workspaces', { id: DEFAULT_WORKSPACE_ID });
+  const existing = await dbSelect<Workspace>('workspaces', { id: wsId });
   if (existing.length > 0) return existing[0];
 
   const created = await dbUpsert<Workspace>('workspaces', defaultWs, 'id');

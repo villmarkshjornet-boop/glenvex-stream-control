@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
@@ -9,11 +10,20 @@ export const metadata: Metadata = {
   description: 'Twitch + Discord command center for GLENVEX',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const FULL_PAGE_PATHS = ['/login', '/onboarding'];
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = headers().get('x-pathname') ?? '';
+  const isFullPage = FULL_PAGE_PATHS.some(p => pathname.startsWith(p));
+
+  if (isFullPage) {
+    return (
+      <html lang="no">
+        <body className="bg-g-bg text-g-text">{children}</body>
+      </html>
+    );
+  }
+
   return (
     <html lang="no">
       <body className="bg-g-bg text-g-text">
