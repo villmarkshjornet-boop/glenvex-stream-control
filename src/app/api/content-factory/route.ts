@@ -133,16 +133,41 @@ export async function POST(req: NextRequest) {
     metadata: { vodId, twitchVodId: vodIdTall, title: vodMeta.title, durationSeconds: vodMeta.duration_seconds },
   });
 
-  // Fire-and-forget – ikke vent på Railway (kan være treg ved cold start)
-  fetch(`${botApiUrl}/content-factory/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      vodId,
-      twitchVodUrl,
-      userOauth: process.env.TWITCH_USER_OAUTH,
-    }),
-  }).catch(() => {});
+  // Vent på Railway-bekreftelse med timeout – fire-and-forget blir drept av Vercel etter response
+  let railwayStartet = false;
+  let railwayFeil: string | null = null;
+  try {
+    const railwayRes = await fetch(`${botApiUrl}/content-factory/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vodId,
+        twitchVodUrl,
+        userOauth: process.env.TWITCH_USER_OAUTH,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (railwayRes.ok) {
+      railwayStartet = true;
+    } else {
+      railwayFeil = `Railway HTTP ${railwayRes.status}`;
+    }
+  } catch (err: any) {
+    railwayFeil = err.name === 'TimeoutError'
+      ? 'Railway svarte ikke innen 12s (cold start?) – jobben kan likevel ha startet'
+      : `Railway ikke nådd: ${err.message?.slice(0, 100)}`;
+    // Timeout er ikke nødvendigvis fatal – Railway kan ha mottatt requesten
+    railwayStartet = err.name === 'TimeoutError';
+  }
+
+  if (!railwayStartet && railwayFeil && !railwayFeil.startsWith('Railway svarte ikke')) {
+    await db.from('content_vods').update({
+      status: 'FAILED',
+      error_message: `Railway ikke nådd: ${railwayFeil}. Sjekk at BOT_API_URL er riktig i Vercel og at Railway kjører.`,
+      progress_percent: 0,
+    }).eq('id', vodId);
+    return NextResponse.json({ ok: false, vodId, railwayFeil });
+  }
 
   await logSystemEvent({
     source: 'content_factory',
@@ -150,14 +175,14 @@ export async function POST(req: NextRequest) {
     title: 'Download startet på Railway',
     description: `VOD ${vodIdTall} sendt til Railway for nedlasting og transkribering`,
     severity: 'info',
-    metadata: { vodId, twitchVodId: vodIdTall },
+    metadata: { vodId, twitchVodId: vodIdTall, railwayStartet, railwayFeil },
   });
 
   return NextResponse.json({
     ok: true,
     vodId,
     vodTitle: vodMeta.title,
-    railwayStartet: true,
-    railwayFeil: null,
+    railwayStartet,
+    railwayFeil,
   });
 }

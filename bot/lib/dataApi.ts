@@ -71,7 +71,19 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
 
     let ytDlpOk = false;
     try { execSync('yt-dlp --version', { stdio: 'ignore' }); ytDlpOk = true; } catch {}
-    if (!ytDlpOk) { oppdaterJobbStatus(vodId, 'FAILED', 'yt-dlp ikke tilgjengelig på Railway'); return; }
+    if (!ytDlpOk) {
+      // Prøv å installere yt-dlp via pip
+      try {
+        execSync('pip install -U yt-dlp', { stdio: 'ignore', timeout: 60_000 });
+        execSync('yt-dlp --version', { stdio: 'ignore' });
+        ytDlpOk = true;
+        console.log('[CF] yt-dlp installert via pip');
+      } catch {}
+    }
+    if (!ytDlpOk) { oppdaterJobbStatus(vodId, 'FAILED', 'yt-dlp ikke tilgjengelig på Railway. Legg til yt-dlp i Railway-tjenestens avhengigheter (pip install yt-dlp)'); return; }
+
+    // Prøv å oppdatere yt-dlp (Twitch endrer API hyppig – gammel versjon feiler)
+    try { execSync('yt-dlp -U 2>/dev/null || pip install -U yt-dlp 2>/dev/null', { stdio: 'ignore', timeout: 30_000, shell: true }); } catch {}
 
     const audioDir = path.join(DATA_DIR, 'content-factory', 'audio');
     if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
@@ -80,6 +92,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
     const cookieArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
 
     let nedlastingOk = false;
+
+    let sisteYtDlpFeil = '';
 
     // ── Strategi 1: audio_only / bestaudio (raskest, minst data) ────────────
     oppdaterJobbStatus(vodId, 'DOWNLOADING', 'yt-dlp: laster ned lydspor (strategi 1/3)...');
@@ -91,7 +105,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       );
       if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
     } catch (e: any) {
-      console.error(`[CF] Strategi 1 feilet: ${(e.message ?? '').slice(0, 200)}`);
+      sisteYtDlpFeil = (e.stderr ?? e.message ?? '').slice(0, 300);
+      console.error(`[CF] Strategi 1 feilet: ${sisteYtDlpFeil}`);
       try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
     } finally { clearInterval(hb1); }
 
@@ -106,7 +121,8 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
         );
         if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
       } catch (e: any) {
-        console.error(`[CF] Strategi 2 feilet: ${(e.message ?? '').slice(0, 200)}`);
+        sisteYtDlpFeil = (e.stderr ?? e.message ?? '').slice(0, 300);
+        console.error(`[CF] Strategi 2 feilet: ${sisteYtDlpFeil}`);
         try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
       } finally { clearInterval(hb2); }
     }
@@ -122,14 +138,26 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
         );
         if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 50_000) nedlastingOk = true;
       } catch (e: any) {
-        console.error(`[CF] Strategi 3 feilet: ${(e.message ?? '').slice(0, 200)}`);
+        sisteYtDlpFeil = (e.stderr ?? e.message ?? '').slice(0, 300);
+        console.error(`[CF] Strategi 3 feilet: ${sisteYtDlpFeil}`);
         try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch {}
       } finally { clearInterval(hb3); }
     }
 
     if (!nedlastingOk) {
-      oppdaterJobbStatus(vodId, 'PENDING_RETRY', 'Alle 3 nedlastingsstrategier feilet – klikk Retry for å prøve igjen');
-      logSystemEvent({ source: 'content_factory', event_type: 'DOWNLOAD_FAILED', title: 'Nedlasting feilet – alle strategier utprøvd', severity: 'error', metadata: { vodId } });
+      // Lag en forklarende feilmelding med faktisk yt-dlp-output
+      const isAuth = /403|subscription|subscriber|private|login|oauth/i.test(sisteYtDlpFeil);
+      const isGone = /404|not found|deleted|removed/i.test(sisteYtDlpFeil);
+      const hint = isAuth
+        ? 'VOD krever Twitch-autentisering. Sett TWITCH_USER_OAUTH i Railway env.'
+        : isGone
+          ? 'VOD er slettet eller ikke tilgjengelig lenger.'
+          : 'Sjekk Railway-logger for detaljer. Mulig årsak: yt-dlp er utdatert.';
+      const melding = sisteYtDlpFeil
+        ? `Nedlasting feilet: ${sisteYtDlpFeil.slice(0, 200)} — ${hint}`
+        : `Alle 3 nedlastingsstrategier feilet. ${hint}`;
+      oppdaterJobbStatus(vodId, 'FAILED', melding);
+      logSystemEvent({ source: 'content_factory', event_type: 'DOWNLOAD_FAILED', title: 'Nedlasting feilet – alle strategier utprøvd', severity: 'error', metadata: { vodId, ytDlpFeil: sisteYtDlpFeil.slice(0, 200) } });
       return;
     }
 
