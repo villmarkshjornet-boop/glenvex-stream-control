@@ -4,6 +4,8 @@ import { getStreamInfo } from '@/lib/twitch';
 import { hentBotData } from '@/lib/botData';
 import { getDb } from '@/lib/db';
 import { logSystemEvent } from '@/lib/systemEvents';
+import { getCreatorContext, buildContextPrompt } from '@/lib/ai/creatorContext';
+import { logAgentDecision } from '@/lib/ai/eventLogger';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -16,8 +18,13 @@ export async function GET() {
       return NextResponse.json({ isLive: false, stream: null, analyse: null, tiltak: [] });
     }
 
-    const events = await hentBotData('events') ?? { raids: [], giftSubs: [] };
-    const members = await hentBotData('members') ?? {};
+    const [eventsRaw, membersRaw, ctx] = await Promise.all([
+      hentBotData('events'),
+      hentBotData('members'),
+      getCreatorContext({ limit: 10 }),
+    ]);
+    const events = eventsRaw ?? { raids: [], giftSubs: [] };
+    const members = membersRaw ?? {};
     const activeMembers = Object.values(members).filter((m: any) => {
       const sist = new Date(m.lastSeen ?? 0).getTime();
       return Date.now() - sist < 60 * 60 * 1000;
@@ -65,6 +72,8 @@ export async function GET() {
     let analyse = '';
     let tiltak: any[] = [];
 
+    const kanalKunnskap = buildContextPrompt(ctx);
+
     if (apiKey) {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
@@ -90,6 +99,8 @@ NÅVÆRENDE STREAM:
 STREAM COACH HISTORIKK (siste ${streamHistorikk.length} streams):
 - Snitt peak-seere: ${avgPeak}
 - Beste spill: ${spillRanking || 'ikke nok data ennå'}
+
+${kanalKunnskap}
 
 Returner KUN gyldig JSON:
 {
@@ -144,19 +155,29 @@ Gi 3-5 tiltak. Alltid generer faktisk innhold for tiltak som krever en tekst. Ti
       (Math.min(activeMembers, 20) / 20) * 40
     ));
 
-    await logSystemEvent({
-      source: 'ai_producer',
-      event_type: 'AI_PRODUCER_ANALYSIS_COMPLETE',
-      title: `AI Producer analyserte stream: ${stream.game ?? 'Ukjent spill'}`,
-      severity: 'info',
-      metadata: {
-        stream: stream.game,
-        viewers: viewerCount,
-        tiltakGenerert: tiltak.length,
-        harHistorikk: streamHistorikk.length > 0,
-        engagementScore,
-      },
-    }).catch(() => {});
+    await Promise.all([
+      logSystemEvent({
+        source: 'ai_producer',
+        event_type: 'AI_PRODUCER_ANALYSIS_COMPLETE',
+        title: `AI Producer analyserte stream: ${stream.game ?? 'Ukjent spill'}`,
+        severity: 'info',
+        metadata: {
+          stream: stream.game,
+          viewers: viewerCount,
+          tiltakGenerert: tiltak.length,
+          harHistorikk: streamHistorikk.length > 0,
+          engagementScore,
+          harKanalKunnskap: ctx.streamCount > 0,
+        },
+      }),
+      logAgentDecision({
+        agent_type: 'ai_producer',
+        decision_type: 'stream_analysis',
+        input_context: { game: stream.game, viewers: viewerCount, historyCount: streamHistorikk.length, streamCount: ctx.streamCount },
+        decision_summary: `Analyserte ${stream.game ?? 'stream'} med ${viewerCount} seere. Genererte ${tiltak.length} tiltak. Kanalminne: ${ctx.streamCount} streams.`,
+        outcome: tiltak.length > 0 ? 'tips_generated' : 'no_tips',
+      }),
+    ]).catch(() => {});
 
     return NextResponse.json({
       isLive: true,

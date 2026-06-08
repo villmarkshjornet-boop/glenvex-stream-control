@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getStreamInfo, getBroadcasterId } from '@/lib/twitch';
 import { logSystemEvent } from '@/lib/systemEvents';
+import { upsertMemory } from '@/lib/ai/creatorContext';
+import { logAgentDecision } from '@/lib/ai/eventLogger';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,13 +101,32 @@ ${targets.map(t => `- ${t.username}: ${t.viewers} seere, ${t.game}, språk: ${t.
           .sort((a: any, b: any) => b.score - a.score);
 
         if (targets.length > 0) {
-          await logSystemEvent({
-            source: 'raid_manager',
-            event_type: 'RAID_RECOMMENDATION_CREATED',
-            title: `Raid-anbefaling: ${targets[0]?.username} (score: ${targets[0]?.score})`,
-            severity: 'info',
-            metadata: { topTarget: targets[0]?.login, score: targets[0]?.score, grunn: targets[0]?.grunn },
-          });
+          const top = targets[0];
+          await Promise.all([
+            logSystemEvent({
+              source: 'raid_manager',
+              event_type: 'RAID_RECOMMENDATION_CREATED',
+              title: `Raid-anbefaling: ${top?.username} (score: ${top?.score})`,
+              severity: 'info',
+              metadata: { topTarget: top?.login, score: top?.score, grunn: top?.grunn },
+            }),
+            // Store raid recommendation in memory so future runs can check history
+            upsertMemory({
+              agent_type: 'content',
+              memory_type: 'stream_pattern',
+              key: `raid_target_${top?.login ?? 'unknown'}`,
+              summary: `Raid-mål ${top?.username}: score ${top?.score}, ${top?.game}, ${top?.viewers} seere. Grunn: ${(top?.grunn ?? '').slice(0, 100)}`,
+              confidence_score: Math.min(1, (top?.score ?? 50) / 100),
+              metadata: { login: top?.login, game: top?.game, viewers: top?.viewers, score: top?.score, raidTarget: true, lastRecommendedAt: new Date().toISOString() },
+            }),
+            logAgentDecision({
+              agent_type: 'raid_manager',
+              decision_type: 'raid_recommendation',
+              input_context: { game: stream.game, currentViewers: stream.viewerCount, candidateCount: targets.length },
+              decision_summary: `Anbefalte raid til ${top?.username} (score: ${top?.score}): ${(top?.grunn ?? '').slice(0, 100)}`,
+              outcome: 'recommended',
+            }),
+          ]).catch(() => {});
         }
       } catch {}
     }

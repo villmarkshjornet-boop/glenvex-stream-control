@@ -36,6 +36,10 @@ export interface CreatorContext {
   recentInsights: { title: string; summary: string; confidenceScore: number; createdAt: string }[];
   // Antall streams analysert (proxy for modenhet)
   streamCount: number;
+  // Siste utførte AI-anbefalinger (for effektsporing)
+  recentExecutedTips: { tip: string; executedAt: string; game?: string }[];
+  // Siste stream-resultater (for before/after-analyse)
+  recentStreamHistory: { title: string; game: string; peakViewers: number; avgViewers: number; followersGained: number; startedAt: string }[];
 }
 
 const FALLBACK_CONTEXT: Omit<CreatorContext, 'workspaceId'> = {
@@ -51,6 +55,8 @@ const FALLBACK_CONTEXT: Omit<CreatorContext, 'workspaceId'> = {
   communityContext: 'Norsk gaming community, engasjerte seere.',
   recentInsights: [],
   streamCount: 0,
+  recentExecutedTips: [],
+  recentStreamHistory: [],
 };
 
 export async function getCreatorContext(options?: {
@@ -62,7 +68,9 @@ export async function getCreatorContext(options?: {
 
   const limit = options?.limit ?? 25;
 
-  const [memoryRes, insightsRes, legacyKnowledge] = await Promise.all([
+  const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+
+  const [memoryRes, insightsRes, legacyKnowledge, executedTipsRes, streamHistoryRes] = await Promise.all([
     db.from('ai_agent_memory')
       .select('agent_type,memory_type,key,summary,confidence_score,occurrence_count,last_seen_at,metadata')
       .eq('workspace_id', workspaceId)
@@ -79,11 +87,29 @@ export async function getCreatorContext(options?: {
     db.from('ai_producer_knowledge')
       .select('category,content,stream_count')
       .eq('workspace_id', workspaceId),
+
+    // Siste utførte AI-anbefalinger (for effektsporing og kontekst)
+    db.from('system_events')
+      .select('title,metadata,created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('event_type', 'AI_PRODUCER_RECOMMENDATION_COMPLETED')
+      .gte('created_at', cutoff30d)
+      .order('created_at', { ascending: false })
+      .limit(10),
+
+    // Siste stream-resultater (for before/after-analyse)
+    db.from('stream_history')
+      .select('title,game,peak_viewers,avg_viewers,followers_gained,started_at')
+      .eq('workspace_id', workspaceId)
+      .order('started_at', { ascending: false })
+      .limit(5),
   ]);
 
   const memory: any[] = memoryRes.data ?? [];
   const insights: any[] = insightsRes.data ?? [];
   const legacy: any[] = legacyKnowledge.data ?? [];
+  const executedTips: any[] = executedTipsRes.data ?? [];
+  const streamHistory: any[] = streamHistoryRes.data ?? [];
 
   const byType = (memType: string): MemoryEntry[] =>
     memory
@@ -129,6 +155,19 @@ export async function getCreatorContext(options?: {
       createdAt: i.created_at,
     })),
     streamCount,
+    recentExecutedTips: executedTips.map((e: any) => ({
+      tip: e.metadata?.tipTekst ?? e.title ?? '',
+      executedAt: e.created_at,
+      game: e.metadata?.streamGame ?? undefined,
+    })),
+    recentStreamHistory: streamHistory.map((s: any) => ({
+      title: s.title ?? '',
+      game: s.game ?? '',
+      peakViewers: s.peak_viewers ?? 0,
+      avgViewers: s.avg_viewers ?? 0,
+      followersGained: s.followers_gained ?? 0,
+      startedAt: s.started_at ?? '',
+    })),
   };
 }
 
@@ -228,6 +267,15 @@ export function buildContextPrompt(ctx: CreatorContext): string {
 
   if (ctx.recentInsights.length > 0) {
     deler.push(`- Siste innsikter:\n${ctx.recentInsights.slice(0, 2).map(i => `  • ${i.title}: ${i.summary}`).join('\n')}`);
+  }
+
+  if (ctx.recentStreamHistory.length > 0) {
+    const snittPeak = Math.round(ctx.recentStreamHistory.reduce((s, h) => s + h.peakViewers, 0) / ctx.recentStreamHistory.length);
+    deler.push(`- Siste ${ctx.recentStreamHistory.length} streams: snitt peak ${snittPeak} seere. Spill: ${ctx.recentStreamHistory.map(h => h.game).filter((g, i, a) => a.indexOf(g) === i).slice(0, 3).join(', ')}`);
+  }
+
+  if (ctx.recentExecutedTips.length > 0) {
+    deler.push(`- Siste utførte tiltak (${ctx.recentExecutedTips.length}): ${ctx.recentExecutedTips.slice(0, 3).map(t => `"${t.tip.slice(0, 60)}"`).join(', ')}`);
   }
 
   deler.push('\nBruk denne kunnskapen aktivt: gi HØYERE score til øyeblikk som historisk fungerer bra for GLENVEX.');

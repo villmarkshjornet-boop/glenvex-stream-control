@@ -8,6 +8,7 @@ import { getWorkspaceId } from '@/lib/workspace';
 import { getStreamInfo } from '@/lib/twitch';
 import OpenAI from 'openai';
 import { logSystemEvent } from '@/lib/systemEvents';
+import { getCreatorContext, buildContextPrompt } from '@/lib/ai/creatorContext';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -32,6 +33,7 @@ export async function POST() {
     vodsRes,
     memoryRes,
     streamInfo,
+    ctxRes,
   ] = await Promise.allSettled([
     db.from('workspaces').select('settings_json').eq('id', ws).single(),
     db.from('ai_agent_insights').select('title,summary,confidence_score,created_at').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(5),
@@ -41,6 +43,7 @@ export async function POST() {
     db.from('content_vods').select('title,status,created_at').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(5),
     db.from('ai_agent_memory').select('key,summary,occurrence_count,memory_type').eq('workspace_id', ws).order('occurrence_count', { ascending: false }).limit(10),
     getStreamInfo(),
+    getCreatorContext({ limit: 8 }),
   ]);
 
   const settings   = workspaceRes.status === 'fulfilled'  ? workspaceRes.value.data?.settings_json  : null;
@@ -51,6 +54,8 @@ export async function POST() {
   const vods       = vodsRes.status === 'fulfilled'       ? vodsRes.value.data       ?? [] : [];
   const memory     = memoryRes.status === 'fulfilled'     ? memoryRes.value.data     ?? [] : [];
   const stream     = streamInfo.status === 'fulfilled'    ? streamInfo.value         : null;
+  const ctx        = ctxRes.status === 'fulfilled'        ? ctxRes.value             : null;
+  const kanalKunnskap = ctx ? buildContextPrompt(ctx) : '';
 
   const streamplan = (settings?.streamplan ?? []).filter((d: any) => d.aktiv);
 
@@ -64,6 +69,10 @@ export async function POST() {
     discord.length > 0 ? `Discord-aktivitet (siste 24t, topp 10):\n${discord.slice(0, 10).map((e: any) => `- ${e.username ?? '?'}: ${e.message_text ?? e.event_type}`).join('\n')}` : 'Ingen Discord-aktivitet',
     highlights.length > 0 ? `Siste highlights (siste 7d): ${highlights.map((h: any) => `${h.title ?? h.category} (${h.clip_status})`).join(', ')}` : '',
     vods.length > 0 ? `Siste VODs: ${vods.map((v: any) => `${v.title} (${v.status})`).join(', ')}` : '',
+    kanalKunnskap || '',
+    ctx?.recentExecutedTips?.length
+      ? `Siste utførte tiltak: ${ctx.recentExecutedTips.slice(0, 3).map(t => `"${t.tip.slice(0, 60)}"`).join(', ')}`
+      : '',
   ].filter(Boolean).join('\n\n');
 
   const client = new OpenAI({ apiKey });

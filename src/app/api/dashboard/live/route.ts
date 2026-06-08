@@ -80,8 +80,10 @@ export async function GET() {
   const cutoff1h = new Date(Date.now() - 60 * 60_000).toISOString();
   const cutoff24h = new Date(Date.now() - 24 * 3600_000).toISOString();
 
+  const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -119,6 +121,14 @@ export async function GET() {
       .gte('created_at', cutoff24h)
       .order('created_at', { ascending: false })
       .limit(500),
+
+    // Siste AI-beslutninger for effect tracking (siste 30 dager)
+    db.from('ai_agent_decisions')
+      .select('agent_type,decision_type,decision_summary,outcome,feedback_score,created_at,input_context')
+      .eq('workspace_id', ws)
+      .gte('created_at', cutoff30d)
+      .order('created_at', { ascending: false })
+      .limit(30),
   ]);
 
   const vods: any[]       = vodsRes.data ?? [];
@@ -128,6 +138,7 @@ export async function GET() {
   const syklus: any       = workspaceRes.data?.settings_json?.stream_syklus ?? {};
   const systemEvents: any[] = systemEventsRes.data ?? [];
   const subsystemEvents: any[] = subsystemEventsRes.data ?? [];
+  const decisions: any[] = decisionsRes.data ?? [];
 
   // ── Aktive VOD-jobber ─────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v =>
@@ -336,6 +347,46 @@ export async function GET() {
     };
   });
 
+  // ── Lærdom: effect tracking basert på ai_agent_decisions ─────────────────
+  const utførteTiltak = decisions.filter(d => d.outcome === 'executed' || d.feedback_score === 1);
+  const avvisteTiltak = decisions.filter(d => d.outcome === 'dismissed' || (d.feedback_score !== null && d.feedback_score === 0));
+  const raidAnbefalinger = decisions.filter(d => d.agent_type === 'raid_manager');
+
+  // Confidence-logikk: basert på datamengde
+  const totalDatapunkter = decisions.length;
+  const confidenceLabel =
+    totalDatapunkter < 3  ? 'for_lite_datagrunnlag' :
+    totalDatapunkter < 10 ? 'lav' :
+    totalDatapunkter < 30 ? 'medium' : 'høy';
+
+  const lærdom = {
+    utførteTiltak: utførteTiltak.slice(0, 5).map(d => ({
+      summary: d.decision_summary,
+      game: d.input_context?.game ?? null,
+      executedAt: d.created_at,
+      agentType: d.agent_type,
+    })),
+    avvisteTiltak: avvisteTiltak.slice(0, 3).map(d => ({
+      summary: d.decision_summary,
+      executedAt: d.created_at,
+    })),
+    raidHistorikk: raidAnbefalinger.slice(0, 3).map(d => ({
+      summary: d.decision_summary,
+      executedAt: d.created_at,
+    })),
+    totalDatapunkter,
+    confidenceLabel,
+    siste30dager: {
+      utført: utførteTiltak.length,
+      avvist: avvisteTiltak.length,
+      raids: raidAnbefalinger.length,
+      analyser: decisions.filter(d => d.decision_type === 'stream_analysis').length,
+    },
+    notat: totalDatapunkter < 3
+      ? 'For lite datagrunnlag for effektanalyse – systemet lærer etter hvert som tiltak utføres.'
+      : `${totalDatapunkter} beslutninger loggett siste 30 dager. Confidence: ${confidenceLabel}.`,
+  };
+
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
       title: i.title, summary: i.summary,
@@ -359,6 +410,7 @@ export async function GET() {
     systemEvents,
     liveEvents,
     kontrollsenter,
+    lærdom,
     debug,
     ts: new Date().toISOString(),
   });

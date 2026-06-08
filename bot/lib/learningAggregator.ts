@@ -44,7 +44,7 @@ export async function kjørAggregering(): Promise<void> {
     .order('created_at', { ascending: false })
     .limit(100);
 
-  if (!events || events.length < 3) return;
+  if (!events || events.length < 1) return;
 
   // Bygg username→kilde-map for korrekt agent_type-tildeling
   const userSourceMap = new Map<string, Set<string>>();
