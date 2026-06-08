@@ -59,10 +59,17 @@ export async function DELETE(
     await db.storage.from(STORAGE_BUCKET).remove(stier).catch(() => {});
   }
 
+  // Delete in FK-safe order: leaf tables first, then parents
+  await db.from('content_review_queue').delete().eq('vod_id', vodId);
+  const highlightIds = (highlights ?? []).map((h: any) => h.id);
+  if (highlightIds.length > 0) {
+    await db.from('content_captions').delete().in('highlight_id', highlightIds);
+  }
+  await db.from('content_assets').delete().eq('vod_id', vodId);
+  await db.from('content_copy').delete().eq('vod_id', vodId);
   await db.from('content_transcripts').delete().eq('vod_id', vodId);
   await db.from('content_highlights').delete().eq('vod_id', vodId);
-  try { await db.from('content_copy').delete().eq('vod_id', vodId); } catch {}
-  try { await db.from('content_assets').delete().eq('vod_id', vodId); } catch {}
+  await db.from('content_pipeline_logs').delete().eq('vod_id', vodId);
 
   const { error: slettError } = await db.from('content_vods').delete().eq('id', vodId);
   if (slettError) return NextResponse.json({ error: slettError.message }, { status: 500 });
