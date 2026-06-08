@@ -1,8 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+
+function getSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error(`Mangler Supabase-konfig. URL: ${url ? '✓' : '✗'}, KEY: ${key ? '✓' : '✗'}`);
+  return createClient(url, key);
+}
 
 type Mode = 'signin' | 'signup';
 
@@ -22,7 +29,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
+      const supabase = getSupabaseClient();
       if (useMagic) {
         const { error } = await supabase.auth.signInWithOtp({
           email,
