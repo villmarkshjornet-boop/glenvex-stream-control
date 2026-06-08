@@ -58,6 +58,15 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/favicon') ||
     PUBLIC_PATHS.some(p => pathname.startsWith(p))
   ) {
+    // If /login arrives with ?code= from Supabase magic link, forward to callback
+    if (pathname === '/login') {
+      const code = request.nextUrl.searchParams.get('code');
+      if (code) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/api/auth/callback';
+        return NextResponse.redirect(url);
+      }
+    }
     const res = NextResponse.next({ request });
     res.headers.set('x-pathname', pathname);
     return res;

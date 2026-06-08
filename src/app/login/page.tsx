@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 type Mode = 'signin' | 'signup';
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,13 +15,13 @@ export default function LoginPage() {
   const [magicSent, setMagicSent] = useState(false);
   const [useMagic, setUseMagic] = useState(false);
 
-  // Håndter ?code= fra Supabase magic link redirect
+  // Håndter ?code= fra Supabase magic link (fallback hvis middleware ikke fanget det)
   useEffect(() => {
-    const code = searchParams.get('code');
+    const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
-      router.replace(`/api/auth/callback?code=${encodeURIComponent(code)}`);
+      window.location.href = `/api/auth/callback?code=${encodeURIComponent(code)}`;
     }
-  }, [searchParams, router]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
