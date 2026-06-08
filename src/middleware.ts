@@ -88,8 +88,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Logged in but no workspace → onboarding
-  if (!session.workspace_id && !pathname.startsWith('/onboarding')) {
+  // Logged in but no workspace → onboarding (allow API calls from onboarding page through)
+  if (!session.workspace_id && !pathname.startsWith('/onboarding') && !pathname.startsWith('/api/onboarding') && !pathname.startsWith('/api/auth')) {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
     return NextResponse.redirect(url);
