@@ -48,8 +48,7 @@ export default function LoginPage() {
       if (data.magic) {
         setMagicSent(true);
       } else {
-        router.push(data.workspaceId ? '/' : '/onboarding');
-        router.refresh();
+        window.location.href = data.workspaceId ? '/' : '/onboarding';
       }
     } catch (err: any) {
       setError(err.message ?? 'Noe gikk galt');
