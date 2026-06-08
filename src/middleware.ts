@@ -2,70 +2,110 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const PUBLIC_PATHS = ['/login', '/api/auth'];
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 dager
 
-// Decode Supabase JWT from cookies — pure Edge-compatible (no Supabase client, no Node.js APIs)
-function getSessionFromCookies(request: NextRequest): { id: string; email: string; workspace_id: string } | null {
-  try {
-    const all = request.cookies.getAll();
+interface StoredSession {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  token_type?: string;
+}
 
-    // Find any sb-*-auth-token cookie (handles project ref mismatch between env vars)
-    const authCookie = all.find(c =>
-      /^sb-.+-auth-token$/.test(c.name)
-    );
+interface UserClaims {
+  id: string;
+  email: string;
+  workspace_id: string;
+  exp: number;
+}
 
-    let tokenValue = authCookie?.value ?? '';
+// ─── Parse stored session from cookie ────────────────────────────────────────
+function parseCookieSession(request: NextRequest): {
+  session: StoredSession | null;
+  cookieName: string | null;
+} {
+  const all = request.cookies.getAll();
+  let tokenValue = '';
+  let cookieName: string | null = null;
 
-    // Try chunked cookies if no single cookie found
-    if (!tokenValue) {
-      const chunkCookie = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
-      if (chunkCookie) {
-        const base = chunkCookie.name.replace('.0', '');
-        const chunks: string[] = [];
-        for (let i = 0; i < 10; i++) {
-          const chunk = request.cookies.get(`${base}.${i}`)?.value;
-          if (!chunk) break;
-          chunks.push(chunk);
-        }
-        tokenValue = chunks.join('');
+  const authCookie = all.find(c => /^sb-.+-auth-token$/.test(c.name));
+  if (authCookie) {
+    tokenValue = authCookie.value;
+    cookieName = authCookie.name;
+  }
+
+  if (!tokenValue) {
+    const chunkCookie = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
+    if (chunkCookie) {
+      const base = chunkCookie.name.replace('.0', '');
+      cookieName = base;
+      const chunks: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const chunk = request.cookies.get(`${base}.${i}`)?.value;
+        if (!chunk) break;
+        chunks.push(chunk);
       }
+      tokenValue = chunks.join('');
     }
+  }
 
-    if (!tokenValue) return null;
+  if (!tokenValue) return { session: null, cookieName: null };
 
-    const session = JSON.parse(decodeURIComponent(tokenValue));
-    const accessToken = session?.access_token;
-    if (!accessToken) return null;
+  try {
+    const session = JSON.parse(decodeURIComponent(tokenValue)) as StoredSession;
+    return { session, cookieName };
+  } catch {
+    return { session: null, cookieName: null };
+  }
+}
 
-    // Decode JWT payload (base64url → JSON) — no crypto, just reading claims
+// ─── Decode JWT claims without crypto ────────────────────────────────────────
+function decodeJwtClaims(accessToken: string): UserClaims | null {
+  try {
     const b64 = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     const payload = JSON.parse(
       typeof atob !== 'undefined'
         ? atob(b64)
         : Buffer.from(b64, 'base64').toString('utf-8')
     );
-
-    if (!payload.sub || !payload.exp || payload.exp < Date.now() / 1000) return null;
-
+    if (!payload.sub) return null;
     return {
       id: payload.sub,
       email: payload.email ?? '',
       workspace_id: payload.user_metadata?.workspace_id ?? '',
+      exp: payload.exp ?? 0,
     };
   } catch {
     return null;
   }
 }
 
+// ─── Refresh access token via Supabase REST ───────────────────────────────────
+async function refreshAccessToken(refreshToken: string): Promise<StoredSession | null> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': key },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+    return await res.json() as StoredSession;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always pass through static assets
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     PUBLIC_PATHS.some(p => pathname.startsWith(p))
   ) {
-    // If /login arrives with ?code= from Supabase magic link, forward to callback
     if (pathname === '/login') {
       const code = request.nextUrl.searchParams.get('code');
       if (code) {
@@ -79,31 +119,68 @@ export async function middleware(request: NextRequest) {
     return res;
   }
 
-  const session = getSessionFromCookies(request);
+  const { session, cookieName } = parseCookieSession(request);
 
-  // Not logged in → redirect to login
-  if (!session) {
+  if (!session || !cookieName) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // Logged in but no workspace → onboarding (allow API calls from onboarding page through)
-  if (!session.workspace_id && !pathname.startsWith('/onboarding') && !pathname.startsWith('/api/onboarding') && !pathname.startsWith('/api/auth')) {
+  let claims = decodeJwtClaims(session.access_token);
+  let refreshedSession: StoredSession | null = null;
+
+  // JWT expired — try to silently refresh using refresh_token
+  if (!claims || claims.exp < Date.now() / 1000) {
+    if (!session.refresh_token) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+
+    refreshedSession = await refreshAccessToken(session.refresh_token);
+    if (!refreshedSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+
+    claims = decodeJwtClaims(refreshedSession.access_token);
+    if (!claims) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (
+    !claims.workspace_id &&
+    !pathname.startsWith('/onboarding') &&
+    !pathname.startsWith('/api/onboarding') &&
+    !pathname.startsWith('/api/auth')
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
     return NextResponse.redirect(url);
   }
 
-  // Inject workspace context into request headers
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', pathname);
-  requestHeaders.set('x-workspace-id', session.workspace_id);
-  requestHeaders.set('x-user-email', session.email);
+  requestHeaders.set('x-workspace-id', claims.workspace_id);
+  requestHeaders.set('x-user-email', claims.email);
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
-  response.headers.set('x-workspace-id', session.workspace_id);
+  response.headers.set('x-workspace-id', claims.workspace_id);
   response.headers.set('x-pathname', pathname);
+
+  // Write refreshed session back as cookie so next request is instant
+  if (refreshedSession) {
+    response.cookies.set(
+      cookieName,
+      encodeURIComponent(JSON.stringify(refreshedSession)),
+      { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: COOKIE_MAX_AGE }
+    );
+  }
 
   return response;
 }

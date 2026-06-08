@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const workspaceId = signInData.user?.user_metadata?.workspace_id ?? '';
     const response = NextResponse.json({ ok: true, workspaceId, immediate: !workspaceId });
     response.cookies.set(cookieName, encodeURIComponent(JSON.stringify(session)), {
-      path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: session.expires_in,
+      path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: 60 * 60 * 24 * 30,
     });
     return response;
   }
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
-    maxAge: session.expires_in,
+    maxAge: 60 * 60 * 24 * 30, // 30 dager — access_token refreshes selv via middleware
   });
 
   return response;
