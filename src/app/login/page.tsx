@@ -20,10 +20,9 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    // Create client here (client-side only — avoids SSR localStorage crash)
-    const supabase = createSupabaseBrowserClient();
 
     try {
+      const supabase = createSupabaseBrowserClient();
       if (useMagic) {
         const { error } = await supabase.auth.signInWithOtp({
           email,
