@@ -22,6 +22,18 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [magicSent, setMagicSent] = useState(false);
   const [useMagic, setUseMagic] = useState(false);
+  const [pingResult, setPingResult] = useState('');
+
+  async function testPing() {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    setPingResult('Tester...');
+    try {
+      const r = await fetch(`${url}/auth/v1/health`, { method: 'GET' });
+      setPingResult(`HTTP ${r.status} — OK, Supabase svarer`);
+    } catch (e: any) {
+      setPingResult(`FEIL: ${e.message}`);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -150,6 +162,18 @@ export default function LoginPage() {
               {loading ? 'Venter...' : useMagic ? 'Send innloggingslenke' : mode === 'signin' ? 'Logg inn' : 'Opprett konto'}
             </button>
           </form>
+
+          {/* Connectivity test */}
+          <button type="button" onClick={testPing}
+            className="w-full text-[10px] text-g-muted/40 hover:text-g-muted transition-colors text-center">
+            Test tilkobling
+          </button>
+          {pingResult && (
+            <p className="text-[10px] font-mono text-center px-2 py-1 rounded bg-black/30 break-all
+              {pingResult.startsWith('FEIL') ? 'text-red-400' : 'text-g-green'}">
+              {pingResult}
+            </p>
+          )}
 
           {/* Magic link toggle */}
           <button
