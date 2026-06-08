@@ -36,10 +36,13 @@ export async function POST(req: NextRequest) {
     }
   );
 
+  const origin = req.headers.get('origin') ?? `https://${req.headers.get('host') ?? ''}`;
+  const callbackUrl = `${origin}/api/auth/callback`;
+
   if (mode === 'magic') {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/api/auth/callback` },
+      options: { emailRedirectTo: callbackUrl },
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ ok: true, magic: true });
@@ -49,7 +52,7 @@ export async function POST(req: NextRequest) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/api/auth/callback` },
+      options: { emailRedirectTo: callbackUrl },
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ ok: true, magic: true });

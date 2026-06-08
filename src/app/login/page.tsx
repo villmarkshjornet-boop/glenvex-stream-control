@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 type Mode = 'signin' | 'signup';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,6 +15,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [magicSent, setMagicSent] = useState(false);
   const [useMagic, setUseMagic] = useState(false);
+
+  // Håndter ?code= fra Supabase magic link redirect
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (code) {
+      router.replace(`/api/auth/callback?code=${encodeURIComponent(code)}`);
+    }
+  }, [searchParams, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
