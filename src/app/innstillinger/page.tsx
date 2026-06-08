@@ -129,16 +129,106 @@ function DebugPanel() {
   );
 }
 
+// ─── Discord Kanaler ──────────────────────────────────────────────────────────
+
+function DiscordKanalerPanel() {
+  const [kanaler, setKanaler] = useState<{ id: string; navn: string; kategori: string }[]>([]);
+  const [prefs, setPrefs] = useState<Record<string, string>>({});
+  const [lagrer, setLagrer] = useState(false);
+  const [lagret, setLagret] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/channel-settings').then(r => r.json()).then(d => {
+      setKanaler(d.kanaler ?? []);
+      setPrefs(d.preferanser ?? {});
+    }).catch(() => {});
+  }, []);
+
+  async function lagre() {
+    setLagrer(true);
+    await fetch('/api/channel-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
+    setLagrer(false);
+    setLagret(true);
+    setTimeout(() => setLagret(false), 2000);
+  }
+
+  const kanalTyper = [
+    { felt: 'live',            label: 'Live-varsling',        desc: 'Boten poster her når stream starter' },
+    { felt: 'chat',            label: 'Chat / Generell',      desc: 'Fallback for promos og meldinger' },
+    { felt: 'clips',           label: 'Klipp',                desc: 'Ferdige klipp postes her' },
+    { felt: 'partner',         label: 'Partner-reklame',      desc: 'Partner-promos (overstyrer Chat)' },
+    { felt: 'subs',            label: 'Subs & Gifts',         desc: 'Sub- og gift-anerkjennelser' },
+    { felt: 'raid',            label: 'Raids',                desc: 'Raid-varsler og raid-anbefalinger' },
+    { felt: 'streamplan',      label: 'Streamplan',           desc: 'Streamplan-oppdateringer' },
+    { felt: 'content_factory', label: 'Content Factory',      desc: 'Ferdige highlights og thumbnails' },
+    { felt: 'errors',          label: 'Feil & Varsler',       desc: 'Tekniske feil fra boten' },
+  ];
+
+  const ingenKanal = { id: '', navn: '— Ikke satt —' };
+
+  return (
+    <div id="discord-kanaler" className="bg-g-card border border-g-border rounded-xl p-5">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-xs font-bold text-g-text">Discord Kanaler</h2>
+        {kanaler.length === 0 && (
+          <span className="text-[9px] text-yellow-400/70">DISCORD_BOT_TOKEN eller DISCORD_GUILD_ID mangler</span>
+        )}
+      </div>
+      <p className="text-[9px] text-g-muted mb-4">Velg hvilken Discord-kanal boten bruker for hver hendelsestype. Lagres til Supabase og synces til boten innen 5 min.</p>
+
+      <div className="space-y-2">
+        {kanalTyper.map(({ felt, label, desc }) => (
+          <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-2 border-b border-g-border/30 last:border-0">
+            <div>
+              <p className="text-xs text-g-text">{label}</p>
+              <p className="text-[9px] text-g-muted">{desc}</p>
+            </div>
+            <select
+              value={prefs[felt] ?? ''}
+              onChange={e => setPrefs(p => ({ ...p, [felt]: e.target.value }))}
+              className="bg-g-bg border border-g-border rounded px-2 py-1.5 text-[10px] text-g-text font-mono focus:outline-none focus:border-g-green/40 min-w-[180px]">
+              <option value={ingenKanal.id}>{ingenKanal.navn}</option>
+              {kanaler.map(k => (
+                <option key={k.id} value={k.id}>#{k.navn} ({k.kategori})</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <button onClick={lagre} disabled={lagrer}
+          className="px-5 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">
+          {lagrer ? 'Lagrer...' : lagret ? '✓ Lagret!' : 'Lagre kanalvalg'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Automatiseringer ─────────────────────────────────────────────────────────
+
+const TONER = [
+  { verdi: 'dark_gaming',  label: 'Dark Gaming',   desc: 'Rå, direkte, hacker-estetikk' },
+  { verdi: 'hype',         label: 'Hype',          desc: 'Energisk, caps, emojis, alt er episk' },
+  { verdi: 'humoristisk',  label: 'Humoristisk',   desc: 'Lett, selvironisk, inkluderende' },
+  { verdi: 'rp_stil',      label: 'RP-stil',       desc: 'Fortellende, i karakter' },
+  { verdi: 'cinematic',    label: 'Cinematisk',    desc: 'Dramatisk, slagkraftige setninger' },
+  { verdi: 'profesjonell', label: 'Profesjonell',  desc: 'Ryddig, kort, ingen slang' },
+];
 
 function AutomatiseringerPanel() {
   const [botSettings, setBotSettings] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/bot-settings').then(r => r.json()).then(setBotSettings).catch(() => {});
+    fetch('/api/bot-settings').then(r => r.json()).then(d => setBotSettings(d.settings ?? d)).catch(() => {});
   }, []);
 
-  async function toggleFlag(felt: string, verdi: boolean) {
+  async function lagreFelt(felt: string, verdi: any) {
     await fetch('/api/bot-settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -148,37 +238,54 @@ function AutomatiseringerPanel() {
   }
 
   const flagg = botSettings ? [
-    { label: 'Discord-bot aktiv', felt: 'discordPause', aktivtNårFalse: true },
-    { label: 'Auto live-varsler', felt: 'pauseLiveVarsler', aktivtNårFalse: true },
-    { label: 'Auto partner-promo', felt: 'pausePartnerPromo', aktivtNårFalse: true },
-    { label: 'AI proaktive meldinger', felt: 'pauseProaktiv', aktivtNårFalse: true },
+    { label: 'Discord-bot aktiv',       felt: 'pauseDiscord',      aktivtNårFalse: true },
+    { label: 'Auto live-varsler',        felt: 'pauseLiveVarsler',  aktivtNårFalse: true },
+    { label: 'Auto partner-promo',       felt: 'pausePartnerPromo', aktivtNårFalse: true },
+    { label: 'AI proaktive meldinger',   felt: 'pauseProaktiv',     aktivtNårFalse: true },
   ] : [];
 
   return (
-    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-xl p-5">
-      <h2 className="text-xs font-bold text-g-text mb-1">Automatiseringer</h2>
-      <p className="text-[9px] text-g-muted mb-4">Skru av/på bot-handlinger</p>
+    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-xl p-5 space-y-5">
+      <div>
+        <h2 className="text-xs font-bold text-g-text mb-1">Bot-innstillinger</h2>
+        <p className="text-[9px] text-g-muted">Skru av/på handlinger og velg bot-tone. Synces til Railway-boten via Supabase.</p>
+      </div>
 
+      {/* Av/på-flagg */}
       {!botSettings ? (
         <p className="text-xs text-g-muted">Laster...</p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-1">
           {flagg.map(f => {
             const aktiv = f.aktivtNårFalse ? !botSettings[f.felt] : !!botSettings[f.felt];
             return (
               <div key={f.felt} className="flex items-center justify-between py-2 border-b border-g-border/40 last:border-0">
                 <span className="text-xs text-g-text">{f.label}</span>
                 <button
-                  onClick={() => {
-                    const nyVerdi = f.aktivtNårFalse ? aktiv : !aktiv;
-                    toggleFlag(f.felt, nyVerdi);
-                  }}
+                  onClick={() => lagreFelt(f.felt, f.aktivtNårFalse ? aktiv : !aktiv)}
                   className={`relative w-10 h-5 rounded-full transition-all duration-200 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}>
                   <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 ${aktiv ? 'left-5 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
                 </button>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Tone-velger */}
+      {botSettings && (
+        <div>
+          <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Bot-tone / Personlighet</p>
+          <div className="grid grid-cols-3 gap-2">
+            {TONER.map(t => (
+              <button key={t.verdi}
+                onClick={() => lagreFelt('tone', t.verdi)}
+                className={`p-2.5 rounded-lg border text-left transition-all ${botSettings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}>
+                <p className={`text-[10px] font-bold ${botSettings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
+                <p className="text-[8px] text-g-muted mt-0.5 leading-tight">{t.desc}</p>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -243,9 +350,9 @@ export default function InnstillingerSide() {
       {/* Snarvei-lenker */}
       <div className="flex gap-2 flex-wrap">
         {[
+          { label: 'Discord Kanaler', href: '#discord-kanaler' },
+          { label: 'Bot-innstillinger', href: '#automatiseringer' },
           { label: 'Integrasjoner', href: '#helse' },
-          { label: 'Systemstatus', href: '#helse' },
-          { label: 'Automatiseringer', href: '#automatiseringer' },
           { label: 'Debug', href: '#debug' },
           { label: 'Logging', href: '/logs' },
           { label: 'QA', href: '/content-factory-admin/qa' },
@@ -257,11 +364,14 @@ export default function InnstillingerSide() {
         ))}
       </div>
 
+      {/* Discord kanal-mapping */}
+      <DiscordKanalerPanel />
+
+      {/* Bot-innstillinger og tone */}
+      <AutomatiseringerPanel />
+
       {/* Integrasjons-helse */}
       <HelsePanel />
-
-      {/* Automatiseringer */}
-      <AutomatiseringerPanel />
 
       {/* Integrasjonsinnstillinger */}
       {settings ? (

@@ -6,6 +6,8 @@ import JSZip from 'jszip';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const BRAND_SLUG = process.env.BRAND_SLUG ?? 'glenvex';
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { highlightId: string } }
@@ -189,7 +191,7 @@ export async function GET(
   // ─── Generer og returner ZIP ────────────────────────────────────────────────
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-  const filnavn = `glenvex_highlight_${tittelSlug}.zip`;
+  const filnavn = `${BRAND_SLUG}_highlight_${tittelSlug}.zip`;
 
   return new NextResponse(new Uint8Array(zipBuffer), {
     headers: {

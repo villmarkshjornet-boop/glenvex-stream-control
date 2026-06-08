@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+const BRAND_SLUG = process.env.NEXT_PUBLIC_BRAND_SLUG ?? 'glenvex';
+
 interface Highlight {
   id: string;
   vod_id: string;
@@ -177,7 +179,7 @@ export default function HighlightViewerPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `glenvex_highlight_${tittel.replace(/\s+/g, '_').slice(0, 40)}.zip`;
+      a.download = `${BRAND_SLUG}_highlight_${tittel.replace(/\s+/g, '_').slice(0, 40)}.zip`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) { console.error('ZIP nedlasting feil:', e); }

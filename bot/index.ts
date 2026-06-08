@@ -33,6 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
+import { getBotTone, getPauseProaktiv } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -699,7 +700,12 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
         temperature: 0.8,
       });
       const ai = res.choices[0]?.message?.content ?? '';
-      if (ai) tekst = `🤝 ${ai}`;
+      if (ai) {
+        const aiTekst = `🤝 ${ai}`;
+        tekst = partner.finalUrl && !ai.includes(partner.finalUrl)
+          ? `${aiTekst}\n${partner.finalUrl}${kode}`
+          : aiTekst;
+      }
     } catch {}
   }
 
@@ -746,6 +752,7 @@ async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
 async function sendProaktivMelding() {
   const botSettings = getBotSettings();
   if (!botSettings.aktiv || botSettings.pauseDiscord) return;
+  if (await getPauseProaktiv()) return;
   const kanal = finnChatKanal();
   if (!kanal) return;
 
@@ -1081,7 +1088,8 @@ async function sjekkPreHype() {
   }
 }
 
-const STATUS_KANAL_ID = '1511722714623381645';
+const BOT_ADMIN_USERNAME = process.env.BOT_ADMIN_USERNAME ?? 'gkarlsen';
+const STATUS_KANAL_ID = process.env.STATUS_CHANNEL_ID ?? '1511722714623381645';
 
 async function tildelTwitchSubRolle(twitchUsername: string): Promise<void> {
   const guild = client.guilds.cache.first();
@@ -1106,14 +1114,14 @@ async function sikkerAdminTilGkarlsen(): Promise<void> {
   const guild = client.guilds.cache.first();
   if (!guild) return;
   const members = await guild.members.fetch().catch(() => guild.members.cache);
-  const gkarlsen = [...members.values()].find(m => m.user.username.toLowerCase() === 'gkarlsen');
+  const gkarlsen = [...members.values()].find(m => m.user.username.toLowerCase() === BOT_ADMIN_USERNAME);
   if (!gkarlsen) return;
   let adminRolle = guild.roles.cache.find(r => r.permissions.has('Administrator'));
   if (!adminRolle) {
-    adminRolle = await guild.roles.create({ name: '👑 Admin', permissions: ['Administrator'], reason: 'Admin-rolle for gkarlsen' });
+    adminRolle = await guild.roles.create({ name: '👑 Admin', permissions: ['Administrator'], reason: `Admin-rolle for ${BOT_ADMIN_USERNAME}` });
   }
   if (!gkarlsen.roles.cache.has(adminRolle.id)) {
-    await gkarlsen.roles.add(adminRolle, 'gkarlsen er serveradministrator').catch(() => {});
+    await gkarlsen.roles.add(adminRolle, `${BOT_ADMIN_USERNAME} er serveradministrator`).catch(() => {});
   }
 }
 

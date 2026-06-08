@@ -17,6 +17,8 @@ import { logSystemEvent } from './systemEvents';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 const klipperNå = new Set<string>();
 const execAsync = require('util').promisify(require('child_process').exec);
 
@@ -117,13 +119,13 @@ async function lastOppTilSupabase(sb: any, lokalSti: string, storageSti: string)
   if (!fs.existsSync(lokalSti)) return null;
   try {
     const buf = fs.readFileSync(lokalSti);
-    const { error } = await sb.storage.from('glenvex-assets').upload(storageSti, buf, {
+    const { error } = await sb.storage.from(STORAGE_BUCKET).upload(storageSti, buf, {
       contentType: 'video/mp4',
       upsert: true,
     });
     if (error) throw error;
     // Hent public URL (ikke signed – unngår utløp)
-    const { data: publicData } = sb.storage.from('glenvex-assets').getPublicUrl(storageSti);
+    const { data: publicData } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(storageSti);
     return publicData?.publicUrl ?? null;
   } catch (err: any) {
     wLog('ERROR', 'UPLOAD_FAIL', { path: storageSti, err: err.message?.slice(0, 200) });

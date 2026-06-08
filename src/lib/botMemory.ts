@@ -18,6 +18,7 @@ export interface BotSettings {
   pauseTwitch: boolean;
   pausePartnerPromo: boolean;
   pauseLiveVarsler: boolean;
+  pauseProaktiv: boolean;
   aktiv: boolean;
 }
 
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: BotSettings = {
   pauseTwitch: false,
   pausePartnerPromo: false,
   pauseLiveVarsler: false,
+  pauseProaktiv: false,
   aktiv: true,
 };
 

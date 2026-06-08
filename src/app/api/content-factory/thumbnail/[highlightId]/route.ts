@@ -6,6 +6,8 @@ import OpenAI from 'openai';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 // ── Thumbnail-tekst via GPT-4o-mini ──────────────────────────────────────────
 
 async function lagThumbnailTekst(
@@ -87,12 +89,12 @@ async function hentPng(url: string): Promise<Buffer | null> {
 
 async function lastOpp(db: any, buf: Buffer, storageSti: string): Promise<string | null> {
   try {
-    const { error } = await db.storage.from('glenvex-assets').upload(storageSti, buf, {
+    const { error } = await db.storage.from(STORAGE_BUCKET).upload(storageSti, buf, {
       contentType: 'image/png',
       upsert: true,
     });
     if (error) return null;
-    const { data } = db.storage.from('glenvex-assets').getPublicUrl(storageSti);
+    const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(storageSti);
     return (data as any)?.publicUrl ?? null;
   } catch { return null; }
 }

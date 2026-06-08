@@ -16,6 +16,8 @@ import OpenAI from 'openai';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 // ── Copy-generering ───────────────────────────────────────────────────────────
 
 async function lagCopy(
@@ -128,12 +130,12 @@ async function genererBilde(
 
 async function lastOpp(db: any, buf: Buffer, sti: string): Promise<string | null> {
   try {
-    const { error } = await db.storage.from('glenvex-assets').upload(sti, buf, {
+    const { error } = await db.storage.from(STORAGE_BUCKET).upload(sti, buf, {
       contentType: 'image/png',
       upsert: true,
     });
     if (error) return null;
-    const { data } = db.storage.from('glenvex-assets').getPublicUrl(sti);
+    const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(sti);
     return (data as any)?.publicUrl ?? null;
   } catch { return null; }
 }

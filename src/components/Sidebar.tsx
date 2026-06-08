@@ -46,6 +46,7 @@ const NAV: NavSeksjon[] = [
       { label: 'Community Manager',     href: '/community-manager' },
       { label: 'Community Intelligence', href: '/community-intelligence' },
       { label: 'Moderator',             href: '/moderation' },
+      { label: 'Bot-innstillinger',     href: '/innstillinger#discord-kanaler' },
     ],
   },
   {

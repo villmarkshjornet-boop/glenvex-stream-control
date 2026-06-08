@@ -5,6 +5,8 @@ import { getDb } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 export async function GET() {
   if (!isContentFactoryEnabled()) {
     return NextResponse.json({ error: 'FEATURE_DISABLED' }, { status: 403 });
@@ -36,7 +38,7 @@ export async function GET() {
     (async () => {
       const db = getDb();
       if (!db) return { ok: false, melding: 'Supabase ikke tilkoblet' };
-      const { data, error } = await db.storage.getBucket('glenvex-assets');
+      const { data, error } = await db.storage.getBucket(STORAGE_BUCKET);
       return { ok: !error && !!data, melding: error ? `Bucket mangler: ${error.message}` : 'OK' };
     })(),
     // OpenAI

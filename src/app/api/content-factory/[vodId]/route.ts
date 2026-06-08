@@ -4,6 +4,8 @@ import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { vodId: string } }
@@ -54,13 +56,16 @@ export async function DELETE(
       `content-factory/clips/${vodId}/${h.id}_16x9.mp4`,
       `content-factory/clips/${vodId}/${h.id}_9x16.mp4`,
     ]);
-    await db.storage.from('glenvex-assets').remove(stier).catch(() => {});
+    await db.storage.from(STORAGE_BUCKET).remove(stier).catch(() => {});
   }
 
   await db.from('content_transcripts').delete().eq('vod_id', vodId);
   await db.from('content_highlights').delete().eq('vod_id', vodId);
   try { await db.from('content_copy').delete().eq('vod_id', vodId); } catch {}
-  await db.from('content_vods').delete().eq('id', vodId);
+  try { await db.from('content_assets').delete().eq('vod_id', vodId); } catch {}
+
+  const { error: slettError } = await db.from('content_vods').delete().eq('id', vodId);
+  if (slettError) return NextResponse.json({ error: slettError.message }, { status: 500 });
 
   return NextResponse.json({ ok: true, slettet: vodId });
 }

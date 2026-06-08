@@ -29,6 +29,7 @@ import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
 
 const execAsync = promisify(exec);
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -390,12 +391,12 @@ function computeQualityScore(opts: {
 
 async function uploadPng(sb: any, buf: Buffer, sti: string): Promise<string | null> {
   try {
-    const { error } = await sb.storage.from('glenvex-assets').upload(sti, buf, {
+    const { error } = await sb.storage.from(STORAGE_BUCKET).upload(sti, buf, {
       contentType: 'image/png',
       upsert: true,
     });
     if (error) { log('UPLOAD_ERROR', JSON.stringify(error)); return null; }
-    const { data } = sb.storage.from('glenvex-assets').getPublicUrl(sti);
+    const { data } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(sti);
     return (data as any)?.publicUrl ?? null;
   } catch (e: any) {
     log('UPLOAD_EXCEPTION', e.message?.slice(0, 200));

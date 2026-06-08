@@ -22,6 +22,8 @@ import { logSystemEvent } from './systemEvents';
 
 const execAsync = require('util').promisify(require('child_process').exec);
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 const THUMB_BASE = path.join(process.cwd(), 'data', 'thumbnails');
 const MAX_CONCURRENT = 2;
 
@@ -315,12 +317,12 @@ function byggDallePrompt(
 async function lastOppBilde(db: any, localPath: string, storageSti: string): Promise<string | null> {
   try {
     const buf = fs.readFileSync(localPath);
-    const { error } = await db.storage.from('glenvex-assets').upload(storageSti, buf, {
+    const { error } = await db.storage.from(STORAGE_BUCKET).upload(storageSti, buf, {
       contentType: 'image/png',
       upsert: true,
     });
     if (error) throw error;
-    const { data } = db.storage.from('glenvex-assets').getPublicUrl(storageSti);
+    const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(storageSti);
     wLog('INFO', 'THUMBNAIL_UPLOAD_DONE', { storageSti });
     return (data as any)?.publicUrl ?? null;
   } catch (err: any) {

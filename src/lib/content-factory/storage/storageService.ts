@@ -13,6 +13,8 @@ function getBackend(): StorageBackend {
   return 'local';
 }
 
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+
 const BASE_DIR = path.join(process.cwd(), 'data', 'content-factory');
 
 const BØTTER = {
@@ -48,11 +50,11 @@ export async function lagreAsset(
       const filSti = `content-factory/${bøtte}/${filNavn}`;
       const buffer = typeof innhold === 'string' ? Buffer.from(innhold) : innhold;
       const { error } = await db.storage
-        .from('glenvex-assets')
+        .from(STORAGE_BUCKET)
         .upload(filSti, buffer, { upsert: true });
 
       if (!error) {
-        const { data: urlData } = db.storage.from('glenvex-assets').getPublicUrl(filSti);
+        const { data: urlData } = db.storage.from(STORAGE_BUCKET).getPublicUrl(filSti);
         return { path: filSti, url: urlData.publicUrl };
       }
     }
@@ -76,7 +78,7 @@ export async function hentAssetUrl(bøtte: BøtteNavn, filNavn: string): Promise
   if (backend === 'supabase') {
     const db = getDb();
     if (db) {
-      const { data } = db.storage.from('glenvex-assets')
+      const { data } = db.storage.from(STORAGE_BUCKET)
         .getPublicUrl(`content-factory/${bøtte}/${filNavn}`);
       return data.publicUrl ?? null;
     }
