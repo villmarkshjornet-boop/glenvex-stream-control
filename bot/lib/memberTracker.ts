@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const FILE = path.join(process.cwd(), 'data', 'members.json');
-const WORKSPACE_ID = 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
 export interface MemberProfile {
   id: string;

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { hentBotData } from '@/lib/botData';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,7 @@ export async function GET() {
       const { data } = await db
         .from('stream_history')
         .select('*')
-        .eq('workspace_id', 'glenvex-default')
+        .eq('workspace_id', getWorkspaceId())
         .order('started_at', { ascending: false })
         .limit(50);
 

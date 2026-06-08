@@ -11,7 +11,7 @@ export function getBotDb(): SupabaseClient | null {
   return _client;
 }
 
-export const WORKSPACE_ID = 'glenvex-default';
+export const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
 export async function dbUpsert(table: string, row: Record<string, any>, onConflict: string): Promise<boolean> {
   const db = getBotDb();

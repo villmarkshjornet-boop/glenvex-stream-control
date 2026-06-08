@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   const [vodsRes, highlightsRes, assetsRes, copyRes, køRes] = await Promise.all([
     vodId
       ? db.from('content_vods').select('*').eq('id', vodId).single()
-      : db.from('content_vods').select('*').eq('workspace_id', 'glenvex-default').order('created_at', { ascending: false }),
+      : db.from('content_vods').select('*').eq('workspace_id', getWorkspaceId()).order('created_at', { ascending: false }),
     vodId ? db.from('content_highlights').select('*').eq('vod_id', vodId).order('rank') : Promise.resolve({ data: [] }),
     vodId ? db.from('content_assets').select('*').eq('vod_id', vodId) : Promise.resolve({ data: [] }),
     vodId ? db.from('content_copy').select('*').eq('vod_id', vodId) : Promise.resolve({ data: [] }),

@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { getStreamInfo } from '@/lib/twitch';
 import { hentBotData } from '@/lib/botData';
 import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 import { logSystemEvent } from '@/lib/systemEvents';
 import { getCreatorContext, buildContextPrompt } from '@/lib/ai/creatorContext';
 import { logAgentDecision } from '@/lib/ai/eventLogger';
@@ -40,12 +41,12 @@ export async function GET() {
         const [histRes, commRes] = await Promise.all([
           db.from('stream_history')
             .select('title,game,peak_viewers,avg_viewers,duration_minutes,followers_gained,chat_messages,subs_gained')
-            .eq('workspace_id', 'glenvex-default')
+            .eq('workspace_id', getWorkspaceId())
             .order('started_at', { ascending: false })
             .limit(10),
           db.from('community_members')
             .select('display_name,username,level,xp,streams_attended,subs,gift_subs,raids,last_seen,engagement_score')
-            .eq('workspace_id', 'glenvex-default')
+            .eq('workspace_id', getWorkspaceId())
             .order('xp', { ascending: false })
             .limit(20),
         ]);
