@@ -65,6 +65,42 @@ export async function getPauseProaktiv(): Promise<boolean> {
   return !!(bs as any).pauseProaktiv;
 }
 
+export async function getAktiv(): Promise<boolean> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return (bs as any).aktiv !== false; // default true
+}
+
+export async function getPauseDiscord(): Promise<boolean> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return !!(bs as any).pauseDiscord;
+}
+
+export async function getPauseTwitch(): Promise<boolean> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return !!(bs as any).pauseTwitch;
+}
+
+export async function getPauseLiveVarsler(): Promise<boolean> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return !!(bs as any).pauseLiveVarsler;
+}
+
+export async function getPausePartnerPromo(): Promise<boolean> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return !!(bs as any).pausePartnerPromo;
+}
+
+export async function getSvarSjanse(): Promise<number> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  return typeof (bs as any).svarSjanse === 'number' ? (bs as any).svarSjanse : 0.35;
+}
+
+export async function getCooldownMs(): Promise<number> {
+  const bs = await loadBotSettings().catch(() => ({}));
+  const sek = typeof (bs as any).cooldownSek === 'number' ? (bs as any).cooldownSek : 15;
+  return sek * 1000;
+}
+
 // Fallback: env → prefs → null
 export async function getSubsKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));

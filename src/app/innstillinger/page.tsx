@@ -56,62 +56,235 @@ function PassordPanel() {
   );
 }
 
-// ─── Twitch Bot ───────────────────────────────────────────────────────────────
+// ─── Twitch Bot Admin Panel ───────────────────────────────────────────────────
 
-function TwitchBotPanel() {
-  const [tone, setTone] = useState('dark_gaming');
-  const [pause, setPause] = useState(false);
+const TONER_TWITCH = [
+  { verdi: 'dark_gaming',  label: 'Dark Gaming',  desc: 'Rå, direkte, hacker-vibe' },
+  { verdi: 'hype',         label: 'Hype',         desc: 'Energisk, caps, emojis' },
+  { verdi: 'humoristisk',  label: 'Humoristisk',  desc: 'Lett og selvironisk' },
+  { verdi: 'rp_stil',      label: 'RP-stil',      desc: 'I karakter, fortellende' },
+  { verdi: 'cinematic',    label: 'Cinematisk',   desc: 'Dramatisk, slagkraftig' },
+  { verdi: 'profesjonell', label: 'Profesjonell', desc: 'Kort, ryddig, ingen slang' },
+];
+
+type BotEvent = { id: string; source: string; event_type: string; title: string; created_at: string; metadata?: any };
+
+function TwitchBotAdminPanel() {
+  const [settings, setSettings] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [botOnline, setBotOnline] = useState<boolean | null>(null);
+  const [events, setEvents] = useState<BotEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   useEffect(() => {
-    fetch('/api/innstillinger').then(r => r.json()).then(d => {
-      const bs = d.settings?.botSettings ?? {};
-      setTone(bs.tone ?? 'dark_gaming');
-      setPause(!!bs.pauseProaktiv);
-    }).catch(() => {});
+    fetch('/api/bot-settings').then(r => r.json()).then(d => setSettings(d.settings)).catch(() => {});
+    fetch('/api/bot-health').then(r => r.json()).then(d => setBotOnline(d.online)).catch(() => setBotOnline(false));
+    hentEvents();
   }, []);
 
-  async function lagre(e: React.FormEvent) {
-    e.preventDefault();
+  async function hentEvents() {
+    setLoadingEvents(true);
+    try {
+      const r = await fetch('/api/system-events?minutesBack=1440&limit=30');
+      const d = await r.json();
+      setEvents((d.events ?? []).filter((e: BotEvent) =>
+        e.source === 'twitch_bot' || (e.source === 'discord_bot' && e.event_type === 'BOT_DISCORD_MESSAGE')
+      ));
+    } catch {}
+    setLoadingEvents(false);
+  }
+
+  async function lagreFelt(felt: string, verdi: any) {
     setSaving(true); setSaved(false);
-    await fetch('/api/innstillinger', {
-      method: 'POST',
+    await fetch('/api/bot-settings', {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ botSettings: { tone, pauseProaktiv: pause } }),
+      body: JSON.stringify({ [felt]: verdi }),
     });
+    setSettings((prev: any) => prev ? { ...prev, [felt]: verdi } : prev);
     setSaving(false); setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
-  return (
-    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-xl p-5">
-      <h2 className="text-xs font-bold text-g-text mb-1">Twitch Bot-innstillinger</h2>
-      <p className="text-[9px] text-g-muted mb-4">Juster botens tone og oppførsel i Twitch-chatten.</p>
-      <form onSubmit={lagre} className="space-y-4 max-w-sm">
+  function Toggle({ felt, label, desc, invertert = false }: { felt: string; label: string; desc?: string; invertert?: boolean }) {
+    const aktiv = invertert ? !settings?.[felt] : !!settings?.[felt];
+    return (
+      <div className="flex items-center justify-between py-2 border-b border-g-border/30 last:border-0">
         <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Tone / Personlighet</label>
-          <select value={tone} onChange={e => setTone(e.target.value)}
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40">
-            <option value="dark_gaming">Dark Gaming (standard)</option>
-            <option value="hype">Hype / Energisk</option>
-            <option value="chill">Chill / Avslappet</option>
-            <option value="professional">Profesjonell</option>
-            <option value="norwegian">Norsk / Lokal</option>
-          </select>
+          <p className="text-xs text-g-text">{label}</p>
+          {desc && <p className="text-[9px] text-g-muted">{desc}</p>}
         </div>
-        <div className="flex items-center gap-3">
-          <input type="checkbox" id="pause-proaktiv" checked={pause} onChange={e => setPause(e.target.checked)}
-            className="w-4 h-4 accent-green-500" />
-          <label htmlFor="pause-proaktiv" className="text-xs text-g-text cursor-pointer">
-            Pause proaktive meldinger (boten svarer kun på direkte henvendelser)
-          </label>
-        </div>
-        <button type="submit" disabled={saving}
-          className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
-          {saving ? 'Lagrer...' : saved ? '✓ Lagret!' : 'Lagre'}
+        <button
+          onClick={() => lagreFelt(felt, invertert ? aktiv : !aktiv)}
+          className={`relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}>
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 ${aktiv ? 'left-5 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
         </button>
-      </form>
+      </div>
+    );
+  }
+
+  const eventTypeLabel: Record<string, string> = {
+    BOT_CHAT_MESSAGE: '💬 Twitch Chat',
+    BOT_DISCORD_MESSAGE: '🔵 Discord',
+    TWITCH_EVENT_RECEIVED: '⚡ Hendelse',
+    TWITCH_SUB_RECEIVED: '⭐ Sub',
+    TWITCH_GIFT_SUB_RECEIVED: '🎁 Gift Sub',
+    LIVE_DETECTED: '🔴 Live',
+    DISCORD_LIVE_ANNOUNCEMENT_SENT: '📢 Live-varsel',
+    PREHYPE_SENT: '🔥 Pre-hype',
+  };
+
+  return (
+    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-g-border flex items-center justify-between">
+        <div>
+          <h2 className="text-xs font-bold text-g-text">Twitch Bot Admin</h2>
+          <p className="text-[9px] text-g-muted mt-0.5">Full kontroll over Twitch-boten — chat-atferd, toggle-er og live aktivitet</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {saving && <span className="text-[9px] text-g-muted">Lagrer...</span>}
+          {saved && <span className="text-[9px] text-g-green">✓ Lagret!</span>}
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-[9px] font-bold border ${
+            botOnline === true ? 'text-g-green border-g-green/20 bg-g-green/5' :
+            botOnline === false ? 'text-red-400 border-red-500/20 bg-red-500/5' :
+            'text-g-muted border-g-border'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${botOnline === true ? 'bg-g-green animate-pulse' : botOnline === false ? 'bg-red-400' : 'bg-g-muted'}`} />
+            {botOnline === true ? 'Railway Online' : botOnline === false ? 'Railway Offline' : 'Sjekker...'}
+          </div>
+        </div>
+      </div>
+
+      {!settings ? (
+        <div className="p-5"><p className="text-xs text-g-muted">Laster...</p></div>
+      ) : (
+        <div className="p-5 space-y-6">
+
+          {/* Master toggle */}
+          <div>
+            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Master-kontroll</p>
+            <div className="flex items-center justify-between p-3 rounded-lg border border-g-border bg-g-bg">
+              <div>
+                <p className="text-xs font-bold text-g-text">Bot aktiv</p>
+                <p className="text-[9px] text-g-muted">Skrur av/på all bot-aktivitet (Twitch + Discord)</p>
+              </div>
+              <button
+                onClick={() => lagreFelt('aktiv', !settings.aktiv)}
+                className={`relative w-12 h-6 rounded-full transition-all duration-200 ${settings.aktiv ? 'bg-g-green/70' : 'bg-g-bg border-2 border-g-border'}`}>
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full transition-all duration-200 ${settings.aktiv ? 'left-6 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Twitch chat toggles */}
+          <div>
+            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Twitch Chat</p>
+            <div className="bg-g-bg border border-g-border rounded-lg px-3 divide-y divide-g-border/30">
+              <Toggle felt="pauseTwitch" label="Twitch chat-svar" desc="Boten svarer i Twitch-chat" invertert />
+              <Toggle felt="pausePartnerPromo" label="Partner-promo i chat" desc="AI-generert partner-reklame hvert 60 min" invertert />
+              <Toggle felt="pauseLiveVarsler" label="Live-varsler til Discord" desc="Poster embed når stream starter" invertert />
+              <Toggle felt="pauseProaktiv" label="Proaktive Discord-meldinger" desc="Promo, streamplan, community-oppdateringer" invertert />
+            </div>
+          </div>
+
+          {/* Chat-atferd */}
+          <div>
+            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Chat-atferd</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-g-bg border border-g-border rounded-lg p-3">
+                <label className="text-[9px] text-g-muted uppercase tracking-wider font-bold block mb-2">
+                  Svar-sjanse: <span className="text-g-green">{Math.round((settings.svarSjanse ?? 0.35) * 100)}%</span>
+                </label>
+                <input
+                  type="range" min="0" max="100" step="5"
+                  value={Math.round((settings.svarSjanse ?? 0.35) * 100)}
+                  onChange={e => lagreFelt('svarSjanse', parseInt(e.target.value) / 100)}
+                  className="w-full accent-green-500"
+                />
+                <p className="text-[8px] text-g-muted mt-1">Sjanse for at boten svarer på tilfeldige meldinger</p>
+              </div>
+              <div className="bg-g-bg border border-g-border rounded-lg p-3">
+                <label className="text-[9px] text-g-muted uppercase tracking-wider font-bold block mb-2">
+                  Cooldown: <span className="text-g-green">{settings.cooldownSek ?? 15}s</span>
+                </label>
+                <input
+                  type="number" min="5" max="300" step="5"
+                  value={settings.cooldownSek ?? 15}
+                  onChange={e => lagreFelt('cooldownSek', parseInt(e.target.value) || 15)}
+                  className="w-full bg-transparent text-xs text-g-text border-0 outline-none focus:border-0"
+                />
+                <p className="text-[8px] text-g-muted mt-1">Sekunder mellom svar til samme bruker</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Tone */}
+          <div>
+            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Bot-tone i Twitch-chat</p>
+            <div className="grid grid-cols-3 gap-2">
+              {TONER_TWITCH.map(t => (
+                <button key={t.verdi}
+                  onClick={() => lagreFelt('tone', t.verdi)}
+                  className={`p-2.5 rounded-lg border text-left transition-all ${settings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}>
+                  <p className={`text-[10px] font-bold ${settings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
+                  <p className="text-[8px] text-g-muted mt-0.5 leading-tight">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat-kommandoer */}
+          <div>
+            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Tilgjengelige chat-kommandoer</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { cmd: '!discordsiste', desc: 'Oppsummerer siste Discord-aktivitet', plattform: 'Twitch' },
+                { cmd: '!discordtema', desc: 'Viser hva som diskuteres i Discord', plattform: 'Twitch' },
+                { cmd: '!twitchsiste', desc: 'Oppsummerer siste Twitch-aktivitet', plattform: 'Discord' },
+                { cmd: '!twitchtema', desc: 'Viser aktuelle Twitch-temaer', plattform: 'Discord' },
+                { cmd: '!communitymemory', desc: 'AI-oppsummering av community-hukommelse', plattform: 'Discord' },
+              ].map(c => (
+                <div key={c.cmd} className="bg-g-bg border border-g-border rounded p-2">
+                  <p className="text-[10px] font-mono font-bold text-g-green">{c.cmd}</p>
+                  <p className="text-[8px] text-g-muted mt-0.5">{c.desc}</p>
+                  <span className="text-[7px] text-g-muted/60 uppercase tracking-wider">{c.plattform}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Live aktivitetsfeed */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold">Bot-aktivitet (siste 24t)</p>
+              <button onClick={hentEvents} disabled={loadingEvents}
+                className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+                {loadingEvents ? '⟳ Laster...' : '↻ Oppdater'}
+              </button>
+            </div>
+            {events.length === 0 ? (
+              <p className="text-[9px] text-g-muted">Ingen registrert aktivitet de siste 24 timene.</p>
+            ) : (
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {events.map(e => (
+                  <div key={e.id} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
+                    <span className="text-[9px] text-g-muted flex-shrink-0 w-24 mt-0.5">
+                      {new Date(e.created_at).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="text-[9px] text-g-muted flex-shrink-0 w-24">
+                      {eventTypeLabel[e.event_type] ?? e.event_type.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-[9px] text-g-text flex-1 leading-tight">{e.title}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
@@ -552,8 +725,8 @@ export default function InnstillingerSide() {
         <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />
       )}
 
-      {/* Twitch Bot */}
-      <TwitchBotPanel />
+      {/* Twitch Bot Admin */}
+      <TwitchBotAdminPanel />
 
       {/* Passord */}
       <PassordPanel />

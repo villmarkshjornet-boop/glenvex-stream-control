@@ -7,15 +7,25 @@ import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
-import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId } from './botKanalPreferanser';
+import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
 const KANAL = process.env.TWITCH_USERNAME?.toLowerCase() || 'glenvex';
 
 const cooldowns = new Map<string, number>();
-const COOLDOWN_MS = 15_000;
-const SVAR_SJANSE = 0.35;
+
+// Log + send til Twitch-chat
+async function chatSend(channel: string, message: string, context?: Record<string, any>): Promise<void> {
+  client?.say(channel, message).catch(() => {});
+  logSystemEvent({
+    source: 'twitch_bot',
+    event_type: 'BOT_CHAT_MESSAGE',
+    title: message.slice(0, 100),
+    severity: 'info',
+    metadata: { channel, message: message.slice(0, 500), ...context },
+  });
+}
 
 // Callback som index.ts setter for å tildele Discord Twitch-Sub-rolle
 let _onSubCallback: ((username: string) => Promise<void>) | null = null;
@@ -295,7 +305,7 @@ export function startTwitchBot() {
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
     const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom! Sjekk Discord: ${DISCORD_URL}`;
 
-    client?.say(channel, melding).catch(() => {});
+    await chatSend(channel, melding, { trigger: 'raid', username, viewers });
 
     await postTilDiscord(await getBotRaidKanalId() || liveKanalId(), {
       embeds: [{
@@ -320,7 +330,7 @@ export function startTwitchBot() {
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
-    client?.say(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`).catch(() => {});
+    await chatSend(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`, { trigger: 'sub', username });
     _onSubCallback?.(username).catch(() => {});
 
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
@@ -336,7 +346,7 @@ export function startTwitchBot() {
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Resub: ${username} (${months} mnd)`, severity: 'info', metadata: { type: 'resub', giver: username, mottaker: username, months } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
-    client?.say(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`).catch(() => {});
+    await chatSend(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`, { trigger: 'resub', username, months });
     _onSubCallback?.(username).catch(() => {});
   });
 
@@ -349,7 +359,7 @@ export function startTwitchBot() {
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_GIFT_SUB_RECEIVED', title: `Gift sub: ${username} → ${recipient ?? 'ukjent'}`, severity: 'info', metadata: { type: 'gift_sub', giver: username, mottaker: recipient ?? 'ukjent', antall: 1 } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
-    client?.say(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`).catch(() => {});
+    await chatSend(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`, { trigger: 'giftsub', username, recipient });
     _onSubCallback?.(recipient).catch(() => {}); // recipient får sub-rollen
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       content: `🎁 **${username}** giftet sub til **${recipient ?? 'noen'}**! Sjenerøst! PogChamp`,
@@ -364,7 +374,7 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Mass gift-giver – ${numbOfSubs} subs`, confidence_score: 0.95, metadata: { gifter: true, totalGifts: numbOfSubs } }).catch(() => {});
 
     const svar = await aiSvar(`${username} giftet ${numbOfSubs} subs til random seere! Lag en episk takkemelding på norsk. Maks 1 setning.`);
-    client?.say(channel, svar || `@${username} gifter ${numbOfSubs} subs! HVEM ER DETTE MENNESKET?! PogChamp`).catch(() => {});
+    await chatSend(channel, svar || `@${username} gifter ${numbOfSubs} subs! HVEM ER DETTE MENNESKET?! PogChamp`, { trigger: 'mystery_gift', username, count: numbOfSubs });
 
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       embeds: [{
@@ -387,7 +397,7 @@ export function startTwitchBot() {
     logBotAgentEvent({ source: 'twitch', event_type: 'cheer', username, importance_score: Math.min(90, bitsNum / 10), metadata: { bits: bitsNum } });
     if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på GLENVEX`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
-    client?.say(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`).catch(() => {});
+    await chatSend(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`, { trigger: 'cheer', username, bits });
   });
 
   // ─── Meldinger ─────────────────────────────────────────────────────────────
@@ -423,7 +433,7 @@ export function startTwitchBot() {
       if (isCommandCooldown(channel, tekLower)) return;
       setCommandCooldown(channel, tekLower);
       const oppsummering = await summarizeRecentActivity('discord', 60);
-      client?.say(channel, oppsummering.slice(0, 490)).catch(() => {});
+      await chatSend(channel, oppsummering.slice(0, 490), { trigger: 'command', command: tekLower });
       logBotAgentEvent({ source: 'twitch', event_type: 'cross_platform_context_used', metadata: { command: tekLower, type: 'TWITCH_BOT_USED_DISCORD_CONTEXT' } });
       return;
     }
@@ -439,19 +449,21 @@ export function startTwitchBot() {
     if (tekst.startsWith('!') || tekst.startsWith('/')) return;
     if (erBot) return;
 
+    const cooldownMs = await getCooldownMs();
     const sist = cooldowns.get(brukernavn);
-    if (sist && Date.now() - sist < COOLDOWN_MS) return;
+    if (sist && Date.now() - sist < cooldownMs) return;
 
     const spørOmDiscord = tekLower.includes('discord') || tekLower.includes('server');
     if (spørOmDiscord) {
       cooldowns.set(brukernavn, Date.now());
-      client?.say(channel, `@${tags.username} Discord er her: ${DISCORD_URL} PogChamp`).catch(() => {});
+      await chatSend(channel, `@${tags.username} Discord er her: ${DISCORD_URL} PogChamp`, { trigger: 'discord_mention', username: tags.username });
       return;
     }
 
     const botNamnLower = botNavn.toLowerCase();
     const erTagget = tekLower.includes(botNamnLower) || tekLower.includes('@glenvex');
-    if (!erTagget && Math.random() > SVAR_SJANSE) return;
+    const svarSjanse = await getSvarSjanse();
+    if (!erTagget && Math.random() > svarSjanse) return;
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return;
@@ -463,22 +475,22 @@ export function startTwitchBot() {
     const discordCtx = vilHaDiscordInfo ? await hentDiscordKontekst() : undefined;
 
     const svar = await aiSvar(`${tags.username}: ${tekst}`, discordCtx || undefined);
-    if (svar) client?.say(channel, `@${tags.username} ${svar}`).catch(() => {});
+    if (svar) await chatSend(channel, `@${tags.username} ${svar}`, { trigger: 'ai_reply', username: tags.username });
   });
 
   // ─── Periodic Discord-promo ────────────────────────────────────────────────
 
-  setInterval(() => {
-    try {
-      const { getBotSettings } = require('@/lib/botMemory');
-      const settings = getBotSettings();
-      if (!settings.aktiv || settings.pauseTwitch) return;
-    } catch {}
+  setInterval(async () => {
+    const [aktiv, pauseTwitch] = await Promise.all([
+      getPauseTwitch().then(p => !p).catch(() => true), // aktiv = ikke pauset
+      getPauseTwitch().catch(() => false),
+    ]);
+    if (!aktiv || pauseTwitch) return;
 
     if (Date.now() - sisteDiscordMelding < DISCORD_INTERVAL_MS) return;
     sisteDiscordMelding = Date.now();
     const melding = DISCORD_MELDINGER[Math.floor(Math.random() * DISCORD_MELDINGER.length)];
-    client?.say(`#${KANAL}`, melding).catch(() => {});
+    await chatSend(`#${KANAL}`, melding, { trigger: 'discord_promo' });
   }, 5 * 60 * 1000);
 
   // ─── Partner-promotering via Supabase ─────────────────────────────────────
@@ -487,11 +499,11 @@ export function startTwitchBot() {
   let sistePartnerPromo = 0;
 
   setInterval(async () => {
-    try {
-      const { getBotSettings } = require('@/lib/botMemory');
-      const s = getBotSettings();
-      if (!s.aktiv || s.pauseTwitch || s.pausePartnerPromo) return;
-    } catch {}
+    const [pauseTwitch, pausePartnerPromo] = await Promise.all([
+      getPauseTwitch().catch(() => false),
+      getPausePartnerPromo().catch(() => false),
+    ]);
+    if (pauseTwitch || pausePartnerPromo) return;
 
     if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
     sistePartnerPromo = Date.now();
@@ -504,7 +516,7 @@ export function startTwitchBot() {
       `Lag en naturlig, kort Twitch-chat-reklame for partneren vår "${partner.navn}": ${partner.beskrivelse}. Lenke: ${partner.finalUrl}${kode}. Maks 200 tegn. Norsk, avslappet tone.`
     );
     const melding = ai || `🤝 ${partner.navn}: ${partner.beskrivelse}${kode} ${partner.finalUrl}`;
-    client?.say(`#${KANAL}`, melding.slice(0, 500)).catch(() => {});
+    await chatSend(`#${KANAL}`, melding.slice(0, 500), { trigger: 'partner_promo', partner: partner.navn });
 
     logPartnerPromoResult({
       partnerName: partner.navn,

@@ -20,6 +20,8 @@ export interface BotSettings {
   pauseLiveVarsler: boolean;
   pauseProaktiv: boolean;
   aktiv: boolean;
+  svarSjanse: number;   // 0.0–1.0, how often bot replies in Twitch chat
+  cooldownSek: number;  // seconds between replies per user
 }
 
 const DEFAULT_SETTINGS: BotSettings = {
@@ -30,6 +32,8 @@ const DEFAULT_SETTINGS: BotSettings = {
   pauseLiveVarsler: false,
   pauseProaktiv: false,
   aktiv: true,
+  svarSjanse: 0.35,
+  cooldownSek: 15,
 };
 
 // ── Memory ──────────────────────────────────────────────────────────────────

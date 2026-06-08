@@ -34,13 +34,30 @@ export async function POST(req: NextRequest) {
   }
 
   if (mode === 'signup') {
-    // Use admin API — oppretter bruker uten epost-bekreftelse, ingen rate limit
+    let userId: string | null = null;
+
+    // Prøv å opprette ny bruker
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
     });
-    if (createErr) return NextResponse.json({ error: createErr.message }, { status: 400 });
+
+    if (createErr) {
+      // Bruker finnes allerede (delvis oppretting eller tidligere forsøk) — oppdater passordet
+      const { data: list } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const existing = list?.users?.find((u: any) => u.email === email);
+      if (existing) {
+        userId = existing.id;
+        const { error: updErr } = await supabase.auth.admin.updateUserById(userId, {
+          password,
+          email_confirm: true,
+        });
+        if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
+      } else {
+        return NextResponse.json({ error: createErr.message }, { status: 400 });
+      }
+    }
 
     // Logg inn umiddelbart
     const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
@@ -49,7 +66,8 @@ export async function POST(req: NextRequest) {
     const session = signInData.session;
     const projectRef = supabaseUrl.match(/https?:\/\/([^.]+)\.supabase\.co/)?.[1] ?? '';
     const cookieName = `sb-${projectRef}-auth-token`;
-    const response = NextResponse.json({ ok: true, workspaceId: '', immediate: true });
+    const workspaceId = signInData.user?.user_metadata?.workspace_id ?? '';
+    const response = NextResponse.json({ ok: true, workspaceId, immediate: !workspaceId });
     response.cookies.set(cookieName, encodeURIComponent(JSON.stringify(session)), {
       path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: session.expires_in,
     });

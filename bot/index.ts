@@ -33,11 +33,31 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
 import OpenAI from 'openai';
+
+// Log + send Discord-melding
+async function discordSend(kanal: TextChannel, melding: string | object, kontekst?: Record<string, any>): Promise<void> {
+  try {
+    const payload = typeof melding === 'string' ? melding : melding;
+    if (typeof payload === 'string') {
+      await kanal.send(payload);
+    } else {
+      await kanal.send(payload as any);
+    }
+  } catch {}
+  const preview = typeof melding === 'string' ? melding.slice(0, 100) : JSON.stringify(melding).slice(0, 100);
+  logSystemEvent({
+    source: 'discord_bot',
+    event_type: 'BOT_DISCORD_MESSAGE',
+    title: preview,
+    severity: 'info',
+    metadata: { channel: kanal.name, channelId: kanal.id, ...kontekst },
+  });
+}
 
 const token = process.env.DISCORD_BOT_TOKEN;
 if (!token) {
@@ -120,8 +140,7 @@ async function checkLive() {
     }
 
     if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId) {
-      const botSettings = getBotSettings();
-      if (botSettings.pauseLiveVarsler) return;
+      if (await getPauseLiveVarsler().catch(() => false)) return;
 
       logSystemEvent({
         source: 'twitch_bot',
@@ -524,7 +543,7 @@ async function postPreLiveHype(tittel: string, spill: string) {
       temperature: 0.9,
     });
     const melding = res.choices[0]?.message?.content ?? '';
-    if (melding) await kanal.send(`🔴 **GLENVEX ER LIVE!** ${melding}`);
+    if (melding) await discordSend(kanal, `🔴 **GLENVEX ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
   } catch {}
 }
 
@@ -617,8 +636,8 @@ async function sjekkGoals() {
 }
 
 async function delSocialsSubtilt() {
-  const botSettings = getBotSettings();
-  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
+  const [aktiv, pauseDiscord] = await Promise.all([getAktiv().catch(() => true), getPauseDiscord().catch(() => false)]);
+  if (!aktiv || pauseDiscord) return;
   const kanal = finnChatKanal();
   if (!kanal) return;
 
@@ -648,7 +667,7 @@ async function delSocialsSubtilt() {
     .setDescription(`${intro}\n\n${links.join('\n')}`)
     .setFooter({ text: 'GLENVEX' });
 
-  await kanal.send({ embeds: [embed] }).catch(() => {});
+  await discordSend(kanal, { embeds: [embed] }, { trigger: 'socials_promo' });
   addToMemory({ type: 'socials', innhold: 'delt sosiale lenker' });
 }
 
@@ -709,7 +728,8 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
     } catch {}
   }
 
-  const msg = await kanal.send(tekst).catch(() => null);
+  await discordSend(kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
+  const msg: any = null; // message id not needed after discordSend
 
   logPartnerPromoResult({
     partnerName: partner.navn,
@@ -745,14 +765,17 @@ async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
     const ai = res2.choices[0]?.message?.content ?? '';
     if (ai) tekst = `📅 ${ai}\ntwitch.tv/glenvex`;
   }
-  await kanal.send(tekst).catch(() => {});
+  await discordSend(kanal, tekst, { trigger: 'stream_info', spill: neste.spill });
   addToMemory({ type: 'proaktiv', innhold: `stream-info: ${neste.spill}` });
 }
 
 async function sendProaktivMelding() {
-  const botSettings = getBotSettings();
-  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
-  if (await getPauseProaktiv()) return;
+  const [aktiv, pauseDiscord, pauseProaktiv] = await Promise.all([
+    getAktiv().catch(() => true),
+    getPauseDiscord().catch(() => false),
+    getPauseProaktiv().catch(() => false),
+  ]);
+  if (!aktiv || pauseDiscord || pauseProaktiv) return;
   const kanal = finnChatKanal();
   if (!kanal) return;
 
@@ -766,7 +789,7 @@ async function sendProaktivMelding() {
       await sendStreamInfoMelding(kanal);
     } else {
       const melding = getProaktivMelding();
-      await kanal.send(melding);
+      await discordSend(kanal, melding, { trigger: 'proaktiv_community' });
       addToMemory({ type: 'proaktiv', innhold: melding });
     }
   } catch {}
@@ -834,7 +857,7 @@ async function sjekkUkentligStats() {
       .setFooter({ text: `Uke ${uke} • GLENVEX Stream Control` })
       .setTimestamp();
 
-    await kanal.send({ embeds: [embed] });
+    await discordSend(kanal, { embeds: [embed] }, { trigger: 'ukentlig_stats', uke });
     addLog('success', `Ukentlig stats postet (uke ${uke})`, 'OK');
   } catch (error) {
     addLog('error', `Stats feil: ${(error as Error).message}`, 'ERROR');
@@ -862,7 +885,7 @@ async function postTopClip() {
       .setFooter({ text: 'GLENVEX Stream Control • Auto Clip' })
       .setTimestamp();
 
-    await kanal.send({ content: '🔥 Har dere sett denne clipsen?', embeds: [embed] });
+    await discordSend(kanal, { content: '🔥 Har dere sett denne clipsen?', embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
     addLog('success', `Clip postet: ${nyClip.title}`, 'OK');
   } catch (error) {
     addLog('error', `Clip-post feil: ${(error as Error).message}`, 'ERROR');
@@ -902,7 +925,7 @@ client.on('guildMemberAdd', async (member) => {
     } catch {}
   }
 
-  try { await kanal.send(velkomst); } catch {}
+  await discordSend(kanal, velkomst, { trigger: 'member_welcome', member: member.displayName }).catch(() => {});
 });
 
 // ─── Tråd-deltakelse ──────────────────────────────────────────────────────────
@@ -1069,7 +1092,7 @@ async function sjekkPreHype() {
       } catch {}
     }
 
-    const sendtOk = await kanal.send(melding).then(() => true).catch(() => false);
+    const sendtOk = await discordSend(kanal, melding, { trigger: 'pre_hype', spill: planlagtStream.spill, minutter: diffTilStream }).then(() => true).catch(() => false);
     await updateStreamSyklus({ pre_hype_sendt_at: new Date().toISOString() });
     logBotEvent('pre_hype', { spill: planlagtStream.spill, tittel: planlagtStream.tittel ?? '', minutter_til: diffTilStream });
 
@@ -1264,8 +1287,8 @@ client.on('messageCreate', async (message) => {
 
   setCooldown(message.author.id);
 
-  const botSettings = getBotSettings();
-  if (!botSettings.aktiv || botSettings.pauseDiscord) return;
+  const [aktiv, pauseDiscord] = await Promise.all([getAktiv().catch(() => true), getPauseDiscord().catch(() => false)]);
+  if (!aktiv || pauseDiscord) return;
 
   try {
     await message.channel.sendTyping();
