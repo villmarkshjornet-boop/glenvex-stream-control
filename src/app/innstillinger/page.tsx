@@ -56,6 +56,66 @@ function PassordPanel() {
   );
 }
 
+// ─── Twitch Bot ───────────────────────────────────────────────────────────────
+
+function TwitchBotPanel() {
+  const [tone, setTone] = useState('dark_gaming');
+  const [pause, setPause] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/innstillinger').then(r => r.json()).then(d => {
+      const bs = d.settings?.botSettings ?? {};
+      setTone(bs.tone ?? 'dark_gaming');
+      setPause(!!bs.pauseProaktiv);
+    }).catch(() => {});
+  }, []);
+
+  async function lagre(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true); setSaved(false);
+    await fetch('/api/innstillinger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botSettings: { tone, pauseProaktiv: pause } }),
+    });
+    setSaving(false); setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-xl p-5">
+      <h2 className="text-xs font-bold text-g-text mb-1">Twitch Bot-innstillinger</h2>
+      <p className="text-[9px] text-g-muted mb-4">Juster botens tone og oppførsel i Twitch-chatten.</p>
+      <form onSubmit={lagre} className="space-y-4 max-w-sm">
+        <div>
+          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Tone / Personlighet</label>
+          <select value={tone} onChange={e => setTone(e.target.value)}
+            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40">
+            <option value="dark_gaming">Dark Gaming (standard)</option>
+            <option value="hype">Hype / Energisk</option>
+            <option value="chill">Chill / Avslappet</option>
+            <option value="professional">Profesjonell</option>
+            <option value="norwegian">Norsk / Lokal</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="checkbox" id="pause-proaktiv" checked={pause} onChange={e => setPause(e.target.checked)}
+            className="w-4 h-4 accent-green-500" />
+          <label htmlFor="pause-proaktiv" className="text-xs text-g-text cursor-pointer">
+            Pause proaktive meldinger (boten svarer kun på direkte henvendelser)
+          </label>
+        </div>
+        <button type="submit" disabled={saving}
+          className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
+          {saving ? 'Lagrer...' : saved ? '✓ Lagret!' : 'Lagre'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // ─── Integrasjons-helse ───────────────────────────────────────────────────────
 
 function HelsePanel() {
@@ -491,6 +551,9 @@ export default function InnstillingerSide() {
       ) : (
         <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />
       )}
+
+      {/* Twitch Bot */}
+      <TwitchBotPanel />
 
       {/* Passord */}
       <PassordPanel />

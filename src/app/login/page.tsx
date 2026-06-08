@@ -47,6 +47,8 @@ export default function LoginPage() {
 
       if (data.magic) {
         setMagicSent(true);
+      } else if (data.immediate) {
+        window.location.href = '/onboarding';
       } else {
         window.location.href = data.workspaceId ? '/' : '/onboarding';
       }

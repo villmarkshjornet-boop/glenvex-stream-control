@@ -34,13 +34,26 @@ export async function POST(req: NextRequest) {
   }
 
   if (mode === 'signup') {
-    const { error } = await supabase.auth.signUp({
+    // Use admin API — oppretter bruker uten epost-bekreftelse, ingen rate limit
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
       email,
       password,
-      options: { emailRedirectTo: callbackUrl },
+      email_confirm: true,
     });
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true, magic: true });
+    if (createErr) return NextResponse.json({ error: createErr.message }, { status: 400 });
+
+    // Logg inn umiddelbart
+    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInErr) return NextResponse.json({ error: signInErr.message }, { status: 400 });
+
+    const session = signInData.session;
+    const projectRef = supabaseUrl.match(/https?:\/\/([^.]+)\.supabase\.co/)?.[1] ?? '';
+    const cookieName = `sb-${projectRef}-auth-token`;
+    const response = NextResponse.json({ ok: true, workspaceId: '', immediate: true });
+    response.cookies.set(cookieName, encodeURIComponent(JSON.stringify(session)), {
+      path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: session.expires_in,
+    });
+    return response;
   }
 
   // signin — get session and set cookie manually
