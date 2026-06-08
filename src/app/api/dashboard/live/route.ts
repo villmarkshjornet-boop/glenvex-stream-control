@@ -110,9 +110,9 @@ export async function GET() {
     db.from('system_events')
       .select('id,source,event_type,title,description,severity,metadata,created_at')
       .eq('workspace_id', ws)
-      .gte('created_at', cutoff1h)
+      .gte('created_at', cutoff24h)
       .order('created_at', { ascending: false })
-      .limit(60),
+      .limit(100),
 
     // Siste event per subsystem (siste 24t) for kontrollsenter-widgets
     db.from('system_events')

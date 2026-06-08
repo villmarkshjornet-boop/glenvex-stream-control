@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,10 +47,10 @@ export async function DELETE(
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
 
-  const { data: highlights } = await db
-    .from('content_highlights')
-    .select('id')
-    .eq('vod_id', vodId);
+  const [{ data: highlights }, { data: vodMeta }] = await Promise.all([
+    db.from('content_highlights').select('id').eq('vod_id', vodId),
+    db.from('content_vods').select('title').eq('id', vodId).single(),
+  ]);
 
   if (highlights && highlights.length > 0) {
     const stier = highlights.flatMap((h: any) => [
@@ -73,6 +74,17 @@ export async function DELETE(
 
   const { error: slettError } = await db.from('content_vods').delete().eq('id', vodId);
   if (slettError) return NextResponse.json({ error: slettError.message }, { status: 500 });
+
+  try {
+    await db.from('system_events').insert({
+      workspace_id: getWorkspaceId(),
+      source: 'content_factory',
+      event_type: 'VOD_DELETED',
+      title: `VOD slettet: ${(vodMeta as any)?.title ?? vodId}`,
+      severity: 'info',
+      metadata: { vodId },
+    });
+  } catch {}
 
   return NextResponse.json({ ok: true, slettet: vodId });
 }

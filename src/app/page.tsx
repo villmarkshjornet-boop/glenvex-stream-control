@@ -568,7 +568,7 @@ function RecentAiLearning({ innsikter, loading }: { innsikter: AiInnsikt[]; load
 
 // ─── STREAM CYCLE CHECKLIST ───────────────────────────────────────────────────
 
-function Sjekkliste({ items, loading }: { items: LiveData['sjekkliste']; loading: boolean }) {
+function Sjekkliste({ items, loading, onReset }: { items: LiveData['sjekkliste']; loading: boolean; onReset: () => void }) {
   if (loading) return <div className="h-52 bg-g-card border border-g-border rounded-xl animate-pulse" />;
   if (!items.length) return null;
   const ferdig = items.filter(i => i.done).length;
@@ -577,7 +577,16 @@ function Sjekkliste({ items, loading }: { items: LiveData['sjekkliste']; loading
     <div className="bg-g-card border border-g-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Stream-syklus</p>
-        <p className="text-[10px] font-mono font-black text-g-green">{ferdig}/{items.length}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] font-mono font-black text-g-green">{ferdig}/{items.length}</p>
+          {ferdig > 0 && (
+            <button onClick={onReset}
+              className="text-[9px] text-g-muted/50 hover:text-g-muted transition-colors px-1.5 py-0.5 border border-g-border/30 rounded"
+              title="Nullstill stream-syklus">
+              ↺ Reset
+            </button>
+          )}
+        </div>
       </div>
       <div className="mb-3 h-1 bg-g-border rounded-full overflow-hidden">
         <div className="h-full bg-g-green rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
@@ -608,6 +617,7 @@ export default function Dashboard() {
   const [loadingSlow, setLoadingSlow] = useState(true);
   const [sistOppdatert, setSistOppdatert] = useState<string | null>(null);
   const [visDebug, setVisDebug]       = useState(false);
+  const [refreshing, setRefreshing]   = useState(false);
 
   const hentLive = useCallback(async () => {
     try {
@@ -629,7 +639,11 @@ export default function Dashboard() {
     setLoadingSlow(false);
   }, []);
 
-  const hentAlt = useCallback(() => { hentLive(); hentSlow(); }, [hentLive, hentSlow]);
+  const hentAlt = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([hentLive(), hentSlow()]);
+    setRefreshing(false);
+  }, [hentLive, hentSlow]);
 
   useEffect(() => {
     hentLive();
@@ -652,9 +666,13 @@ export default function Dashboard() {
           {sistOppdatert && (
             <p className="text-[9px] text-g-muted/50">Live · {tidSiden(sistOppdatert)}</p>
           )}
-          <button onClick={hentAlt}
-            className="px-2.5 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-            ↻ Refresh
+          <button onClick={hentAlt} disabled={refreshing}
+            className={`px-2.5 py-1.5 border rounded text-[9px] transition-all ${
+              refreshing
+                ? 'border-g-green/30 text-g-green animate-pulse cursor-not-allowed'
+                : 'border-g-border text-g-muted hover:text-g-green hover:border-g-green/30'
+            }`}>
+            {refreshing ? '↻ Laster...' : '↻ Refresh'}
           </button>
         </div>
       </div>
@@ -690,7 +708,10 @@ export default function Dashboard() {
       {/* ── SEKSJON 4: AI Learning + Sjekkliste ─────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
         <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} loading={loadingLive} />
-        <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} />
+        <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} onReset={async () => {
+          await fetch('/api/stream-syklus/reset', { method: 'POST' });
+          hentLive();
+        }} />
       </div>
 
       {/* ── Siste klipp (kompakt) ────────────────────────────────────────────── */}
