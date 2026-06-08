@@ -52,7 +52,8 @@ export default function LoginPage() {
         router.refresh();
       }
     } catch (err: any) {
-      setError(err.message ?? 'Noe gikk galt');
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '(ikke satt)';
+      setError(`${err.message ?? 'Noe gikk galt'} [URL: ${url.slice(0, 40)}]`);
     } finally {
       setLoading(false);
     }
