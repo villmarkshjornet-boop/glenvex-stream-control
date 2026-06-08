@@ -1,13 +1,58 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const PUBLIC_PATHS = ['/login', '/api/auth'];
 
+// Decode Supabase JWT from cookies — pure Edge-compatible (no Supabase client, no Node.js APIs)
+function getSessionFromCookies(request: NextRequest): { id: string; email: string; workspace_id: string } | null {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const projectRef = url.match(/https?:\/\/([^.]+)\.supabase\.co/)?.[1];
+    if (!projectRef) return null;
+
+    const cookieName = `sb-${projectRef}-auth-token`;
+
+    // Try single cookie first, then chunked (Supabase splits large tokens)
+    let tokenValue = request.cookies.get(cookieName)?.value ?? '';
+    if (!tokenValue) {
+      const chunks: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const chunk = request.cookies.get(`${cookieName}.${i}`)?.value;
+        if (!chunk) break;
+        chunks.push(chunk);
+      }
+      tokenValue = chunks.join('');
+    }
+    if (!tokenValue) return null;
+
+    const session = JSON.parse(decodeURIComponent(tokenValue));
+    const accessToken = session?.access_token;
+    if (!accessToken) return null;
+
+    // Decode JWT payload (base64url → JSON) — no crypto, just reading claims
+    const b64 = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(
+      typeof atob !== 'undefined'
+        ? atob(b64)
+        : Buffer.from(b64, 'base64').toString('utf-8')
+    );
+
+    if (!payload.sub || !payload.exp || payload.exp < Date.now() / 1000) return null;
+
+    return {
+      id: payload.sub,
+      email: payload.email ?? '',
+      workspace_id: payload.user_metadata?.workspace_id ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Pass through static assets and public paths
+  // Always pass through static assets
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
@@ -18,58 +63,31 @@ export async function middleware(request: NextRequest) {
     return res;
   }
 
-  // Build response that preserves cookies (required for Supabase SSR session refresh)
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-pathname', pathname);
-
-  let response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            requestHeaders.set(name, value)
-          );
-          response = NextResponse.next({ request: { headers: requestHeaders } });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  // Refresh session — important: getUser() is the only safe way (not getSession())
-  const { data: { user } } = await supabase.auth.getUser();
+  const session = getSessionFromCookies(request);
 
   // Not logged in → redirect to login
-  if (!user) {
+  if (!session) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  const workspaceId: string = user.user_metadata?.workspace_id ?? '';
-
-  // Logged in but no workspace → onboarding (unless already there)
-  if (!workspaceId && !pathname.startsWith('/onboarding')) {
+  // Logged in but no workspace → onboarding
+  if (!session.workspace_id && !pathname.startsWith('/onboarding')) {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
     return NextResponse.redirect(url);
   }
 
-  // Inject workspace_id into request headers so getWorkspaceId() can read it
-  response.headers.set('x-workspace-id', workspaceId);
+  // Inject workspace context into request headers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-pathname', pathname);
+  requestHeaders.set('x-workspace-id', session.workspace_id);
+  requestHeaders.set('x-user-email', session.email);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('x-workspace-id', session.workspace_id);
   response.headers.set('x-pathname', pathname);
-  response.headers.set('x-user-email', user.email ?? '');
 
   return response;
 }
