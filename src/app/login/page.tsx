@@ -1,15 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
-
-function getSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error(`Mangler Supabase-konfig. URL: ${url ? '✓' : '✗'}, KEY: ${key ? '✓' : '✗'}`);
-  return createClient(url, key);
-}
 
 type Mode = 'signin' | 'signup';
 
@@ -22,18 +14,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [magicSent, setMagicSent] = useState(false);
   const [useMagic, setUseMagic] = useState(false);
-  const [pingResult, setPingResult] = useState('');
-
-  async function testPing() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-    setPingResult('Tester...');
-    try {
-      const r = await fetch(`${url}/auth/v1/health`, { method: 'GET' });
-      setPingResult(`HTTP ${r.status} — OK, Supabase svarer`);
-    } catch (e: any) {
-      setPingResult(`FEIL: ${e.message}`);
-    }
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,31 +21,30 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const supabase = getSupabaseClient();
-      if (useMagic) {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: `${location.origin}/api/auth/callback` },
-        });
-        if (error) throw error;
-        setMagicSent(true);
-      } else if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email,
           password,
-          options: { emailRedirectTo: `${location.origin}/api/auth/callback` },
-        });
-        if (error) throw error;
+          mode: useMagic ? 'magic' : mode,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Noe gikk galt');
+      }
+
+      if (data.magic) {
         setMagicSent(true);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        router.push('/');
+        router.push(data.workspaceId ? '/' : '/onboarding');
         router.refresh();
       }
     } catch (err: any) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '(ikke satt)';
-      setError(`${err.message ?? 'Noe gikk galt'} [URL: ${url.slice(0, 40)}]`);
+      setError(err.message ?? 'Noe gikk galt');
     } finally {
       setLoading(false);
     }
@@ -162,18 +141,6 @@ export default function LoginPage() {
               {loading ? 'Venter...' : useMagic ? 'Send innloggingslenke' : mode === 'signin' ? 'Logg inn' : 'Opprett konto'}
             </button>
           </form>
-
-          {/* Connectivity test */}
-          <button type="button" onClick={testPing}
-            className="w-full text-[10px] text-g-muted/40 hover:text-g-muted transition-colors text-center">
-            Test tilkobling
-          </button>
-          {pingResult && (
-            <p className="text-[10px] font-mono text-center px-2 py-1 rounded bg-black/30 break-all
-              {pingResult.startsWith('FEIL') ? 'text-red-400' : 'text-g-green'}">
-              {pingResult}
-            </p>
-          )}
 
           {/* Magic link toggle */}
           <button
