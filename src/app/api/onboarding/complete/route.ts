@@ -42,13 +42,15 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Database ikke tilgjengelig' }, { status: 500 });
 
-  // Check slug not taken
-  const { data: existing } = await db.from('workspaces').select('id').eq('id', workspaceSlug).single();
-  if (existing) {
-    return NextResponse.json({ error: `Workspace "${workspaceSlug}" er allerede tatt. Velg et annet navn.` }, { status: 409 });
+  // Check if workspace exists — if it does but has no owner, allow claiming it
+  const { data: existing } = await db.from('workspaces').select('id,owner_user_id').eq('id', workspaceSlug).single();
+  if (existing && existing.owner_user_id) {
+    return NextResponse.json({ error: `Workspace "${workspaceSlug}" tilhører allerede en annen bruker.` }, { status: 409 });
   }
 
-  // Create workspace
+  const isClaiming = !!existing;
+
+  // Create or claim workspace
   const credentials = {
     twitchClientId,
     twitchClientSecret,
@@ -71,24 +73,48 @@ export async function POST(req: NextRequest) {
     feil: null,
   };
 
-  const { error: wsError } = await db.from('workspaces').insert({
-    id: workspaceSlug,
-    owner_user_id: user.id,
-    streamer_name: twitchUsername,
-    brand_name: brandName || twitchUsername,
-    twitch_channel_name: twitchUsername,
-    discord_guild_id: discordGuildId,
-    live_channel_id: discordLiveChannelId || null,
-    bot_personality: 'dark_gaming',
-    plan: 'alpha',
-    settings_json: {
-      credentials,
-      kanalPreferanser,
-      stream_syklus: {},
-    },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
+  let wsError: any = null;
+
+  if (isClaiming) {
+    // Workspace exists (no owner) — claim it and update credentials
+    const { error } = await db.from('workspaces').update({
+      owner_user_id: user.id,
+      streamer_name: twitchUsername,
+      brand_name: brandName || twitchUsername,
+      twitch_channel_name: twitchUsername,
+      discord_guild_id: discordGuildId,
+      live_channel_id: discordLiveChannelId || null,
+      plan: 'alpha',
+      settings_json: {
+        credentials,
+        kanalPreferanser,
+        stream_syklus: {},
+      },
+      updated_at: new Date().toISOString(),
+    }).eq('id', workspaceSlug);
+    wsError = error;
+  } else {
+    // New workspace — insert
+    const { error } = await db.from('workspaces').insert({
+      id: workspaceSlug,
+      owner_user_id: user.id,
+      streamer_name: twitchUsername,
+      brand_name: brandName || twitchUsername,
+      twitch_channel_name: twitchUsername,
+      discord_guild_id: discordGuildId,
+      live_channel_id: discordLiveChannelId || null,
+      bot_personality: 'dark_gaming',
+      plan: 'alpha',
+      settings_json: {
+        credentials,
+        kanalPreferanser,
+        stream_syklus: {},
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    wsError = error;
+  }
 
   if (wsError) {
     return NextResponse.json({ error: wsError.message }, { status: 500 });
