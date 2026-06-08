@@ -79,20 +79,9 @@ export async function POST(req: NextRequest) {
   let wsError: any = null;
 
   if (isClaiming) {
-    // Workspace exists (no owner) — claim it and update credentials
+    // Workspace exists (no owner) — claim it but preserve existing settings_json
     const { error } = await db.from('workspaces').update({
       owner_user_id: user.id,
-      streamer_name: twitchUsername,
-      brand_name: brandName || twitchUsername,
-      twitch_channel_name: twitchUsername,
-      discord_guild_id: discordGuildId,
-      live_channel_id: discordLiveChannelId || null,
-      plan: 'alpha',
-      settings_json: {
-        credentials,
-        kanalPreferanser,
-        stream_syklus: {},
-      },
       updated_at: new Date().toISOString(),
     }).eq('id', workspaceSlug);
     wsError = error;
