@@ -6,6 +6,56 @@ import type { Settings } from '@/types';
 
 interface HealthItem { ok: boolean; melding: string; }
 
+// ─── Passord ──────────────────────────────────────────────────────────────────
+
+function PassordPanel() {
+  const [passord, setPassord] = useState('');
+  const [bekreft, setBekreft] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [feil, setFeil] = useState('');
+
+  async function settPassord(e: React.FormEvent) {
+    e.preventDefault();
+    if (passord !== bekreft) { setFeil('Passordene er ikke like'); return; }
+    setStatus('loading'); setFeil('');
+    const res = await fetch('/api/auth/set-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passord }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setFeil(data.error ?? 'Noe gikk galt'); setStatus('error'); return; }
+    setStatus('ok'); setPassord(''); setBekreft('');
+  }
+
+  return (
+    <div id="passord" className="bg-g-card border border-g-border rounded-xl p-5">
+      <h2 className="text-xs font-bold text-g-text mb-1">Sett passord</h2>
+      <p className="text-[9px] text-g-muted mb-4">Sett et passord så du kan logge inn direkte neste gang.</p>
+      <form onSubmit={settPassord} className="space-y-3 max-w-sm">
+        <div>
+          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Nytt passord</label>
+          <input type="password" value={passord} onChange={e => setPassord(e.target.value)}
+            minLength={6} required placeholder="Minst 6 tegn"
+            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40" />
+        </div>
+        <div>
+          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Bekreft passord</label>
+          <input type="password" value={bekreft} onChange={e => setBekreft(e.target.value)}
+            minLength={6} required placeholder="Gjenta passord"
+            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40" />
+        </div>
+        {feil && <p className="text-xs text-red-400">{feil}</p>}
+        {status === 'ok' && <p className="text-xs text-g-green">✓ Passord satt! Du kan nå logge inn med e-post og passord.</p>}
+        <button type="submit" disabled={status === 'loading'}
+          className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
+          {status === 'loading' ? 'Lagrer...' : 'Sett passord'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // ─── Integrasjons-helse ───────────────────────────────────────────────────────
 
 function HelsePanel() {
@@ -441,6 +491,9 @@ export default function InnstillingerSide() {
       ) : (
         <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />
       )}
+
+      {/* Passord */}
+      <PassordPanel />
 
       {/* Debug */}
       <DebugPanel />
