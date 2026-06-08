@@ -6,23 +6,30 @@ const PUBLIC_PATHS = ['/login', '/api/auth'];
 // Decode Supabase JWT from cookies — pure Edge-compatible (no Supabase client, no Node.js APIs)
 function getSessionFromCookies(request: NextRequest): { id: string; email: string; workspace_id: string } | null {
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-    const projectRef = url.match(/https?:\/\/([^.]+)\.supabase\.co/)?.[1];
-    if (!projectRef) return null;
+    const all = request.cookies.getAll();
 
-    const cookieName = `sb-${projectRef}-auth-token`;
+    // Find any sb-*-auth-token cookie (handles project ref mismatch between env vars)
+    const authCookie = all.find(c =>
+      /^sb-.+-auth-token$/.test(c.name)
+    );
 
-    // Try single cookie first, then chunked (Supabase splits large tokens)
-    let tokenValue = request.cookies.get(cookieName)?.value ?? '';
+    let tokenValue = authCookie?.value ?? '';
+
+    // Try chunked cookies if no single cookie found
     if (!tokenValue) {
-      const chunks: string[] = [];
-      for (let i = 0; i < 10; i++) {
-        const chunk = request.cookies.get(`${cookieName}.${i}`)?.value;
-        if (!chunk) break;
-        chunks.push(chunk);
+      const chunkCookie = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
+      if (chunkCookie) {
+        const base = chunkCookie.name.replace('.0', '');
+        const chunks: string[] = [];
+        for (let i = 0; i < 10; i++) {
+          const chunk = request.cookies.get(`${base}.${i}`)?.value;
+          if (!chunk) break;
+          chunks.push(chunk);
+        }
+        tokenValue = chunks.join('');
       }
-      tokenValue = chunks.join('');
     }
+
     if (!tokenValue) return null;
 
     const session = JSON.parse(decodeURIComponent(tokenValue));
