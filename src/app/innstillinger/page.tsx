@@ -577,7 +577,17 @@ function AutomatiseringerPanel() {
 
 // ─── Innstillinger-siden ───────────────────────────────────────────────────────
 
+type Fane = 'bots' | 'integrasjoner' | 'system' | 'konto';
+
+const FANER: { id: Fane; label: string; ikon: string; desc: string }[] = [
+  { id: 'bots',           label: 'Bots',          ikon: '🟣', desc: 'Twitch og Discord bot-kontroll' },
+  { id: 'integrasjoner',  label: 'Integrasjoner', ikon: '⚙',  desc: 'Kanaler, Twitch og sosiale medier' },
+  { id: 'system',         label: 'Systemstatus',  ikon: '◉',  desc: 'Health checks og debug' },
+  { id: 'konto',          label: 'Konto',         ikon: '◈',  desc: 'Passord og tilgang' },
+];
+
 export default function InnstillingerSide() {
+  const [aktivFane, setAktivFane] = useState<Fane>('bots');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -610,7 +620,7 @@ export default function InnstillingerSide() {
   function updateSocial(platform: string, value: string) {
     setSettings(prev => prev ? { ...prev, socials: { ...prev.socials, [platform]: value } } : null);
   }
-  function Toggle({ label, field }: { label: string; field: keyof Settings }) {
+  function SettingsToggle({ label, field }: { label: string; field: keyof Settings }) {
     const checked = settings?.[field] as boolean ?? false;
     return (
       <div className="flex items-center justify-between py-3 border-b border-g-border/50 last:border-0">
@@ -624,125 +634,281 @@ export default function InnstillingerSide() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Innstillinger</h1>
-        <p className="text-[9px] text-g-muted mt-0.5">Konfigurasjon, system health, automatiseringer og debug</p>
-      </div>
+    <div className="space-y-0">
 
-      {/* Snarvei-lenker */}
-      <div className="flex gap-2 flex-wrap">
-        {[
-          { label: 'Discord Kanaler', href: '#discord-kanaler' },
-          { label: 'Bot-innstillinger', href: '#automatiseringer' },
-          { label: 'Integrasjoner', href: '#helse' },
-          { label: 'Debug', href: '#debug' },
-          { label: 'Logging', href: '/logs' },
-          { label: 'QA', href: '/content-factory-admin/qa' },
-        ].map(l => (
-          <a key={l.label + l.href} href={l.href}
-            className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
-            {l.label}
-          </a>
-        ))}
-      </div>
-
-      {/* Discord kanal-mapping */}
-      <DiscordKanalerPanel />
-
-      {/* Bot-innstillinger og tone */}
-      <AutomatiseringerPanel />
-
-      {/* Integrasjons-helse */}
-      <HelsePanel />
-
-      {/* Integrasjonsinnstillinger */}
-      {settings ? (
-        <>
-          <div className="bg-g-card border border-g-border rounded-xl p-5">
-            <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">Discord</h2>
-            <div className="space-y-3">
-              {[
-                { label: 'Live Kanal ID', field: 'discordLiveChannelId' as keyof Settings, placeholder: '123456789012345678' },
-                { label: 'Varsel Rolle ID', field: 'discordLiveRoleId' as keyof Settings, placeholder: '123456789012345678' },
-              ].map(({ label, field, placeholder }) => (
-                <div key={field}>
-                  <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
-                  <input type="text" value={(settings[field] as string) || ''}
-                    onChange={e => update(field, e.target.value as Settings[typeof field])}
-                    placeholder={placeholder}
-                    className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
-                </div>
-              ))}
-              <Toggle label="Auto Post Live" field="autoPostLive" />
-              <Toggle label="Auto Post Promo" field="autoPostPromo" />
-              <Toggle label="Ping Rolle ved Live" field="pingRole" />
-            </div>
+      {/* ─── Topptekst + fane-nav ─────────────────────────────────────────────── */}
+      <div className="border-b border-g-border bg-g-sidebar/40 px-6 pb-0 pt-5">
+        <div className="flex items-end justify-between mb-4">
+          <div>
+            <h1 className="text-lg font-black tracking-wider text-g-text uppercase">Innstillinger</h1>
+            <p className="text-[9px] text-g-muted mt-0.5">{FANER.find(f => f.id === aktivFane)?.desc}</p>
           </div>
-
-          <div className="bg-g-card border border-g-border rounded-xl p-5">
-            <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">Twitch</h2>
-            <div className="space-y-3">
-              {[
-                { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'glenvex' },
-                { label: 'Twitch URL', field: 'twitchUrl' as keyof Settings, placeholder: 'https://twitch.tv/glenvex' },
-              ].map(({ label, field, placeholder }) => (
-                <div key={field}>
-                  <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
-                  <input type="text" value={(settings[field] as string) || ''}
-                    onChange={e => update(field, e.target.value as Settings[typeof field])}
-                    placeholder={placeholder}
-                    className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
-                </div>
-              ))}
-            </div>
+          <div className="flex items-center gap-2 pb-1">
+            {aktivFane === 'integrasjoner' && saved && <span className="text-[9px] text-g-green">✓ Lagret</span>}
+            {aktivFane === 'integrasjoner' && error && <span className="text-[9px] text-red-400">✗ {error}</span>}
+            {aktivFane === 'integrasjoner' && (
+              <button onClick={save} disabled={saving}
+                className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-[10px] font-bold uppercase tracking-widest rounded transition-all">
+                {saving ? 'Lagrer...' : 'Lagre'}
+              </button>
+            )}
           </div>
-
-          <div className="bg-g-card border border-g-border rounded-xl p-5">
-            <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">Sosiale Medier</h2>
-            <div className="space-y-3">
-              {(['tiktok', 'instagram', 'twitter', 'youtube', 'discord'] as const).map(platform => (
-                <div key={platform}>
-                  <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{platform}</label>
-                  <input type="text" value={settings.socials?.[platform] || ''}
-                    onChange={e => updateSocial(platform, e.target.value)}
-                    placeholder={`https://${platform}.com/glenvex`}
-                    className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button onClick={save} disabled={saving}
-              className="px-6 py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">
-              {saving ? 'Lagrer...' : saved ? '✓ Lagret!' : 'Lagre innstillinger'}
-            </button>
-            {error && <span className="text-xs text-red-400">✗ {error}</span>}
-          </div>
-        </>
-      ) : (
-        <div className="h-48 bg-g-card border border-g-border rounded-xl animate-pulse" />
-      )}
-
-      {/* Twitch Bot Admin */}
-      <TwitchBotAdminPanel />
-
-      {/* Passord */}
-      <PassordPanel />
-
-      {/* Debug */}
-      <DebugPanel />
-
-      {/* Navigasjonslenker */}
-      <div className="bg-g-card border border-g-border rounded-xl p-4">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Andre systemsider</p>
-        <div className="flex gap-2 flex-wrap">
-          <Link href="/logs" className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">Logging</Link>
-          <Link href="/system-health" className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">Systemhelse (full)</Link>
-          <Link href="/content-factory-admin/qa" className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">QA</Link>
-          <Link href="/setup-wizard" className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">Setup Wizard</Link>
         </div>
+
+        {/* Fane-knapper */}
+        <div className="flex gap-0">
+          {FANER.map(fane => (
+            <button key={fane.id} onClick={() => setAktivFane(fane.id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                aktivFane === fane.id
+                  ? 'border-g-green text-g-green'
+                  : 'border-transparent text-g-muted hover:text-g-text hover:border-g-border'
+              }`}>
+              <span className="text-sm">{fane.ikon}</span>
+              {fane.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ─── Fane-innhold ─────────────────────────────────────────────────────── */}
+      <div className="p-6">
+
+        {/* ── BOTS ──────────────────────────────────────────────────────────── */}
+        {aktivFane === 'bots' && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-5 items-start">
+              {/* Venstre: Twitch */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">🟣</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-g-muted">Twitch Bot</span>
+                </div>
+                <TwitchBotAdminPanel />
+              </div>
+
+              {/* Høyre: Discord */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">🔵</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-g-muted">Discord Bot</span>
+                </div>
+                <DiscordKanalerPanel />
+                <AutomatiseringerPanel />
+              </div>
+            </div>
+
+            {/* Info-widgets */}
+            <div className="grid grid-cols-3 gap-3 pt-2">
+              {[
+                {
+                  ikon: '⟳',
+                  tittel: 'Settings syncer innen 5 min',
+                  tekst: 'Endringer lagres til Supabase og plukkes opp av Railway-boten ved neste poll.',
+                },
+                {
+                  ikon: '📋',
+                  tittel: 'Bot-aktivitet logges automatisk',
+                  tekst: 'Alle meldinger boten sender (Twitch og Discord) registreres i aktivitetfeeden.',
+                },
+                {
+                  ikon: '⚡',
+                  tittel: 'Cross-platform kommandoer',
+                  tekst: '!discordsiste (Twitch) og !twitchsiste (Discord) gir AI-oppsummering på tvers.',
+                },
+              ].map(w => (
+                <div key={w.tittel} className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-g-green text-sm">{w.ikon}</span>
+                    <p className="text-[10px] font-bold text-g-text">{w.tittel}</p>
+                  </div>
+                  <p className="text-[9px] text-g-muted leading-relaxed">{w.tekst}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── INTEGRASJONER ────────────────────────────────────────────────── */}
+        {aktivFane === 'integrasjoner' && (
+          <div className="space-y-5">
+            {settings ? (
+              <div className="grid grid-cols-2 gap-5 items-start">
+                {/* Venstre kolonne */}
+                <div className="space-y-5">
+                  <div className="bg-g-card border border-g-border rounded-xl p-5">
+                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4 flex items-center gap-2">
+                      <span>🔵</span> Discord
+                    </h2>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Live Kanal ID', field: 'discordLiveChannelId' as keyof Settings, placeholder: '123456789012345678' },
+                        { label: 'Varsel Rolle ID', field: 'discordLiveRoleId' as keyof Settings, placeholder: '123456789012345678' },
+                      ].map(({ label, field, placeholder }) => (
+                        <div key={field}>
+                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
+                          <input type="text" value={(settings[field] as string) || ''}
+                            onChange={e => update(field, e.target.value as Settings[typeof field])}
+                            placeholder={placeholder}
+                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                        </div>
+                      ))}
+                      <SettingsToggle label="Auto Post Live" field="autoPostLive" />
+                      <SettingsToggle label="Auto Post Promo" field="autoPostPromo" />
+                      <SettingsToggle label="Ping Rolle ved Live" field="pingRole" />
+                    </div>
+                  </div>
+
+                  <div className="bg-g-card border border-g-border rounded-xl p-5">
+                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4 flex items-center gap-2">
+                      <span>🟣</span> Twitch
+                    </h2>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'glenvex' },
+                        { label: 'Twitch URL', field: 'twitchUrl' as keyof Settings, placeholder: 'https://twitch.tv/glenvex' },
+                      ].map(({ label, field, placeholder }) => (
+                        <div key={field}>
+                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
+                          <input type="text" value={(settings[field] as string) || ''}
+                            onChange={e => update(field, e.target.value as Settings[typeof field])}
+                            placeholder={placeholder}
+                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Høyre kolonne */}
+                <div className="space-y-5">
+                  <div className="bg-g-card border border-g-border rounded-xl p-5">
+                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Sosiale Medier</h2>
+                    <div className="space-y-3">
+                      {(['tiktok', 'instagram', 'twitter', 'youtube', 'discord'] as const).map(platform => (
+                        <div key={platform}>
+                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{platform}</label>
+                          <input type="text" value={settings.socials?.[platform] || ''}
+                            onChange={e => updateSocial(platform, e.target.value)}
+                            placeholder={`https://${platform}.com/glenvex`}
+                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tips-widget */}
+                  <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+                    <p className="text-[10px] font-bold text-g-text uppercase tracking-widest">Hvor finner jeg IDer?</p>
+                    {[
+                      { label: 'Discord Kanal-ID', tip: 'Discord → Høyreklikk kanal → Kopier kanal-ID (developer mode på)' },
+                      { label: 'Discord Rolle-ID', tip: 'Discord → Serverinnstillinger → Roller → Høyreklikk rolle' },
+                      { label: 'Twitch Credentials', tip: 'dev.twitch.tv → Your Console → Applications' },
+                    ].map(t => (
+                      <div key={t.label} className="border-b border-g-border/30 pb-2 last:border-0 last:pb-0">
+                        <p className="text-[9px] font-bold text-g-muted uppercase">{t.label}</p>
+                        <p className="text-[9px] text-g-muted/70 mt-0.5 leading-relaxed">{t.tip}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-5">
+                {[1, 2].map(i => <div key={i} className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SYSTEMSTATUS ─────────────────────────────────────────────────── */}
+        {aktivFane === 'system' && (
+          <div className="space-y-5">
+            <HelsePanel />
+
+            <div className="grid grid-cols-2 gap-5 items-start">
+              <DebugPanel />
+
+              {/* Systemsider + tips */}
+              <div className="space-y-3">
+                <div className="bg-g-card border border-g-border rounded-xl p-5">
+                  <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">Systemsider</p>
+                  <div className="space-y-1">
+                    {[
+                      { label: 'Logging',           href: '/logs',                        desc: 'Alle bot-logger og feilmeldinger' },
+                      { label: 'Systemhelse (full)', href: '/system-health',              desc: 'Detaljert helsesjekk' },
+                      { label: 'QA-oversikt',        href: '/content-factory-admin/qa',   desc: 'Content factory kvalitetskontroll' },
+                      { label: 'Setup Wizard',        href: '/setup-wizard',              desc: 'Oppsett av workspace' },
+                    ].map(l => (
+                      <Link key={l.href} href={l.href}
+                        className="flex items-center justify-between py-2 border-b border-g-border/30 last:border-0 group">
+                        <div>
+                          <p className="text-xs text-g-text group-hover:text-g-green transition-colors">{l.label}</p>
+                          <p className="text-[9px] text-g-muted">{l.desc}</p>
+                        </div>
+                        <span className="text-g-muted group-hover:text-g-green transition-colors text-xs">↗</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-g-text mb-2">API-snarveier</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: 'Status', href: '/api/status' },
+                      { label: 'Dashboard', href: '/api/dashboard' },
+                      { label: 'CF Health', href: '/api/content-factory/health' },
+                      { label: 'Bot Activity', href: '/api/bot-activity' },
+                      { label: 'Bot Health', href: '/api/bot-health' },
+                      { label: 'System Events', href: '/api/system-events?limit=20' },
+                    ].map(l => (
+                      <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
+                        className="px-2 py-1 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-mono">
+                        {l.label} ↗
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── KONTO ────────────────────────────────────────────────────────── */}
+        {aktivFane === 'konto' && (
+          <div className="grid grid-cols-2 gap-5 items-start">
+            <PassordPanel />
+
+            <div className="space-y-3">
+              <div className="bg-g-card border border-g-border rounded-xl p-5">
+                <p className="text-[10px] font-bold text-g-text mb-3">Tilgang og sikkerhet</p>
+                <div className="space-y-3">
+                  {[
+                    { tittel: 'Passord-basert innlogging', tekst: 'Sett et passord for raskere innlogging. Magic link (e-post) er alltid tilgjengelig som backup.' },
+                    { tittel: 'Én bruker per workspace', tekst: 'GLENVEX Creator OS er bygget for én administrator. Kontakt support for flerbruker-oppsett.' },
+                    { tittel: 'Supabase-autentisering', tekst: 'Innlogging håndteres av Supabase Auth. Sessions er kryptert og utløper automatisk.' },
+                  ].map(t => (
+                    <div key={t.tittel} className="border-b border-g-border/30 pb-3 last:border-0 last:pb-0">
+                      <p className="text-[10px] font-bold text-g-text">{t.tittel}</p>
+                      <p className="text-[9px] text-g-muted mt-1 leading-relaxed">{t.tekst}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <p className="text-[10px] font-bold text-g-text mb-2">Logg ut</p>
+                <p className="text-[9px] text-g-muted mb-3">Avslutter gjeldende session og sletter auth-cookie.</p>
+                <a href="/api/auth/logout"
+                  className="inline-block px-4 py-2 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded transition-all">
+                  Logg ut
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
