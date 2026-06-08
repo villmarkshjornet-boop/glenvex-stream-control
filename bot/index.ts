@@ -33,7 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -753,7 +753,8 @@ async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
   const idag = new Date().getDay();
   const neste = aktive.find((d: any) => DAGER.indexOf(d.dag) >= idag) ?? aktive[0];
   const apiKey = process.env.OPENAI_API_KEY;
-  let tekst = `📅 Neste stream: **${neste.dag}** kl. ${neste.tid} – **${neste.spill}**${neste.tittel ? ` – *${neste.tittel}*` : ''}\nFølg med på twitch.tv/glenvex 🔴`;
+  const twitchUrl = await getTwitchUrl().catch(() => `https://twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`);
+  let tekst = `📅 Neste stream: **${neste.dag}** kl. ${neste.tid} – **${neste.spill}**${neste.tittel ? ` – *${neste.tittel}*` : ''}\nFølg med på ${twitchUrl} 🔴`;
   if (apiKey) {
     const openai = new OpenAI({ apiKey });
     const res2 = await openai.chat.completions.create({
@@ -763,7 +764,7 @@ async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
       temperature: 0.9,
     });
     const ai = res2.choices[0]?.message?.content ?? '';
-    if (ai) tekst = `📅 ${ai}\ntwitch.tv/glenvex`;
+    if (ai) tekst = `📅 ${ai}\n${twitchUrl}`;
   }
   await discordSend(kanal, tekst, { trigger: 'stream_info', spill: neste.spill });
   addToMemory({ type: 'proaktiv', innhold: `stream-info: ${neste.spill}` });
@@ -907,7 +908,8 @@ client.on('guildMemberAdd', async (member) => {
   if (!kanal) return;
 
   const apiKey = process.env.OPENAI_API_KEY;
-  let velkomst = `Hei **${member.displayName}**, velkommen til GLENVEX sitt community! Sjekk twitch.tv/glenvex og slå på varslinger.`;
+  const twitchUrlVelkomst = await getTwitchUrl().catch(() => `https://twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`);
+  let velkomst = `Hei **${member.displayName}**, velkommen til GLENVEX sitt community! Sjekk ${twitchUrlVelkomst} og slå på varslinger.`;
 
   if (apiKey) {
     try {
@@ -915,7 +917,7 @@ client.on('guildMemberAdd', async (member) => {
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'Du er GLENVEX BOT. Skriv en kort, varm og energisk velkomstmelding på norsk. Nevn twitch.tv/glenvex. Maks 2 setninger.' },
+          { role: 'system', content: `Du er GLENVEX BOT. Skriv en kort, varm og energisk velkomstmelding på norsk. Nevn ${twitchUrlVelkomst}. Maks 2 setninger.` },
           { role: 'user', content: `Nytt medlem: ${member.displayName}` },
         ],
         max_tokens: 100,

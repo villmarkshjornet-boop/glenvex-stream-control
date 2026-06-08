@@ -30,7 +30,7 @@ Twitter-regler:
 - Inkluder 4-6 hashtags som faktisk er i bruk på Twitter for dette spillet
 - Eksempel GTA RP: #GTARP #NoPixel #GTA5 #Twitch #NorwegianStreamer
 - Eksempel Tarkov: #EscapeFromTarkov #Tarkov #EFT #Twitch #Gaming
-- Avslutt alltid med twitch.tv/glenvex
+- Avslutt alltid med ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`}
 
 Instagram-regler:
 - Inkluder 8-10 relevante hashtags for spillet og gaming-nisjen

@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
-import { getDb } from '@/lib/db';
+import { getDb, dbRawInsert } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { logSystemEvent } from '@/lib/systemEvents';
 
@@ -79,7 +79,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Opprett VOD-rad med PENDING status
-  const { data: vod, error: dbErr } = await db.from('content_vods').insert({
+  // Bruker dbRawInsert for å garantere service role key i Authorization-headeren (unngår RLS-blokkering)
+  const { data: vod, error: rawErr } = await dbRawInsert<{ id: string }>('content_vods', {
     workspace_id: getWorkspaceId(),
     stream_id: vodIdTall,
     twitch_vod_id: vodMeta.twitch_vod_id ?? vodIdTall,
@@ -93,9 +94,15 @@ export async function POST(req: NextRequest) {
     current_step: 'DOWNLOAD',
     progress_percent: 5,
     status_message: 'VOD opprettet – starter Railway...',
-  }).select().single();
+  });
 
-  if (dbErr) return NextResponse.json({ error: `DB-feil: ${dbErr.message}` }, { status: 500 });
+  if (rawErr || !vod) {
+    const isRls = rawErr?.toLowerCase().includes('row-level security') || rawErr?.toLowerCase().includes('policy');
+    const hint = isRls
+      ? ' Kjør i Supabase SQL Editor: ALTER TABLE content_vods DISABLE ROW LEVEL SECURITY;'
+      : '';
+    return NextResponse.json({ error: `DB-feil: ${rawErr}${hint}` }, { status: 500 });
+  }
 
   const vodId = vod.id;
   const botApiUrl = process.env.BOT_API_URL;

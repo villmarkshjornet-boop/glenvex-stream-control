@@ -31,7 +31,7 @@ Som "selger" for GLENVEX:
 - Skap FOMO – folk som ikke følger går glipp av noe genuint bra
 - Vær konkret: "sist stream skjedde X og du var ikke der" slår "sjekk kanalen" 10-0
 - Oppfordre til klipp og deling naturlig – ikke som en robot, men som en som faktisk ble imponert
-- Minne om twitch.tv/glenvex og varslinger når det passer naturlig
+- Minne om ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`} og varslinger når det passer naturlig
 - Bruk community-kunnskap til å gjøre promotering personlig og relevant
 
 Regler:
@@ -236,13 +236,13 @@ export async function generateChatReply(
 // ── Proaktive meldinger ───────────────────────────────────────────────────────
 
 const PROAKTIVE_MELDINGER = [
-  '👀 Er det noen her som ikke har fulgt twitch.tv/glenvex ennå? Det er ulovlig og dere vet det 🔴',
+  `👀 Er det noen her som ikke har fulgt ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`} ennå? Det er ulovlig og dere vet det 🔴`,
   '🎬 Seriøst spørsmål – hva er den beste clipsen dere har sett fra GLENVEX? Del den her, beste clip vinner æren 👑',
   '🔥 Hvilket spill vil dere se GLENVEX ta mer? Stem i chatten – vi hører faktisk på dere (noen ganger)',
   '⚡ Utfordring: Send stream-linken til én venn i dag. Én ny seer fra deg = du er offisielt en MVP 💪',
   '🎮 Hva er det kuleste som har skjedd på stream så langt? Noen som har clipset det? Hvis ikke – GJØR DET neste gang 📸',
   '💬 Hot take: Hva er GLENVEX sitt beste spill? Diskuter. Jeg har meninger og de er riktige 😤',
-  '🔔 PSA: Hvis du ikke har slått på Twitch-varslinger for GLENVEX, sover du gjennom de beste øyeblikkene. Fix it. twitch.tv/glenvex',
+  `🔔 PSA: Hvis du ikke har slått på Twitch-varslinger for GLENVEX, sover du gjennom de beste øyeblikkene. Fix it. ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`}`,
   '🚀 Én deling av en clip kan gi GLENVEX hundrevis av nye seere. Del gjerne neste gang dere ser noe bra 📢',
   '🎯 Ukens spørsmål: Hva vil dere se mer av på stream? Fortell meg alt, jeg videresender (kanskje) 👂',
   '😤 Ingen clips fra siste stream? Hva holder dere på med? Neste gang det skjer noe episk – klikk clip-knappen.',

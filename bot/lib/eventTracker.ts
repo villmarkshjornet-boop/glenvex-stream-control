@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'events.json');
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
 interface Raid {
   username: string;
@@ -48,11 +50,26 @@ function save(data: EventData) {
   } catch {}
 }
 
+function syncToSupabase(event: 'raid' | 'giftsub', payload: Record<string, any>) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  const sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  sb.from('system_events').insert({
+    workspace_id: WORKSPACE_ID,
+    source: 'twitch_bot',
+    event_type: event === 'raid' ? 'RAID_RECEIVED' : 'GIFT_SUB_RECEIVED',
+    title: event === 'raid' ? `Raid fra ${payload.username} (${payload.viewers} seere)` : `Gift sub fra ${payload.username} (${payload.count})`,
+    severity: 'info',
+    metadata: { ...payload, workspace_id: WORKSPACE_ID },
+  }).then().catch(() => {});
+}
+
 export function trackRaid(username: string, viewers: number) {
   const data = load();
   data.raids.push({ username, viewers, timestamp: new Date().toISOString() });
   save(data);
-  // Raids lagres i lokal fil – nok for statistikk
+  syncToSupabase('raid', { username, viewers, timestamp: new Date().toISOString() });
 }
 
 export function trackGiftSub(username: string, count: number) {
@@ -64,6 +81,7 @@ export function trackGiftSub(username: string, count: number) {
     data.giftSubs.push({ username, count, timestamp: new Date().toISOString() });
   }
   save(data);
+  syncToSupabase('giftsub', { username, count, timestamp: new Date().toISOString() });
 }
 
 export function getWeeklyData(): EventData {

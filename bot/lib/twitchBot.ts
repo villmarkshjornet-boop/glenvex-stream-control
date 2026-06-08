@@ -7,10 +7,9 @@ import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
-import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs } from './botKanalPreferanser';
+import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
-const DISCORD_URL = process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
 const KANAL = process.env.TWITCH_USERNAME?.toLowerCase() || 'glenvex';
 
 const cooldowns = new Map<string, number>();
@@ -33,21 +32,28 @@ export function setOnSubCallback(cb: (username: string) => Promise<void>): void 
   _onSubCallback = cb;
 }
 
-const DISCORD_MELDINGER = [
-  `Bli med i GLENVEX sitt Discord! Snakk med community, se klipp og få live-varsling: ${DISCORD_URL} GlitchCat`,
-  `Har du ikke jotnet Discord ennå? Kom innom: ${DISCORD_URL} PogChamp`,
-  `Discord-chatten er varm nå! Bli med: ${DISCORD_URL} 👾`,
-  `For drops, klipp og kaos utenom stream – Discord er stedet: ${DISCORD_URL} Kappa`,
-  `Stream-varslinger og community på Discord: ${DISCORD_URL} FeelsGoodMan`,
-];
+// Henter Discord URL fra Supabase hver gang så det alltid er oppdatert
+async function getDiscordMeldinger(): Promise<string[]> {
+  const url = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
+  return [
+    `Bli med i GLENVEX sitt Discord! Snakk med community, se klipp og få live-varsling: ${url} GlitchCat`,
+    `Har du ikke jotnet Discord ennå? Kom innom: ${url} PogChamp`,
+    `Discord-chatten er varm nå! Bli med: ${url} 👾`,
+    `For drops, klipp og kaos utenom stream – Discord er stedet: ${url} Kappa`,
+    `Stream-varslinger og community på Discord: ${url} FeelsGoodMan`,
+  ];
+}
 
-const SYSTEM_PROMPT = `Du er GLENVEX BOT i Twitch-chat.
+async function getSystemPrompt(): Promise<string> {
+  const discordUrl = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'discord.gg/glenvex';
+  return `Du er GLENVEX BOT i Twitch-chat.
 Regler:
 - VELDIG korte svar – maks 1 setning, helst under 10 ord
 - Norsk med litt gaming-slang
 - Bruk Twitch-emotes naturlig: Kappa PogChamp LUL FeelsGoodMan GlitchCat Pog
 - Svar kun hvis det er relevant og morsomt
-- Promoter discord.gg/glenvex naturlig innimellom`;
+- Promoter ${discordUrl} naturlig innimellom`;
+}
 
 let client: tmi.Client | null = null;
 let sisteDiscordMelding = 0;
@@ -93,7 +99,7 @@ async function aiSvar(kontekst: string, discordCtx?: string): Promise<string> {
   if (!apiKey) return '';
   try {
     const openai = new OpenAI({ apiKey });
-    let systemPrompt = SYSTEM_PROMPT;
+    let systemPrompt = await getSystemPrompt().catch(() => 'Du er GLENVEX BOT i Twitch-chat. Veldig korte norske svar.');
     if (discordCtx) {
       systemPrompt += `\n\nFersk Discord-aktivitet (bruk til å svare på Discord-spørsmål):\n${discordCtx}`;
       logBotAgentEvent({ source: 'twitch', event_type: 'cross_platform_context_used', metadata: { type: 'TWITCH_BOT_USED_DISCORD_CONTEXT' } });
@@ -489,7 +495,8 @@ export function startTwitchBot() {
 
     if (Date.now() - sisteDiscordMelding < DISCORD_INTERVAL_MS) return;
     sisteDiscordMelding = Date.now();
-    const melding = DISCORD_MELDINGER[Math.floor(Math.random() * DISCORD_MELDINGER.length)];
+    const meldinger = await getDiscordMeldinger();
+    const melding = meldinger[Math.floor(Math.random() * meldinger.length)];
     await chatSend(`#${KANAL}`, melding, { trigger: 'discord_promo' });
   }, 5 * 60 * 1000);
 

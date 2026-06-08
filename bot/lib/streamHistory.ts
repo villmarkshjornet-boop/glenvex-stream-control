@@ -1,7 +1,16 @@
 import fs from 'fs';
 import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
 const FILE = path.join(process.cwd(), 'data', 'stream-history.json');
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
 
 export interface StreamSession {
   id: string;
@@ -88,7 +97,25 @@ export function endSession(followerGain = 0) {
   save(history.slice(0, 50));
   activeSession = null;
 
-  // Data lagres i lokal fil – Supabase-sync via separat mekanisme
+  // Sync til Supabase stream_history for at Sponsor Manager og andre API-er får data
+  const sb = getSupabase();
+  if (sb) {
+    sb.from('stream_history').upsert({
+      id: session.id,
+      workspace_id: WORKSPACE_ID,
+      title: session.title,
+      game: session.game,
+      started_at: session.startedAt,
+      ended_at: session.endedAt,
+      peak_viewers: session.peakViewers,
+      avg_viewers: session.avgViewers,
+      duration_minutes: session.durationMinutes,
+      follower_gain: session.followerGain,
+      chat_messages: session.chatMessages,
+      raids_during: session.raidsDuring,
+      subs_gained: session.subsGained,
+    }, { onConflict: 'id' }).then().catch(() => {});
+  }
 }
 
 export function getHistory(): StreamSession[] {

@@ -101,6 +101,22 @@ export async function getCooldownMs(): Promise<number> {
   return sek * 1000;
 }
 
+// Hent Twitch URL og sosiale lenker fra Supabase settings_json
+export async function getTwitchUrl(): Promise<string> {
+  const json = await loadSettingsJson();
+  return (json as any)?.twitchUrl || (json as any)?.socials?.twitch || process.env.TWITCH_URL || `https://twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`;
+}
+
+export async function getDiscordInviteUrl(): Promise<string> {
+  const json = await loadSettingsJson();
+  return (json as any)?.socials?.discord || process.env.DISCORD_INVITE_URL || '';
+}
+
+export async function getSocialsFromSettings(): Promise<Record<string, string | undefined>> {
+  const json = await loadSettingsJson();
+  return (json as any)?.socials ?? {};
+}
+
 // Fallback: env → prefs → null
 export async function getSubsKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));

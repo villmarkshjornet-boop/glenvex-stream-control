@@ -34,9 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (mode === 'signup') {
-    let userId: string | null = null;
-
-    // Prøv å opprette ny bruker
+    // Prøv å opprette ny bruker via admin API
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -44,22 +42,23 @@ export async function POST(req: NextRequest) {
     });
 
     if (createErr) {
-      // Bruker finnes allerede (delvis oppretting eller tidligere forsøk) — oppdater passordet
+      // Sjekk om brukeren allerede finnes (manuelt opprettet eller tidligere forsøk)
       const { data: list } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      const existing = list?.users?.find((u: any) => u.email === email);
+      const existing = (list?.users ?? []).find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+
       if (existing) {
-        userId = existing.id;
-        const { error: updErr } = await supabase.auth.admin.updateUserById(userId, {
-          password,
-          email_confirm: true,
-        });
-        if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
+        // Bruker finnes — oppdater passord og logg inn
+        await supabase.auth.admin.updateUserById(existing.id, { password, email_confirm: true }).catch(() => {});
       } else {
-        return NextResponse.json({ error: createErr.message }, { status: 400 });
+        // Supabase blokkerer oppretting — gi forklarende melding
+        const msg = createErr.message.toLowerCase().includes('not allowed')
+          ? 'Kontoen kan ikke opprettes automatisk. Be administrator opprette brukeren i Supabase Dashboard (Authentication → Users → Add user), og logg deretter inn normalt.'
+          : createErr.message;
+        return NextResponse.json({ error: msg }, { status: 400 });
       }
     }
 
-    // Logg inn umiddelbart
+    // Logg inn med oppgitt passord
     const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
     if (signInErr) return NextResponse.json({ error: signInErr.message }, { status: 400 });
 

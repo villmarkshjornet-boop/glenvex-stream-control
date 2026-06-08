@@ -15,19 +15,55 @@ async function getTwitchFollowers(broadcasterId: string): Promise<number> {
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
   if (!clientId || !clientSecret) return 0;
   try {
-    const tokenRes = await fetch(
-      `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-      { method: 'POST', signal: AbortSignal.timeout(5000) }
-    );
-    const td = await tokenRes.json() as any;
-    const token = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '') || td.access_token;
+    // channels/followers krever user OAuth med moderator:read:followers scope
+    // Prøv BOT_OAUTH og USER_OAUTH før client credentials (som IKKE har denne scope)
+    const userToken = (process.env.TWITCH_BOT_OAUTH ?? process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
+    let token = userToken;
+
+    if (!token) {
+      // Fall tilbake til client credentials (funker IKKE for followers siden 2023 – returnerer 0)
+      const tokenRes = await fetch(
+        `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
+        { method: 'POST', signal: AbortSignal.timeout(5000) }
+      );
+      const td = await tokenRes.json() as any;
+      token = td.access_token ?? '';
+    }
+
     const res = await fetch(
       `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}&first=1`,
       { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
     );
-    if (!res.ok) return 0;
+    if (!res.ok) {
+      // Prøv å lese fra Supabase workspace-cache hvis API feiler
+      return 0;
+    }
     const d = await res.json() as any;
-    return d.total ?? 0;
+    const total = d.total ?? 0;
+
+    // Cache i Supabase for fremtidige kall
+    const { getDb } = await import('@/lib/db');
+    const { getWorkspaceId } = await import('@/lib/workspace');
+    const db = getDb();
+    if (db && total > 0) {
+      const wsId = getWorkspaceId();
+      const { data } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+      const current = (data as any)?.settings_json ?? {};
+      const metrics = { ...(current.metrics ?? {}), followerCount: total, followerUpdatedAt: new Date().toISOString() };
+      db.from('workspaces').update({ settings_json: { ...current, metrics } }).eq('id', wsId).then(undefined, () => {});
+    }
+    return total;
+  } catch { return 0; }
+}
+
+async function getCachedFollowers(): Promise<number> {
+  try {
+    const { getDb } = await import('@/lib/db');
+    const { getWorkspaceId } = await import('@/lib/workspace');
+    const db = getDb();
+    if (!db) return 0;
+    const { data } = await db.from('workspaces').select('settings_json').eq('id', getWorkspaceId()).single();
+    return (data as any)?.settings_json?.metrics?.followerCount ?? 0;
   } catch { return 0; }
 }
 
@@ -72,7 +108,9 @@ export async function GET() {
         .order('created_at', { ascending: false }).limit(1000),
       db?.from('partners').select('navn,aktiv').eq('workspace_id', wsId),
       db?.from('workspaces').select('settings_json').eq('id', wsId).single(),
-      broadcasterId ? getTwitchFollowers(broadcasterId) : Promise.resolve(0),
+      broadcasterId
+        ? getTwitchFollowers(broadcasterId).then(async f => f > 0 ? f : getCachedFollowers())
+        : getCachedFollowers(),
     ]);
 
     const history: any[] = streamHistRes?.data ?? [];

@@ -7,6 +7,19 @@ import { getWorkspaceId } from '@/lib/workspace';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  // Les alltid fra Supabase først – lokal fil mangler etter Vercel cold-start
+  const db = getDb();
+  if (db) {
+    try {
+      const wsId = getWorkspaceId();
+      const { data } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+      const botSettings = (data as any)?.settings_json?.botSettings;
+      if (botSettings && Object.keys(botSettings).length > 0) {
+        const memory = getRecentMemory(undefined, 20);
+        return NextResponse.json({ settings: { ...getBotSettings(), ...botSettings }, memory });
+      }
+    } catch {}
+  }
   const settings = getBotSettings();
   const memory = getRecentMemory(undefined, 20);
   return NextResponse.json({ settings, memory });
