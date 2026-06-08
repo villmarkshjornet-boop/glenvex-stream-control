@@ -1324,7 +1324,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
   try {
     const member = await reaction.message.guild?.members.fetch(user.id).catch(() => null);
     if (!member) return;
-    addReaction(user.id, user.username, member.displayName);
+    addReaction(user.id, user.username ?? user.id, member.displayName);
   } catch {}
 });
 
