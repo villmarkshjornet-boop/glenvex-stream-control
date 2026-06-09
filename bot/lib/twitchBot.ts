@@ -309,7 +309,8 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet GLENVEX med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
 
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
-    const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom! Sjekk Discord: ${DISCORD_URL}`;
+    const discordUrlRaid = await getDiscordInviteUrl();
+    const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom!${discordUrlRaid ? ` Sjekk Discord: ${discordUrlRaid}` : ''}`;
 
     await chatSend(channel, melding, { trigger: 'raid', username, viewers });
 
@@ -462,7 +463,8 @@ export function startTwitchBot() {
     const spørOmDiscord = tekLower.includes('discord') || tekLower.includes('server');
     if (spørOmDiscord) {
       cooldowns.set(brukernavn, Date.now());
-      await chatSend(channel, `@${tags.username} Discord er her: ${DISCORD_URL} PogChamp`, { trigger: 'discord_mention', username: tags.username });
+      const discordUrlChat = await getDiscordInviteUrl();
+      await chatSend(channel, `@${tags.username} Discord er her: ${discordUrlChat || 'discord.gg/glenvex'} PogChamp`, { trigger: 'discord_mention', username: tags.username });
       return;
     }
 
