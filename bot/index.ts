@@ -37,6 +37,7 @@ import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVa
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
+import { startWorkspaceManager } from './lib/workspaceManager';
 import OpenAI from 'openai';
 
 // Log + send Discord-melding
@@ -1158,6 +1159,7 @@ client.once('clientReady', () => {
   startLearningAggregator();
   startRecoveryEngine();
   startSystemEventsFlusher();
+  startWorkspaceManager();
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: 'GLENVEX Bot startet', severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});

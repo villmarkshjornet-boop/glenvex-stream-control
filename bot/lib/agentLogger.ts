@@ -16,6 +16,7 @@ function getSb() {
 }
 
 interface BotAgentEvent {
+  workspaceId?: string;
   source: 'twitch' | 'discord' | 'content_factory';
   event_type: string;
   username?: string;
@@ -47,7 +48,7 @@ async function flushEvents(): Promise<void> {
     return;
   }
   const rows = batch.map(e => ({
-    workspace_id:     WORKSPACE_ID,
+    workspace_id:     e.workspaceId ?? WORKSPACE_ID,
     source:           e.source,
     event_type:       e.event_type,
     username:         e.username        ?? null,
@@ -87,6 +88,7 @@ async function flushEvents(): Promise<void> {
 
 /** Logg en chat-melding (Twitch eller Discord) til ai_agent_events. */
 export function logChatMessage(params: {
+  workspaceId?: string;
   source: 'twitch' | 'discord';
   username: string;
   message_text: string;
@@ -95,6 +97,7 @@ export function logChatMessage(params: {
   metadata?: Record<string, any>;
 }): void {
   logBotAgentEvent({
+    workspaceId:     params.workspaceId,
     source:          params.source,
     event_type:      params.source === 'twitch' ? 'chat_message' : 'discord_message',
     username:        params.username,

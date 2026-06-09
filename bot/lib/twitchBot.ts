@@ -59,6 +59,39 @@ let client: tmi.Client | null = null;
 let sisteDiscordMelding = 0;
 const DISCORD_INTERVAL_MS = 25 * 60 * 1000;
 
+// ─── Multi-tenant ekstern kanal-ruting ────────────────────────────────────────
+
+type ExternalChannelHandler = (channel: string, username: string, text: string, tags: tmi.ChatUserstate) => void;
+const externalChannelHandlers = new Map<string, ExternalChannelHandler>();
+
+/**
+ * Registrer en ekstern workspace-kanal på den delte tmi.js-klienten.
+ * Returnerer en cleanup-funksjon som forlater kanalen og fjerner handleren.
+ */
+export function registerExternalChannel(channel: string, handler: ExternalChannelHandler): () => void {
+  const ch = channel.toLowerCase().replace(/^#/, '');
+  externalChannelHandlers.set(ch, handler);
+
+  if (client) {
+    const joined = client.getChannels();
+    if (!joined.includes(`#${ch}`)) {
+      client.join(ch).catch((err: Error) =>
+        console.error(`[twitchBot] Kan ikke joine ${ch}:`, err.message?.slice(0, 80))
+      );
+    }
+  }
+
+  return () => {
+    externalChannelHandlers.delete(ch);
+    client?.part(ch).catch(() => {});
+  };
+}
+
+/** Send en melding i en kanal via den delte tmi.js-klienten (for workspace bots). */
+export function sayInChannel(channel: string, message: string): void {
+  client?.say(channel.startsWith('#') ? channel : `#${channel}`, message).catch(() => {});
+}
+
 async function postTilDiscord(channelId: string, payload: object) {
   const token = process.env.DISCORD_BOT_TOKEN;
   if (!token || !channelId) return;
@@ -290,6 +323,10 @@ export function startTwitchBot() {
 
   client.connect().then(() => {
     console.log(`  ✓ Twitch chat-bot koblet til #${KANAL}`);
+    // Join eventuelle workspace-kanaler som ble registrert før connect()
+    for (const ch of externalChannelHandlers.keys()) {
+      client!.join(ch).catch(() => {});
+    }
     // Start følger-polling etter 30s (vent på at broadcaster ID er klart)
     setTimeout(() => {
       sjekkNyeFollowers();
@@ -425,6 +462,16 @@ export function startTwitchBot() {
   client.on('message', async (channel, tags, message, self) => {
     if (self) return;
     if (!tags.username) return;
+
+    // Rut til workspace-handler hvis dette ikke er hoved-kanalen
+    const chNavn = channel.replace('#', '').toLowerCase();
+    if (chNavn !== KANAL) {
+      const extHandler = externalChannelHandlers.get(chNavn);
+      if (extHandler) {
+        extHandler(channel, tags.username, message, tags);
+        return;
+      }
+    }
 
     const brukernavn = tags.username.toLowerCase();
     const tekst = message.trim();

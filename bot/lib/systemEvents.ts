@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 type Severity = 'info' | 'warning' | 'error' | 'critical';
 
 export interface SystemEvent {
+  workspaceId?: string;
   source: string;
   event_type: string;
   title: string;
@@ -39,7 +40,7 @@ async function flush() {
     if (!sb) return;
     const { error } = await sb.from('system_events').insert(
       batch.map(e => ({
-        workspace_id: WORKSPACE_ID,
+        workspace_id: e.workspaceId ?? WORKSPACE_ID,
         source:       e.source,
         event_type:   e.event_type,
         title:        e.title,
@@ -71,7 +72,7 @@ export async function logSystemEventNow(event: SystemEvent): Promise<void> {
   if (!sb) { logSystemEvent(event); return; }
   try {
     const { error } = await sb.from('system_events').insert({
-      workspace_id: WORKSPACE_ID,
+      workspace_id: event.workspaceId ?? WORKSPACE_ID,
       source:       event.source,
       event_type:   event.event_type,
       title:        event.title,

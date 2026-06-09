@@ -114,7 +114,7 @@ export function endSession(followerGain = 0) {
       chat_messages: session.chatMessages,
       raids_during: session.raidsDuring,
       subs_gained: session.subsGained,
-    }, { onConflict: 'id' }).then().catch(() => {});
+    }, { onConflict: 'id' }).then(undefined, () => {});
   }
 }
 
