@@ -109,10 +109,17 @@ export async function GET() {
       ? `✅ workspace_id er konsistent: "${vercelWsId}"`
       : `ℹ️ Ingen data funnet for "${vercelWsId}" og ingen andre workspaces med data heller. Kanskje boten aldri har kjørt?`;
 
+  // Vis prosjekt-ID fra Supabase-URL (de første 20 tegnene etter https://)
+  const supabaseUrl = process.env.SUPABASE_URL ?? '';
+  const supabaseProjectHint = supabaseUrl
+    ? supabaseUrl.replace('https://', '').split('.')[0].slice(0, 20) + '...'
+    : '(SUPABASE_URL ikke satt på Vercel)';
+
   return NextResponse.json({
     ok: true,
     instructions,
     mismatch,
+    vercelSupabaseProject: supabaseProjectHint,
     vercelWorkspaceId: vercelWsId,
     vercelEnvWorkspaceId: vercelEnvId,
     dashboardSeesData: {
