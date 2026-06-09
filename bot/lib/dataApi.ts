@@ -8,6 +8,7 @@ import { logBotEvent, updateStreamSyklus } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
 function readFile(navn: string): any {
   const file = path.join(DATA_DIR, `${navn}.json`);
