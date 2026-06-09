@@ -62,7 +62,7 @@ function syncToSupabase(event: 'raid' | 'giftsub', payload: Record<string, any>)
     title: event === 'raid' ? `Raid fra ${payload.username} (${payload.viewers} seere)` : `Gift sub fra ${payload.username} (${payload.count})`,
     severity: 'info',
     metadata: { ...payload, workspace_id: WORKSPACE_ID },
-  }).then().catch(() => {});
+  }).then(undefined, () => {});
 }
 
 export function trackRaid(username: string, viewers: number) {
