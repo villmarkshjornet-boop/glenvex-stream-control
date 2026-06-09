@@ -92,25 +92,25 @@ async function importTwitchHistory(db: any, ws: string): Promise<{ imported: num
       .from('stream_history')
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', ws)
-      .eq('id', streamId);
+      .eq('stream_id', streamId);
 
     if ((existingHistory ?? 0) === 0) {
-      // Skriv til stream_history
+      // Skriv til stream_history (id er UUID auto-generert, stream_id er Twitch-ID)
       const { error: histErr } = await db.from('stream_history').upsert({
-        id: streamId,
+        stream_id: streamId,
         workspace_id: ws,
         title: v.title ?? '',
         game: null, // Twitch /videos gir ikke game_name
         started_at: startedAt,
         ended_at: endedAt,
         peak_viewers: v.view_count ?? 0,
-        avg_viewers: Math.round((v.view_count ?? 0) * 0.3), // estimat
+        avg_viewers: Math.round((v.view_count ?? 0) * 0.3),
         duration_minutes: durationMin,
-        follower_gain: 0,
+        followers_gained: 0,
         chat_messages: 0,
         raids_during: 0,
         subs_gained: 0,
-      }, { onConflict: 'id' });
+      }, { onConflict: 'stream_id' });
 
       if (histErr) {
         result.errors.push(`stream_history ${streamId}: ${histErr.message?.slice(0, 80)}`);
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
               peak_viewers: 0,
               avg_viewers: 0,
               duration_minutes: durationMin,
-              follower_gain: 0,
+              followers_gained: 0,
               chat_messages: 0,
               raids_during: 0,
               subs_gained: 0,

@@ -111,7 +111,7 @@ export function endSession(followerGain = 0) {
       peak_viewers: session.peakViewers,
       avg_viewers: session.avgViewers,
       duration_minutes: session.durationMinutes,
-      follower_gain: session.followerGain,
+      followers_gained: session.followerGain,
       chat_messages: session.chatMessages,
       raids_during: session.raidsDuring,
       subs_gained: session.subsGained,
