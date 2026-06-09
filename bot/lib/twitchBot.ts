@@ -214,11 +214,9 @@ async function sjekkNyeFollowers() {
     const navnListe = (data.data ?? []).slice(0, antallNye).map((f: any) => f.user_name).filter(Boolean);
     if (navnListe.length > 0) {
       for (const navn of navnListe) {
-        logHendelse('follow', { username: navn, total: nyAntall });
         logBotAgentEvent({ source: 'twitch', event_type: 'follow', username: navn, importance_score: 40, metadata: { total: nyAntall } });
       }
     } else {
-      logHendelse('follow', { count: antallNye, total: nyAntall });
       logBotAgentEvent({ source: 'twitch', event_type: 'follow', importance_score: 30, metadata: { count: antallNye, total: nyAntall } });
     }
 
@@ -268,41 +266,6 @@ async function sjekkNyeFollowers() {
   } catch {}
 }
 
-// ─── Live-hendelser → Supabase (buffret, skrives hvert 30s) ──────────────────
-
-const hendelsesBuffer: { type: string; ts: string; [k: string]: any }[] = [];
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
-
-function logHendelse(type: string, data: Record<string, any>) {
-  hendelsesBuffer.push({ type, ts: new Date().toISOString(), ...data });
-}
-
-async function flushHendelser() {
-  if (hendelsesBuffer.length === 0) return;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return;
-  const batch = hendelsesBuffer.splice(0, hendelsesBuffer.length); // tøm buffer
-  try {
-    const { createClient } = require('@supabase/supabase-js');
-    const ws = require('ws');
-    const sb = createClient(url, key, { realtime: { transport: ws } });
-    const { data: ws_ } = await sb.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single();
-    const existing = ws_?.settings_json ?? {};
-    const liveEvents: any[] = existing.live_events ?? [];
-    liveEvents.unshift(...batch);
-    if (liveEvents.length > 150) liveEvents.length = 150;
-    await sb.from('workspaces').update({
-      settings_json: { ...existing, live_events: liveEvents },
-    }).eq('id', WORKSPACE_ID);
-  } catch {
-    // Legg tilbake i bufferet hvis skriving feilet
-    hendelsesBuffer.unshift(...batch);
-  }
-}
-
-setInterval(flushHendelser, 30_000);
-
 // ─── Partner-promo via Supabase ───────────────────────────────────────────────
 
 
@@ -340,7 +303,6 @@ export function startTwitchBot() {
 
   client.on('raided', async (channel, username, viewers) => {
     trackRaid(username, viewers);
-    logHendelse('raid', { username, viewers });
     logBotAgentEvent({ source: 'twitch', event_type: 'raid', username, importance_score: Math.min(100, viewers / 2), metadata: { viewers } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_EVENT_RECEIVED', title: `Raid fra ${username}: ${viewers} seere`, severity: 'info', metadata: { type: 'raid', username, viewers } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet GLENVEX med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
@@ -369,7 +331,6 @@ export function startTwitchBot() {
   // ─── SUBSCRIPTION ──────────────────────────────────────────────────────────
 
   client.on('subscription', async (channel, username, _method, _message, _userstate) => {
-    logHendelse('sub', { username });
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
@@ -385,7 +346,6 @@ export function startTwitchBot() {
   // ─── RESUB ─────────────────────────────────────────────────────────────────
 
   client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
-    logHendelse('resub', { username, months });
     logBotAgentEvent({ source: 'twitch', event_type: 'resub', username, importance_score: 75, metadata: { months } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Resub: ${username} (${months} mnd)`, severity: 'info', metadata: { type: 'resub', giver: username, mottaker: username, months } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
@@ -398,7 +358,6 @@ export function startTwitchBot() {
 
   client.on('subgift', async (channel, username, _streakMonths, recipient, _methods, _userstate) => {
     trackGiftSub(username, 1);
-    logHendelse('giftsub', { username, recipient });
     logBotAgentEvent({ source: 'twitch', event_type: 'giftsub', username, importance_score: 85, metadata: { recipient } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_GIFT_SUB_RECEIVED', title: `Gift sub: ${username} → ${recipient ?? 'ukjent'}`, severity: 'info', metadata: { type: 'gift_sub', giver: username, mottaker: recipient ?? 'ukjent', antall: 1 } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
@@ -412,7 +371,6 @@ export function startTwitchBot() {
 
   client.on('submysterygift', async (channel, username, numbOfSubs, _methods, _userstate) => {
     trackGiftSub(username, numbOfSubs);
-    logHendelse('mystery_gift', { username, count: numbOfSubs });
     logBotAgentEvent({ source: 'twitch', event_type: 'mystery_gift', username, importance_score: 90, metadata: { count: numbOfSubs } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_GIFT_SUB_RECEIVED', title: `Mystery gift: ${username} giftet ${numbOfSubs} subs til community`, severity: 'info', metadata: { type: 'mystery_gift', giver: username, mottaker: 'community', antall: numbOfSubs } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Mass gift-giver – ${numbOfSubs} subs`, confidence_score: 0.95, metadata: { gifter: true, totalGifts: numbOfSubs } }).catch(() => {});
@@ -436,7 +394,6 @@ export function startTwitchBot() {
   client.on('cheer', async (channel, userstate, _message) => {
     const bits = userstate.bits ?? '?';
     const username = userstate.username ?? 'Noen';
-    logHendelse('cheer', { username, bits });
     const bitsNum = typeof bits === 'string' ? parseInt(bits) || 0 : bits;
     logBotAgentEvent({ source: 'twitch', event_type: 'cheer', username, importance_score: Math.min(90, bitsNum / 10), metadata: { bits: bitsNum } });
     if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på GLENVEX`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});

@@ -312,8 +312,11 @@ export async function GET() {
     thumbActive:      thumbPending + thumbGenerating,
   };
 
-  // ── Live hendelser (legacy) ───────────────────────────────────────────────
-  const liveEvents: any[] = (workspaceRes.data?.settings_json?.live_events ?? []).slice(0, 20);
+  // ── Live hendelser (fra system_events – erstatter live_events) ───────────
+  const liveEvents: any[] = (subsystemEvents ?? []).slice(0, 20).map((e: any) => ({
+    type: e.event_type, ts: e.created_at, source: e.source, title: e.title,
+    severity: e.severity, metadata: e.metadata,
+  }));
 
   // ── Kontrollsenter: subsystem-status fra system_events siste 24t ─────────
   const SUBSYSTEMER = [

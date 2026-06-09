@@ -23,6 +23,106 @@ function getSb() {
   return createClient(url, key, { realtime: { transport: ws } });
 }
 
+// ─── Oppgave 1: Feedback-loop fra ai_agent_decisions ─────────────────────────
+
+async function aggregerDecisionFeedback(sb: any): Promise<void> {
+  const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+  const { data: decisions } = await sb
+    .from('ai_agent_decisions')
+    .select('agent_type,decision_type,outcome,feedback_score,input_context,decision_summary,created_at')
+    .eq('workspace_id', WORKSPACE_ID)
+    .gte('created_at', cutoff30d)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (!decisions || decisions.length < 3) return;
+
+  const utført = decisions.filter((d: any) => d.outcome === 'executed' || d.feedback_score === 1);
+  const avvist = decisions.filter((d: any) => d.outcome === 'dismissed' || d.feedback_score === 0);
+  const acceptanceRate = Math.round((utført.length / decisions.length) * 100);
+
+  // Per type
+  const byType: Record<string, { total: number; executed: number }> = {};
+  for (const d of decisions) {
+    const t = d.decision_type ?? 'unknown';
+    if (!byType[t]) byType[t] = { total: 0, executed: 0 };
+    byType[t].total++;
+    if (d.outcome === 'executed' || d.feedback_score === 1) byType[t].executed++;
+  }
+
+  // Per spill
+  const byGame: Record<string, { total: number; executed: number }> = {};
+  for (const d of decisions) {
+    const g = (d.input_context?.game ?? d.input_context?.streamGame) as string | undefined;
+    if (!g) continue;
+    if (!byGame[g]) byGame[g] = { total: 0, executed: 0 };
+    byGame[g].total++;
+    if (d.outcome === 'executed' || d.feedback_score === 1) byGame[g].executed++;
+  }
+
+  const typeLines = Object.entries(byType)
+    .map(([t, v]) => `${t}: ${Math.round((v.executed / v.total) * 100)}% akseptert (${v.total})`)
+    .join(', ');
+
+  const gameLines = Object.entries(byGame)
+    .map(([g, v]) => ({ g, rate: v.executed / v.total, total: v.total }))
+    .sort((a, b) => b.rate - a.rate)
+    .map(x => `${x.g}: ${Math.round(x.rate * 100)}%`)
+    .join(', ');
+
+  // Lagre i memory slik at creatorContext og briefing ser det
+  await upsertBotMemory({
+    agent_type: 'ai_producer',
+    memory_type: 'feedback_pattern',
+    key: 'decision_acceptance_rates',
+    summary: `AI-anbefalinger siste 30d: ${acceptanceRate}% akseptert (${decisions.length} totalt). Per type: ${typeLines || 'ingen'}. Per spill: ${gameLines || 'ingen data'}.`,
+    confidence_score: Math.min(0.95, 0.5 + decisions.length * 0.01),
+    metadata: { total: decisions.length, executed: utført.length, dismissed: avvist.length, byType, byGame, acceptanceRate },
+  });
+
+  // GPT-innsikt kun hvis nok data
+  if (decisions.length >= 5) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+    try {
+      const openai = new OpenAI({ apiKey });
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: `Basert på disse AI-beslutningsdataene, lag 1-2 konkrete læringssetninger på norsk:
+Total: ${decisions.length} anbefalinger, ${utført.length} utført (${acceptanceRate}%), ${avvist.length} avvist.
+Per type: ${typeLines || 'ingen'}
+Per spill: ${gameLines || 'ingen'}
+
+Eksempel: "Viewer-engagement-prompts aksepteres 82% av gangene, særlig under Tarkov-streams."
+Maks 2 setninger, faktuell og konkret.` }],
+        max_tokens: 150,
+        temperature: 0.3,
+      });
+      const insight = res.choices[0]?.message?.content?.trim();
+      if (insight) {
+        try {
+          await sb.from('ai_agent_insights').insert({
+            workspace_id: WORKSPACE_ID,
+            title: `Feedback-analyse: ${acceptanceRate}% av ${decisions.length} anbefalinger utført`,
+            summary: insight,
+            confidence_score: Math.min(0.9, 0.6 + decisions.length * 0.01),
+            source_data: { type: 'decision_feedback', total: decisions.length, acceptanceRate },
+          });
+        } catch {}
+        logSystemEvent({
+          source: 'learning_aggregator',
+          event_type: 'DECISION_FEEDBACK_LEARNED',
+          title: `AI lærte av ${decisions.length} beslutninger: ${acceptanceRate}% akseptert`,
+          severity: 'info',
+          metadata: { acceptanceRate, total: decisions.length, executed: utført.length, dismissed: avvist.length, insight: insight.slice(0, 200) },
+        });
+      }
+    } catch {}
+  }
+}
+
+// ─── Hoved-aggregering ────────────────────────────────────────────────────────
+
 export async function kjørAggregering(): Promise<void> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return;
@@ -36,15 +136,32 @@ export async function kjørAggregering(): Promise<void> {
   const cutoff = new Date(lastRun || Date.now() - 20 * 60_000).toISOString();
   lastRun = Date.now();
 
-  const { data: events } = await sb
-    .from('ai_agent_events')
-    .select('source,event_type,username,message_text,importance_score,metadata,created_at')
-    .eq('workspace_id', WORKSPACE_ID)
-    .gte('created_at', cutoff)
-    .order('created_at', { ascending: false })
-    .limit(100);
+  // Oppgave 5: system_events-feil som svak kontekst
+  const sysWarningCutoff = new Date(Date.now() - 60 * 60_000).toISOString();
+  const [eventsRes, sysRes] = await Promise.all([
+    sb.from('ai_agent_events')
+      .select('source,event_type,username,message_text,importance_score,metadata,created_at')
+      .eq('workspace_id', WORKSPACE_ID)
+      .gte('created_at', cutoff)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    sb.from('system_events')
+      .select('source,event_type,title,severity')
+      .eq('workspace_id', WORKSPACE_ID)
+      .in('severity', ['warning', 'error', 'critical'])
+      .gte('created_at', sysWarningCutoff)
+      .order('created_at', { ascending: false })
+      .limit(8),
+  ]);
 
-  if (!events || events.length < 1) return;
+  const events: any[] = eventsRes.data ?? [];
+  const sysWarnings: any[] = sysRes.data ?? [];
+
+  if (events.length < 1) {
+    // Kjør feedback-loop selv uten nye community-events
+    await aggregerDecisionFeedback(sb).catch(() => {});
+    return;
+  }
 
   // Bygg username→kilde-map for korrekt agent_type-tildeling
   const userSourceMap = new Map<string, Set<string>>();
@@ -67,6 +184,11 @@ export async function kjørAggregering(): Promise<void> {
     })
     .join('\n');
 
+  // Oppgave 5: System-advarsler som svak kontekst (aldri dominant)
+  const sysKontekst = sysWarnings.length > 0
+    ? `\nSYSTEMSTATUS (ikke la dette dominere analysen):\n${sysWarnings.map((e: any) => `[${e.severity.toUpperCase()}] ${e.source}: ${e.title}`).join('\n')}`
+    : '';
+
   try {
     const openai = new OpenAI({ apiKey });
     const res = await openai.chat.completions.create({
@@ -77,7 +199,7 @@ export async function kjørAggregering(): Promise<void> {
           content: `Du er læringsagenten for GLENVEX Creator OS. Analyser disse hendelsene og trekk ut kunnskap.
 
 HENDELSER (siste 15-20 min):
-${eventLinjer}
+${eventLinjer}${sysKontekst}
 
 Finn og returner:
 1. Aktive brukere (username som dukker opp hyppig = potensielle faste seere/membres)
@@ -179,11 +301,17 @@ Returner KUN JSON:
         innsikterFunnet: innsikter.length,
         memoryOppdatert: (analyse.aktiveSeere ?? []).length,
         communitySignaler: (analyse.communitySignaler ?? []).length,
+        sysWarninger: sysWarnings.length,
         executionTime: Date.now() - aggrStart,
       },
     });
     if (innsikter.length > 0 || (analyse.aktiveSeere ?? []).length > 0) {
       console.log(`[LearningAggregator] ✓ ${events.length} hendelser → ${innsikter.length} innsikter, ${(analyse.aktiveSeere ?? []).length} brukere oppdatert`);
+    }
+
+    // Oppgave 1: Kjør feedback-analyse parallelt (hvert 4. run = ~60 min)
+    if (Math.random() < 0.25) {
+      aggregerDecisionFeedback(sb).catch(() => {});
     }
   } catch (err: any) {
     logSystemEvent({

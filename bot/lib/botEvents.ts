@@ -1,9 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
+import { logSystemEvent } from './systemEvents';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
-
-const eventQueue: Array<Record<string, any>> = [];
-let flushTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function getDb() {
   const url = process.env.SUPABASE_URL;
@@ -13,30 +11,22 @@ function getDb() {
   return createClient(url, key, { realtime: { transport: ws } });
 }
 
-async function doFlush(): Promise<void> {
-  if (eventQueue.length === 0) return;
-  const db = getDb();
-  if (!db) return;
-  const batch = eventQueue.splice(0);
-  try {
-    const { data: ws_ } = await db.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single();
-    const existing = ws_?.settings_json ?? {};
-    const events: any[] = existing.live_events ?? [];
-    events.unshift(...batch);
-    if (events.length > 200) events.length = 200;
-    await db.from('workspaces').update({ settings_json: { ...existing, live_events: events } }).eq('id', WORKSPACE_ID);
-  } catch {
-    eventQueue.unshift(...batch);
-  }
-}
+const TITTEL_MAP: Record<string, (d: Record<string, any>) => string> = {
+  stream_live:      d => `Stream live: ${d.tittel ?? d.spill ?? ''}`.trimEnd(),
+  stream_offline:   _  => 'Stream offline',
+  pre_hype:         d => `Pre-hype sendt: ${d.spill ?? ''}`.trimEnd(),
+  level_up:         d => `Level up: ${d.username ?? '?'} → Level ${d.level ?? '?'}`,
+  klipp_ferdig:     d => `Klipp ferdig: ${d.title ?? d.id ?? ''}`.trimEnd(),
+  klipp_start:      d => `Klipp starter: ${d.title ?? ''}`.trimEnd(),
+  discord_varsel:   d => d.melding ?? 'Discord varslet',
+  thumbnail_ferdig: d => `Thumbnail ferdig: ${d.id ?? ''}`.trimEnd(),
+};
 
-setInterval(() => doFlush().catch(() => {}), 15_000);
-
+/** Logg bot-hendelse til system_events (erstatter live_events). */
 export function logBotEvent(type: string, data: Record<string, any> = {}): void {
-  eventQueue.push({ type, ts: new Date().toISOString(), ...data });
-  if (!flushTimeout) {
-    flushTimeout = setTimeout(() => { flushTimeout = null; doFlush().catch(() => {}); }, 3_000);
-  }
+  const tittelFn = TITTEL_MAP[type];
+  const title = tittelFn ? tittelFn(data) : `${type}${Object.keys(data).length ? ': ' + JSON.stringify(data).slice(0, 60) : ''}`;
+  logSystemEvent({ source: 'bot_events', event_type: type, title, severity: 'info', metadata: data });
 }
 
 export async function updateStreamSyklus(updates: Record<string, string | null>): Promise<void> {
