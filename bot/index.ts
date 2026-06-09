@@ -1236,6 +1236,99 @@ async function sikkerAdminTilGkarlsen(): Promise<void> {
   }
 }
 
+// ─── Workspace ID-oppløsning ved oppstart ────────────────────────────────────
+// Prøver å finne det faktiske workspace-IDen fra Supabase slik at Railway-loggen
+// viser nøyaktig hva man må sette som WORKSPACE_ID i Railway env vars.
+async function logWorkspaceIdDiagnose(): Promise<void> {
+  const currentId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+  const sbUrl = process.env.SUPABASE_URL;
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const twitchUser = process.env.TWITCH_USERNAME ?? '';
+
+  console.log(`\n  🔑 WORKSPACE_ID (bot): "${currentId}"`);
+
+  if (!sbUrl || !sbKey) {
+    console.log('  ⚠️  SUPABASE_URL eller SUPABASE_SERVICE_ROLE_KEY mangler — kan ikke verifisere workspace');
+    return;
+  }
+
+  try {
+    // Finn workspace fra Supabase via Twitch-brukernavn
+    const qs = new URLSearchParams({ select: 'id,brand_name,twitch_channel_name' });
+    if (twitchUser) qs.set('twitch_channel_name', `eq.${twitchUser}`);
+    const res = await fetch(`${sbUrl}/rest/v1/workspaces?${qs}`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const rows = await res.json() as any[];
+      if (rows.length > 0) {
+        const ws = rows[0];
+        if (ws.id !== currentId) {
+          console.log(`  ❌ WORKSPACE_ID MISMATCH!`);
+          console.log(`     Bot bruker:      "${currentId}"`);
+          console.log(`     Supabase har:    "${ws.id}" (${ws.brand_name ?? ws.twitch_channel_name})`);
+          console.log(`     FIX: Sett WORKSPACE_ID="${ws.id}" i Railway environment variables`);
+          console.log(`     Åpne: /api/debug/workspace for full diagnose\n`);
+        } else {
+          console.log(`  ✅ WORKSPACE_ID er korrekt: "${ws.id}" (${ws.brand_name ?? ws.twitch_channel_name})\n`);
+        }
+      } else {
+        console.log(`  ℹ️  Ingen workspace funnet for twitch_channel_name="${twitchUser}" — sjekk /api/debug/workspace\n`);
+      }
+    }
+  } catch (err: any) {
+    console.log(`  ⚠️  Workspace-diagnose feilet: ${err?.message?.slice(0, 80)}\n`);
+  }
+}
+
+// ─── Heartbeats — skrives hvert 5. min for at System Coverage viser riktig status ──
+function writeHeartbeats(): void {
+  const uptime = Math.round(process.uptime());
+  logSystemEvent({
+    source: 'twitch_bot',
+    event_type: 'HEARTBEAT',
+    title: 'Twitch Bot aktiv',
+    severity: 'info',
+    metadata: { uptime, pid: process.pid },
+  });
+  logSystemEvent({
+    source: 'discord_bot',
+    event_type: 'HEARTBEAT',
+    title: 'Discord Bot aktiv',
+    severity: 'info',
+    metadata: { guilds: client.guilds.cache.size, uptime, pid: process.pid },
+  });
+  logSystemEvent({
+    source: 'learning_aggregator',
+    event_type: 'HEARTBEAT',
+    title: 'Learning Aggregator aktiv',
+    severity: 'info',
+    metadata: { uptime, pid: process.pid },
+  });
+  logSystemEvent({
+    source: 'scheduler',
+    event_type: 'HEARTBEAT',
+    title: 'Scheduler aktiv',
+    severity: 'info',
+    metadata: { uptime, pid: process.pid },
+  });
+  logSystemEvent({
+    source: 'content_factory',
+    event_type: 'HEARTBEAT',
+    title: 'Content Factory aktiv',
+    severity: 'info',
+    metadata: { uptime, pid: process.pid },
+  });
+  logSystemEvent({
+    source: 'recovery_engine',
+    event_type: 'HEARTBEAT',
+    title: 'Recovery Engine aktiv',
+    severity: 'info',
+    metadata: { uptime, pid: process.pid },
+  });
+}
+
 client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
@@ -1247,6 +1340,8 @@ client.once('clientReady', () => {
   startWorkspaceManager();
   // Discord historikk bootstrap: kjøres én gang per kanal, 5 min etter oppstart
   setTimeout(() => startDiscordHistoryBootstrap(client).catch(() => {}), 5 * 60_000);
+  // Workspace-diagnose: logg til Railway-konsollen slik at man ser om WORKSPACE_ID er feil
+  logWorkspaceIdDiagnose().catch(() => {});
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: 'GLENVEX Bot startet', severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});
@@ -1273,6 +1368,8 @@ client.once('clientReady', () => {
   }
 
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
+  // Heartbeat: skriv til system_events hvert 5. min (sikrer at Coverage aldri viser 0)
+  setTimeout(() => { writeHeartbeats(); setInterval(writeHeartbeats, 5 * 60_000); }, 60_000);
   setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
   setTimeout(() => { withCron('send-proaktiv', sendProaktivMelding); setInterval(() => withCron('send-proaktiv', sendProaktivMelding), PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { withCron('post-top-clip', postTopClip); setInterval(() => withCron('post-top-clip', postTopClip), CLIP_INTERVAL); }, 60 * 60 * 1000);

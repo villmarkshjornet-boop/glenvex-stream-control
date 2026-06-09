@@ -434,16 +434,19 @@ export async function GET() {
 
   // ── Event Coverage (per kilde, basert på siste 24t system_events) ────────
   const COVERAGE_DEFS = [
-    { key: 'twitch',     label: 'Twitch Bot',      sources: ['twitch_bot'],          windowH: 4,  passive: false },
-    { key: 'discord',    label: 'Discord Bot',     sources: ['discord_bot'],         windowH: 4,  passive: false },
+    { key: 'twitch',     label: 'Twitch Bot',      sources: ['twitch_bot'],          windowH: 12, passive: false },
+    { key: 'discord',    label: 'Discord Bot',     sources: ['discord_bot'],         windowH: 12, passive: false },
     { key: 'scheduler',  label: 'Scheduler',       sources: ['scheduler'],           windowH: 24, passive: false },
-    { key: 'aggregator', label: 'AI Learning',     sources: ['learning_aggregator'], windowH: 2,  passive: false },
+    { key: 'aggregator', label: 'AI Learning',     sources: ['learning_aggregator'], windowH: 12, passive: false },
     { key: 'content',    label: 'Content Factory', sources: ['content_factory'],     windowH: 24, passive: false },
     { key: 'cron',       label: 'Cron Jobs',       sources: ['cron'],                windowH: 24, passive: false },
     { key: 'api',        label: 'API Monitor',     sources: ['api_monitor'],         windowH: 24, passive: true  },
     { key: 'database',   label: 'Database',        sources: ['database'],            windowH: 24, passive: true  },
     { key: 'recovery',   label: 'Recovery Engine', sources: ['recovery_engine'],     windowH: 24, passive: false },
   ];
+
+  // HEARTBEAT-events telles alltid som aktivitet uansett event_type
+  // (subsystemEvents inneholder alle events siste 24t — HEARTBEAT er nå blant dem)
 
   const coverage = COVERAGE_DEFS.map(cs => {
     const events = subsystemEvents.filter((e: any) => cs.sources.includes(e.source));
