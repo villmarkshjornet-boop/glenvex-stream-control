@@ -33,7 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -97,12 +97,28 @@ const BESKYTTEDE_KANALER = [
 
 // ─── Hjelpefunksjoner ────────────────────────────────────────────────────────
 
-function finnChatKanal(): TextChannel | null {
-  const chatId = process.env.DISCORD_CHAT_CHANNEL_ID;
-  if (chatId) {
-    const ch = client.channels.cache.get(chatId);
+// Cache for chat-kanal-ID fra Supabase (10 min TTL)
+let _chatKanalIdCache: string | null = null;
+let _chatKanalIdTs = 0;
+
+async function finnChatKanal(): Promise<TextChannel | null> {
+  // 1. Prøv Supabase-settings (oppdatert fra web UI)
+  const now = Date.now();
+  if (now - _chatKanalIdTs > 10 * 60_000) {
+    _chatKanalIdCache = await getSbChatKanalId().catch(() => null);
+    _chatKanalIdTs = now;
+  }
+  if (_chatKanalIdCache) {
+    const ch = client.channels.cache.get(_chatKanalIdCache);
     if (ch instanceof TextChannel) return ch;
   }
+  // 2. Env var fallback
+  const envId = process.env.DISCORD_CHAT_CHANNEL_ID;
+  if (envId) {
+    const ch = client.channels.cache.get(envId);
+    if (ch instanceof TextChannel) return ch;
+  }
+  // 3. Name-based fallback
   const fallback = client.channels.cache.find(
     ch => ch instanceof TextChannel &&
     (ch.name.includes('chat') || ch.name.includes('general') || ch.name.includes('gaming'))
@@ -116,11 +132,44 @@ function ukeNummer(): number {
   return Math.ceil(((now.getTime() - start.getTime()) / 86_400_000 + start.getDay() + 1) / 7);
 }
 
+// ─── Supabase-settings sync (5-min cache, bot leser fra Supabase ikke bare fil) ──
+
+let _sbSettings: any = null;
+let _sbSettingsTs = 0;
+const SB_SETTINGS_TTL = 5 * 60_000;
+
+async function getSettingsFresh() {
+  const file = getSettings();
+  if (Date.now() - _sbSettingsTs < SB_SETTINGS_TTL && _sbSettings) {
+    return { ...file, ..._sbSettings };
+  }
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const wid = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    if (sbUrl && sbKey) {
+      const res = await fetch(`${sbUrl}/rest/v1/workspaces?id=eq.${encodeURIComponent(wid)}&select=settings_json`, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = await res.json() as any[];
+        if (data?.[0]?.settings_json) {
+          _sbSettings = data[0].settings_json;
+          _sbSettingsTs = Date.now();
+          return { ...file, ..._sbSettings };
+        }
+      }
+    }
+  } catch {}
+  return file;
+}
+
 // ─── Live-sjekk med stream-analyse ───────────────────────────────────────────
 
 async function checkLive() {
   try {
-    const settings = getSettings();
+    const settings = await getSettingsFresh();
     if (!settings.autoPostLive) return;
     const stream = await getStreamInfo();
 
@@ -251,7 +300,7 @@ async function checkLive() {
 // ─── Stream-kontekst analyse ─────────────────────────────────────────────────
 
 async function analyserStreamKontekst(tittel: string, spill: string) {
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -482,7 +531,7 @@ async function autoRyddKanaler() {
   logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: autoRyddKanaler', severity: 'info', metadata: { job_name: 'autoRyddKanaler', uke } });
 
   const guild = client.guilds.cache.first();
-  const chatKanal = finnChatKanal();
+  const chatKanal = await finnChatKanal();
   if (!guild || !chatKanal) return;
 
   const INAKTIV_DAGER = 60;
@@ -561,7 +610,7 @@ async function autoRyddKanaler() {
 // ─── Pre-Live Hype ───────────────────────────────────────────────────────────
 
 async function postPreLiveHype(tittel: string, spill: string) {
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return;
@@ -581,7 +630,7 @@ async function postPreLiveHype(tittel: string, spill: string) {
 // ─── Smart Velkomst tilbake ───────────────────────────────────────────────────
 
 async function smartVelkomst(userId: string, username: string, displayName: string) {
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   const member = getMember(userId);
@@ -669,7 +718,7 @@ async function sjekkGoals() {
 async function delSocialsSubtilt() {
   const [aktiv, pauseDiscord] = await Promise.all([getAktiv().catch(() => true), getPauseDiscord().catch(() => false)]);
   if (!aktiv || pauseDiscord) return;
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   const settings = getSettings();
@@ -808,7 +857,7 @@ async function sendProaktivMelding() {
     getPauseProaktiv().catch(() => false),
   ]);
   if (!aktiv || pauseDiscord || pauseProaktiv) return;
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   const runde = proaktivRunde % 3;
@@ -838,7 +887,7 @@ async function sjekkUkentligStats() {
 
   logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: sjekkUkentligStats', severity: 'info', metadata: { job_name: 'sjekkUkentligStats', uke } });
 
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   try {
@@ -903,7 +952,7 @@ async function sjekkUkentligStats() {
 // ─── Clip-deling ─────────────────────────────────────────────────────────────
 
 async function postTopClip() {
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
   try {
     const broadcasterId = await getBroadcasterId();
@@ -939,7 +988,7 @@ client.on('guildMemberAdd', async (member) => {
     tildeltSpesialRolle(member.guild, member, 'new_member').catch(() => {});
   }
 
-  const kanal = finnChatKanal();
+  const kanal = await finnChatKanal();
   if (!kanal) return;
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -1109,7 +1158,7 @@ async function sjekkPreHype() {
       metadata: { spill: planlagtStream.spill, dag: planlagtStream.dag, tid: planlagtStream.tid, diffMinutter: diffTilStream, osloDag: dagNavn, osloMinutter: minutter },
     });
 
-    const kanal = finnChatKanal();
+    const kanal = await finnChatKanal();
     if (!kanal) {
       logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_SCHEDULED', title: 'Pre-hype: Discord-kanal ikke funnet', severity: 'warning', metadata: { spill: planlagtStream.spill } });
       return;

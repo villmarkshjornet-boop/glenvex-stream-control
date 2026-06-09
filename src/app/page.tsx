@@ -63,6 +63,9 @@ interface AiLearning {
   feedbackDecisionsLast24h: number;
   sisteInnsikt: { title: string; summary: string; createdAt: string } | null;
 }
+interface RaidTarget {
+  username: string; login: string; viewers: number; game: string; score: number; grunn: string; url: string;
+}
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string; detail?: string }[];
   sjekkliste:  { label: string; done: boolean; href: string }[];
@@ -264,13 +267,16 @@ const SEV_DOT: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<string, string> = {
-  thumbnail:       'Thumbnail',
-  clip_worker:     'Clip Worker',
-  content_factory: 'Content Factory',
-  discord_bot:     'Discord Bot',
-  twitch_bot:      'Twitch Bot',
-  recovery_engine: 'Recovery',
-  learning:        'AI Learning',
+  thumbnail:          'Thumbnail',
+  clip_worker:        'Clip Worker',
+  content_factory:    'Content Factory',
+  discord_bot:        'Discord Bot',
+  twitch_bot:         'Twitch Bot',
+  recovery_engine:    'Recovery',
+  learning:           'AI Learning',
+  learning_aggregator:'AI Learning',
+  system:             'System',
+  settings:           'Innstillinger',
 };
 
 // ─── KONTROLLSENTER ───────────────────────────────────────────────────────────
@@ -746,6 +752,115 @@ function Sjekkliste({ items, loading, onReset }: { items: LiveData['sjekkliste']
   );
 }
 
+// ─── RAID TOP 3 WIDGET ───────────────────────────────────────────────────────
+
+function RaidWidget() {
+  const [targets, setTargets] = useState<RaidTarget[]>([]);
+  const [game, setGame] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch_ = async () => {
+      try {
+        const d = await fetch('/api/raid-targets').then(r => r.json());
+        setTargets(d.targets ?? []);
+        setGame(d.currentGame ?? null);
+      } catch {}
+      setLoading(false);
+    };
+    fetch_();
+    const id = setInterval(fetch_, 90_000); // refresh every 90s
+    return () => clearInterval(id);
+  }, []);
+
+  if (loading) return null;
+  if (!game || targets.length === 0) return null;
+
+  const top3 = targets.slice(0, 3);
+  return (
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Raid-mål · {game}</p>
+        </div>
+        <Link href="/raid-manager" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Alle mål →</Link>
+      </div>
+      <div className="space-y-2">
+        {top3.map((t, i) => (
+          <div key={t.login} className="flex items-center gap-3 py-1.5 px-2 rounded border border-g-border/20 bg-g-bg/30">
+            <span className={`text-[10px] font-black font-mono w-4 ${i === 0 ? 'text-g-green' : 'text-g-muted/60'}`}>{i + 1}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-g-text truncate">{t.username}</p>
+              <p className="text-[8px] text-g-muted truncate">{t.grunn || t.game}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[10px] font-mono font-black text-g-green">{t.viewers.toLocaleString()}</span>
+              <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${t.score >= 80 ? 'text-g-green border-g-green/30' : 'text-g-muted border-g-border'}`}>{t.score}%</span>
+              <a href={t.url} target="_blank" rel="noreferrer" className="text-[8px] text-g-green hover:underline">↗</a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── AI PRODUCER WIDGET ───────────────────────────────────────────────────────
+
+function AiProducerWidget({ innsikter, aiLearning, loading }: { innsikter: AiInnsikt[]; aiLearning?: AiLearning; loading: boolean }) {
+  if (loading) return null;
+
+  const harData = innsikter.length > 0 || aiLearning?.sisteInnsikt;
+  if (!harData) return (
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Producer</p>
+        <Link href="/ai-producer" className="text-[9px] text-g-green hover:underline">Åpne →</Link>
+      </div>
+      <p className="text-[10px] text-g-muted">Ingen analyse ennå. <Link href="/ai-producer" className="text-g-green hover:underline">Kjør AI Producer →</Link></p>
+    </div>
+  );
+
+  const siste = aiLearning?.sisteInnsikt ?? (innsikter[0] ? { title: innsikter[0].title, summary: innsikter[0].summary, createdAt: innsikter[0].createdAt } : null);
+
+  return (
+    <div className="bg-g-card border border-g-green/20 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-g-green" />
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Producer</p>
+        </div>
+        <Link href="/ai-producer" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Full analyse →</Link>
+      </div>
+      {siste && (
+        <div className="mb-2">
+          <p className="text-[10px] font-bold text-g-green">{siste.title}</p>
+          <p className="text-[9px] text-g-muted leading-snug mt-0.5">{siste.summary.slice(0, 160)}</p>
+          <p className="text-[8px] text-g-muted/40 mt-1">{tidSiden(siste.createdAt)}</p>
+        </div>
+      )}
+      {innsikter.length > 1 && (
+        <div className="space-y-1 border-t border-g-border/20 pt-2 mt-2">
+          {innsikter.slice(1, 3).map((ins, i) => (
+            <div key={i} className="flex gap-2 items-start">
+              <span className="text-g-green text-[8px] font-black mt-0.5">◆</span>
+              <p className="text-[9px] text-g-muted leading-snug">{ins.title}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {aiLearning && (
+        <div className="flex gap-2 mt-2 pt-2 border-t border-g-border/20">
+          <span className="text-[9px] text-g-muted/60">{aiLearning.eventsLast60min} events/60min</span>
+          <span className="text-[9px] text-g-muted/40">·</span>
+          <span className="text-[9px] text-g-muted/60">{aiLearning.decisionsLast24h} beslutninger/24t</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN DASHBOARD ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -846,13 +961,19 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ── SEKSJON 4: AI Learning + Sjekkliste ─────────────────────────────── */}
+      {/* ── SEKSJON 4: AI Producer + Sjekkliste ─────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
-        <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} aiLearning={live?.aiLearning} loading={loadingLive} />
+        <AiProducerWidget innsikter={live?.nyesteInnsikter ?? []} aiLearning={live?.aiLearning} loading={loadingLive} />
         <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} onReset={async () => {
           await fetch('/api/stream-syklus/reset', { method: 'POST' });
           hentLive();
         }} />
+      </div>
+
+      {/* ── SEKSJON 5: Raid Top 3 (kun når live) + AI Learning ──────────────── */}
+      <div className="grid grid-cols-2 gap-4">
+        <RaidWidget />
+        <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} aiLearning={live?.aiLearning} loading={loadingLive} />
       </div>
 
       {/* ── Siste klipp (kompakt) ────────────────────────────────────────────── */}

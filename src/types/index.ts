@@ -24,6 +24,7 @@ export interface Settings {
   discordLiveRoleId: string;
   twitchUsername: string;
   twitchUrl: string;
+  contentFactoryChannel?: string;
   autoPostLive: boolean;
   autoPostPromo: boolean;
   pingRole: boolean;

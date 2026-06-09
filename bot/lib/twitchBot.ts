@@ -287,8 +287,53 @@ async function sjekkNyeFollowers() {
   } catch {}
 }
 
-// ─── Partner-promo via Supabase ───────────────────────────────────────────────
+// ─── Partner-promo i Twitch chat ──────────────────────────────────────────────
 
+async function sendTwitchPartnerPromo(): Promise<void> {
+  if (!client) return;
+  const settings = getSettings();
+  if (!settings.lastNotifiedStreamId) return; // bare når live
+  if (await getPausePartnerPromo().catch(() => false)) return;
+
+  const partner = await getRandomActivePartner();
+  if (!partner) return;
+
+  const kode = partner.rabattkode ? ` (kode: ${partner.rabattkode})` : '';
+  let tekst = `🤝 Sjekk ut vår partner ${partner.navn}! ${partner.finalUrl}${kode}`;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey) {
+    try {
+      const openai = new OpenAI({ apiKey });
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: `Skriv en veldig kort Twitch-chat promo (maks 15 ord) for GLENVEXs partner: ${partner.navn}${partner.beskrivelse ? ` – ${partner.beskrivelse}` : ''}. Norsk, uformell, ikke salesy. Ikke start med emoji.` }],
+        max_tokens: 40,
+        temperature: 0.8,
+      });
+      const ai = res.choices[0]?.message?.content?.trim() ?? '';
+      if (ai) tekst = `${ai} → ${partner.finalUrl}${kode}`;
+    } catch {}
+  }
+
+  await chatSend(`#${KANAL}`, tekst, { trigger: 'twitch_partner_promo', partner: partner.navn });
+  logSystemEvent({
+    source: 'twitch_bot',
+    event_type: 'PARTNER_PROMO_SENT',
+    title: `Twitch-promo: ${partner.navn}`,
+    severity: 'info',
+    metadata: { partner: partner.navn, featured: (partner as any).prioritet >= 100, channel: KANAL },
+  });
+  logPartnerPromoResult({
+    partnerName: partner.navn,
+    platform: 'twitch',
+    channel: KANAL,
+    affiliateUrlUsed: partner.finalUrl,
+    hadAffiliateUrl: partner.affiliateUrl !== null,
+    missingAffiliate: partner.missedAffiliate,
+    copyText: tekst,
+  }).catch(() => {});
+}
 
 export function startTwitchBot() {
   const oauth = process.env.TWITCH_BOT_OAUTH;
@@ -316,6 +361,12 @@ export function startTwitchBot() {
       sjekkNyeFollowers();
       setInterval(sjekkNyeFollowers, 2 * 60 * 1000);
     }, 30_000);
+
+    // Partner-promo i Twitch chat: featured partner → 45 min, vanlig → 90 min
+    setTimeout(() => {
+      sendTwitchPartnerPromo().catch(() => {});
+      setInterval(() => sendTwitchPartnerPromo().catch(() => {}), 45 * 60 * 1000);
+    }, 20 * 60_000); // første promo etter 20 min (la stream komme i gang)
   }).catch((err: Error) => {
     console.error('  ✗ Twitch chat feil:', err.message);
   });

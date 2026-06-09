@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, memo } from 'react';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 interface Vod {
@@ -71,6 +71,117 @@ const PIPELINE_STEG = [
   { id: 'COMPLETE',     label: 'Ferdig' },
 ];
 
+// ─── VOD Timeline ─────────────────────────────────────────────────────────────
+
+interface TimelineEvent {
+  id: string;
+  source: string;
+  event_type: string;
+  title: string;
+  description?: string;
+  severity: string;
+  metadata?: any;
+  created_at: string;
+}
+
+const TIMELINE_ORDER = [
+  'VOD_DETECTED', 'DOWNLOAD_STARTED', 'DOWNLOAD_DONE', 'DOWNLOAD_COMPLETED', 'DOWNLOAD_FAILED',
+  'TRANSCRIPTION_STARTED', 'TRANSCRIPTION_COMPLETED', 'TRANSCRIPTION_DONE',
+  'TRANSCRIPTION_FAILED_ZERO_SEGMENTS', 'TRANSCRIPTION_FAILED',
+  'PHASE2_TRIGGER_DELAYED_FOR_DB_COMMIT', 'PHASE2_TRIGGER_STARTED',
+  'DISCOVERY_STARTED', 'DISCOVERY_COMPLETED',
+  'RANKING_COMPLETED', 'COPYWRITING_COMPLETED',
+  'VOD_PIPELINE_DONE',
+  'CLIP_EXTRACTED', 'THUMBNAIL_DONE',
+];
+
+const SEV_DOT_TL: Record<string, string> = {
+  info:    'bg-g-muted/60',
+  warning: 'bg-yellow-400',
+  error:   'bg-red-400',
+  critical:'bg-red-500',
+  success: 'bg-g-green',
+};
+
+const SEV_TEXT_TL: Record<string, string> = {
+  info:    'text-g-text',
+  warning: 'text-yellow-300',
+  error:   'text-red-300',
+  critical:'text-red-400',
+  success: 'text-g-green',
+};
+
+function tidKort(iso: string): string {
+  return new Date(iso).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+const VodTimeline = memo(function VodTimeline({ vodId }: { vodId: string }) {
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hentet, setHentet] = useState(false);
+
+  useEffect(() => {
+    if (hentet) return;
+    setLoading(true);
+    setHentet(true);
+    // Hent events siste 30 dager for denne VOD-en
+    fetch(`/api/system-events?vodId=${encodeURIComponent(vodId)}&minutesBack=43200&limit=100`)
+      .then(r => r.json())
+      .then(d => {
+        // Sort ascending for timeline view
+        const sorted = (d.events ?? []).sort(
+          (a: TimelineEvent, b: TimelineEvent) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        setEvents(sorted);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [vodId, hentet]);
+
+  if (loading) return (
+    <div className="space-y-1.5 py-1">
+      {[1, 2, 3].map(i => <div key={i} className="h-6 bg-g-bg border border-g-border rounded animate-pulse" />)}
+    </div>
+  );
+
+  if (!events.length) return (
+    <p className="text-[9px] text-g-muted py-2">Ingen system-events funnet for denne VOD-en.</p>
+  );
+
+  const isError = (e: TimelineEvent) => e.severity === 'error' || e.severity === 'critical' || e.event_type.includes('FAILED');
+
+  return (
+    <div className="space-y-0">
+      {events.map((e, idx) => (
+        <div key={e.id} className="flex gap-2.5 group">
+          {/* Connector line */}
+          <div className="flex flex-col items-center flex-shrink-0">
+            <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${SEV_DOT_TL[e.severity] ?? SEV_DOT_TL.info}`} />
+            {idx < events.length - 1 && <div className="w-px flex-1 bg-g-border/40 mt-0.5" />}
+          </div>
+          {/* Content */}
+          <div className={`pb-2 flex-1 min-w-0 ${isError(e) ? 'bg-red-500/5 border border-red-500/10 rounded-lg px-2 py-1 -ml-0.5 mb-0.5' : ''}`}>
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span className={`text-[8px] font-bold uppercase font-mono ${isError(e) ? 'text-red-400' : 'text-g-muted/50'}`}>
+                {e.event_type}
+              </span>
+              <span className="text-[8px] text-g-muted/30 font-mono">{tidKort(e.created_at)}</span>
+            </div>
+            <p className={`text-[10px] leading-snug ${SEV_TEXT_TL[e.severity] ?? SEV_TEXT_TL.info}`}>{e.title}</p>
+            {e.description && <p className="text-[9px] text-g-muted/60 leading-snug">{e.description}</p>}
+            {e.metadata && isError(e) && (
+              <p className="text-[9px] text-red-400/60 font-mono mt-0.5 break-all">
+                {e.metadata.possible_reason ?? e.metadata.error ?? ''}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
 // ─── Komponent ─────────────────────────────────────────────────────────────────
 export default function ContentFactoryAdminPage() {
   const [vods, setVods] = useState<Vod[]>([]);
@@ -85,6 +196,7 @@ export default function ContentFactoryAdminPage() {
   const [phase2Res, setPhase2Res] = useState<Record<string, any>>({});
   const autoTriggertRef = useRef<Set<string>>(new Set());
   const [aktivertVod, setAktivertVod] = useState<string | null>(null);
+  const [monitorertKanal, setMonitorertKanal] = useState<string | null>(null);
   const [aktivert, setAktivert] = useState<boolean | null>(null);
   const [detekterer, setDetekterer] = useState(false);
   const [detektFeil, setDetektFeil] = useState('');
@@ -97,6 +209,30 @@ export default function ContentFactoryAdminPage() {
     setAktivert(true);
     const d = await res.json().catch(() => ({}));
     setVods(d.vods ?? []);
+  }, []);
+
+  const loggEvent = useCallback(async (event_type: string, title: string, severity: string, metadata?: any) => {
+    fetch('/api/system-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'content_factory', event_type, title, severity, metadata }),
+    }).catch(() => {});
+  }, []);
+
+  // Last inn sessionStorage-persistert auto-trigger-sett ved første render
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('cf_auto_triggered');
+      if (stored) {
+        const ids: string[] = JSON.parse(stored);
+        ids.forEach(id => autoTriggertRef.current.add(id));
+      }
+    } catch {}
+
+    // Hent hvilken kanal som overvåkes
+    fetch('/api/vod/detect-latest').then(r => r.json()).then(d => {
+      if (d.channel) setMonitorertKanal(d.channel);
+    }).catch(() => {});
   }, []);
 
   const kjørCleanup = useCallback(async () => {
@@ -118,12 +254,32 @@ export default function ContentFactoryAdminPage() {
   useEffect(() => {
     const transcribed = vods.filter(v => v.status === 'TRANSCRIBED');
     for (const v of transcribed) {
-      if (!autoTriggertRef.current.has(v.id) && phase2Running !== v.id) {
-        autoTriggertRef.current.add(v.id);
-        kjørPhase2(v.id);
+      if (autoTriggertRef.current.has(v.id) || phase2Running === v.id) {
+        // Already triggered or running — skip silently (no repeated event)
+        continue;
       }
+      autoTriggertRef.current.add(v.id);
+
+      // Persist til sessionStorage så reload ikke trigger på nytt
+      try {
+        const stored: string[] = JSON.parse(sessionStorage.getItem('cf_auto_triggered') ?? '[]');
+        if (!stored.includes(v.id)) {
+          stored.push(v.id);
+          sessionStorage.setItem('cf_auto_triggered', JSON.stringify(stored));
+        }
+      } catch {}
+
+      // Log commit-wait start
+      loggEvent('PHASE2_TRIGGER_DELAYED_FOR_DB_COMMIT',
+        `Phase 2 venter 2s for DB-commit: ${v.title ?? v.id}`,
+        'info',
+        { vodId: v.id, delay_ms: 2000 });
+
+      // 2s delay for å sikre at alle transkripsjonssegmenter er committet i Supabase
+      const id = v.id;
+      setTimeout(() => kjørPhase2(id), 2000);
     }
-  }, [vods]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [vods, loggEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sjekkHealth = async () => {
     setHealthLoading(true);
@@ -315,7 +471,14 @@ export default function ContentFactoryAdminPage() {
         <div className="bg-g-card border border-g-border rounded-2xl p-5 flex flex-col gap-4">
           {/* Auto-detect */}
           <div>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">Hent siste VOD automatisk</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[9px] text-g-muted uppercase tracking-widest font-black">Hent siste VOD automatisk</p>
+              {monitorertKanal && (
+                <span className="text-[9px] text-g-muted font-mono">
+                  twitch.tv/<span className="text-g-green">{monitorertKanal}</span>
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <button onClick={hentSisteVodFraTwitch} disabled={detekterer}
                 className="flex-1 px-3 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-xl hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40">
@@ -441,6 +604,15 @@ export default function ContentFactoryAdminPage() {
                       {phase2Res[v.id].ok ? `✓ ${phase2Res[v.id].antallHighlights} highlights · ${phase2Res[v.id].antallCopy} tekster` : `✗ ${phase2Res[v.id].error}`}
                     </div>
                   )}
+                  {/* Pipeline-tidslinje for aktiv jobb */}
+                  <details className="mt-3 group">
+                    <summary className="text-[9px] text-g-muted cursor-pointer hover:text-g-green transition-colors select-none">
+                      ▶ Vis pipeline-tidslinje
+                    </summary>
+                    <div className="mt-2 pl-2 border-l border-g-border/40">
+                      <VodTimeline vodId={v.id} />
+                    </div>
+                  </details>
                 </div>
               );
             })}
@@ -553,6 +725,11 @@ export default function ContentFactoryAdminPage() {
                             : <span>✗ {phase2Res[v.id].error}</span>}
                         </div>
                       )}
+                      {/* VOD event-tidslinje */}
+                      <div>
+                        <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-2">Pipeline-tidslinje</p>
+                        <VodTimeline vodId={v.id} />
+                      </div>
                     </div>
                   )}
                 </div>

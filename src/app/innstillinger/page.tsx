@@ -776,6 +776,21 @@ export default function InnstillingerSide() {
                             className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
                         </div>
                       ))}
+                      <div className="pt-2 border-t border-g-border/40">
+                        <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">
+                          Content Factory – overvåk kanal
+                        </label>
+                        <input
+                          type="text"
+                          value={(settings.contentFactoryChannel as string) || ''}
+                          onChange={e => update('contentFactoryChannel', e.target.value as Settings['contentFactoryChannel'])}
+                          placeholder={settings.twitchUsername || 'glenvex'}
+                          className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40"
+                        />
+                        <p className="text-[9px] text-g-muted mt-1 leading-relaxed">
+                          Hvilken Twitch-kanal Content Factory henter VODs fra. Standard: samme som bot-kanalen ({settings.twitchUsername || 'Twitch Brukernavn ovenfor'}).
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -195,8 +195,8 @@ export async function kjørAggregering(): Promise<void> {
     metadata: { lastRun: lastRun ? new Date(lastRun).toISOString() : null },
   });
 
-  // Hent hendelser siden forrige kjøring (eller siste 20 min ved oppstart)
-  const cutoff = new Date(lastRun || Date.now() - 20 * 60_000).toISOString();
+  // Hent hendelser siden forrige kjøring (eller siste 2 timer ved oppstart)
+  const cutoff = new Date(lastRun || Date.now() - 2 * 60 * 60_000).toISOString();
   lastRun = Date.now();
 
   const sysWarningCutoff = new Date(Date.now() - 60 * 60_000).toISOString();

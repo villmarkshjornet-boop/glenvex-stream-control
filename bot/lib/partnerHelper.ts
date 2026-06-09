@@ -33,6 +33,27 @@ export interface PartnerInfo {
   missedAffiliate: boolean;
 }
 
+export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
+  const sb = getSb();
+  if (!sb) return null;
+  try {
+    const { data } = await sb
+      .from('partners')
+      .select('navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
+      .eq('aktiv', true)
+      .gte('prioritet', 100) // featured = prioritet >= 100
+      .order('prioritet', { ascending: false })
+      .limit(1);
+    if (!data || data.length === 0) return null;
+    const raw = data[0];
+    const affiliateUrl: string | null = raw.affiliate_link?.trim() || null;
+    const fallbackUrl: string | null = raw.nettadresse?.trim() || null;
+    const finalUrl = affiliateUrl ?? fallbackUrl;
+    if (!finalUrl) return null;
+    return { navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost: true, missedAffiliate: !affiliateUrl && !!fallbackUrl };
+  } catch { return null; }
+}
+
 export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
   const sb = getSb();
   if (!sb) return null;
@@ -47,8 +68,16 @@ export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
 
     if (!data || data.length === 0) return null;
 
-    const candidates = data.slice(0, 3);
-    const raw = candidates[Math.floor(Math.random() * candidates.length)];
+    // Featured partner (prioritet >= 100) gets 70% of all promo slots
+    const featured = data.find(p => (p.prioritet ?? 0) >= 100);
+    let raw: any;
+    if (featured && Math.random() < 0.70) {
+      raw = featured;
+    } else {
+      const pool = data.filter(p => (p.prioritet ?? 0) < 100).slice(0, 3);
+      const candidates = pool.length > 0 ? pool : data.slice(0, 3);
+      raw = candidates[Math.floor(Math.random() * candidates.length)];
+    }
 
     const affiliateUrl: string | null = raw.affiliate_link?.trim() || null;
     const fallbackUrl: string | null = raw.nettadresse?.trim() || null;

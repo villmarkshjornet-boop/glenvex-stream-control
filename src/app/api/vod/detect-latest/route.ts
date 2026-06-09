@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 25;
@@ -31,6 +32,33 @@ async function getTwitchUserId(clientId: string, token: string, username: string
   } catch { return null; }
 }
 
+type ChannelResolution = {
+  channel: string;
+  source: 'settings_json.contentFactoryChannel' | 'twitch_channel_name' | 'env_fallback';
+} | null;
+
+async function resolveMonitoredChannel(): Promise<ChannelResolution> {
+  try {
+    const db = getDb();
+    if (db) {
+      const { data } = await db
+        .from('workspaces')
+        .select('twitch_channel_name,settings_json')
+        .eq('id', getWorkspaceId())
+        .single();
+      if (data) {
+        const cfChannel = data.settings_json?.contentFactoryChannel as string | undefined;
+        if (cfChannel?.trim()) return { channel: cfChannel.trim(), source: 'settings_json.contentFactoryChannel' };
+        const wsChannel = data.twitch_channel_name as string | undefined;
+        if (wsChannel?.trim()) return { channel: wsChannel.trim(), source: 'twitch_channel_name' };
+      }
+    }
+  } catch {}
+  const envChannel = process.env.TWITCH_USERNAME;
+  if (envChannel) return { channel: envChannel, source: 'env_fallback' };
+  return null;
+}
+
 function parseDurationSek(duration: string): number {
   const m = (duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
   if (!m) return 0;
@@ -43,11 +71,32 @@ export async function POST() {
   }
 
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const username = process.env.TWITCH_USERNAME;
   const botApiUrl = process.env.BOT_API_URL;
 
+  const resolution = await resolveMonitoredChannel();
+  const username = resolution?.channel;
+
   if (!clientId || !username) {
-    return NextResponse.json({ error: 'TWITCH_CLIENT_ID eller TWITCH_USERNAME mangler' }, { status: 500 });
+    return NextResponse.json({ error: 'TWITCH_CLIENT_ID mangler, eller ingen Twitch-kanal er satt i workspace/innstillinger' }, { status: 500 });
+  }
+
+  // Log channel resolution
+  logSystemEvent({
+    source: 'content_factory',
+    event_type: 'VOD_DETECTION_CHANNEL_RESOLVED',
+    title: 'Resolved Content Factory monitoring channel.',
+    severity: 'info',
+    metadata: { workspace_id: getWorkspaceId(), resolved_channel: username, source: resolution!.source },
+  }).catch(() => {});
+
+  if (resolution!.source === 'env_fallback') {
+    logSystemEvent({
+      source: 'content_factory',
+      event_type: 'VOD_DETECTION_FALLBACK_USED',
+      title: 'Workspace channel missing. Using fallback channel.',
+      severity: 'warning',
+      metadata: { workspace_id: getWorkspaceId(), resolved_channel: username, source: 'env_fallback' },
+    }).catch(() => {});
   }
   if (!botApiUrl) {
     return NextResponse.json({ error: 'BOT_API_URL mangler – Railway kan ikke nås' }, { status: 500 });
@@ -151,7 +200,8 @@ export async function POST() {
 
 export async function GET() {
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const username = process.env.TWITCH_USERNAME;
+  const resolution = await resolveMonitoredChannel();
+  const username = resolution?.channel;
 
   if (!clientId || !username) {
     return NextResponse.json({ vods: [], error: 'Twitch-credentials mangler' });
@@ -170,6 +220,7 @@ export async function GET() {
     });
     const vodData = await vodRes.json() as any;
     return NextResponse.json({
+      channel: username,
       vods: (vodData.data ?? []).map((v: any) => ({
         id: v.id, title: v.title, duration: v.duration, published_at: v.published_at, url: `https://www.twitch.tv/videos/${v.id}`,
       })),

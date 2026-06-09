@@ -3,6 +3,7 @@ import { getSettings, saveSettings } from '@/lib/settings';
 import { addLog } from '@/lib/logger';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +44,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Les gammel contentFactoryChannel for endring-sporing
+    const oldSettings = await getSettingsFromDb();
+    const oldChannel = (oldSettings?.contentFactoryChannel as string | undefined) ?? '';
+    const newChannel = (body.contentFactoryChannel as string | undefined) ?? '';
+
     // Lagre i Supabase (primær)
     const dbOk = await saveSettingsToDb(body);
 
@@ -50,6 +56,23 @@ export async function POST(req: NextRequest) {
     const updated = saveSettings(body);
 
     addLog('info', `Innstillinger oppdatert${dbOk ? ' (Supabase)' : ' (fil)'}`, 'OK');
+
+    // Logg kanalendring dersom contentFactoryChannel ble endret
+    if (newChannel !== oldChannel) {
+      logSystemEvent({
+        source: 'content_factory',
+        event_type: 'CONTENT_FACTORY_CHANNEL_UPDATED',
+        title: 'Content Factory monitoring channel updated.',
+        severity: 'info',
+        metadata: {
+          workspace_id: getWorkspaceId(),
+          old_channel: oldChannel || '(ikke satt)',
+          new_channel: newChannel || '(fjernet)',
+          changed_by: 'innstillinger',
+        },
+      }).catch(() => {});
+    }
+
     return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json({ error: 'Ugyldig forespørsel' }, { status: 400 });

@@ -205,9 +205,11 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       segmentPaths.push({ filePath: audioPath, offset: 0 });
     }
 
-    logSystemEvent({ source: 'content_factory', event_type: 'TRANSCRIPTION_STARTED', title: `Deepgram starter: ${segmentPaths.length} segment(er)`, severity: 'info', metadata: { vodId, segmenter: segmentPaths.length } });
+    const transcriptionStartMs = Date.now();
+    logSystemEvent({ source: 'content_factory', event_type: 'TRANSCRIPTION_STARTED', title: `Deepgram starter transkripsjon`, severity: 'info', metadata: { vodId, segmenter: segmentPaths.length, deepgram_model: 'nova-2', workspace_id: WORKSPACE_ID } });
 
     let totalSegmenter = 0;
+    let detectedLanguage = 'ukjent';
     for (let i = 0; i < segmentPaths.length; i++) {
       const { filePath: segPath, offset } = segmentPaths[i];
       const segSize = Math.round(fs.statSync(segPath).size / 1024 / 1024);
@@ -216,7 +218,7 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       const segBuf = fs.readFileSync(segPath);
 
       const dgRes = await fetch(
-        'https://api.deepgram.com/v1/listen?model=nova-2&language=no&punctuate=true&utterances=true&utt_split=2',
+        'https://api.deepgram.com/v1/listen?model=nova-2&language=no&detect_language=true&punctuate=true&utterances=true&utt_split=2',
         {
           method: 'POST',
           headers: {
@@ -234,6 +236,12 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       }
 
       const dgData = await dgRes.json() as any;
+
+      // Hent detektert språk fra Deepgram-svar
+      const segLang: string = dgData.results?.channels?.[0]?.detected_language
+        ?? dgData.metadata?.detected_language
+        ?? 'ukjent';
+      if (segLang !== 'ukjent') detectedLanguage = segLang;
 
       // Deepgram returnerer utterances (setningsgrupper) eller words – bruk utterances
       const utterances: any[] = dgData.results?.utterances ?? [];
@@ -257,7 +265,45 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
 
     try { fs.unlinkSync(audioPath); } catch {}
 
-    logSystemEvent({ source: 'content_factory', event_type: 'TRANSCRIPTION_DONE', title: `Deepgram ferdig: ${totalSegmenter} segmenter`, description: `VOD ${vodId} – Phase 2 starter automatisk`, severity: 'info', metadata: { vodId, segmenter: totalSegmenter } });
+    const transcriptionDurationMs = Date.now() - transcriptionStartMs;
+
+    if (totalSegmenter === 0) {
+      const possibleReason = detectedLanguage === 'ukjent' ? 'language_detection_failed' : 'silent_audio';
+      const feilmelding = 'Deepgram returnerte ingen transkripsjonssegmenter. Mulige årsaker: lydsporet er stille/tomt, Deepgram-nøkkelen er utløpt, eller språkdeteksjon feilet.';
+      oppdaterJobbStatus(vodId, 'FAILED', feilmelding);
+      logSystemEvent({
+        source: 'content_factory',
+        event_type: 'TRANSCRIPTION_FAILED_ZERO_SEGMENTS',
+        title: 'Deepgram completed but returned zero segments.',
+        severity: 'error',
+        metadata: {
+          vod_id: vodId,
+          workspace_id: WORKSPACE_ID,
+          detected_language: detectedLanguage,
+          transcription_duration: transcriptionDurationMs,
+          deepgram_model: 'nova-2',
+          total_segments: 0,
+          possible_reason: possibleReason,
+        },
+      });
+      return;
+    }
+
+    logSystemEvent({
+      source: 'content_factory',
+      event_type: 'TRANSCRIPTION_COMPLETED',
+      title: `Transkripsjon fullført: ${totalSegmenter} segmenter`,
+      description: `VOD ${vodId} transkribering ferdig – Phase 2 starter automatisk`,
+      severity: 'info',
+      metadata: {
+        vod_id: vodId,
+        workspace_id: WORKSPACE_ID,
+        total_segments: totalSegmenter,
+        language: detectedLanguage,
+        duration: transcriptionDurationMs,
+        deepgram_model: 'nova-2',
+      },
+    });
 
     oppdaterJobbStatus(vodId, 'COMPLETE', `Ferdig! ${totalSegmenter} transkripsjonssegmenter lagret (Deepgram Nova-2).`, {
       transcribed: true,

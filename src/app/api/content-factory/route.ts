@@ -30,7 +30,7 @@ export async function GET() {
 
   const { data } = await db
     .from('content_vods')
-    .select('id,title,category,status,created_at,twitch_vod_id,duration_seconds,vod_url,started_at,error_message,current_step,progress_percent')
+    .select('id,title,category,status,created_at,twitch_vod_id,duration_seconds,vod_url,started_at,error_message,current_step,progress_percent,status_message')
     .eq('workspace_id', getWorkspaceId())
     .order('created_at', { ascending: false })
     .limit(30);

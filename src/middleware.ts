@@ -89,6 +89,7 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredSession |
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': key },
       body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(8000), // 8s timeout — avoid hanging edge functions
     });
     if (!res.ok) return null;
     return await res.json() as StoredSession;
@@ -130,8 +131,9 @@ export async function middleware(request: NextRequest) {
   let claims = decodeJwtClaims(session.access_token);
   let refreshedSession: StoredSession | null = null;
 
-  // JWT expired — try to silently refresh using refresh_token
-  if (!claims || claims.exp < Date.now() / 1000) {
+  // JWT expired or expiring within 5 minutes — refresh proactively
+  const REFRESH_BUFFER_SECONDS = 5 * 60;
+  if (!claims || claims.exp < (Date.now() / 1000) + REFRESH_BUFFER_SECONDS) {
     if (!session.refresh_token) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
@@ -175,11 +177,29 @@ export async function middleware(request: NextRequest) {
 
   // Write refreshed session back as cookie so next request is instant
   if (refreshedSession) {
-    response.cookies.set(
-      cookieName,
-      encodeURIComponent(JSON.stringify(refreshedSession)),
-      { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: COOKIE_MAX_AGE }
-    );
+    const encoded = encodeURIComponent(JSON.stringify(refreshedSession));
+    const CHUNK_SIZE = 3500; // stay well under 4096 browser limit
+    if (encoded.length <= CHUNK_SIZE) {
+      // Single cookie — also delete any stale chunks from previous chunked write
+      response.cookies.set(cookieName, encoded,
+        { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: COOKIE_MAX_AGE });
+      for (let i = 0; i < 5; i++) {
+        response.cookies.set(`${cookieName}.${i}`, '',
+          { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: 0 });
+      }
+    } else {
+      // Chunked write — delete the base cookie and write chunks
+      response.cookies.set(cookieName, '',
+        { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: 0 });
+      const chunks: string[] = [];
+      for (let i = 0; i < encoded.length; i += CHUNK_SIZE) {
+        chunks.push(encoded.slice(i, i + CHUNK_SIZE));
+      }
+      for (let i = 0; i < chunks.length; i++) {
+        response.cookies.set(`${cookieName}.${i}`, chunks[i],
+          { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: COOKIE_MAX_AGE });
+      }
+    }
   }
 
   return response;

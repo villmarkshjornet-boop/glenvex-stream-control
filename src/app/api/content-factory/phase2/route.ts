@@ -46,6 +46,14 @@ export async function POST(req: NextRequest) {
   const vod = await hentVod(vodId);
   if (!vod) return NextResponse.json({ error: 'VOD ikke funnet' }, { status: 404 });
 
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'PHASE2_TRIGGER_STARTED',
+    title: `Phase 2 trigget for VOD: ${(vod.title ?? vodId).slice(0, 80)}`,
+    severity: 'info',
+    metadata: { vodId, vodTitle: vod.title },
+  });
+
   const steg: any[] = [];
   const db = getDb();
 
