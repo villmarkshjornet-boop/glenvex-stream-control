@@ -7,6 +7,7 @@ import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
+import { logApiError } from './observability';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -196,7 +197,17 @@ async function sjekkNyeFollowers() {
       }
     ).catch(() => null);
 
-    if (!res?.ok) return;
+    if (!res?.ok) {
+      if (res) {
+        logApiError({
+          service: 'Twitch',
+          endpoint: '/helix/channels/followers',
+          statusCode: res.status,
+          errorMessage: `HTTP ${res.status}: follower-sjekk feilet`,
+        });
+      }
+      return;
+    }
     const data = await res.json() as any;
     const nyAntall: number = data.total ?? 0;
 

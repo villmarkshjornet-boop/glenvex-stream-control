@@ -432,6 +432,30 @@ export async function GET() {
     sisteInnsikt,
   };
 
+  // ── Event Coverage (per kilde, basert på siste 24t system_events) ────────
+  const COVERAGE_DEFS = [
+    { key: 'twitch',     label: 'Twitch Bot',      sources: ['twitch_bot'],          windowH: 4,  passive: false },
+    { key: 'discord',    label: 'Discord Bot',     sources: ['discord_bot'],         windowH: 4,  passive: false },
+    { key: 'scheduler',  label: 'Scheduler',       sources: ['scheduler'],           windowH: 24, passive: false },
+    { key: 'aggregator', label: 'AI Learning',     sources: ['learning_aggregator'], windowH: 2,  passive: false },
+    { key: 'content',    label: 'Content Factory', sources: ['content_factory'],     windowH: 24, passive: false },
+    { key: 'cron',       label: 'Cron Jobs',       sources: ['cron'],                windowH: 24, passive: false },
+    { key: 'api',        label: 'API Monitor',     sources: ['api_monitor'],         windowH: 24, passive: true  },
+    { key: 'database',   label: 'Database',        sources: ['database'],            windowH: 24, passive: true  },
+    { key: 'recovery',   label: 'Recovery Engine', sources: ['recovery_engine'],     windowH: 24, passive: false },
+  ];
+
+  const coverage = COVERAGE_DEFS.map(cs => {
+    const events = subsystemEvents.filter((e: any) => cs.sources.includes(e.source));
+    const lastSeen: string | null = events[0]?.created_at ?? null;
+    const ageH = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) / 3_600_000 : Infinity;
+    const status: 'active' | 'stale' | 'offline' | 'passive' =
+      cs.passive && !lastSeen ? 'passive' :
+      ageH <= cs.windowH      ? 'active'  :
+      ageH <= cs.windowH * 3  ? 'stale'   : 'offline';
+    return { key: cs.key, label: cs.label, lastSeen, status, count24h: events.length, passive: cs.passive };
+  });
+
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
       title: i.title, summary: i.summary,
@@ -457,6 +481,7 @@ export async function GET() {
     kontrollsenter,
     lærdom,
     aiLearning,
+    coverage,
     debug,
     ts: new Date().toISOString(),
   });

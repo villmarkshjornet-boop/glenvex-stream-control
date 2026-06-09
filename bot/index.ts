@@ -37,6 +37,7 @@ import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVa
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
+import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
 import OpenAI from 'openai';
@@ -228,13 +229,21 @@ async function checkLive() {
       setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
     }
   } catch (error) {
-    addLog('error', `Live-sjekk feil: ${(error as Error).message}`, 'ERROR');
+    const msg = (error as Error).message ?? '';
+    const match = msg.match(/HTTP (\d{3})/);
+    const statusCode = match ? parseInt(match[1]) : null;
+    const eventType =
+      statusCode === 401 ? 'TWITCH_AUTH_ERROR' :
+      statusCode === 429 ? 'TWITCH_RATE_LIMIT' :
+      !statusCode        ? 'TWITCH_NETWORK_ERROR' :
+                           'LIVE_DETECTION_FAILED';
+    addLog('error', `Live-sjekk feil: ${msg}`, 'ERROR');
     logSystemEvent({
       source: 'twitch_bot',
-      event_type: 'LIVE_DETECTION_FAILED',
-      title: `Live-deteksjon feilet: ${(error as Error).message?.slice(0, 100)}`,
-      severity: 'error',
-      metadata: { error: (error as Error).message?.slice(0, 200) },
+      event_type: eventType,
+      title: `Live-deteksjon feilet: ${msg.slice(0, 100)}`,
+      severity: statusCode === 429 ? 'warning' : 'error',
+      metadata: { error: msg.slice(0, 200), statusCode },
     });
   }
 }
@@ -392,6 +401,7 @@ async function autoPostStreamplan() {
   const uke = ukeNummer();
   const cacheKey = `streamplan_uke_${uke}`;
   if ((global as any)[cacheKey]) return;
+  logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: autoPostStreamplan', severity: 'info', metadata: { job_name: 'autoPostStreamplan', uke } });
   (global as any)[cacheKey] = true;
 
   try {
@@ -455,8 +465,10 @@ Returner kun JSON-array.`,
     }
 
     addLog('success', `Streamplan postet automatisk uke ${uke}`, 'OK');
+    logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: `Cron ferdig: autoPostStreamplan — uke ${uke}`, severity: 'info', metadata: { job_name: 'autoPostStreamplan', uke } });
   } catch (error) {
     addLog('error', `Streamplan-post feil: ${(error as Error).message}`, 'ERROR');
+    logSystemEvent({ source: 'cron', event_type: 'CRON_FAILED', title: `Cron feilet: autoPostStreamplan — ${(error as Error).message?.slice(0, 80)}`, severity: 'error', metadata: { job_name: 'autoPostStreamplan', error_message: (error as Error).message?.slice(0, 200) } });
   }
 }
 
@@ -466,6 +478,8 @@ async function autoRyddKanaler() {
   const uke = ukeNummer();
   if (uke === sisteRyddUke) return;
   sisteRyddUke = uke;
+
+  logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: autoRyddKanaler', severity: 'info', metadata: { job_name: 'autoRyddKanaler', uke } });
 
   const guild = client.guilds.cache.first();
   const chatKanal = finnChatKanal();
@@ -539,6 +553,7 @@ async function autoRyddKanaler() {
 
   await chatKanal.send({ embeds: [embed], components: rows });
   addLog('info', `Kanal-analyse: ${kandidater.length} inaktive kanaler funnet`, 'OK');
+  logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: `Cron ferdig: autoRyddKanaler — ${kandidater.length} kandidater`, severity: 'info', metadata: { job_name: 'autoRyddKanaler', kandidater: kandidater.length } });
 }
 
 // ─── Proaktive meldinger ─────────────────────────────────────────────────────
@@ -821,6 +836,8 @@ async function sjekkUkentligStats() {
   if (uke === sisteStatsukeNr) return;
   sisteStatsukeNr = uke;
 
+  logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: sjekkUkentligStats', severity: 'info', metadata: { job_name: 'sjekkUkentligStats', uke } });
+
   const kanal = finnChatKanal();
   if (!kanal) return;
 
@@ -876,8 +893,10 @@ async function sjekkUkentligStats() {
 
     await discordSend(kanal, { embeds: [embed] }, { trigger: 'ukentlig_stats', uke });
     addLog('success', `Ukentlig stats postet (uke ${uke})`, 'OK');
+    logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: `Cron ferdig: sjekkUkentligStats — uke ${uke}`, severity: 'info', metadata: { job_name: 'sjekkUkentligStats', uke } });
   } catch (error) {
     addLog('error', `Stats feil: ${(error as Error).message}`, 'ERROR');
+    logSystemEvent({ source: 'cron', event_type: 'CRON_FAILED', title: `Cron feilet: sjekkUkentligStats — ${(error as Error).message?.slice(0, 80)}`, severity: 'error', metadata: { job_name: 'sjekkUkentligStats', error_message: (error as Error).message?.slice(0, 200) } });
   }
 }
 
@@ -1022,7 +1041,9 @@ async function sjekkStuckeVodsPeriodisk() {
       });
       addLog('warning', `Periodisk reset: stuck VOD ${vod.title ?? vod.id}`, 'RECOVERY');
     }
-  } catch {}
+  } catch (err: any) {
+    logSystemEvent({ source: 'cron', event_type: 'CRON_FAILED', title: `Cron feilet: sjekkStuckeVods — ${err?.message?.slice(0, 80) ?? ''}`, severity: 'error', metadata: { job_name: 'sjekkStuckeVods', error_message: err?.message?.slice(0, 200) } });
+  }
 }
 
 const DAGNAVN_BOT = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
@@ -1204,10 +1225,10 @@ client.once('clientReady', () => {
 
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
   setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
-  setTimeout(() => { sendProaktivMelding(); setInterval(sendProaktivMelding, PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
-  setTimeout(() => { postTopClip(); setInterval(postTopClip, CLIP_INTERVAL); }, 60 * 60 * 1000);
-  setTimeout(() => { delSocialsSubtilt(); setInterval(delSocialsSubtilt, SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
-  setTimeout(() => { sjekkGoals(); setInterval(sjekkGoals, GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
+  setTimeout(() => { withCron('send-proaktiv', sendProaktivMelding); setInterval(() => withCron('send-proaktiv', sendProaktivMelding), PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
+  setTimeout(() => { withCron('post-top-clip', postTopClip); setInterval(() => withCron('post-top-clip', postTopClip), CLIP_INTERVAL); }, 60 * 60 * 1000);
+  setTimeout(() => { withCron('del-socials', delSocialsSubtilt); setInterval(() => withCron('del-socials', delSocialsSubtilt), SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
+  setTimeout(() => { withCron('sjekk-goals', sjekkGoals); setInterval(() => withCron('sjekk-goals', sjekkGoals), GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
   setInterval(() => sjekkStuckeVodsPeriodisk().catch(() => {}), 30 * 60 * 1000); // Stuck-sjekk hvert 30. min
