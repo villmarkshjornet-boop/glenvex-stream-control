@@ -138,9 +138,11 @@ async function bootstrapKanal(sb: any, channel: TextChannel): Promise<number> {
       metadata: { discordMsgId: m.msgId, channelName: channel.name, isHistorical: true },
       created_at: m.ts,
     }));
-    try {
-      await sb.from('ai_agent_events').insert(rows);
-    } catch {}
+    const { error: insErr } = await sb.from('ai_agent_events').insert(rows).catch((e: any) => ({ error: e }));
+    if (insErr) {
+      console.error(`[DiscordBootstrap] ai_agent_events insert feilet (batch ${i}–${i + BATCH}):`
+        + ` code=${insErr.code ?? '?'} | ${insErr.message ?? insErr}`);
+    }
     await sleep(200);
   }
 

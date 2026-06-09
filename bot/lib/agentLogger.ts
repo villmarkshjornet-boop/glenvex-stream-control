@@ -2,6 +2,11 @@
  * Railway-side agent event logger.
  * Buffrer hendelser i 10s før batch-skriving til Supabase.
  * Brukes av twitchBot.ts, index.ts (Discord-hendelser) og clipWorker.ts.
+ *
+ * Observability-garanti:
+ *   Hvert flush-forsøk logger nøkkel-rolle (service_role vs anon), JS-klient-resultat,
+ *   REST-fallback-resultat, og skriver AI_EVENT_INSERT_FAILED til system_events om begge feiler.
+ *   Aldri stille feil igjen.
  */
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
@@ -13,6 +18,16 @@ function getSb() {
   const { createClient } = require('@supabase/supabase-js');
   const ws = require('ws');
   return createClient(url, key, { realtime: { transport: ws } });
+}
+
+/** Dekoder JWT-payload og returnerer 'role'-claim — beviser om det er service_role eller anon. */
+function getKeyRole(key: string): string {
+  try {
+    const payload = JSON.parse(Buffer.from(key.split('.')[1], 'base64url').toString('utf-8'));
+    return (payload.role as string) ?? 'unknown';
+  } catch {
+    return 'decode-failed';
+  }
 }
 
 interface BotAgentEvent {
@@ -39,14 +54,48 @@ export function logBotAgentEvent(event: BotAgentEvent): void {
   }
 }
 
+async function writeInsertFailureEvent(url: string, key: string, count: number, errorMsg: string): Promise<void> {
+  try {
+    const res = await fetch(`${url}/rest/v1/system_events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({
+        workspace_id: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'AI_EVENT_INSERT_FAILED',
+        title: `ai_agent_events insert feilet: ${count} events tapt`,
+        severity: 'error',
+        metadata: { errorMsg: errorMsg.slice(0, 500), eventCount: count, keyRole: getKeyRole(key) },
+      }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      console.error(`[AgentLogger] system_events failure-event feilet også HTTP ${res.status}: ${txt.slice(0, 200)}`);
+    }
+  } catch (e: any) {
+    console.error('[AgentLogger] writeInsertFailureEvent exception:', e.message?.slice(0, 80));
+  }
+}
+
 async function flushEvents(): Promise<void> {
   if (eventBuffer.length === 0) return;
   const batch = eventBuffer.splice(0);
-  const sb = getSb();
-  if (!sb) {
-    console.error('[AgentLogger] Supabase ikke konfigurert (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY mangler) – events tapt');
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    console.error('[AgentLogger] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY mangler — events tapt');
     return;
   }
+
+  const keyRole = getKeyRole(key);
+  console.log(`[AgentLogger] Flush: ${batch.length} events | nøkkel-rolle: ${keyRole}`);
+
   const rows = batch.map(e => ({
     workspace_id:     e.workspaceId ?? WORKSPACE_ID,
     source:           e.source,
@@ -57,32 +106,54 @@ async function flushEvents(): Promise<void> {
     importance_score: e.importance_score ?? 0,
     metadata:         e.metadata        ?? {},
   }));
-  try {
-    const { error } = await sb.from('ai_agent_events').insert(rows);
-    if (error) {
-      console.error(`[AgentLogger] Insert feilet (${error.code ?? ''}): ${error.message}`);
-      // Fallback: direkte REST for å omgå evt. RLS-problemer med JS-klienten
-      const url = process.env.SUPABASE_URL;
-      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (url && key) {
-        const res = await fetch(`${url}/rest/v1/ai_agent_events`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': key,
-            'Authorization': `Bearer ${key}`,
-            'Prefer': 'return=minimal',
-          },
-          body: JSON.stringify(rows),
-        }).catch((e2: any) => { console.error('[AgentLogger] REST fallback feilet:', e2.message); return null; });
-        if (res && !res.ok) {
-          const txt = await res.text().catch(() => res.statusText);
-          console.error('[AgentLogger] REST fallback HTTP', res.status, txt.slice(0, 200));
-        }
+
+  // ── Forsøk 1: Supabase JS-klienten ──────────────────────────────────────────
+  let jsClientOk = false;
+  const sb = getSb();
+  if (sb) {
+    try {
+      const { error } = await sb.from('ai_agent_events').insert(rows);
+      if (!error) {
+        jsClientOk = true;
+        console.log(`[AgentLogger] ✓ JS-klient: ${batch.length} events skrevet til ai_agent_events`);
+      } else {
+        console.error(
+          `[AgentLogger] JS-klient feilet` +
+          ` | code: ${error.code ?? '(ingen)'}` +
+          ` | message: ${error.message}` +
+          ` | hint: ${error.hint ?? ''}` +
+          ` | details: ${error.details ?? ''}`
+        );
       }
+    } catch (e: any) {
+      console.error('[AgentLogger] JS-klient exception:', e.message?.slice(0, 100));
     }
-  } catch (e: any) {
-    console.error('[AgentLogger] Flush exception:', e.message?.slice(0, 100));
+  }
+
+  if (jsClientOk) return;
+
+  // ── Forsøk 2: Direkte REST API (beviser om det er client-konfig vs faktisk tilgangsproblem) ──
+  try {
+    const res = await fetch(`${url}/rest/v1/ai_agent_events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify(rows),
+    });
+    if (res.ok) {
+      console.log(`[AgentLogger] ✓ REST fallback: ${batch.length} events skrevet til ai_agent_events`);
+    } else {
+      const txt = await res.text().catch(() => res.statusText);
+      console.error(`[AgentLogger] REST fallback HTTP ${res.status}: ${txt.slice(0, 300)}`);
+      await writeInsertFailureEvent(url, key, batch.length, `REST HTTP ${res.status}: ${txt.slice(0, 200)}`);
+    }
+  } catch (e2: any) {
+    console.error('[AgentLogger] REST exception:', e2.message?.slice(0, 80));
+    await writeInsertFailureEvent(url, key, batch.length, `REST exception: ${e2.message?.slice(0, 100)}`);
   }
 }
 
