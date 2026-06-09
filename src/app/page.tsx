@@ -333,9 +333,9 @@ const CONFIDENCE_FARGE: Record<string, string> = {
 
 const COVERAGE_STATUS_BAR: Record<string, string> = {
   active:  'bg-g-green',
-  stale:   'bg-yellow-400',
-  offline: 'bg-red-500/60',
-  passive: 'bg-g-muted/30',
+  stale:   'bg-yellow-400/60',
+  offline: 'bg-g-muted/25',
+  passive: 'bg-g-muted/15',
 };
 
 function EventCoverage({ data, loading }: { data: LiveData['coverage']; loading: boolean }) {
@@ -354,8 +354,8 @@ function EventCoverage({ data, loading }: { data: LiveData['coverage']; loading:
               <p className="text-[10px] text-g-text truncate">{c.label}</p>
               <span className="text-[9px] text-g-muted/60 font-mono">{c.count24h}</span>
             </div>
-            <p className="text-[9px] text-g-muted/50">
-              {c.lastSeen ? tidSiden(c.lastSeen) : c.passive ? 'ingen feil' : 'ingen aktivitet'}
+            <p className={`text-[9px] ${c.status === 'active' ? 'text-g-green/60' : 'text-g-muted/40'}`}>
+              {c.lastSeen ? tidSiden(c.lastSeen) : c.passive ? 'ingen feil loggett' : 'ikke startet ennå'}
             </p>
           </div>
         ))}
