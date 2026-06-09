@@ -97,7 +97,7 @@ async function bootstrapKanal(sb: any, channel: TextChannel): Promise<number> {
       await sleep(1_000); // Rate-limit: 1s mellom kall
     } catch (err: any) {
       console.error(`[DiscordBootstrap] Feil ved henting fra ${channel.name}:`, err.message?.slice(0, 80));
-      break;
+      throw err; // re-throw så caller kan logge SYNC_FAILED
     }
   }
 
@@ -107,7 +107,6 @@ async function bootstrapKanal(sb: any, channel: TextChannel): Promise<number> {
   const msgIds = alleMeldinger.map(m => m.msgId);
   let eksisterendeIds = new Set<string>();
   try {
-    // Sjekk i ai_agent_events.metadata for discordMsgId
     const { data: existing } = await sb
       .from('ai_agent_events')
       .select('metadata')
@@ -158,7 +157,6 @@ export async function startDiscordHistoryBootstrap(client: Client): Promise<void
   const chatKanalId = process.env.DISCORD_CHAT_CHANNEL_ID;
   const liveKanalId = process.env.DISCORD_LIVE_CHANNEL_ID;
 
-  // Bootstrap alle tekstkanaler med aktivitet (prioriter kjente kanaler)
   const prioriterteIds = [chatKanalId, liveKanalId].filter(Boolean) as string[];
   const alleKanaler = guild.channels.cache
     .filter(c => c instanceof TextChannel)
@@ -178,14 +176,54 @@ export async function startDiscordHistoryBootstrap(client: Client): Promise<void
     const alleredeGjort = await erBootstrappet(sb, kanal.id);
     if (alleredeGjort) continue;
 
+    const syncStart = Date.now();
     console.log(`[DiscordBootstrap] Henter historikk fra #${kanal.name}...`);
+
+    logSystemEvent({
+      source: 'discord_bot',
+      event_type: 'DISCORD_HISTORY_SYNC_STARTED',
+      title: `Discord historikk-sync startet: #${kanal.name}`,
+      severity: 'info',
+      metadata: { guildId: guild.id, channelId: kanal.id, channelName: kanal.name },
+    });
+
     try {
       const antall = await bootstrapKanal(sb, kanal);
       await markerBootstrappet(sb, kanal.id, antall);
       totalBootstrappet += antall;
+
+      logSystemEvent({
+        source: 'discord_bot',
+        event_type: 'DISCORD_HISTORY_SYNC_COMPLETED',
+        title: `Discord historikk-sync ferdig: #${kanal.name} — ${antall} meldinger`,
+        severity: 'info',
+        metadata: {
+          guildId: guild.id,
+          channelId: kanal.id,
+          channelName: kanal.name,
+          antallMeldinger: antall,
+          durationMs: Date.now() - syncStart,
+        },
+      });
+
       console.log(`[DiscordBootstrap] ✓ #${kanal.name}: ${antall} nye meldinger lagret`);
     } catch (err: any) {
-      console.error(`[DiscordBootstrap] Feil for #${kanal.name}:`, err.message?.slice(0, 80));
+      const errMsg = err.message?.slice(0, 200) ?? 'Ukjent feil';
+      console.error(`[DiscordBootstrap] Feil for #${kanal.name}:`, errMsg.slice(0, 80));
+
+      logSystemEvent({
+        source: 'discord_bot',
+        event_type: 'DISCORD_HISTORY_SYNC_FAILED',
+        title: `Discord historikk-sync feilet: #${kanal.name}`,
+        severity: 'error',
+        metadata: {
+          guildId: guild.id,
+          channelId: kanal.id,
+          channelName: kanal.name,
+          errorMessage: errMsg,
+          durationMs: Date.now() - syncStart,
+        },
+      });
     }
 
     await sleep(2_000); // 2s mellom kanaler
@@ -194,8 +232,8 @@ export async function startDiscordHistoryBootstrap(client: Client): Promise<void
   if (totalBootstrappet > 0) {
     logSystemEvent({
       source: 'discord_bot',
-      event_type: 'DISCORD_HISTORY_BOOTSTRAPPED',
-      title: `Discord historikk bootstrappet: ${totalBootstrappet} meldinger`,
+      event_type: 'DISCORD_HISTORY_SYNC_COMPLETED',
+      title: `Discord historikk totalt bootstrappet: ${totalBootstrappet} meldinger`,
       severity: 'info',
       metadata: { total: totalBootstrappet, kanaler: alleKanaler.length },
     });

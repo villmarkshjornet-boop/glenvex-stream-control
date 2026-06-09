@@ -83,7 +83,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -129,6 +129,19 @@ export async function GET() {
       .gte('created_at', cutoff30d)
       .order('created_at', { ascending: false })
       .limit(30),
+
+    // Siste memory-oppdatering (for AI learning health)
+    db.from('ai_agent_memory')
+      .select('updated_at')
+      .eq('workspace_id', ws)
+      .order('updated_at', { ascending: false })
+      .limit(1),
+
+    // Antall ai_agent_events siste 60 min
+    db.from('ai_agent_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', ws)
+      .gte('created_at', cutoff1h),
   ]);
 
   const vods: any[]       = vodsRes.data ?? [];
@@ -139,6 +152,8 @@ export async function GET() {
   const systemEvents: any[] = systemEventsRes.data ?? [];
   const subsystemEvents: any[] = subsystemEventsRes.data ?? [];
   const decisions: any[] = decisionsRes.data ?? [];
+  const lastMemoryUpdate: string | null = aiMemoryRes.data?.[0]?.updated_at ?? null;
+  const eventsLast60min: number = aiEventsCountRes.count ?? 0;
 
   // ── Aktive VOD-jobber ─────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v =>
@@ -320,18 +335,18 @@ export async function GET() {
 
   // ── Kontrollsenter: subsystem-status fra system_events siste 24t ─────────
   const SUBSYSTEMER = [
-    { key: 'live',         label: 'Live Detection',      events: ['LIVE_DETECTED', 'STREAM_OFFLINE_DETECTED'] },
-    { key: 'pre_hype',     label: 'Pre-hype',            events: ['PRE_HYPE_SENT', 'STREAM_STARTED'] },
-    { key: 'vod',          label: 'VOD Pipeline',        events: ['VOD_AUTO_QUEUE_STARTED', 'VOD_NOT_FOUND', 'VOD_LOOKUP_STARTED'] },
-    { key: 'discovery',    label: 'Highlight Discovery', events: ['HIGHLIGHTS_DISCOVERED'] },
-    { key: 'ranking',      label: 'Highlight Ranking',   events: ['HIGHLIGHTS_RANKED'] },
+    { key: 'live',         label: 'Live Detection',      events: ['LIVE_DETECTED', 'STREAM_OFFLINE_DETECTED', 'POST_STREAM_STARTED', 'LIVE_DETECTION_FAILED'] },
+    { key: 'pre_hype',     label: 'Pre-hype',            events: ['PREHYPE_SENT', 'PREHYPE_SCHEDULED', 'STREAM_CYCLE_RESET'] },
+    { key: 'vod',          label: 'VOD Pipeline',        events: ['VOD_AUTO_QUEUE_STARTED', 'VOD_NOT_FOUND', 'VOD_LOOKUP_STARTED', 'VOD_DETECTED', 'VOD_PIPELINE_DONE'] },
+    { key: 'discovery',    label: 'Highlight Discovery', events: ['DISCOVERY_STARTED', 'DISCOVERY_COMPLETED'] },
+    { key: 'ranking',      label: 'Highlight Ranking',   events: ['RANKING_COMPLETED', 'COPYWRITING_COMPLETED'] },
     { key: 'clip_factory', label: 'Clip Factory',        events: ['CLIP_EXTRACTED'] },
-    { key: 'thumbnail',    label: 'Thumbnail Generator', events: ['THUMBNAIL_GENERATED'] },
-    { key: 'learning',     label: 'Learning Engine',     events: ['LEARNING_LOOP_EXECUTED'] },
-    { key: 'aggregator',   label: 'Aggregator',          events: ['AGGREGATION_COMPLETE'] },
+    { key: 'thumbnail',    label: 'Thumbnail Generator', events: ['THUMBNAIL_DONE', 'THUMBNAIL_FAILED'] },
+    { key: 'aggregator',   label: 'Aggregator',          events: ['LEARNING_AGGREGATION_COMPLETED', 'LEARNING_AGGREGATION_STARTED', 'INSIGHT_CREATED', 'MEMORY_UPDATED'] },
+    { key: 'feedback',     label: 'Feedback Loop',       events: ['DECISION_FEEDBACK_LEARNED', 'DECISION_FEEDBACK_ANALYSIS_COMPLETED', 'DECISION_FEEDBACK_CONSUMED'] },
     { key: 'ai_producer',  label: 'AI Producer',         events: ['AI_PRODUCER_ANALYSIS_COMPLETE', 'AI_PRODUCER_RECOMMENDATION_COMPLETED', 'AI_PRODUCER_RECOMMENDATION_DISMISSED'] },
     { key: 'raid',         label: 'Raid Manager',        events: ['RAID_CANDIDATES_CHECKED', 'RAID_RECOMMENDATION_CREATED'] },
-    { key: 'community',    label: 'Community',           events: ['DISCORD_ROLE_ASSIGNED'] },
+    { key: 'discord',      label: 'Discord Bot',         events: ['DISCORD_AI_RESPONSE', 'DISCORD_HISTORY_SYNC_COMPLETED', 'DISCORD_HISTORY_SYNC_FAILED', 'DISCORD_ROLE_ASSIGNED'] },
     { key: 'briefing',     label: 'Stream Briefing',     events: ['PRE_STREAM_BRIEFING_GENERATED'] },
   ];
 
@@ -390,6 +405,33 @@ export async function GET() {
       : `${totalDatapunkter} beslutninger loggett siste 30 dager. Confidence: ${confidenceLabel}.`,
   };
 
+  // ── AI Learning health (beregnet fra allerede-hentede data) ──────────────
+  const lastAggregation = systemEvents.find(e =>
+    e.event_type === 'LEARNING_AGGREGATION_COMPLETED' || e.event_type === 'AGGREGATION_COMPLETE'
+  ) ?? null;
+  const lastFeedbackRun = systemEvents.find(e =>
+    e.event_type === 'DECISION_FEEDBACK_ANALYSIS_COMPLETED' || e.event_type === 'DECISION_FEEDBACK_LEARNED'
+  ) ?? null;
+  const lastInsight = nyesteInnsikter[0] ?? null;
+  const decisionsLast24h = decisions.filter(d => d.created_at >= cutoff24h).length;
+  const feedbackDecisionsLast24h = decisions.filter(d =>
+    d.created_at >= cutoff24h && (d.outcome === 'executed' || d.outcome === 'dismissed' || d.feedback_score !== null)
+  ).length;
+  const sisteInnsikt = lastInsight ? { title: lastInsight.title, summary: lastInsight.summary, createdAt: lastInsight.created_at } : null;
+
+  const aiLearning = {
+    lastAggregation: lastAggregation?.created_at ?? null,
+    lastAggregationTitle: lastAggregation?.title ?? null,
+    lastFeedbackRun: lastFeedbackRun?.created_at ?? null,
+    lastFeedbackTitle: lastFeedbackRun?.title ?? null,
+    lastMemoryUpdate,
+    lastInsightAt: lastInsight?.created_at ?? null,
+    eventsLast60min,
+    decisionsLast24h,
+    feedbackDecisionsLast24h,
+    sisteInnsikt,
+  };
+
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
       title: i.title, summary: i.summary,
@@ -414,6 +456,7 @@ export async function GET() {
     liveEvents,
     kontrollsenter,
     lærdom,
+    aiLearning,
     debug,
     ts: new Date().toISOString(),
   });

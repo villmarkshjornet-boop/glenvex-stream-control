@@ -91,6 +91,14 @@ export async function GET() {
     const db = getDb();
     const wsId = getWorkspaceId();
 
+    await logSystemEvent({
+      source: 'sponsor_manager',
+      event_type: 'SPONSOR_ANALYSIS_STARTED',
+      title: 'Sponsor-analyse startet',
+      severity: 'info',
+      metadata: { workspaceId: wsId },
+    });
+
     const [broadcasterId, guild, creatorCtx] = await Promise.all([
       getBroadcasterId(),
       getGuildInfo(),

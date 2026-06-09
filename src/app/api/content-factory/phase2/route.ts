@@ -80,12 +80,30 @@ export async function POST(req: NextRequest) {
     return oppdagHighlights(vodId);
   }, steg);
 
+  if (highlights !== null) {
+    await logSystemEvent({
+      source: 'content_factory',
+      event_type: 'DISCOVERY_COMPLETED',
+      title: `Highlight-oppdagelse ferdig: ${highlights?.length ?? 0} highlights funnet`,
+      severity: 'info',
+      metadata: { vodId, vodTitle: vod.title, highlightCount: highlights?.length ?? 0 },
+    });
+  }
+
   // RANK med retry
   if (highlights && highlights.length > 0) {
     await kjørMedRetry('RANK', vodId, async () => {
       const { rangerHighlights } = await import('@/lib/content-factory/ranking/highlightRanker');
       return rangerHighlights(vodId);
     }, steg);
+
+    await logSystemEvent({
+      source: 'content_factory',
+      event_type: 'RANKING_COMPLETED',
+      title: `Rangering ferdig: ${highlights.length} highlights rangert`,
+      severity: 'info',
+      metadata: { vodId, vodTitle: vod.title, highlightCount: highlights.length },
+    });
   } else if (!steg.find(s => s.steg === 'RANK')) {
     steg.push({ steg: 'RANK', status: 'HOPPET OVER', melding: 'Ingen highlights å rangere' });
   }
@@ -100,6 +118,14 @@ export async function POST(req: NextRequest) {
     antallCopy = copy.length;
     return copy;
   }, steg);
+
+  await logSystemEvent({
+    source: 'content_factory',
+    event_type: 'COPYWRITING_COMPLETED',
+    title: `Copywriting ferdig: ${antallCopy} tekster generert`,
+    severity: 'info',
+    metadata: { vodId, vodTitle: vod.title, antallCopy },
+  });
 
   // QUEUE med retry
   await kjørMedRetry('QUEUE', vodId, async () => {

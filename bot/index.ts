@@ -217,11 +217,25 @@ async function checkLive() {
         severity: 'info',
         metadata: { resetSyklusOm: '2t' },
       });
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'POST_STREAM_STARTED',
+        title: 'Post-stream fase startet – VOD-prosessering og opprydding',
+        severity: 'info',
+        metadata: { streamId: settings.lastNotifiedStreamId ?? null },
+      });
       // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
       setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
     }
   } catch (error) {
     addLog('error', `Live-sjekk feil: ${(error as Error).message}`, 'ERROR');
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'LIVE_DETECTION_FAILED',
+      title: `Live-deteksjon feilet: ${(error as Error).message?.slice(0, 100)}`,
+      severity: 'error',
+      metadata: { error: (error as Error).message?.slice(0, 200) },
+    });
   }
 }
 
@@ -1308,8 +1322,22 @@ client.on('messageCreate', async (message) => {
         .setFooter({ text: 'GLENVEX Bot • AI-generert bilde' });
 
       await message.reply({ content: svar.tekst ?? undefined, embeds: [embed] });
+      logSystemEvent({
+        source: 'discord_bot',
+        event_type: 'DISCORD_AI_RESPONSE',
+        title: `AI svarte med bilde i #${(message.channel as any).name ?? message.channelId}`,
+        severity: 'info',
+        metadata: { channel: message.channelId, username: message.author.username, hasBilde: true },
+      });
     } else if (svar.tekst) {
       await message.reply(svar.tekst);
+      logSystemEvent({
+        source: 'discord_bot',
+        event_type: 'DISCORD_AI_RESPONSE',
+        title: svar.tekst.slice(0, 80),
+        severity: 'info',
+        metadata: { channel: message.channelId, username: message.author.username, length: svar.tekst.length },
+      });
     }
   } catch (error) {
     addLog('error', `AI chat feil: ${(error as Error).message}`, 'ERROR');

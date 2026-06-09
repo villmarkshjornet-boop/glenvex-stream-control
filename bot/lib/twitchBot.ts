@@ -220,6 +220,16 @@ async function sjekkNyeFollowers() {
       logBotAgentEvent({ source: 'twitch', event_type: 'follow', importance_score: 30, metadata: { count: antallNye, total: nyAntall } });
     }
 
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'FOLLOW_RECEIVED',
+      title: navnListe.length > 0
+        ? `${antallNye === 1 ? navnListe[0] : `${navnListe[0]} og ${antallNye - 1} til`} fulgte GLENVEX`
+        : `${antallNye} ny${antallNye > 1 ? 'e' : ''} følger${antallNye > 1 ? 'e' : ''}`,
+      severity: 'info',
+      metadata: { antallNye, totalFollowers: nyAntall, names: navnListe.slice(0, 5) },
+    });
+
     // Nyeste følgere (tilgjengelig ved user token, tom liste ellers)
     const nyeNavn: string[] = (data.data ?? [])
       .slice(0, antallNye)
@@ -406,6 +416,19 @@ export function startTwitchBot() {
   // Telletabell for aktive chat-brukere (oppdateres i minne, flusher til memory via aggregering)
   const chatActivity = new Map<string, number>();
   setInterval(() => {
+    const totalMessages = Array.from(chatActivity.values()).reduce((a, b) => a + b, 0);
+    const uniqueUsers = chatActivity.size;
+
+    if (totalMessages >= 20 && uniqueUsers >= 5) {
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'CHAT_SPIKE_DETECTED',
+        title: `Chat-spike: ${totalMessages} meldinger fra ${uniqueUsers} brukere (10 min)`,
+        severity: 'info',
+        metadata: { totalMessages, uniqueUsers, windowMin: 10 },
+      });
+    }
+
     // Topp 5 aktive chatters → logg som events for aggregering
     const sorted = Array.from(chatActivity.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
     for (const [username, count] of sorted) {

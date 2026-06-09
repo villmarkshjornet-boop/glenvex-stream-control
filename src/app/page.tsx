@@ -51,6 +51,18 @@ interface Lærdom {
   siste30dager: { utført: number; avvist: number; raids: number; analyser: number };
   notat: string;
 }
+interface AiLearning {
+  lastAggregation: string | null;
+  lastAggregationTitle: string | null;
+  lastFeedbackRun: string | null;
+  lastFeedbackTitle: string | null;
+  lastMemoryUpdate: string | null;
+  lastInsightAt: string | null;
+  eventsLast60min: number;
+  decisionsLast24h: number;
+  feedbackDecisionsLast24h: number;
+  sisteInnsikt: { title: string; summary: string; createdAt: string } | null;
+}
 interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string; detail?: string }[];
   sjekkliste:  { label: string; done: boolean; href: string }[];
@@ -63,6 +75,7 @@ interface LiveData {
   systemEvents: SystemEvent[];
   kontrollsenter?: { key: string; label: string; status: 'ok'|'feil'|'ingen_aktivitet'; sisteKjøring: string|null; sisteEvent: string|null; sisteTitle: string|null; antall24h: number }[];
   lærdom?: Lærdom;
+  aiLearning?: AiLearning;
   debug?: Record<string, any>;
   ts: string;
 }
@@ -372,6 +385,8 @@ function DetteVetGlenvex({ data, loading }: { data: Lærdom | undefined; loading
 }
 
 function GlobalActivityFeed({ events, loading }: { events: SystemEvent[]; loading: boolean }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />;
 
   return (
@@ -395,25 +410,49 @@ function GlobalActivityFeed({ events, loading }: { events: SystemEvent[]; loadin
         <p className="text-[11px] text-g-muted">Ingen system-events ennå – events dukker opp her automatisk fra alle moduler.</p>
       ) : (
         <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
-          {events.map((e) => (
-            <div key={e.id}
-              className={`flex items-start gap-2.5 py-1.5 border-b last:border-0 ${SEV_STYLE[e.severity] ?? SEV_STYLE.info}`}>
-              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${SEV_DOT[e.severity] ?? SEV_DOT.info}`} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-1.5 flex-wrap">
-                  <span className="text-[9px] text-g-muted font-bold uppercase">
-                    {SOURCE_LABEL[e.source] ?? e.source}
-                  </span>
-                  <span className="text-[9px] text-g-muted/40">{e.event_type}</span>
-                </div>
-                <p className="text-[10px] leading-snug mt-0.5">{e.title}</p>
-                {e.description && (
-                  <p className="text-[9px] text-g-muted/60 leading-snug">{e.description}</p>
+          {events.map((e) => {
+            const isExpanded = expandedId === e.id;
+            const hasMeta = e.metadata && Object.keys(e.metadata).length > 0;
+            return (
+              <div key={e.id}>
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : e.id)}
+                  className={`w-full text-left flex items-start gap-2.5 py-1.5 border-b last:border-0 transition-colors ${SEV_STYLE[e.severity] ?? SEV_STYLE.info} ${hasMeta ? 'cursor-pointer hover:bg-white/[0.02]' : 'cursor-default'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${SEV_DOT[e.severity] ?? SEV_DOT.info}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-[9px] text-g-muted font-bold uppercase">
+                        {SOURCE_LABEL[e.source] ?? e.source}
+                      </span>
+                      <span className="text-[9px] text-g-muted/40">{e.event_type}</span>
+                      {hasMeta && <span className="text-[8px] text-g-muted/30">{isExpanded ? '▲' : '▼'}</span>}
+                    </div>
+                    <p className="text-[10px] leading-snug mt-0.5">{e.title}</p>
+                    {e.description && (
+                      <p className="text-[9px] text-g-muted/60 leading-snug">{e.description}</p>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-g-muted/40 flex-shrink-0 mt-1">{tidSiden(e.created_at)}</span>
+                </button>
+                {isExpanded && hasMeta && (
+                  <div className="ml-4 mb-1.5 p-2 bg-g-bg/40 border border-g-border/20 rounded-lg">
+                    <p className="text-[8px] text-g-muted/50 uppercase font-bold mb-1">Metadata</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                      {Object.entries(e.metadata!).slice(0, 12).map(([k, v]) => (
+                        <div key={k} className="flex items-baseline gap-1 min-w-0">
+                          <span className="text-[8px] text-g-muted/50 font-mono shrink-0">{k}</span>
+                          <span className="text-[9px] text-g-text font-mono truncate">
+                            {typeof v === 'object' ? JSON.stringify(v).slice(0, 60) : String(v ?? '—').slice(0, 80)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[8px] text-g-muted/30 mt-1.5 font-mono">{new Date(e.created_at).toLocaleString('no-NO')}</p>
+                  </div>
                 )}
               </div>
-              <span className="text-[9px] text-g-muted/40 flex-shrink-0 mt-1">{tidSiden(e.created_at)}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -530,38 +569,103 @@ function JobMonitor({ resultater, clipStatus, loading }: {
   );
 }
 
-// ─── 4. RECENT AI LEARNING ────────────────────────────────────────────────────
+// ─── 4. AI LEARNING PANEL ────────────────────────────────────────────────────
 
-function RecentAiLearning({ innsikter, loading }: { innsikter: AiInnsikt[]; loading: boolean }) {
+function alderLabel(ts: string | null): string {
+  if (!ts) return '—';
+  const sek = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (sek < 60)    return 'akkurat nå';
+  if (sek < 3600)  return `${Math.floor(sek / 60)}m siden`;
+  if (sek < 86400) return `${Math.floor(sek / 3600)}t siden`;
+  return `${Math.floor(sek / 86400)}d siden`;
+}
+
+function healthDot(ts: string | null, warnMs: number): string {
+  if (!ts) return 'bg-g-muted/30';
+  const age = Date.now() - new Date(ts).getTime();
+  if (age > warnMs * 3) return 'bg-red-400';
+  if (age > warnMs) return 'bg-yellow-400';
+  return 'bg-g-green';
+}
+
+function RecentAiLearning({ innsikter, aiLearning, loading }: { innsikter: AiInnsikt[]; aiLearning?: AiLearning; loading: boolean }) {
   if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-xl animate-pulse" />;
-  if (!innsikter || innsikter.length === 0) return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">AI lærte nylig</p>
-      <p className="text-xs text-g-muted">Ingen nye AI-innsikter siste 24t.</p>
-    </div>
-  );
+
+  const harInnsikter = innsikter && innsikter.length > 0;
 
   return (
-    <div className="bg-g-card border border-g-green/10 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-g-green" />
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI lærte nylig</p>
+          {harInnsikter && <span className="w-1.5 h-1.5 rounded-full bg-g-green" />}
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Learning</p>
         </div>
         <Link href="/ai-memory" className="text-[9px] text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
       </div>
-      <div className="space-y-2">
-        {innsikter.map((ins, i) => (
-          <div key={i} className="flex gap-3 items-start py-1.5 border-b border-g-border/20 last:border-0">
-            <span className="text-g-green text-[9px] font-black flex-shrink-0 mt-0.5">◆</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold text-g-green">{ins.title}</p>
-              <p className="text-[10px] text-g-muted leading-snug">{ins.summary.slice(0, 120)}</p>
+
+      {/* Health metrics grid */}
+      {aiLearning && (
+        <div className="grid grid-cols-2 gap-1.5">
+          {[
+            { label: 'Siste aggregering', ts: aiLearning.lastAggregation, warnMs: 20 * 60_000 },
+            { label: 'Siste feedback-run', ts: aiLearning.lastFeedbackRun, warnMs: 70 * 60_000 },
+            { label: 'Siste memory-update', ts: aiLearning.lastMemoryUpdate, warnMs: 35 * 60_000 },
+            { label: 'Siste innsikt', ts: aiLearning.lastInsightAt, warnMs: 35 * 60_000 },
+          ].map(({ label, ts, warnMs }) => (
+            <div key={label} className="flex items-center gap-1.5 py-1 px-1.5 rounded border border-g-border/20 bg-g-bg/30">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${healthDot(ts, warnMs)}`} />
+              <div className="min-w-0">
+                <p className="text-[8px] text-g-muted/60 leading-none">{label}</p>
+                <p className="text-[9px] text-g-text font-mono leading-snug">{alderLabel(ts)}</p>
+              </div>
             </div>
-            <span className="text-[9px] text-g-muted/40 flex-shrink-0">{tidSiden(ins.createdAt)}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Counts row */}
+      {aiLearning && (
+        <div className="flex gap-2 flex-wrap">
+          <span className="text-[9px] text-g-muted px-2 py-0.5 border border-g-border/20 rounded-full">
+            <span className="font-mono font-black text-g-text">{aiLearning.eventsLast60min}</span> events/60 min
+          </span>
+          <span className="text-[9px] text-g-muted px-2 py-0.5 border border-g-border/20 rounded-full">
+            <span className="font-mono font-black text-g-text">{aiLearning.decisionsLast24h}</span> beslutninger/24t
+          </span>
+          <span className="text-[9px] text-g-muted px-2 py-0.5 border border-g-border/20 rounded-full">
+            <span className="font-mono font-black text-g-text">{aiLearning.feedbackDecisionsLast24h}</span> med feedback
+          </span>
+        </div>
+      )}
+
+      {/* Siste læringspunkt */}
+      {aiLearning?.sisteInnsikt ? (
+        <div className="border-t border-g-border/20 pt-2">
+          <p className="text-[8px] text-g-muted/50 uppercase font-bold mb-1">Siste læringspunkt</p>
+          <p className="text-[10px] font-bold text-g-green">{aiLearning.sisteInnsikt.title}</p>
+          <p className="text-[9px] text-g-muted leading-snug mt-0.5">{aiLearning.sisteInnsikt.summary.slice(0, 140)}</p>
+          <p className="text-[8px] text-g-muted/40 mt-1">{tidSiden(aiLearning.sisteInnsikt.createdAt)}</p>
+        </div>
+      ) : !harInnsikter ? (
+        <p className="text-[10px] text-g-muted border-t border-g-border/20 pt-2">Ingen nye AI-innsikter ennå.</p>
+      ) : null}
+
+      {/* Øvrige innsikter */}
+      {harInnsikter && (
+        <div className="space-y-1.5 border-t border-g-border/20 pt-2">
+          {innsikter.slice(0, 3).map((ins, i) => (
+            <div key={i} className="flex gap-2.5 items-start">
+              <span className="text-g-green text-[9px] font-black flex-shrink-0 mt-0.5">◆</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-g-green">{ins.title}</p>
+                <p className="text-[9px] text-g-muted leading-snug">{ins.summary.slice(0, 100)}</p>
+              </div>
+              <span className="text-[9px] text-g-muted/40 flex-shrink-0">{tidSiden(ins.createdAt)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -707,7 +811,7 @@ export default function Dashboard() {
 
       {/* ── SEKSJON 4: AI Learning + Sjekkliste ─────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
-        <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} loading={loadingLive} />
+        <RecentAiLearning innsikter={live?.nyesteInnsikter ?? []} aiLearning={live?.aiLearning} loading={loadingLive} />
         <Sjekkliste items={live?.sjekkliste ?? []} loading={loadingLive} onReset={async () => {
           await fetch('/api/stream-syklus/reset', { method: 'POST' });
           hentLive();
