@@ -22,7 +22,13 @@ function getClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  return createClient(url, key);
+  // Node.js < 22 mangler native WebSocket — må sende ws-pakken eksplisitt
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ws = require('ws');
+  return createClient(url, key, {
+    realtime: { transport: ws },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 function scheduleFlush() {

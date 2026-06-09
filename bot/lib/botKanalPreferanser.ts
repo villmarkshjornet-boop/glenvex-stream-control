@@ -12,7 +12,9 @@ function getClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  return createClient(url, key);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ws = require('ws');
+  return createClient(url, key, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
 }
 
 async function loadSettingsJson(): Promise<any> {

@@ -96,7 +96,9 @@ async function hentKommunitetKontekst(): Promise<string> {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return '';
   try {
-    const sb = createClient(url, key);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const wsTransport = require('ws');
+    const sb = createClient(url, key, { realtime: { transport: wsTransport }, auth: { persistSession: false, autoRefreshToken: false } });
     const ws = process.env.WORKSPACE_ID || 'glenvex-default';
     const [viewersRes, jokesRes, insightsRes] = await Promise.all([
       sb.from('ai_agent_memory').select('key,summary').eq('workspace_id', ws).eq('memory_type', 'viewer').order('occurrence_count', { ascending: false }).limit(5),

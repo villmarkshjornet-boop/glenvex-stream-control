@@ -7,7 +7,9 @@ export function getBotDb(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  _client = createClient(url, key);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ws = require('ws');
+  _client = createClient(url, key, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
   return _client;
 }
 

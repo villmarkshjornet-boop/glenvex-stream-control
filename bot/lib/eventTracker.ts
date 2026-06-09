@@ -54,7 +54,8 @@ function syncToSupabase(event: 'raid' | 'giftsub', payload: Record<string, any>)
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return;
-  const sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sb = createClient(url, key, { realtime: { transport: require('ws') }, auth: { autoRefreshToken: false, persistSession: false } });
   sb.from('system_events').insert({
     workspace_id: WORKSPACE_ID,
     source: 'twitch_bot',
