@@ -1,34 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { getDb } from '@/lib/db';
 import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
+
+function parseSessionFromCookies(cookieStore: ReturnType<typeof cookies>): string | null {
+  const all = cookieStore.getAll();
+  // Enkelt-cookie
+  const single = all.find(c => /^sb-.+-auth-token$/.test(c.name));
+  if (single?.value) return single.value;
+  // Chunked cookie
+  const chunk0 = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
+  if (!chunk0) return null;
+  const base = chunk0.name.replace('.0', '');
+  const chunks: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const chunk = cookieStore.get(`${base}.${i}`)?.value;
+    if (!chunk) break;
+    chunks.push(chunk);
+  }
+  return chunks.length ? chunks.join('') : null;
+}
 
 export async function POST(req: NextRequest) {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
   const cookieStore = cookies();
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll(); },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {}
-        },
-      },
-    }
-  );
+  const rawCookie = parseSessionFromCookies(cookieStore);
+  const adminClient = createClient(supabaseUrl, supabaseKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Ikke innlogget' }, { status: 401 });
+  let userId: string | null = null;
+  if (rawCookie) {
+    try {
+      const session = JSON.parse(decodeURIComponent(rawCookie));
+      const accessToken: string = session.access_token ?? '';
+      if (accessToken) {
+        const { data: { user } } = await adminClient.auth.getUser(accessToken);
+        userId = user?.id ?? null;
+      }
+    } catch {}
+  }
+
+  if (!userId) return NextResponse.json({ error: 'Ikke innlogget — logg inn på nytt og prøv igjen' }, { status: 401 });
 
   const body = await req.json();
   const {
@@ -81,7 +98,7 @@ export async function POST(req: NextRequest) {
   if (isClaiming) {
     // Workspace exists (no owner) — claim it but preserve existing settings_json
     const { error } = await db.from('workspaces').update({
-      owner_user_id: user.id,
+      owner_user_id: userId,
       updated_at: new Date().toISOString(),
     }).eq('id', workspaceSlug);
     wsError = error;
@@ -89,7 +106,7 @@ export async function POST(req: NextRequest) {
     // New workspace — insert
     const { error } = await db.from('workspaces').insert({
       id: workspaceSlug,
-      owner_user_id: user.id,
+      owner_user_id: userId,
       streamer_name: twitchUsername,
       brand_name: brandName || twitchUsername,
       twitch_channel_name: twitchUsername,
@@ -113,8 +130,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Store workspace_id in user metadata — middleware reads this to inject x-workspace-id
-  const { error: metaError } = await supabase.auth.updateUser({
-    data: { workspace_id: workspaceSlug, brand_name: brandName },
+  const { error: metaError } = await adminClient.auth.admin.updateUserById(userId!, {
+    user_metadata: { workspace_id: workspaceSlug, brand_name: brandName },
   });
 
   if (metaError) {
@@ -129,7 +146,7 @@ export async function POST(req: NextRequest) {
       event_type: 'WORKSPACE_CREATED',
       title: `Workspace ${workspaceSlug} opprettet`,
       severity: 'info',
-      metadata: { user_id: user.id, twitch_username: twitchUsername },
+      metadata: { user_id: userId, twitch_username: twitchUsername },
     });
   } catch {}
 
