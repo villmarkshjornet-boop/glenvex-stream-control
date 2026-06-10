@@ -8,31 +8,33 @@ function botHeaders() {
   return { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` };
 }
 
-// Cache preferanser i minnet i 60 sekunder
-let prefsCache: Record<string, string> | null = null;
-let prefsCacheTime = 0;
+// Cache preferanser i minnet i 60 sekunder — keyed by workspace_id
+const prefsCacheMap = new Map<string, { prefs: Record<string, string>; ts: number }>();
 const CACHE_TTL = 60_000;
 
 async function loadPrefs(): Promise<Record<string, string>> {
-  // Returner cache hvis fersk
-  if (prefsCache && Date.now() - prefsCacheTime < CACHE_TTL) return prefsCache;
-
   // Prøv Supabase
   try {
     const { getDb, isDbAvailable } = await import('./db');
     const { getWorkspaceId } = await import('./workspace');
+    const wsId = getWorkspaceId();
+
+    // Returner cache hvis fersk for dette workspace
+    const cached = prefsCacheMap.get(wsId);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.prefs;
+
     if (isDbAvailable()) {
       const db = getDb();
       if (db) {
         const { data } = await db
           .from('workspaces')
           .select('settings_json')
-          .eq('id', getWorkspaceId())
+          .eq('id', wsId)
           .single();
         if (data?.settings_json?.kanalPreferanser) {
-          prefsCache = data.settings_json.kanalPreferanser;
-          prefsCacheTime = Date.now();
-          return prefsCache!;
+          const prefs = data.settings_json.kanalPreferanser as Record<string, string>;
+          prefsCacheMap.set(wsId, { prefs, ts: Date.now() });
+          return prefs;
         }
       }
     }
@@ -41,10 +43,7 @@ async function loadPrefs(): Promise<Record<string, string>> {
   // Fallback til fil
   try {
     if (fs.existsSync(PREFS_FILE)) {
-      const prefs = JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8'));
-      prefsCache = prefs;
-      prefsCacheTime = Date.now();
-      return prefs;
+      return JSON.parse(fs.readFileSync(PREFS_FILE, 'utf-8'));
     }
   } catch {}
 
@@ -192,8 +191,7 @@ export async function getErrorsKanalId(): Promise<string | null> {
   return null;
 }
 
-// Nullstill cache (kalles etter kanalinnstillinger er lagret)
+// Nullstill cache for alle workspaces (kalles etter kanalinnstillinger er lagret)
 export function nullstillKanalCache() {
-  prefsCache = null;
-  prefsCacheTime = 0;
+  prefsCacheMap.clear();
 }

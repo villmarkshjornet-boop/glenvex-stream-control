@@ -94,6 +94,7 @@ export async function GET() {
       .limit(15),
     db.from('content_highlights')
       .select('id,vod_id,clip_status,created_at')
+      .eq('workspace_id', getWorkspaceId())
       .in('clip_status', ['READY_FOR_CLIP', 'CLIPPING', 'CLIPPED'])
       .order('created_at', { ascending: false })
       .limit(50),
