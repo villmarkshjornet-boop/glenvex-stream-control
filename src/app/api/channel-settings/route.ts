@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import fs from 'fs';
 import path from 'path';
@@ -8,6 +7,64 @@ export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const FILE = path.join(process.cwd(), 'data', 'channel-settings.json');
+
+// ── Direct Supabase REST helpers (bypasses JS-client auth state / RLS issues) ──
+
+function sbHeaders() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+function sbUrl(): string {
+  return (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+}
+
+async function sbGet(table: string, filter: string): Promise<any[]> {
+  const base = sbUrl();
+  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return [];
+  const res = await fetch(`${base}/rest/v1/${table}?${filter}&select=*`, {
+    headers: { ...sbHeaders(), Accept: 'application/json' },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function sbPatch(table: string, filter: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const base = sbUrl();
+  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Supabase ikke konfigurert' };
+  const res = await fetch(`${base}/rest/v1/${table}?${filter}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    return { ok: false, error: `HTTP ${res.status}: ${txt.slice(0, 120)}` };
+  }
+  return { ok: true };
+}
+
+async function sbInsert(table: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const base = sbUrl();
+  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Supabase ikke konfigurert' };
+  const res = await fetch(`${base}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    return { ok: false, error: `HTTP ${res.status}: ${txt.slice(0, 120)}` };
+  }
+  return { ok: true };
+}
 
 export interface KanalPreferanser {
   live: string;
@@ -26,19 +83,10 @@ export interface KanalPreferanser {
 }
 
 async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
-  // Supabase først
-  if (isDbAvailable()) {
-    const db = getDb();
-    if (db) {
-      const { data } = await db
-        .from('workspaces')
-        .select('settings_json')
-        .eq('id', getWorkspaceId())
-        .single();
-      if (data?.settings_json?.kanalPreferanser) {
-        return data.settings_json.kanalPreferanser;
-      }
-    }
+  const wsId = getWorkspaceId();
+  const rows = await sbGet('workspaces', `id=eq.${encodeURIComponent(wsId)}`);
+  if (rows.length > 0 && rows[0].settings_json?.kanalPreferanser) {
+    return rows[0].settings_json.kanalPreferanser;
   }
   // Fallback fil
   try {
@@ -47,36 +95,44 @@ async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
   return {};
 }
 
-// Throws on any DB failure — caller must handle and return 500.
+// Throws on any failure — caller must handle and return 500.
 async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
-  if (!isDbAvailable()) throw new Error('Supabase ikke tilgjengelig');
-  const db = getDb();
-  if (!db) throw new Error('Supabase client mangler');
-
   const wsId = getWorkspaceId();
+  if (!wsId) throw new Error('Workspace ID mangler');
 
-  // Read existing settings_json to merge kanalPreferanser in
-  const { data: existing, error: readErr } = await db
-    .from('workspaces')
-    .select('settings_json')
-    .eq('id', wsId)
-    .single();
+  const base = sbUrl();
+  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Supabase ikke konfigurert');
 
-  if (readErr && readErr.code !== 'PGRST116') {
-    throw new Error(`Lesefeil: ${readErr.message}`);
-  }
-
-  const current = (existing?.settings_json as Record<string, any>) ?? {};
+  // Read existing row (direct REST — bypasses JS-client auth / RLS issues)
+  const rows = await sbGet('workspaces', `id=eq.${encodeURIComponent(wsId)}`);
+  const current = (rows[0]?.settings_json as Record<string, unknown>) ?? {};
   const nySettings = { ...current, kanalPreferanser: prefs };
+  const now = new Date().toISOString();
 
-  // Always UPDATE — workspace row must exist (created during onboarding).
-  // Never INSERT from here: avoids RLS violations and prevents duplicate workspace rows.
-  const { error: updateErr } = await db
-    .from('workspaces')
-    .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
-    .eq('id', wsId);
-
-  if (updateErr) throw new Error(`Lagring feilet: ${updateErr.message}`);
+  if (rows.length > 0) {
+    // Row exists — PATCH it
+    const { ok, error } = await sbPatch(
+      'workspaces',
+      `id=eq.${encodeURIComponent(wsId)}`,
+      { settings_json: nySettings, updated_at: now }
+    );
+    if (!ok) throw new Error(`Lagring feilet: ${error}`);
+  } else {
+    // Row missing — INSERT (service role key bypasses RLS)
+    const { ok, error } = await sbInsert('workspaces', {
+      id: wsId,
+      owner_user_id: wsId,
+      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? wsId,
+      streamer_name: wsId,
+      twitch_channel_name: wsId,
+      bot_personality: 'dark_gaming',
+      plan: 'creator',
+      settings_json: nySettings,
+      created_at: now,
+      updated_at: now,
+    });
+    if (!ok) throw new Error(`Opprettelse feilet: ${error}`);
+  }
 }
 
 export async function GET() {
@@ -104,10 +160,6 @@ export async function GET() {
 
   const lagret = await loadPrefs();
 
-  // DIAG-5: What loadPrefs returned
-  console.log('[DIAG channel-settings GET] wsId:', getWorkspaceId());
-  console.log('[DIAG channel-settings GET] loadPrefs result:', JSON.stringify(lagret));
-
   const preferanser: Partial<KanalPreferanser> = {
     live: lagret.live ?? process.env.DISCORD_LIVE_CHANNEL_ID ?? '',
     announce: lagret.announce ?? '',
@@ -124,62 +176,26 @@ export async function GET() {
     errors: lagret.errors ?? '',
   };
 
-  // DIAG-5 continued: exact response
-  console.log('[DIAG channel-settings GET] response preferanser:', JSON.stringify(preferanser));
-
   return NextResponse.json({ kanaler, preferanser });
 }
 
 export async function POST(req: NextRequest) {
-  const wsId = getWorkspaceId();
   const body = await req.json() as Partial<KanalPreferanser>;
-
-  // DIAG-1: Incoming payload + workspaceId
-  console.log('[DIAG channel-settings POST] wsId:', wsId);
-  console.log('[DIAG channel-settings POST] incoming body:', JSON.stringify(body));
-
-  // DIAG-2: Read DB before write
-  if (isDbAvailable()) {
-    const db = getDb();
-    if (db) {
-      const { data: before, error: beforeErr } = await db
-        .from('workspaces')
-        .select('settings_json')
-        .eq('id', wsId)
-        .single();
-      console.log('[DIAG channel-settings POST] DB before write - error:', beforeErr?.message ?? null);
-      console.log('[DIAG channel-settings POST] DB before write - settings_json:', JSON.stringify(before?.settings_json ?? null));
-    }
-  }
 
   try {
     await savePrefs(body);
   } catch (err: any) {
     console.error('[channel-settings POST] Save failed:', err?.message);
     return NextResponse.json(
-      { success: false, error: err?.message ?? 'Ukjent DB-feil' },
+      { success: false, error: err?.message ?? 'Ukjent feil' },
       { status: 500 }
     );
   }
 
-  // DIAG-3: Read DB after write
-  if (isDbAvailable()) {
-    const db = getDb();
-    if (db) {
-      const { data: after, error: afterErr } = await db
-        .from('workspaces')
-        .select('settings_json')
-        .eq('id', wsId)
-        .single();
-      console.log('[DIAG channel-settings POST] DB after write - error:', afterErr?.message ?? null);
-      console.log('[DIAG channel-settings POST] DB after write - kanalPreferanser:', JSON.stringify(after?.settings_json?.kanalPreferanser ?? null));
-    }
-  }
-
-  // Nullstill cache i discordChannel
   try {
     const { nullstillKanalCache } = await import('@/lib/discordChannel');
     nullstillKanalCache();
   } catch {}
+
   return NextResponse.json({ success: true, source: 'supabase', saved: true });
 }

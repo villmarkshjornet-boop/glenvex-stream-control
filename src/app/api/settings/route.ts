@@ -6,6 +6,14 @@ import { getWorkspaceId } from '@/lib/workspace';
 import { logSystemEvent } from '@/lib/systemEvents';
 import { nullstillKanalCache } from '@/lib/discordChannel';
 
+function sbHeaders() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+}
+function sbBase() {
+  return (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+}
+
 export const dynamic = 'force-dynamic';
 
 // ── Reads full settings_json from DB (including kanalPreferanser) ─────────────
@@ -55,13 +63,22 @@ async function saveSettingsToDb(incoming: Record<string, any>): Promise<{
   // MERGE: preserve all existing keys (especially kanalPreferanser from channel-settings panel)
   const merged = { ...currentJson, ...incoming };
 
-  // Always UPDATE — workspace row must exist (created during onboarding).
-  // Never INSERT from here: avoids RLS violations and prevents duplicate workspace rows.
-  const { error } = await db
-    .from('workspaces')
-    .update({ settings_json: merged, updated_at: new Date().toISOString() })
-    .eq('id', wsId);
-  if (error) return { ok: false, merged, error: error.message };
+  // Use raw REST to bypass JS-client auth state / RLS issues
+  const base = sbBase();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!base || !key) return { ok: false, merged, error: 'Supabase ikke konfigurert' };
+
+  const now = new Date().toISOString();
+  const patchRes = await fetch(`${base}/rest/v1/workspaces?id=eq.${encodeURIComponent(wsId)}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify({ settings_json: merged, updated_at: now }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!patchRes.ok) {
+    const txt = await patchRes.text().catch(() => '');
+    return { ok: false, merged, error: `HTTP ${patchRes.status}: ${txt.slice(0, 120)}` };
+  }
 
   return { ok: true, merged };
 }
