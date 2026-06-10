@@ -52,39 +52,38 @@ function getAccessToken(req: NextRequest): string {
   return '';
 }
 
-function authHeaders(accessToken: string): Record<string, string> {
-  const key = anonKey();
+function authHeaders(): Record<string, string> {
+  // Service role bypasses RLS — correct for server-side workspace operations (no INSERT).
+  const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const key = svcKey || anonKey();
   return {
     apikey: key,
-    Authorization: `Bearer ${accessToken || key}`,
+    Authorization: `Bearer ${key}`,
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
 }
 
-async function sbSelect(wsId: string, token: string): Promise<Record<string, unknown> | null> {
+async function sbSelect(wsId: string): Promise<Record<string, unknown> | null> {
   const url = sbUrl();
   if (!url) return null;
   const res = await fetch(
     `${url}/rest/v1/workspaces?id=eq.${encodeURIComponent(wsId)}&select=settings_json`,
-    { headers: authHeaders(token), signal: AbortSignal.timeout(8000) }
+    { headers: authHeaders(), signal: AbortSignal.timeout(8000) }
   );
-  if (!res.ok) {
-    console.log('[channel-settings] SELECT status:', res.status, await res.text().catch(() => ''));
-    return null;
-  }
+  if (!res.ok) return null;
   const rows = await res.json() as any[];
   return rows[0] ?? null;
 }
 
-async function sbUpdate(wsId: string, token: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+async function sbUpdate(wsId: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
   const url = sbUrl();
   if (!url) return { ok: false, error: 'SUPABASE_URL mangler' };
   const res = await fetch(
     `${url}/rest/v1/workspaces?id=eq.${encodeURIComponent(wsId)}`,
     {
       method: 'PATCH',
-      headers: { ...authHeaders(token), Prefer: 'return=minimal' },
+      headers: { ...authHeaders(), Prefer: 'return=minimal' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(8000),
     }
@@ -116,10 +115,9 @@ export interface KanalPreferanser {
 
 // ── Load / Save ───────────────────────────────────────────────────────────────
 
-async function loadPrefs(req: NextRequest): Promise<Partial<KanalPreferanser>> {
+async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
   const wsId = getWorkspaceId();
-  const token = getAccessToken(req);
-  const row = await sbSelect(wsId, token);
+  const row = await sbSelect(wsId);
   if (row?.settings_json) {
     const prefs = (row.settings_json as any)?.kanalPreferanser;
     if (prefs) return prefs as Partial<KanalPreferanser>;
@@ -130,18 +128,11 @@ async function loadPrefs(req: NextRequest): Promise<Partial<KanalPreferanser>> {
   return {};
 }
 
-async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Promise<void> {
+async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
   const wsId = getWorkspaceId();
   if (!wsId) throw new Error('Workspace ID mangler');
 
-  const allCookies = req.cookies.getAll();
-  console.log('[channel-settings] cookies:', allCookies.map(c => c.name).join(' | '));
-  const token = getAccessToken(req);
-  console.log('[channel-settings] wsId:', wsId, '| hasToken:', !!token, '| url:', sbUrl().slice(0, 40));
-
-  const row = await sbSelect(wsId, token);
-  console.log('[channel-settings] row found:', !!row, '| token used:', !!token);
-
+  const row = await sbSelect(wsId);
   if (!row) {
     throw Object.assign(
       new Error('Workspace mangler. Fullfør onboarding først.'),
@@ -152,7 +143,7 @@ async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Pr
   const current = (row.settings_json as Record<string, unknown>) ?? {};
   const nySettings = { ...current, kanalPreferanser: prefs };
 
-  const { ok, error } = await sbUpdate(wsId, token, {
+  const { ok, error } = await sbUpdate(wsId, {
     settings_json: nySettings,
     updated_at: new Date().toISOString(),
   });
@@ -185,7 +176,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const lagret = await loadPrefs(req);
+  const lagret = await loadPrefs();
 
   const preferanser: Partial<KanalPreferanser> = {
     live: lagret.live ?? process.env.DISCORD_LIVE_CHANNEL_ID ?? '',
@@ -210,7 +201,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as Partial<KanalPreferanser>;
 
   try {
-    await savePrefs(body, req);
+    await savePrefs(body);
   } catch (err: any) {
     console.error('[channel-settings POST] Save failed:', err?.message);
     const status = (err as any)?.status === 404 ? 404 : 500;
