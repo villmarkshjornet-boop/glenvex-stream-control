@@ -10,7 +10,8 @@ const DISCORD_API = 'https://discord.com/api/v10';
 const FILE = path.join(process.cwd(), 'data', 'channel-settings.json');
 
 function supabaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '').replace(/\/$/, '');
+  // Server-side: SUPABASE_URL is authoritative. NEXT_PUBLIC_ variant may differ or be stale on Vercel.
+  return (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
 }
 
 function anonKey(): string {
