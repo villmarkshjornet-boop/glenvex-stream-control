@@ -134,6 +134,8 @@ async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Pr
   const wsId = getWorkspaceId();
   if (!wsId) throw new Error('Workspace ID mangler');
 
+  const allCookies = req.cookies.getAll();
+  console.log('[channel-settings] cookies:', allCookies.map(c => c.name).join(' | '));
   const token = getAccessToken(req);
   console.log('[channel-settings] wsId:', wsId, '| hasToken:', !!token, '| url:', sbUrl().slice(0, 40));
 
