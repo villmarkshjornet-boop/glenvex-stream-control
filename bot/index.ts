@@ -33,7 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -203,16 +203,47 @@ async function checkLive() {
         metadata: { streamId: stream.id, title: stream.title, game: stream.game, viewerCount: stream.viewerCount },
       });
 
+      // Hent kanal-ID fra Supabase (dashboard-settings) — dette er source of truth.
+      // Faller tilbake til lokal fil/env kun om Supabase-verdien mangler.
+      const dbLiveKanalId = await getLiveKanalId().catch(() => '');
+      const envLiveKanalId = settings.discordLiveChannelId;
+      const effectiveLiveKanalId = dbLiveKanalId || envLiveKanalId;
+      const kanalKilde = dbLiveKanalId ? 'supabase' : (envLiveKanalId ? 'env_or_file' : 'ingen');
+
+      console.log(
+        `[DISCORD ANNOUNCEMENT DEBUG]` +
+        `\n  workspace=${process.env.WORKSPACE_ID ?? 'glenvex-default'}` +
+        `\n  dbChannel=${dbLiveKanalId || '(ikke satt i Supabase)'}` +
+        `\n  envChannel=${envLiveKanalId || '(ikke satt i env/fil)'}` +
+        `\n  actualChannel=${effectiveLiveKanalId || '(INGEN — varslet vil feile)'}` +
+        `\n  source=${kanalKilde}`
+      );
+
+      logSystemEvent({
+        source: 'discord_bot',
+        event_type: 'LIVE_CHANNEL_RESOLVED',
+        title: `Live-kanal løst: ${effectiveLiveKanalId || 'INGEN'}`,
+        severity: effectiveLiveKanalId ? 'info' : 'error',
+        metadata: {
+          dbKanalId: dbLiveKanalId || null,
+          envKanalId: envLiveKanalId || null,
+          effectiveKanalId: effectiveLiveKanalId || null,
+          source: kanalKilde,
+        },
+      });
+
+      const liveSettings = { ...settings, discordLiveChannelId: effectiveLiveKanalId };
+
       let liveEmbedOk = false;
       try {
-        await postLiveEmbed(stream, settings);
+        await postLiveEmbed(stream, liveSettings);
         liveEmbedOk = true;
         logSystemEvent({
           source: 'discord_bot',
           event_type: 'DISCORD_LIVE_ANNOUNCEMENT_SENT',
           title: `Discord live-varsel postet: ${stream.title?.slice(0, 60) ?? ''}`,
           severity: 'info',
-          metadata: { streamId: stream.id, channelId: settings.discordLiveChannelId },
+          metadata: { streamId: stream.id, channelId: effectiveLiveKanalId, source: kanalKilde },
         });
       } catch (liveErr: any) {
         logSystemEvent({
@@ -220,7 +251,7 @@ async function checkLive() {
           event_type: 'DISCORD_LIVE_ANNOUNCEMENT_FAILED',
           title: `Discord live-varsel feilet: ${liveErr.message?.slice(0, 100)}`,
           severity: 'error',
-          metadata: { streamId: stream.id, error: liveErr.message },
+          metadata: { streamId: stream.id, error: liveErr.message, channelId: effectiveLiveKanalId, source: kanalKilde },
         });
       }
 
