@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
 import { getWorkspaceId } from '@/lib/workspace';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import fs from 'fs';
 import path from 'path';
 
@@ -8,6 +8,34 @@ export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const FILE = path.join(process.cwd(), 'data', 'channel-settings.json');
+
+function supabaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '').replace(/\/$/, '');
+}
+
+function anonKey(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+}
+
+// Creates a Supabase client authenticated as the current user.
+// Uses req.cookies (from the request) so it works correctly in Next.js 14 Route Handlers.
+// next/headers cookies() is read-only in Route Handlers and can cause issues with @supabase/ssr.
+function makeSupabaseClient(req: NextRequest) {
+  const url = supabaseUrl();
+  const key = anonKey();
+  if (!url || !key) return null;
+
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll() {
+        // Route Handlers cannot set cookies here — no-op
+      },
+    },
+  });
+}
 
 export interface KanalPreferanser {
   live: string;
@@ -25,18 +53,20 @@ export interface KanalPreferanser {
   errors: string;
 }
 
-async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
+async function loadPrefs(req: NextRequest): Promise<Partial<KanalPreferanser>> {
   const wsId = getWorkspaceId();
-  const supabase = createSupabaseServerClient();
+  const supabase = makeSupabaseClient(req);
 
-  const { data } = await supabase
-    .from('workspaces')
-    .select('settings_json')
-    .eq('id', wsId)
-    .single();
+  if (supabase) {
+    const { data } = await supabase
+      .from('workspaces')
+      .select('settings_json')
+      .eq('id', wsId)
+      .single();
 
-  if (data?.settings_json?.kanalPreferanser) {
-    return data.settings_json.kanalPreferanser as Partial<KanalPreferanser>;
+    if (data?.settings_json?.kanalPreferanser) {
+      return data.settings_json.kanalPreferanser as Partial<KanalPreferanser>;
+    }
   }
 
   try {
@@ -45,17 +75,24 @@ async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
   return {};
 }
 
-async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
+async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Promise<void> {
   const wsId = getWorkspaceId();
   if (!wsId) throw new Error('Workspace ID mangler');
 
-  const supabase = createSupabaseServerClient();
+  const url = supabaseUrl();
+  const key = anonKey();
+  console.log('[channel-settings] url set:', !!url, '| anonKey set:', !!key, '| wsId:', wsId);
+
+  const supabase = makeSupabaseClient(req);
+  if (!supabase) throw new Error('Supabase ikke konfigurert (SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY mangler)');
 
   const { data: row, error: selectErr } = await supabase
     .from('workspaces')
     .select('settings_json')
     .eq('id', wsId)
     .single();
+
+  console.log('[channel-settings] select result — row:', !!row, '| err:', selectErr?.code, selectErr?.message);
 
   if (selectErr && selectErr.code !== 'PGRST116') {
     throw new Error(`Les feilet: ${selectErr.message}`);
@@ -76,10 +113,11 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
     .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
     .eq('id', wsId);
 
+  console.log('[channel-settings] update error:', updateErr?.message ?? 'none');
   if (updateErr) throw new Error(`Lagring feilet: ${updateErr.message}`);
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const guildId = process.env.DISCORD_GUILD_ID;
   const token = process.env.DISCORD_BOT_TOKEN;
 
@@ -102,7 +140,7 @@ export async function GET() {
     }
   }
 
-  const lagret = await loadPrefs();
+  const lagret = await loadPrefs(req);
 
   const preferanser: Partial<KanalPreferanser> = {
     live: lagret.live ?? process.env.DISCORD_LIVE_CHANNEL_ID ?? '',
@@ -127,7 +165,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as Partial<KanalPreferanser>;
 
   try {
-    await savePrefs(body);
+    await savePrefs(body, req);
   } catch (err: any) {
     console.error('[channel-settings POST] Save failed:', err?.message);
     const status = (err as any)?.status === 404 ? 404 : 500;
