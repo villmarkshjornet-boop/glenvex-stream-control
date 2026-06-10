@@ -4,6 +4,7 @@ import { trackRaid, trackGiftSub } from './eventTracker';
 import { getSettings } from '@/lib/settings';
 import { getBroadcasterId } from '@/lib/twitch';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger';
+import { recordViewerActivity } from './audienceTracker';
 import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
@@ -521,6 +522,7 @@ export function startTwitchBot() {
 
     // Spor chat-aktivitet (billig – bare telle)
     chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
+    recordViewerActivity(tags.username, tags);
 
     const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
 

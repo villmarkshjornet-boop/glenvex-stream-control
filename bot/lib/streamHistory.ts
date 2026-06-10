@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { startAudienceTracking, recordViewerCount, stopAudienceTracking } from './audienceTracker';
 
 const FILE = path.join(process.cwd(), 'data', 'stream-history.json');
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
@@ -61,12 +62,14 @@ export function startSession(stream: { id: string; title: string; game: string; 
     durationMinutes: 0,
   };
   chatMessageCount = 0;
+  startAudienceTracking(stream.id, stream.game, stream.title);
 }
 
 export function updateSession(viewerCount: number) {
   if (!activeSession) return;
   if (viewerCount > (activeSession.peakViewers ?? 0)) activeSession.peakViewers = viewerCount;
   activeSession.avgViewers = Math.round(((activeSession.avgViewers ?? 0) + viewerCount) / 2);
+  recordViewerCount(viewerCount);
 }
 
 export function incrementChatMessages() {
@@ -97,6 +100,7 @@ export function endSession(followerGain = 0) {
   history.unshift(session);
   save(history.slice(0, 50));
   activeSession = null;
+  stopAudienceTracking().catch(() => {});
 
   // Sync til Supabase stream_history for at Sponsor Manager og andre API-er får data
   const sb = getSupabase();
