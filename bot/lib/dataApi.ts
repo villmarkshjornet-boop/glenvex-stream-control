@@ -311,15 +311,39 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
       segmenter: totalSegmenter,
     });
 
-    // Oppdater Supabase → TRANSCRIBED slik at Vercel auto-trigger Phase 2
+    // Oppdater Supabase → TRANSCRIBED
     await sb.from('content_vods').update({
       status: 'TRANSCRIBED',
       current_step: 'DISCOVER',
       progress_percent: 30,
-      status_message: `Deepgram ferdig (${totalSegmenter} segmenter) – Phase 2 starter automatisk`,
+      status_message: `Deepgram ferdig (${totalSegmenter} segmenter) – Phase 2 starter...`,
     }).eq('id', vodId);
 
-    console.log(`[ContentFactory] ✓ Jobb ferdig: ${vodId} – ${totalSegmenter} segmenter, status satt til TRANSCRIBED`);
+    console.log(`[ContentFactory] ✓ Transkribering ferdig: ${vodId} – ${totalSegmenter} segmenter. Trigger Phase 2...`);
+
+    // Trigger Phase 2 direkte fra Railway — ikke avhengig av at admin-siden er åpen i browser
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+    if (appUrl) {
+      const baseUrl = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+      try {
+        const p2Res = await fetch(`${baseUrl}/api/content-factory/phase2`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vodId }),
+          signal: AbortSignal.timeout(300_000), // 5 min — OpenAI kan ta tid
+        });
+        const p2Data = await p2Res.json().catch(() => ({}));
+        if (p2Res.ok) {
+          console.log(`[ContentFactory] ✓ Phase 2 fullført for ${vodId}:`, p2Data);
+        } else {
+          console.error(`[ContentFactory] ✗ Phase 2 feilet for ${vodId}:`, p2Data);
+        }
+      } catch (p2Err: any) {
+        console.error(`[ContentFactory] ✗ Phase 2 kall feilet for ${vodId}:`, p2Err.message);
+      }
+    } else {
+      console.warn('[ContentFactory] NEXT_PUBLIC_APP_URL ikke satt — Phase 2 må trigges manuelt fra admin-siden');
+    }
   } catch (err: any) {
     console.error(`[ContentFactory] ✗ Jobb feilet: ${err.message}`);
     oppdaterJobbStatus(vodId, 'FAILED', err.message);

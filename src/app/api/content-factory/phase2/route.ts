@@ -7,7 +7,7 @@ import { logPipeline } from '@/lib/content-factory/jobs/pipelineLogger';
 import { logSystemEvent } from '@/lib/systemEvents';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 async function kjørMedRetry<T>(
   stegNavn: string,
