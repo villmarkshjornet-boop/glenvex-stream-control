@@ -81,7 +81,20 @@ async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Pr
 
   const url = supabaseUrl();
   const key = anonKey();
-  console.log('[channel-settings] url set:', !!url, '| anonKey set:', !!key, '| wsId:', wsId);
+  console.log('[channel-settings] url:', url ? url.slice(0, 40) : 'MISSING', '| anonKey set:', !!key, '| wsId:', wsId);
+
+  // Connectivity pre-check — shows the real Node.js error (ENOTFOUND, ECONNREFUSED etc.)
+  try {
+    const probe = await fetch(`${url}/rest/v1/`, {
+      headers: { apikey: key },
+      signal: AbortSignal.timeout(5000),
+    });
+    console.log('[channel-settings] connectivity probe:', probe.status);
+  } catch (e: any) {
+    const cause = (e?.cause as any)?.message ?? e?.cause ?? e?.message ?? 'ukjent';
+    console.error('[channel-settings] connectivity FAILED:', cause);
+    throw new Error(`Supabase utilgjengelig: ${cause}`);
+  }
 
   const supabase = makeSupabaseClient(req);
   if (!supabase) throw new Error('Supabase ikke konfigurert (SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY mangler)');
