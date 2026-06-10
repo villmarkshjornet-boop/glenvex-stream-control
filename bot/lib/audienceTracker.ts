@@ -281,7 +281,7 @@ export async function stopAudienceTracking(): Promise<void> {
   activeStreamId = null;
 
   // Enrichment + agent events — wrapped so STOPPED is always written below
-  let enriched: ReturnType<typeof sessions.map> = sessions;
+  let enriched: Array<ViewerSession & { returningViewer?: boolean; firstTimeSeen?: boolean }> = sessions;
   try {
     const knownViewers = await fetchKnownViewers();
     enriched = sessions.map(s => ({

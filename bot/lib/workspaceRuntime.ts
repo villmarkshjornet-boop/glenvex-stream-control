@@ -9,6 +9,18 @@
 import { Client, TextChannel, EmbedBuilder } from 'discord.js';
 import { logBotAgentEvent } from './agentLogger';
 import { logSystemEvent } from './systemEvents';
+import { registerExternalChannel } from './twitchBot';
+
+interface ViewerRecord {
+  username: string;
+  firstSeen: string;
+  lastSeen: string;
+  messagesSent: number;
+  follower: boolean;
+  subscriber: boolean;
+  moderator: boolean;
+  vip: boolean;
+}
 
 export interface WorkspaceConfig {
   workspaceId: string;
@@ -32,6 +44,8 @@ export class WorkspaceRuntime {
   private liveState: LiveState = { isLive: false, lastStreamId: '', lastChecked: 0 };
   private accessToken: string | null = null;
   private tokenExpiry = 0;
+  private channelCleanup: (() => void) | null = null;
+  private viewerSessions = new Map<string, ViewerRecord>();
 
   constructor(config: WorkspaceConfig) {
     this.config = config;
@@ -200,6 +214,89 @@ export class WorkspaceRuntime {
     });
   }
 
+  // ── Multi-tenant chat ──────────────────────────────────────────────────────────
+
+  private registerChatChannel(): void {
+    const login = this.config.twitchLogin;
+    if (!login) return;
+
+    try {
+      this.channelCleanup = registerExternalChannel(login, (channel, username, text, tags) => {
+        this.handleChatMessage(username, text, tags);
+      });
+
+      logSystemEvent({
+        workspaceId: this.workspaceId,
+        source: 'twitch_bot',
+        event_type: 'TWITCH_CHAT_CHANNEL_REGISTERED',
+        title: `Chat-lytter registrert: #${login}`,
+        severity: 'info',
+        metadata: { workspaceId: this.workspaceId, twitchLogin: login },
+      });
+    } catch (err: any) {
+      logSystemEvent({
+        workspaceId: this.workspaceId,
+        source: 'twitch_bot',
+        event_type: 'TWITCH_CHAT_CHANNEL_REGISTER_FAILED',
+        title: `Chat-registrering feilet for #${login}: ${err?.message?.slice(0, 80)}`,
+        severity: 'error',
+        metadata: { workspaceId: this.workspaceId, twitchLogin: login, error: err?.message },
+      });
+    }
+  }
+
+  private handleChatMessage(
+    username: string,
+    text: string,
+    tags: { subscriber?: string | boolean; mod?: boolean; badges?: Record<string, string | undefined> }
+  ): void {
+    if (!username) return;
+    const now = new Date().toISOString();
+    const key = username.toLowerCase();
+    const existing = this.viewerSessions.get(key);
+
+    const isSubscriber = tags.subscriber === true || tags.subscriber === '1' || tags.subscriber === 'true';
+    const isMod = !!tags.mod;
+    const isVip = !!(tags.badges?.vip);
+    const isFollower = !!(tags.badges?.subscriber || tags.badges?.founder) || isSubscriber;
+
+    if (existing) {
+      existing.lastSeen = now;
+      existing.messagesSent++;
+      if (isSubscriber) existing.subscriber = true;
+      if (isMod) existing.moderator = true;
+      if (isVip) existing.vip = true;
+      if (isFollower) existing.follower = true;
+    } else {
+      this.viewerSessions.set(key, {
+        username,
+        firstSeen: now,
+        lastSeen: now,
+        messagesSent: 1,
+        follower: isFollower,
+        subscriber: isSubscriber,
+        moderator: isMod,
+        vip: isVip,
+      });
+
+      logSystemEvent({
+        workspaceId: this.workspaceId,
+        source: 'twitch_bot',
+        event_type: 'TWITCH_CHAT_MESSAGE_OBSERVED',
+        title: `Ny chatter observert: ${username}`,
+        severity: 'info',
+        metadata: {
+          workspaceId: this.workspaceId,
+          twitchLogin: this.config.twitchLogin,
+          username,
+          subscriber: isSubscriber,
+          moderator: isMod,
+          vip: isVip,
+        },
+      });
+    }
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────────
 
   updateConfig(config: WorkspaceConfig): void {
@@ -220,6 +317,8 @@ export class WorkspaceRuntime {
   }
 
   start(): void {
+    this.registerChatChannel();
+
     logSystemEvent({
       workspaceId: this.workspaceId,
       source: 'workspace_manager',
@@ -233,9 +332,22 @@ export class WorkspaceRuntime {
         liveChannelId: this.config.liveChannelId,
       },
     });
+
+    logSystemEvent({
+      workspaceId: this.workspaceId,
+      source: 'twitch_bot',
+      event_type: 'AUDIENCE_TRACKING_STARTED',
+      title: `Publikumssporing klar for ${this.config.brandName}`,
+      severity: 'info',
+      metadata: { workspaceId: this.workspaceId, twitchLogin: this.config.twitchLogin },
+    });
   }
 
   stop(): void {
+    this.channelCleanup?.();
+    this.channelCleanup = null;
+    this.viewerSessions.clear();
+
     logSystemEvent({
       workspaceId: this.workspaceId,
       source: 'workspace_manager',

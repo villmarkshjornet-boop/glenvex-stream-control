@@ -283,9 +283,18 @@ export default function ContentFactoryAdminPage() {
 
   const sjekkHealth = async () => {
     setHealthLoading(true);
-    const res = await fetch('/api/content-factory/health').catch(() => null);
-    if (res?.ok) setHealth(await res.json());
-    setHealthLoading(false);
+    try {
+      const res = await fetch('/api/content-factory/health');
+      if (res.ok) {
+        setHealth(await res.json());
+      } else {
+        setHealth({ railway: { ok: false, melding: `HTTP ${res.status}` }, supabase: { ok: false, melding: 'Ukjent' }, storage: { ok: false, melding: 'Ukjent' }, openai: { ok: false, melding: 'Ukjent' }, twitch: { ok: false, melding: 'Ukjent' }, altOk: false });
+      }
+    } catch {
+      setHealth({ railway: { ok: false, melding: 'Nettverksfeil' }, supabase: { ok: false, melding: 'Ukjent' }, storage: { ok: false, melding: 'Ukjent' }, openai: { ok: false, melding: 'Ukjent' }, twitch: { ok: false, melding: 'Ukjent' }, altOk: false });
+    } finally {
+      setHealthLoading(false);
+    }
   };
 
   useEffect(() => { sjekkHealth(); }, []);
@@ -345,6 +354,14 @@ export default function ContentFactoryAdminPage() {
 
   async function retryRailway(vodId: string) {
     const res = await fetch('/api/content-factory/retry', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vodId }),
+    });
+    if (res.ok) await hentVods();
+  }
+
+  async function resetJob(vodId: string) {
+    const res = await fetch('/api/content-factory/reset', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vodId }),
     });
@@ -593,9 +610,15 @@ export default function ContentFactoryAdminPage() {
                           {phase2Running === v.id ? '⏳...' : '◆ Phase 2'}
                         </button>
                       )}
-                      <button onClick={() => retryRailway(v.id)}
-                        className={`px-4 py-2 border text-[11px] font-bold rounded-xl transition-all ${erHengt ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20' : 'border-g-border text-g-muted hover:border-red-500/30 hover:text-red-400'}`}>
-                        ↺ {erHengt ? 'Retry' : 'Reset'}
+                      {erHengt && (
+                        <button onClick={() => retryRailway(v.id)}
+                          className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-bold rounded-xl hover:bg-red-500/20 transition-all">
+                          ↺ Retry
+                        </button>
+                      )}
+                      <button onClick={() => resetJob(v.id)}
+                        className="px-4 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-xl hover:border-yellow-400/30 hover:text-yellow-400 transition-all">
+                        ↩ Reset
                       </button>
                     </div>
                   </div>
@@ -639,6 +662,10 @@ export default function ContentFactoryAdminPage() {
                     <button onClick={() => retryRailway(v.id)}
                       className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-xl hover:bg-red-500/20 transition-all">
                       ↻ Retry
+                    </button>
+                    <button onClick={() => resetJob(v.id)}
+                      className="px-3 py-1.5 border border-yellow-400/20 text-yellow-400/70 text-[10px] font-bold rounded-xl hover:border-yellow-400/40 hover:text-yellow-400 transition-all">
+                      ↩ Reset
                     </button>
                     <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
                       className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-xl hover:text-g-green transition-all">
