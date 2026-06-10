@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, memo } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 interface Vod {
@@ -194,7 +194,6 @@ export default function ContentFactoryAdminPage() {
   const [railwayStatusMap, setRailwayStatusMap] = useState<Record<string, RailwayStatus>>({});
   const [phase2Running, setPhase2Running] = useState<string | null>(null);
   const [phase2Res, setPhase2Res] = useState<Record<string, any>>({});
-  const autoTriggertRef = useRef<Set<string>>(new Set());
   const [aktivertVod, setAktivertVod] = useState<string | null>(null);
   const [monitorertKanal, setMonitorertKanal] = useState<string | null>(null);
   const [aktivert, setAktivert] = useState<boolean | null>(null);
@@ -219,17 +218,7 @@ export default function ContentFactoryAdminPage() {
     }).catch(() => {});
   }, []);
 
-  // Last inn sessionStorage-persistert auto-trigger-sett ved første render
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('cf_auto_triggered');
-      if (stored) {
-        const ids: string[] = JSON.parse(stored);
-        ids.forEach(id => autoTriggertRef.current.add(id));
-      }
-    } catch {}
-
-    // Hent hvilken kanal som overvåkes
     fetch('/api/vod/detect-latest').then(r => r.json()).then(d => {
       if (d.channel) setMonitorertKanal(d.channel);
     }).catch(() => {});
@@ -250,36 +239,6 @@ export default function ContentFactoryAdminPage() {
     const cleanupId = setInterval(kjørCleanup, 60_000);
     return () => { clearInterval(id); clearInterval(cleanupId); };
   }, [hentVods, kjørCleanup]);
-
-  useEffect(() => {
-    const transcribed = vods.filter(v => v.status === 'TRANSCRIBED');
-    for (const v of transcribed) {
-      if (autoTriggertRef.current.has(v.id) || phase2Running === v.id) {
-        // Already triggered or running — skip silently (no repeated event)
-        continue;
-      }
-      autoTriggertRef.current.add(v.id);
-
-      // Persist til sessionStorage så reload ikke trigger på nytt
-      try {
-        const stored: string[] = JSON.parse(sessionStorage.getItem('cf_auto_triggered') ?? '[]');
-        if (!stored.includes(v.id)) {
-          stored.push(v.id);
-          sessionStorage.setItem('cf_auto_triggered', JSON.stringify(stored));
-        }
-      } catch {}
-
-      // Log commit-wait start
-      loggEvent('PHASE2_TRIGGER_DELAYED_FOR_DB_COMMIT',
-        `Phase 2 venter 2s for DB-commit: ${v.title ?? v.id}`,
-        'info',
-        { vodId: v.id, delay_ms: 2000 });
-
-      // 2s delay for å sikre at alle transkripsjonssegmenter er committet i Supabase
-      const id = v.id;
-      setTimeout(() => kjørPhase2(id), 2000);
-    }
-  }, [vods, loggEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sjekkHealth = async () => {
     setHealthLoading(true);

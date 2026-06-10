@@ -95,6 +95,8 @@ export default function HighlightViewerPage() {
   const [phase2Res, setPhase2Res] = useState<any>(null);
   const [lasterZip, setLasterZip] = useState<string | null>(null);
   const [regenerererThumb, setRegenerererThumb] = useState<string | null>(null);
+  const [posterDiscord, setPosterDiscord] = useState<string | null>(null);
+  const [discordPostet, setDiscordPostet] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => {
@@ -413,6 +415,41 @@ export default function HighlightViewerPage() {
                             </a>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Post til Discord */}
+                    {h.clip_status === 'CLIPPED' && h.clip_url && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            setPosterDiscord(h.id);
+                            setDiscordPostet(null);
+                            const res = await fetch('/api/content-factory/post-discord', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ highlightId: h.id }),
+                            });
+                            const d = await res.json().catch(() => ({}));
+                            setPosterDiscord(null);
+                            if (res.ok) {
+                              setDiscordPostet(h.id);
+                              setTimeout(() => setDiscordPostet(null), 4000);
+                            } else {
+                              alert(d.error ?? 'Discord-posting feilet');
+                            }
+                          }}
+                          disabled={posterDiscord === h.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[10px] font-black rounded hover:bg-indigo-500/20 transition-all disabled:opacity-40"
+                        >
+                          {posterDiscord === h.id ? (
+                            <><span className="w-2.5 h-2.5 border border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" /> Poster...</>
+                          ) : discordPostet === h.id ? (
+                            <>✓ Postet!</>
+                          ) : (
+                            <>◈ Post til Discord</>
+                          )}
+                        </button>
                       </div>
                     )}
 
