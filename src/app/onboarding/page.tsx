@@ -1,116 +1,189 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
-type Step = 1 | 2 | 3;
-
-interface FormData {
-  // Step 1 — Workspace
-  workspaceSlug: string;
-  brandName: string;
-  // Step 2 — Twitch
-  twitchUsername: string;
-  twitchClientId: string;
-  twitchClientSecret: string;
-  // Step 3 — Discord
-  discordBotToken: string;
-  discordGuildId: string;
-  discordInviteUrl: string;
-  discordLiveChannelId: string;
-  discordChatChannelId: string;
+interface OboardingStatus {
+  workspaceId: string | null;
+  brandName: string | null;
+  twitchConnected: boolean;
+  twitchLogin: string | null;
+  twitchDisplayName: string | null;
+  twitchProfileImage: string | null;
+  discordConnected: boolean;
+  guildId: string | null;
+  guildName: string | null;
+  channelsSaved: boolean;
+  onboardingComplete: boolean;
+  alphaEnabled: boolean;
+  currentStep: number;
 }
 
-const INIT: FormData = {
-  workspaceSlug: '', brandName: '',
-  twitchUsername: '', twitchClientId: '', twitchClientSecret: '',
-  discordBotToken: '', discordGuildId: '', discordInviteUrl: '',
-  discordLiveChannelId: '', discordChatChannelId: '',
-};
+interface DiscordChannel { id: string; navn: string; kategori: string }
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
 }
 
-function Field({ label, value, onChange, type = 'text', placeholder, hint, mono = false }: {
-  label: string; value: string; onChange: (v: string) => void;
-  type?: string; placeholder?: string; hint?: string; mono?: boolean;
+const STEPS = [
+  { n: 1, label: 'Velkommen' },
+  { n: 2, label: 'Twitch' },
+  { n: 3, label: 'Discord' },
+  { n: 4, label: 'Kanaler' },
+  { n: 5, label: 'Aktiver' },
+];
+
+function ProgressBar({ step }: { step: number }) {
+  return (
+    <div className="flex items-center gap-2 w-full">
+      {STEPS.map((s, i) => (
+        <div key={s.n} className="flex items-center flex-1 last:flex-none gap-2">
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 transition-all ${
+            step > s.n  ? 'bg-g-green text-g-bg' :
+            step === s.n ? 'bg-g-green/20 border border-g-green text-g-green' :
+            'bg-g-bg border border-g-border text-g-muted'
+          }`}>
+            {step > s.n ? '✓' : s.n}
+          </div>
+          {i < STEPS.length - 1 && (
+            <div className={`h-0.5 flex-1 rounded-full transition-all ${step > s.n ? 'bg-g-green' : 'bg-g-border'}`} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ConnectButton({ href, icon, label, connected, connectedLabel, disabled = false }: {
+  href: string; icon: string; label: string; connected: boolean; connectedLabel: string; disabled?: boolean;
 }) {
+  if (connected) {
+    return (
+      <div className="flex items-center gap-3 p-4 bg-g-green/5 border border-g-green/20 rounded-xl">
+        <span className="text-2xl">{icon}</span>
+        <div>
+          <p className="text-sm font-bold text-g-green">✓ {connectedLabel}</p>
+          <p className="text-[9px] text-g-muted">Tilkoblet</p>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="space-y-1.5">
-      <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 transition-colors ${mono ? 'font-mono text-xs' : ''}`}
-      />
-      {hint && <p className="text-[10px] text-g-muted/70">{hint}</p>}
-    </div>
+    <a href={disabled ? undefined : href}
+      className={`flex items-center gap-3 p-4 border rounded-xl transition-all ${
+        disabled
+          ? 'border-g-border/30 opacity-40 cursor-not-allowed'
+          : 'border-g-border hover:border-g-green/30 hover:bg-g-green/5 cursor-pointer'
+      }`}>
+      <span className="text-2xl">{icon}</span>
+      <div className="flex-1">
+        <p className="text-sm font-bold text-g-text">{label}</p>
+        <p className="text-[9px] text-g-muted">Klikk for å koble til</p>
+      </div>
+      <span className="text-g-muted text-xs">→</span>
+    </a>
   );
 }
 
-function StepHeader({ step, total, title, sub }: { step: Step; total: number; title: string; sub: string }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        {Array.from({ length: total }).map((_, i) => (
-          <div key={i} className={`h-1 flex-1 rounded-full transition-all ${i < step ? 'bg-g-green' : 'bg-g-border'}`} />
-        ))}
-      </div>
-      <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg {step} av {total}</p>
-        <h2 className="text-base font-black text-g-text mt-0.5">{title}</h2>
-        <p className="text-xs text-g-muted mt-0.5">{sub}</p>
-      </div>
-    </div>
-  );
-}
+function OnboardingInner() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
 
-export default function OnboardingPage() {
-  const router = useRouter();
-  const [step, setStep] = useState<Step>(1);
-  const [form, setForm] = useState<FormData>(INIT);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [step,      setStep]      = useState(1);
+  const [status,    setStatus]    = useState<OboardingStatus | null>(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState('');
 
-  function set(field: keyof FormData) {
-    return (val: string) => setForm(f => ({ ...f, [field]: val }));
+  // Step 1 state
+  const [brandName,  setBrandName]  = useState('');
+  const [wsSlug,     setWsSlug]     = useState('');
+  const [step1Saved, setStep1Saved] = useState(false);
+
+  // Step 4 state
+  const [channels,  setChannels]  = useState<DiscordChannel[]>([]);
+  const [prefs,     setPrefs]     = useState<Record<string, string>>({});
+  const [savingCh,  setSavingCh]  = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    const res = await fetch('/api/onboarding/status').catch(() => null);
+    if (!res?.ok) return;
+    const d: OboardingStatus = await res.json();
+    setStatus(d);
+    if (d.brandName) setBrandName(d.brandName);
+    if (d.workspaceId) { setWsSlug(d.workspaceId); setStep1Saved(true); }
+    return d;
+  }, []);
+
+  useEffect(() => {
+    loadStatus().then(d => {
+      if (!d) return;
+      // URL param overrides DB step (for post-OAuth redirects)
+      const urlStep = parseInt(searchParams.get('step') ?? '0', 10);
+      const urlError = searchParams.get('error');
+      if (urlError) setError(`OAuth feil: ${urlError.replace(/_/g, ' ')}`);
+      setStep(urlStep > 1 ? urlStep : d.currentStep);
+    });
+  }, [loadStatus, searchParams]);
+
+  // Load Discord channels when on step 4
+  useEffect(() => {
+    if (step !== 4 || !status?.discordConnected) return;
+    fetch('/api/channel-settings').then(r => r.json()).then(d => {
+      setChannels(d.kanaler ?? []);
+      setPrefs(d.preferanser ?? {});
+    }).catch(() => {});
+  }, [step, status?.discordConnected]);
+
+  async function saveWorkspace() {
+    if (!brandName || !wsSlug) return;
+    setLoading(true); setError('');
+    const res = await fetch('/api/onboarding/workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brandName, workspaceSlug: wsSlug }),
+    });
+    const d = await res.json();
+    setLoading(false);
+    if (!res.ok) { setError(d.error ?? 'Feil ved opprettelse'); return; }
+    setStep1Saved(true);
+    setStep(2);
   }
 
-  function canNext(): boolean {
-    if (step === 1) return form.workspaceSlug.length >= 2 && form.brandName.length >= 2;
-    if (step === 2) return form.twitchUsername.length >= 1 && form.twitchClientId.length >= 10 && form.twitchClientSecret.length >= 10;
-    if (step === 3) return form.discordBotToken.length >= 20 && form.discordGuildId.length >= 15;
-    return false;
+  async function saveChannels() {
+    setSavingCh(true);
+    const res = await fetch('/api/onboarding/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
+    setSavingCh(false);
+    if (res.ok) { await loadStatus(); setStep(5); }
+    else { const d = await res.json(); setError(d.error ?? 'Feil ved kanallagring'); }
   }
 
-  async function finish() {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/onboarding/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error ?? 'Noe gikk galt');
-      router.push('/');
-      router.refresh();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  async function activate() {
+    setLoading(true); setError('');
+    const res = await fetch('/api/onboarding/activate', { method: 'POST' });
+    const d = await res.json();
+    setLoading(false);
+    if (!res.ok) { setError(d.error ?? 'Feil ved aktivering'); return; }
+    router.push('/waiting');
+    router.refresh();
   }
+
+  const CHANNEL_TYPES = [
+    { felt: 'live',            label: 'Live-varsling',   desc: 'Boten poster her når stream starter' },
+    { felt: 'chat',            label: 'Chat / Generell', desc: 'Promos og generelle meldinger' },
+    { felt: 'clips',           label: 'Klipp',           desc: 'Ferdige klipp' },
+    { felt: 'subs',            label: 'Subs & Gifts',    desc: 'Sub-anerkjennelser' },
+    { felt: 'errors',          label: 'Feil & Varsler',  desc: 'Tekniske feil fra boten' },
+  ];
 
   return (
     <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
-      <div className="w-full max-w-lg space-y-6">
+      <div className="w-full max-w-lg space-y-5">
 
-        {/* Logo */}
         <div className="text-center">
           <div className="text-g-green font-black text-xl tracking-[0.15em] uppercase"
             style={{ textShadow: '0 0 20px rgba(0,255,65,0.4)' }}>
@@ -121,105 +194,190 @@ export default function OnboardingPage() {
 
         <div className="bg-g-card border border-g-border rounded-xl p-6 space-y-6">
 
+          <ProgressBar step={step} />
+
+          {error && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+          )}
+
           {/* ── Step 1: Workspace ── */}
           {step === 1 && (
-            <>
-              <StepHeader step={1} total={3} title="Din merkevare" sub="Hva heter du og kanalen din?" />
-              <div className="space-y-4">
-                <Field label="Twitch-kanalnavn / Merkevarenavn" value={form.brandName}
-                  onChange={v => { set('brandName')(v); set('workspaceSlug')(slugify(v)); }}
-                  placeholder="f.eks. NordicGamer" />
-                <Field label="Workspace ID (slug)" value={form.workspaceSlug}
-                  onChange={v => set('workspaceSlug')(slugify(v))}
-                  placeholder="nordicgamer" mono
-                  hint="Kun små bokstaver og bindestrek. Dette er din unike ID i systemet." />
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 1 av 5</p>
+                <h2 className="text-base font-black text-g-text mt-0.5">Velkommen til Glenvex</h2>
+                <p className="text-xs text-g-muted mt-0.5">Sett opp ditt creator workspace.</p>
               </div>
-            </>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Ditt navn / kanalnavn</label>
+                  <input type="text" value={brandName}
+                    onChange={e => { setBrandName(e.target.value); setWsSlug(slugify(e.target.value)); }}
+                    placeholder="f.eks. NordicGamer"
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 transition-colors" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Workspace ID</label>
+                  <input type="text" value={wsSlug}
+                    onChange={e => setWsSlug(slugify(e.target.value))}
+                    placeholder="nordicgamer"
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 font-mono text-xs transition-colors" />
+                  <p className="text-[9px] text-g-muted mt-1">Kun små bokstaver og bindestrek. Kan ikke endres etter opprettelse.</p>
+                </div>
+              </div>
+              <button onClick={saveWorkspace} disabled={loading || brandName.length < 2 || wsSlug.length < 2}
+                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                {loading ? 'Oppretter workspace...' : 'Opprett workspace →'}
+              </button>
+            </div>
           )}
 
           {/* ── Step 2: Twitch ── */}
           {step === 2 && (
-            <>
-              <StepHeader step={2} total={3} title="Twitch-tilkobling" sub="Koble til din Twitch-kanal" />
-              <div className="space-y-4">
-                <div className="bg-g-bg/60 border border-g-border/50 rounded-lg p-3 text-[11px] text-g-muted space-y-1">
-                  <p className="text-g-text font-bold text-xs">Slik får du Twitch-nøklene:</p>
-                  <p>1. Gå til <span className="text-g-green font-mono">dev.twitch.tv/console</span></p>
-                  <p>2. Registrer ny applikasjon</p>
-                  <p>3. OAuth Redirect URL: <span className="font-mono text-g-text">http://localhost</span></p>
-                  <p>4. Kategori: Broadcasting → Kopier Client ID og generer Secret</p>
-                </div>
-                <Field label="Twitch-brukernavn" value={form.twitchUsername}
-                  onChange={set('twitchUsername')} placeholder="nordicgamer" />
-                <Field label="Client ID" value={form.twitchClientId}
-                  onChange={set('twitchClientId')} placeholder="abc123..." mono />
-                <Field label="Client Secret" value={form.twitchClientSecret}
-                  onChange={set('twitchClientSecret')} type="password" placeholder="••••••••••••••••" mono />
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 2 av 5</p>
+                <h2 className="text-base font-black text-g-text mt-0.5">Koble til Twitch</h2>
+                <p className="text-xs text-g-muted mt-0.5">Autoriser Glenvex til å lese din Twitch-kanal.</p>
               </div>
-            </>
+              <ConnectButton
+                href="/api/auth/twitch"
+                icon="🟣"
+                label="Koble til Twitch"
+                connected={!!status?.twitchConnected}
+                connectedLabel={status?.twitchDisplayName ?? status?.twitchLogin ?? 'Tilkoblet'}
+              />
+              {status?.twitchConnected && (
+                <button onClick={() => setStep(3)}
+                  className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all">
+                  Neste →
+                </button>
+              )}
+            </div>
           )}
 
           {/* ── Step 3: Discord ── */}
           {step === 3 && (
-            <>
-              <StepHeader step={3} total={3} title="Discord-tilkobling" sub="Koble boten til Discord-serveren din" />
-              <div className="space-y-4">
-                <div className="bg-g-bg/60 border border-g-border/50 rounded-lg p-3 text-[11px] text-g-muted space-y-1">
-                  <p className="text-g-text font-bold text-xs">Slik setter du opp Discord-boten:</p>
-                  <p>1. Gå til <span className="text-g-green font-mono">discord.com/developers/applications</span></p>
-                  <p>2. New Application → Bot → Add Bot → Kopier Bot Token</p>
-                  <p>3. Aktiver: Server Members Intent + Message Content Intent</p>
-                  <p>4. OAuth2 → Scopes: bot + applications.commands → Permissions: Administrator</p>
-                  <p>5. Inviter boten til serveren din</p>
-                  <p>6. Høyreklikk server → Kopier Server ID (= Guild ID)</p>
-                </div>
-                <Field label="Bot Token" value={form.discordBotToken}
-                  onChange={set('discordBotToken')} type="password" placeholder="••••••••••••••••" mono />
-                <Field label="Guild ID (Server ID)" value={form.discordGuildId}
-                  onChange={set('discordGuildId')} placeholder="1234567890123456789" mono />
-                <Field label="Invitasjonslenke til serveren" value={form.discordInviteUrl}
-                  onChange={set('discordInviteUrl')} placeholder="https://discord.gg/..." />
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Live-varslingskanal ID" value={form.discordLiveChannelId}
-                    onChange={set('discordLiveChannelId')} placeholder="1234..." mono />
-                  <Field label="Chat-kanal ID" value={form.discordChatChannelId}
-                    onChange={set('discordChatChannelId')} placeholder="1234..." mono />
-                </div>
-                <p className="text-[10px] text-g-muted">Høyreklikk på en kanal i Discord → Kopier kanal-ID for å finne ID-ene</p>
-
-                {error && (
-                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
-                )}
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 3 av 5</p>
+                <h2 className="text-base font-black text-g-text mt-0.5">Koble til Discord</h2>
+                <p className="text-xs text-g-muted mt-0.5">Legg til Glenvex-boten på Discord-serveren din.</p>
               </div>
-            </>
+              <ConnectButton
+                href="/api/auth/discord-bot"
+                icon="🔵"
+                label="Legg til Discord-bot"
+                connected={!!status?.discordConnected}
+                connectedLabel={status?.guildName ?? 'Server tilkoblet'}
+              />
+              {status?.discordConnected && (
+                <button onClick={() => setStep(4)}
+                  className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all">
+                  Neste →
+                </button>
+              )}
+            </div>
           )}
 
-          {/* Navigation */}
-          <div className="flex gap-3">
-            {step > 1 && (
-              <button onClick={() => setStep(s => (s - 1) as Step)}
-                className="flex-1 py-2.5 border border-g-border rounded-lg text-sm text-g-muted hover:text-g-text hover:border-g-border/80 transition-all">
-                ← Tilbake
+          {/* ── Step 4: Channels ── */}
+          {step === 4 && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 4 av 5</p>
+                <h2 className="text-base font-black text-g-text mt-0.5">Velg kanaler</h2>
+                <p className="text-xs text-g-muted mt-0.5">Hvilke Discord-kanaler skal boten bruke?</p>
+              </div>
+              <div className="space-y-2">
+                {CHANNEL_TYPES.map(({ felt, label, desc }) => (
+                  <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-1.5 border-b border-g-border/30 last:border-0">
+                    <div>
+                      <p className="text-xs text-g-text">{label}</p>
+                      <p className="text-[9px] text-g-muted">{desc}</p>
+                    </div>
+                    <select
+                      value={prefs[felt] ?? ''}
+                      onChange={e => setPrefs(p => ({ ...p, [felt]: e.target.value }))}
+                      className="bg-g-bg border border-g-border rounded px-2 py-1.5 text-[10px] text-g-text font-mono focus:outline-none focus:border-g-green/40 min-w-[160px]">
+                      <option value="">— Ikke satt —</option>
+                      {channels.map(k => (
+                        <option key={k.id} value={k.id}>#{k.navn} ({k.kategori})</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {channels.length === 0 && (
+                <p className="text-[10px] text-g-muted">Laster kanaler fra Discord...</p>
+              )}
+              <button onClick={saveChannels} disabled={savingCh}
+                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-50">
+                {savingCh ? 'Lagrer...' : 'Lagre og fortsett →'}
               </button>
-            )}
-            {step < 3 ? (
-              <button
-                onClick={() => setStep(s => (s + 1) as Step)}
-                disabled={!canNext()}
-                className="flex-1 bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 hover:border-g-green/50 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-                Neste →
+              <button onClick={() => setStep(5)} disabled={savingCh}
+                className="w-full text-[11px] text-g-muted hover:text-g-text transition-colors py-1">
+                Hopp over for nå
               </button>
-            ) : (
-              <button
-                onClick={finish}
-                disabled={loading || !canNext()}
-                className="flex-1 bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 hover:border-g-green/50 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                {loading ? 'Setter opp workspace...' : '→ Åpne dashbordet mitt'}
+            </div>
+          )}
+
+          {/* ── Step 5: Activate ── */}
+          {step === 5 && (
+            <div className="space-y-5">
+              <div>
+                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 5 av 5</p>
+                <h2 className="text-base font-black text-g-text mt-0.5">Aktiver Glenvex</h2>
+                <p className="text-xs text-g-muted mt-0.5">Se over og send inn forespørselen.</p>
+              </div>
+
+              <div className="bg-g-bg border border-g-border rounded-xl p-4 space-y-3">
+                <p className="text-[10px] font-bold text-g-muted uppercase tracking-widest">Oppsummering</p>
+                {[
+                  { label: 'Workspace', val: status?.workspaceId ?? '–', ok: !!status?.workspaceId },
+                  { label: 'Twitch', val: status?.twitchDisplayName ?? status?.twitchLogin ?? 'Ikke tilkoblet', ok: !!status?.twitchConnected },
+                  { label: 'Discord', val: status?.guildName ?? 'Ikke tilkoblet', ok: !!status?.discordConnected },
+                  { label: 'Kanaler', val: status?.channelsSaved ? 'Lagret' : 'Ikke satt', ok: !!status?.channelsSaved },
+                ].map(r => (
+                  <div key={r.label} className="flex items-center justify-between">
+                    <span className="text-[11px] text-g-muted">{r.label}</span>
+                    <span className={`text-[11px] font-bold ${r.ok ? 'text-g-green' : 'text-g-muted'}`}>
+                      {r.ok ? '✓' : '○'} {r.val}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-g-bg/50 border border-g-border/30 rounded-lg p-3">
+                <p className="text-[10px] text-g-muted leading-relaxed">
+                  Etter aktivering går du til ventelisten. En administrator vil godkjenne deg som alpha-tester og åpne tilgangen.
+                </p>
+              </div>
+
+              <button onClick={activate} disabled={loading}
+                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-3 rounded-lg transition-all disabled:opacity-50">
+                {loading ? 'Aktiverer...' : '→ Send inn og vent på godkjenning'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Back navigation */}
+          {step > 1 && step < 5 && (
+            <button onClick={() => setStep(s => s - 1)}
+              className="w-full py-2 text-[11px] text-g-muted hover:text-g-text transition-colors">
+              ← Tilbake
+            </button>
+          )}
+
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense>
+      <OnboardingInner />
+    </Suspense>
   );
 }

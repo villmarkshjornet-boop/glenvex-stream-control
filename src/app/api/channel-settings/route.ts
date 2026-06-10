@@ -47,33 +47,30 @@ async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
   return {};
 }
 
-async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<boolean> {
-  // Lagre i fil (Railway fallback)
-  try {
-    const dir = path.dirname(FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(prefs, null, 2), 'utf-8');
-  } catch {}
-
-  if (!isDbAvailable()) return false;
+// Throws on any DB failure — caller must handle and return 500.
+async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
+  if (!isDbAvailable()) throw new Error('Supabase ikke tilgjengelig');
   const db = getDb();
-  if (!db) return false;
+  if (!db) throw new Error('Supabase client mangler');
 
   const wsId = getWorkspaceId();
 
-  // Hent eksisterende settings_json
-  const { data: existing } = await db
+  const { data: existing, error: readErr } = await db
     .from('workspaces')
     .select('id, settings_json')
     .eq('id', wsId)
     .single();
 
-  const current = existing?.settings_json ?? {};
+  // PGRST116 = no row — treat as "needs insert". Any other error is a real failure.
+  if (readErr && readErr.code !== 'PGRST116') {
+    throw new Error(`Lesefeil: ${readErr.message}`);
+  }
+
+  const current = (existing?.settings_json as Record<string, any>) ?? {};
   const nySettings = { ...current, kanalPreferanser: prefs };
 
   if (!existing) {
-    // Opprett workspace med preferansene inkludert
-    const { error } = await db.from('workspaces').insert({
+    const { error: upsertErr } = await db.from('workspaces').upsert({
       id: wsId,
       owner_user_id: 'glenvex',
       streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
@@ -83,17 +80,15 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<boolean> {
       bot_personality: 'dark_gaming',
       plan: 'creator',
       settings_json: nySettings,
-    });
-    return !error;
+    }, { onConflict: 'id' });
+    if (upsertErr) throw new Error(`Upsert feilet: ${upsertErr.message}`);
+  } else {
+    const { error: updateErr } = await db
+      .from('workspaces')
+      .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
+      .eq('id', wsId);
+    if (updateErr) throw new Error(`Update feilet: ${updateErr.message}`);
   }
-
-  // Oppdater eksisterende workspace
-  const { error } = await db
-    .from('workspaces')
-    .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
-    .eq('id', wsId);
-
-  return !error;
 }
 
 export async function GET() {
@@ -120,6 +115,11 @@ export async function GET() {
   }
 
   const lagret = await loadPrefs();
+
+  // DIAG-5: What loadPrefs returned
+  console.log('[DIAG channel-settings GET] wsId:', getWorkspaceId());
+  console.log('[DIAG channel-settings GET] loadPrefs result:', JSON.stringify(lagret));
+
   const preferanser: Partial<KanalPreferanser> = {
     live: lagret.live ?? process.env.DISCORD_LIVE_CHANNEL_ID ?? '',
     announce: lagret.announce ?? '',
@@ -136,16 +136,62 @@ export async function GET() {
     errors: lagret.errors ?? '',
   };
 
+  // DIAG-5 continued: exact response
+  console.log('[DIAG channel-settings GET] response preferanser:', JSON.stringify(preferanser));
+
   return NextResponse.json({ kanaler, preferanser });
 }
 
 export async function POST(req: NextRequest) {
+  const wsId = getWorkspaceId();
   const body = await req.json() as Partial<KanalPreferanser>;
-  const ok = await savePrefs(body);
+
+  // DIAG-1: Incoming payload + workspaceId
+  console.log('[DIAG channel-settings POST] wsId:', wsId);
+  console.log('[DIAG channel-settings POST] incoming body:', JSON.stringify(body));
+
+  // DIAG-2: Read DB before write
+  if (isDbAvailable()) {
+    const db = getDb();
+    if (db) {
+      const { data: before, error: beforeErr } = await db
+        .from('workspaces')
+        .select('settings_json')
+        .eq('id', wsId)
+        .single();
+      console.log('[DIAG channel-settings POST] DB before write - error:', beforeErr?.message ?? null);
+      console.log('[DIAG channel-settings POST] DB before write - settings_json:', JSON.stringify(before?.settings_json ?? null));
+    }
+  }
+
+  try {
+    await savePrefs(body);
+  } catch (err: any) {
+    console.error('[channel-settings POST] Save failed:', err?.message);
+    return NextResponse.json(
+      { success: false, error: err?.message ?? 'Ukjent DB-feil' },
+      { status: 500 }
+    );
+  }
+
+  // DIAG-3: Read DB after write
+  if (isDbAvailable()) {
+    const db = getDb();
+    if (db) {
+      const { data: after, error: afterErr } = await db
+        .from('workspaces')
+        .select('settings_json')
+        .eq('id', wsId)
+        .single();
+      console.log('[DIAG channel-settings POST] DB after write - error:', afterErr?.message ?? null);
+      console.log('[DIAG channel-settings POST] DB after write - kanalPreferanser:', JSON.stringify(after?.settings_json?.kanalPreferanser ?? null));
+    }
+  }
+
   // Nullstill cache i discordChannel
   try {
     const { nullstillKanalCache } = await import('@/lib/discordChannel');
     nullstillKanalCache();
   } catch {}
-  return NextResponse.json({ ok: true, lagret: ok ? 'supabase' : 'fil' });
+  return NextResponse.json({ success: true, source: 'supabase', saved: true });
 }

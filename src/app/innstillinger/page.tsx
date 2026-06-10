@@ -419,24 +419,45 @@ function DiscordKanalerPanel() {
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [lagrer, setLagrer] = useState(false);
   const [lagret, setLagret] = useState(false);
+  const [lagreFeil, setLagreFeil] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/channel-settings').then(r => r.json()).then(d => {
+      // DIAG-D: Raw response from GET /api/channel-settings
+      console.log('[DIAG DiscordKanalerPanel] GET /api/channel-settings raw response:', JSON.stringify(d));
+      // DIAG-E: State being set
+      console.log('[DIAG DiscordKanalerPanel] setPrefs with:', JSON.stringify(d.preferanser ?? {}));
       setKanaler(d.kanaler ?? []);
       setPrefs(d.preferanser ?? {});
-    }).catch(() => {});
+      console.log('[DIAG DiscordKanalerPanel] setPrefs called — state will update');
+    }).catch((err) => {
+      console.error('[DIAG DiscordKanalerPanel] GET /api/channel-settings FAILED:', err);
+    });
   }, []);
 
   async function lagre() {
     setLagrer(true);
-    await fetch('/api/channel-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prefs),
-    });
+    setLagreFeil(null);
+    console.log('[DIAG DiscordKanalerPanel] POST /api/channel-settings sending prefs:', JSON.stringify(prefs));
+    try {
+      const res = await fetch('/api/channel-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prefs),
+      });
+      const data = await res.json().catch(() => null);
+      console.log('[DIAG DiscordKanalerPanel] POST /api/channel-settings response:', JSON.stringify(data));
+      if (!res.ok || !data?.success) {
+        setLagreFeil(data?.error ?? `Lagring feilet (HTTP ${res.status})`);
+        setLagrer(false);
+        return;
+      }
+      setLagret(true);
+      setTimeout(() => setLagret(false), 2000);
+    } catch (err: any) {
+      setLagreFeil(err?.message ?? 'Nettverksfeil — prøv igjen');
+    }
     setLagrer(false);
-    setLagret(true);
-    setTimeout(() => setLagret(false), 2000);
   }
 
   const kanalTyper = [
@@ -483,11 +504,14 @@ function DiscordKanalerPanel() {
         ))}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 flex items-center gap-3">
         <button onClick={lagre} disabled={lagrer}
-          className="px-5 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">
+          className="px-5 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all disabled:opacity-50">
           {lagrer ? 'Lagrer...' : lagret ? '✓ Lagret!' : 'Lagre kanalvalg'}
         </button>
+        {lagreFeil && (
+          <span className="text-[10px] text-red-400">⚠ {lagreFeil}</span>
+        )}
       </div>
     </div>
   );

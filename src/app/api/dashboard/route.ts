@@ -79,6 +79,7 @@ export async function GET() {
     vodsRes,
     highlightsRes,
     streamplanRes,
+    audienceEventsRes,
   ] = await Promise.allSettled([
     checkTwitchApiHealth(),
     checkDiscordBotHealth(),
@@ -97,6 +98,12 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(50),
     hentStreamplan(db),
+    db.from('system_events')
+      .select('event_type,metadata,created_at,title')
+      .eq('workspace_id', getWorkspaceId())
+      .in('event_type', ['AUDIENCE_TRACKING_HEARTBEAT', 'AUDIENCE_TRACKING_STOPPED', 'COACH_REPORT_GENERATED'])
+      .order('created_at', { ascending: false })
+      .limit(5),
   ]);
 
   // ── Health ──────────────────────────────────────────────────────────────────
@@ -110,6 +117,30 @@ export async function GET() {
   const vods: any[] = vodsRes.status === 'fulfilled' ? (vodsRes.value?.data ?? []) : [];
   const highlights: any[] = highlightsRes.status === 'fulfilled' ? (highlightsRes.value?.data ?? []) : [];
   const streamplan: any[] = streamplanRes.status === 'fulfilled' ? (streamplanRes.value ?? []) : [];
+  const audienceEvents: any[] = audienceEventsRes.status === 'fulfilled' ? (audienceEventsRes.value?.data ?? []) : [];
+
+  const latestHeartbeat = audienceEvents.find(e => e.event_type === 'AUDIENCE_TRACKING_HEARTBEAT');
+  const latestStopped = audienceEvents.find(e => e.event_type === 'AUDIENCE_TRACKING_STOPPED');
+  const latestCoachReport = audienceEvents.find(e => e.event_type === 'COACH_REPORT_GENERATED');
+
+  const HEARTBEAT_MAX_AGE_MS = 5 * 60_000;
+  const heartbeatAge = latestHeartbeat ? Date.now() - new Date(latestHeartbeat.created_at).getTime() : Infinity;
+  const isTrackingActive =
+    !!latestHeartbeat &&
+    heartbeatAge < HEARTBEAT_MAX_AGE_MS &&
+    (!latestStopped || latestHeartbeat.created_at > latestStopped.created_at);
+
+  const audienceTracking = {
+    isActive: isTrackingActive,
+    totalObserved: latestHeartbeat?.metadata?.totalObserved ?? 0,
+    subscribers: latestHeartbeat?.metadata?.subscribers ?? 0,
+    lastViewerCount: latestHeartbeat?.metadata?.lastViewerCount ?? 0,
+    lastHeartbeat: latestHeartbeat?.created_at ?? null,
+    analysisComplete: !!latestStopped && !!latestCoachReport &&
+      latestCoachReport.created_at > latestStopped.created_at &&
+      latestCoachReport.metadata?.streamId === latestStopped.metadata?.streamId,
+    lastAnalysis: latestCoachReport?.created_at ?? null,
+  };
 
   // ── Aktive jobber ───────────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v => ['ANALYZING', 'PENDING'].includes(v.status));
@@ -139,6 +170,21 @@ export async function GET() {
   }
   if (discordOk) {
     activeJobs.push({ agent: 'Discord Manager', task: 'Bot aktiv – lytter på events', progress: 100, href: '/discord' });
+  }
+  if (isTrackingActive) {
+    activeJobs.push({
+      agent: 'Audience Tracker',
+      task: `Sporer publikum – ${audienceTracking.totalObserved} brukere observert`,
+      progress: 100,
+      href: '/stream-coach',
+    });
+  } else if (audienceTracking.analysisComplete) {
+    activeJobs.push({
+      agent: 'Stream Coach',
+      task: 'Analyse ferdig – rapport tilgjengelig',
+      progress: 100,
+      href: '/stream-coach',
+    });
   }
 
   // ── Streamstatus ────────────────────────────────────────────────────────────
@@ -229,6 +275,7 @@ export async function GET() {
     },
     activeJobs,
     streamStatus,
+    audienceTracking,
     sjekkliste,
     sisteResultater,
     meta: { hentetKl: new Date().toISOString() },

@@ -1,9 +1,5 @@
-/**
- * Diagnostic endpoint — viser workspace_id-mismatchen mellom Railway-boten og dashboardet.
- * Åpen (ingen auth) slik at den kan nås selv uten gyldig sesjon for debugging.
- * GET /api/debug/workspace
- */
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 
@@ -21,6 +17,15 @@ function countByField(rows: any[] | null, field = 'workspace_id'): Record<string
 }
 
 export async function GET() {
+  const h = headers();
+  const userEmail = h.get('x-user-email') ?? '';
+  const adminEmail = process.env.ADMIN_EMAIL ?? '';
+  const isAdmin = adminEmail.length > 0 && userEmail.toLowerCase() === adminEmail.toLowerCase();
+  const isAuthenticated = !!h.get('x-workspace-id');
+  if (!isAdmin && !isAuthenticated) {
+    return NextResponse.json({ error: 'Ikke tilgang' }, { status: 403 });
+  }
+
   const db = getDb();
   const vercelWsId = getWorkspaceId();
   const vercelEnvId = process.env.WORKSPACE_ID ?? '(not set)';

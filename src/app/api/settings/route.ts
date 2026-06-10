@@ -98,9 +98,14 @@ export async function GET() {
   try {
     const fullJson = await getFullSettingsJson();
 
+    // DIAG-4: What is in DB on GET
+    console.log('[DIAG settings GET] wsId:', workspaceId);
+    console.log('[DIAG settings GET] fullJson from DB:', JSON.stringify(fullJson ?? null));
+
     if (fullJson && Object.keys(fullJson).length > 0) {
       const fileSettings = getSettings();
       const response = toApiResponse({ ...fileSettings, ...fullJson });
+      console.log('[DIAG settings GET] response (after toApiResponse):', JSON.stringify(response));
 
       logSystemEvent({
         source: 'settings',

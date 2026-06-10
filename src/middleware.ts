@@ -15,6 +15,7 @@ interface UserClaims {
   id: string;
   email: string;
   workspace_id: string;
+  alpha_enabled?: boolean;
   exp: number;
 }
 
@@ -72,6 +73,7 @@ function decodeJwtClaims(accessToken: string): UserClaims | null {
       id: payload.sub,
       email: payload.email ?? '',
       workspace_id: payload.user_metadata?.workspace_id ?? '',
+      alpha_enabled: payload.user_metadata?.alpha_enabled,
       exp: payload.exp ?? 0,
     };
   } catch {
@@ -155,24 +157,39 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (
-    !claims.workspace_id &&
-    !pathname.startsWith('/onboarding') &&
-    !pathname.startsWith('/api/onboarding') &&
-    !pathname.startsWith('/api/auth')
-  ) {
+  const isOnboardingPath = pathname.startsWith('/onboarding') || pathname.startsWith('/api/onboarding') || pathname.startsWith('/api/auth');
+  const isWaitingPath    = pathname.startsWith('/waiting');
+  const isAdminPath      = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+
+  if (!claims.workspace_id && !isOnboardingPath) {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
+    return NextResponse.redirect(url);
+  }
+
+  // Alpha gate: alpha_enabled === false means the workspace is on the waiting list.
+  // undefined/true means allowed (preserves access for existing users without the flag).
+  if (
+    claims.workspace_id &&
+    claims.alpha_enabled === false &&
+    !isWaitingPath &&
+    !isOnboardingPath &&
+    !isAdminPath
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/waiting';
     return NextResponse.redirect(url);
   }
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', pathname);
   requestHeaders.set('x-workspace-id', claims.workspace_id);
+  requestHeaders.set('x-user-id', claims.id);
   requestHeaders.set('x-user-email', claims.email);
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('x-workspace-id', claims.workspace_id);
+  response.headers.set('x-user-id', claims.id);
   response.headers.set('x-pathname', pathname);
 
   // Write refreshed session back as cookie so next request is instant
