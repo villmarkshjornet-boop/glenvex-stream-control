@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
 import { getWorkspaceId } from '@/lib/workspace';
 import fs from 'fs';
 import path from 'path';
@@ -9,8 +8,9 @@ export const dynamic = 'force-dynamic';
 const DISCORD_API = 'https://discord.com/api/v10';
 const FILE = path.join(process.cwd(), 'data', 'channel-settings.json');
 
-function supabaseUrl(): string {
-  // Server-side: SUPABASE_URL is authoritative. NEXT_PUBLIC_ variant may differ or be stale on Vercel.
+// ── Supabase connection ───────────────────────────────────────────────────────
+
+function sbUrl(): string {
   return (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
 }
 
@@ -18,25 +18,85 @@ function anonKey(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 }
 
-// Creates a Supabase client authenticated as the current user.
-// Uses req.cookies (from the request) so it works correctly in Next.js 14 Route Handlers.
-// next/headers cookies() is read-only in Route Handlers and can cause issues with @supabase/ssr.
-function makeSupabaseClient(req: NextRequest) {
-  const url = supabaseUrl();
-  const key = anonKey();
-  if (!url || !key) return null;
+// Extract the user's Supabase access token from request cookies.
+// @supabase/ssr stores the session as URL-encoded JSON in sb-<ref>-auth-token.
+// Supports both single-cookie and chunked (sb-<ref>-auth-token.0/.1/...) formats.
+function getAccessToken(req: NextRequest): string {
+  const all = req.cookies.getAll();
 
-  return createServerClient(url, key, {
-    cookies: {
-      getAll() {
-        return req.cookies.getAll();
-      },
-      setAll() {
-        // Route Handlers cannot set cookies here — no-op
-      },
-    },
-  });
+  // Single cookie
+  const single = all.find(c => /^sb-.+-auth-token$/.test(c.name));
+  if (single?.value) {
+    try {
+      const sess = JSON.parse(decodeURIComponent(single.value));
+      if (sess?.access_token) return sess.access_token as string;
+    } catch {}
+  }
+
+  // Chunked cookies: sb-<ref>-auth-token.0, .1, …
+  const chunk0 = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
+  if (chunk0) {
+    const base = chunk0.name.slice(0, -2);
+    const parts: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const v = all.find(c => c.name === `${base}.${i}`)?.value;
+      if (!v) break;
+      parts.push(v);
+    }
+    try {
+      const sess = JSON.parse(decodeURIComponent(parts.join('')));
+      if (sess?.access_token) return sess.access_token as string;
+    } catch {}
+  }
+
+  return '';
 }
+
+function authHeaders(accessToken: string): Record<string, string> {
+  const key = anonKey();
+  return {
+    apikey: key,
+    Authorization: `Bearer ${accessToken || key}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+}
+
+async function sbSelect(wsId: string, token: string): Promise<Record<string, unknown> | null> {
+  const url = sbUrl();
+  if (!url) return null;
+  const res = await fetch(
+    `${url}/rest/v1/workspaces?id=eq.${encodeURIComponent(wsId)}&select=settings_json`,
+    { headers: authHeaders(token), signal: AbortSignal.timeout(8000) }
+  );
+  if (!res.ok) {
+    console.log('[channel-settings] SELECT status:', res.status, await res.text().catch(() => ''));
+    return null;
+  }
+  const rows = await res.json() as any[];
+  return rows[0] ?? null;
+}
+
+async function sbUpdate(wsId: string, token: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const url = sbUrl();
+  if (!url) return { ok: false, error: 'SUPABASE_URL mangler' };
+  const res = await fetch(
+    `${url}/rest/v1/workspaces?id=eq.${encodeURIComponent(wsId)}`,
+    {
+      method: 'PATCH',
+      headers: { ...authHeaders(token), Prefer: 'return=minimal' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    return { ok: false, error: `HTTP ${res.status}: ${txt.slice(0, 200)}` };
+  }
+  return { ok: true };
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface KanalPreferanser {
   live: string;
@@ -54,22 +114,16 @@ export interface KanalPreferanser {
   errors: string;
 }
 
+// ── Load / Save ───────────────────────────────────────────────────────────────
+
 async function loadPrefs(req: NextRequest): Promise<Partial<KanalPreferanser>> {
   const wsId = getWorkspaceId();
-  const supabase = makeSupabaseClient(req);
-
-  if (supabase) {
-    const { data } = await supabase
-      .from('workspaces')
-      .select('settings_json')
-      .eq('id', wsId)
-      .single();
-
-    if (data?.settings_json?.kanalPreferanser) {
-      return data.settings_json.kanalPreferanser as Partial<KanalPreferanser>;
-    }
+  const token = getAccessToken(req);
+  const row = await sbSelect(wsId, token);
+  if (row?.settings_json) {
+    const prefs = (row.settings_json as any)?.kanalPreferanser;
+    if (prefs) return prefs as Partial<KanalPreferanser>;
   }
-
   try {
     if (fs.existsSync(FILE)) return JSON.parse(fs.readFileSync(FILE, 'utf-8'));
   } catch {}
@@ -80,37 +134,11 @@ async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Pr
   const wsId = getWorkspaceId();
   if (!wsId) throw new Error('Workspace ID mangler');
 
-  const url = supabaseUrl();
-  const key = anonKey();
-  console.log('[channel-settings] url:', url ? url.slice(0, 40) : 'MISSING', '| anonKey set:', !!key, '| wsId:', wsId);
+  const token = getAccessToken(req);
+  console.log('[channel-settings] wsId:', wsId, '| hasToken:', !!token, '| url:', sbUrl().slice(0, 40));
 
-  // Connectivity pre-check — shows the real Node.js error (ENOTFOUND, ECONNREFUSED etc.)
-  try {
-    const probe = await fetch(`${url}/rest/v1/`, {
-      headers: { apikey: key },
-      signal: AbortSignal.timeout(5000),
-    });
-    console.log('[channel-settings] connectivity probe:', probe.status);
-  } catch (e: any) {
-    const cause = (e?.cause as any)?.message ?? e?.cause ?? e?.message ?? 'ukjent';
-    console.error('[channel-settings] connectivity FAILED:', cause);
-    throw new Error(`Supabase utilgjengelig: ${cause}`);
-  }
-
-  const supabase = makeSupabaseClient(req);
-  if (!supabase) throw new Error('Supabase ikke konfigurert (SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY mangler)');
-
-  const { data: row, error: selectErr } = await supabase
-    .from('workspaces')
-    .select('settings_json')
-    .eq('id', wsId)
-    .single();
-
-  console.log('[channel-settings] select result — row:', !!row, '| err:', selectErr?.code, selectErr?.message);
-
-  if (selectErr && selectErr.code !== 'PGRST116') {
-    throw new Error(`Les feilet: ${selectErr.message}`);
-  }
+  const row = await sbSelect(wsId, token);
+  console.log('[channel-settings] row found:', !!row, '| token used:', !!token);
 
   if (!row) {
     throw Object.assign(
@@ -122,14 +150,15 @@ async function savePrefs(prefs: Partial<KanalPreferanser>, req: NextRequest): Pr
   const current = (row.settings_json as Record<string, unknown>) ?? {};
   const nySettings = { ...current, kanalPreferanser: prefs };
 
-  const { error: updateErr } = await supabase
-    .from('workspaces')
-    .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
-    .eq('id', wsId);
+  const { ok, error } = await sbUpdate(wsId, token, {
+    settings_json: nySettings,
+    updated_at: new Date().toISOString(),
+  });
 
-  console.log('[channel-settings] update error:', updateErr?.message ?? 'none');
-  if (updateErr) throw new Error(`Lagring feilet: ${updateErr.message}`);
+  if (!ok) throw new Error(`Lagring feilet: ${error}`);
 }
+
+// ── Route handlers ────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   const guildId = process.env.DISCORD_GUILD_ID;
