@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { postLiveEmbed } from '@/lib/discord';
+import { getLiveKanalId } from '@/lib/discordChannel';
 import type { StreamInfo } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -13,10 +14,13 @@ export const maxDuration = 20;
 export async function POST() {
   const settings = getSettings();
 
-  if (!settings.discordLiveChannelId) {
+  // Source of truth: Supabase kanalPreferanser, ikke lokal fil/env
+  const liveKanalId = await getLiveKanalId().catch(() => null) || settings.discordLiveChannelId;
+
+  if (!liveKanalId) {
     return NextResponse.json({
       ok: false,
-      feil: 'discordLiveChannelId er ikke konfigurert. Gå til Innstillinger og legg inn Discord-kanal-ID for live-varsler.',
+      feil: 'Live-kanal ikke konfigurert. Gå til Dashboard → Settings → Discord → Velg live-kanal.',
       konfig: false,
     }, { status: 400 });
   }
@@ -91,7 +95,7 @@ export async function POST() {
   }
 
   try {
-    await postLiveEmbed(stream, settings);
+    await postLiveEmbed(stream, { ...settings, discordLiveChannelId: liveKanalId });
     // Oppdater lastNotifiedStreamId så vi ikke sender dobbelt
     if (stream.id) saveSettings({ lastNotifiedStreamId: stream.id });
 

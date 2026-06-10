@@ -5,6 +5,7 @@ import { getSettings, saveSettings } from '@/lib/settings';
 import { addLog } from '@/lib/logger';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { getLiveKanalId } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,11 +70,25 @@ export async function POST(req: NextRequest) {
       });
 
       if (settings.autoPostLive) {
-        await postLiveEmbed(stream, settings);
-        addLog('success', 'Discord live-varsel sendt til #live', 'OK');
-        await logEvent('scheduler', 'DISCORD_LIVE_ANNOUNCEMENT_SENT', `Discord varslet: ${stream.title?.slice(0, 60) ?? ''}`, 'info', {
-          streamId: stream.id,
-        });
+        const liveKanalId = await getLiveKanalId();
+        if (!liveKanalId) {
+          await logEvent('scheduler', 'DISCORD_LIVE_ANNOUNCEMENT_SKIPPED', 'Live-varsel hoppet over — ingen kanal konfigurert', 'warning', {
+            reason: 'missing_channel_preference',
+            streamId: stream.id,
+            workspaceId: getWorkspaceId(),
+            fix: 'Gå til Dashboard → Settings → Discord → Velg live-kanal',
+          });
+        } else {
+          const liveSettings = { ...settings, discordLiveChannelId: liveKanalId };
+          await postLiveEmbed(stream, liveSettings);
+          addLog('success', 'Discord live-varsel sendt til #live', 'OK');
+          await logEvent('scheduler', 'DISCORD_LIVE_ANNOUNCEMENT_SENT', `Discord varslet: ${stream.title?.slice(0, 60) ?? ''}`, 'info', {
+            workspaceId: getWorkspaceId(),
+            channelId: liveKanalId,
+            source: 'supabase',
+            streamId: stream.id,
+          });
+        }
       }
 
       if (stream.id) {

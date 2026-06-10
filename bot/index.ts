@@ -232,6 +232,26 @@ async function checkLive() {
         },
       });
 
+      // Krav 4: Ingen kanal → logg og stopp. Ikke post tilfeldig i #chat.
+      if (!effectiveLiveKanalId) {
+        logSystemEvent({
+          source: 'discord_bot',
+          event_type: 'DISCORD_LIVE_ANNOUNCEMENT_SKIPPED',
+          title: 'Live-varsel hoppet over — ingen kanal konfigurert',
+          severity: 'warning',
+          metadata: {
+            reason: 'missing_channel_preference',
+            streamId: stream.id,
+            workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+            fix: 'Gå til Dashboard → Settings → Discord → Velg live-kanal',
+          },
+        });
+        saveSettings({ lastNotifiedStreamId: stream.id });
+        return;
+      }
+
+      const guildId = process.env.DISCORD_GUILD_ID ?? null;
+      const channelName = client.channels.cache.get(effectiveLiveKanalId)?.name ?? '(ukjent)';
       const liveSettings = { ...settings, discordLiveChannelId: effectiveLiveKanalId };
 
       let liveEmbedOk = false;
@@ -243,7 +263,14 @@ async function checkLive() {
           event_type: 'DISCORD_LIVE_ANNOUNCEMENT_SENT',
           title: `Discord live-varsel postet: ${stream.title?.slice(0, 60) ?? ''}`,
           severity: 'info',
-          metadata: { streamId: stream.id, channelId: effectiveLiveKanalId, source: kanalKilde },
+          metadata: {
+            workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+            guildId,
+            channelId: effectiveLiveKanalId,
+            channelName,
+            source: kanalKilde,
+            streamId: stream.id,
+          },
         });
       } catch (liveErr: any) {
         logSystemEvent({
@@ -251,7 +278,13 @@ async function checkLive() {
           event_type: 'DISCORD_LIVE_ANNOUNCEMENT_FAILED',
           title: `Discord live-varsel feilet: ${liveErr.message?.slice(0, 100)}`,
           severity: 'error',
-          metadata: { streamId: stream.id, error: liveErr.message, channelId: effectiveLiveKanalId, source: kanalKilde },
+          metadata: {
+            streamId: stream.id,
+            error: liveErr.message,
+            channelId: effectiveLiveKanalId,
+            channelName,
+            source: kanalKilde,
+          },
         });
       }
 
@@ -265,7 +298,7 @@ async function checkLive() {
         type: 'live-varsel',
         status: 'publisert',
         tekst: `🔴 GLENVEX ER LIVE – ${stream.game}: ${stream.title}`,
-        kanalId: settings.discordLiveChannelId,
+        kanalId: effectiveLiveKanalId,
         modul: 'Auto Live',
         opprettetAv: 'bot',
         publisert: new Date().toISOString(),

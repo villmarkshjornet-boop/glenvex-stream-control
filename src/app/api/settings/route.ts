@@ -4,6 +4,7 @@ import { addLog } from '@/lib/logger';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { logSystemEvent } from '@/lib/systemEvents';
+import { nullstillKanalCache } from '@/lib/discordChannel';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +55,9 @@ export async function POST(req: NextRequest) {
 
     // Lagre i fil (fallback/Railway)
     const updated = saveSettings(body);
+
+    // Invalidér kanal-cache slik at neste live-varsel leser ferske verdier
+    nullstillKanalCache();
 
     addLog('info', `Innstillinger oppdatert${dbOk ? ' (Supabase)' : ' (fil)'}`, 'OK');
 

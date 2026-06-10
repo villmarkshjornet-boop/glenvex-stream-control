@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getStreamInfo } from '@/lib/twitch';
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings } from '@/lib/settings';
+import { getLiveKanalId } from '@/lib/discordChannel';
 import { addLog } from '@/lib/logger';
 import type { StreamInfo } from '@/types';
 
@@ -39,7 +40,9 @@ export async function POST() {
     }
 
     const settings = getSettings();
-    await postLiveEmbed(stream, settings);
+    const liveKanalId = await getLiveKanalId().catch(() => null) || settings.discordLiveChannelId;
+    if (!liveKanalId) throw new Error('Live-kanal ikke konfigurert — gå til Dashboard → Settings → Discord');
+    await postLiveEmbed(stream, { ...settings, discordLiveChannelId: liveKanalId });
 
     addLog('success', 'Test live-varsel sendt til Discord', 'OK');
     return NextResponse.json({ success: true, message: 'Test varsel sendt til Discord!' });
