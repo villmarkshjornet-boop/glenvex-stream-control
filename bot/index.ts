@@ -251,7 +251,8 @@ async function checkLive() {
       }
 
       const guildId = process.env.DISCORD_GUILD_ID ?? null;
-      const channelName = client.channels.cache.get(effectiveLiveKanalId)?.name ?? '(ukjent)';
+      const ch = client.channels.cache.get(effectiveLiveKanalId);
+      const channelName = (ch && 'name' in ch ? (ch as any).name : null) ?? '(ukjent)';
       const liveSettings = { ...settings, discordLiveChannelId: effectiveLiveKanalId };
 
       let liveEmbedOk = false;
