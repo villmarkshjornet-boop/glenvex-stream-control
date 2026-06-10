@@ -68,10 +68,10 @@ export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
 
     if (!data || data.length === 0) return null;
 
-    // Featured partner (prioritet >= 100) gets 70% of all promo slots
+    // Featured partner (prioritet >= 100) gets 90% of all promo slots
     const featured = data.find(p => (p.prioritet ?? 0) >= 100);
     let raw: any;
-    if (featured && Math.random() < 0.70) {
+    if (featured && Math.random() < 0.90) {
       raw = featured;
     } else {
       const pool = data.filter(p => (p.prioritet ?? 0) < 100).slice(0, 3);
