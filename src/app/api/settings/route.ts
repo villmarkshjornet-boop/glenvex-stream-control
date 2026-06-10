@@ -55,30 +55,13 @@ async function saveSettingsToDb(incoming: Record<string, any>): Promise<{
   // MERGE: preserve all existing keys (especially kanalPreferanser from channel-settings panel)
   const merged = { ...currentJson, ...incoming };
 
-  if (existing) {
-    // Update — row exists
-    const { error } = await db
-      .from('workspaces')
-      .update({ settings_json: merged, updated_at: new Date().toISOString() })
-      .eq('id', wsId);
-    if (error) return { ok: false, merged, error: error.message };
-  } else {
-    // Upsert — row doesn't exist yet, create it
-    const { error } = await db
-      .from('workspaces')
-      .upsert({
-        id: wsId,
-        owner_user_id: 'glenvex',
-        streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-        brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
-        twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-        discord_guild_id: process.env.DISCORD_GUILD_ID,
-        bot_personality: 'dark_gaming',
-        plan: 'creator',
-        settings_json: merged,
-      }, { onConflict: 'id' });
-    if (error) return { ok: false, merged, error: error.message };
-  }
+  // Always UPDATE — workspace row must exist (created during onboarding).
+  // Never INSERT from here: avoids RLS violations and prevents duplicate workspace rows.
+  const { error } = await db
+    .from('workspaces')
+    .update({ settings_json: merged, updated_at: new Date().toISOString() })
+    .eq('id', wsId);
+  if (error) return { ok: false, merged, error: error.message };
 
   return { ok: true, merged };
 }

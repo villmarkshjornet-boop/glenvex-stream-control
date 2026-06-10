@@ -20,6 +20,8 @@ export default function Topbar() {
     return () => clearInterval(id);
   }, []);
 
+  const [isAdmin, setIsAdmin] = useState(false);
+
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -28,6 +30,13 @@ export default function Topbar() {
         setBrandName(user.user_metadata?.brand_name ?? user.user_metadata?.workspace_id ?? '');
       }
     });
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/admin/check')
+      .then(r => r.ok ? r.json() : { isAdmin: false })
+      .then(d => setIsAdmin(!!d.isAdmin))
+      .catch(() => {});
   }, []);
 
   async function loggUt() {
@@ -50,6 +59,15 @@ export default function Topbar() {
 
       <div className="flex items-center gap-5">
         <span className="text-xs text-g-muted font-mono hidden sm:block">{time}</span>
+
+        {isAdmin && (
+          <button
+            onClick={() => router.push('/admin')}
+            className="px-2.5 py-1 border border-g-green/30 rounded text-[10px] font-bold text-g-green hover:bg-g-green/10 transition-colors tracking-wider uppercase"
+          >
+            Admin
+          </button>
+        )}
 
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-g-green animate-pulse-green"

@@ -55,13 +55,13 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
 
   const wsId = getWorkspaceId();
 
+  // Read existing settings_json to merge kanalPreferanser in
   const { data: existing, error: readErr } = await db
     .from('workspaces')
-    .select('id, settings_json')
+    .select('settings_json')
     .eq('id', wsId)
     .single();
 
-  // PGRST116 = no row — treat as "needs insert". Any other error is a real failure.
   if (readErr && readErr.code !== 'PGRST116') {
     throw new Error(`Lesefeil: ${readErr.message}`);
   }
@@ -69,26 +69,14 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
   const current = (existing?.settings_json as Record<string, any>) ?? {};
   const nySettings = { ...current, kanalPreferanser: prefs };
 
-  if (!existing) {
-    const { error: upsertErr } = await db.from('workspaces').upsert({
-      id: wsId,
-      owner_user_id: 'glenvex',
-      streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
-      twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-      discord_guild_id: process.env.DISCORD_GUILD_ID,
-      bot_personality: 'dark_gaming',
-      plan: 'creator',
-      settings_json: nySettings,
-    }, { onConflict: 'id' });
-    if (upsertErr) throw new Error(`Upsert feilet: ${upsertErr.message}`);
-  } else {
-    const { error: updateErr } = await db
-      .from('workspaces')
-      .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
-      .eq('id', wsId);
-    if (updateErr) throw new Error(`Update feilet: ${updateErr.message}`);
-  }
+  // Always UPDATE — workspace row must exist (created during onboarding).
+  // Never INSERT from here: avoids RLS violations and prevents duplicate workspace rows.
+  const { error: updateErr } = await db
+    .from('workspaces')
+    .update({ settings_json: nySettings, updated_at: new Date().toISOString() })
+    .eq('id', wsId);
+
+  if (updateErr) throw new Error(`Lagring feilet: ${updateErr.message}`);
 }
 
 export async function GET() {
