@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { headers as nextHeaders, cookies } from 'next/headers';
 import { getWorkspaceId } from '@/lib/workspace';
 import fs from 'fs';
 import path from 'path';
@@ -8,26 +9,66 @@ export const dynamic = 'force-dynamic';
 const DISCORD_API = 'https://discord.com/api/v10';
 const FILE = path.join(process.cwd(), 'data', 'channel-settings.json');
 
-// ── Direct Supabase REST helpers (bypasses JS-client auth state / RLS issues) ──
+// ── Supabase REST — uses user JWT (anon key + user token) so RLS allows own rows ──
+// Service role key is tried first; falls back to user JWT if service role is misconfigured.
 
-function sbHeaders() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-function sbUrl(): string {
+function sbBase(): string {
   return (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
 }
 
+function serviceRoleHeaders(): Record<string, string> | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  if (!key) return null;
+  return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+}
+
+function extractAccessTokenFromCookies(): string {
+  try {
+    const jar = cookies();
+    const all = jar.getAll();
+    const single = all.find(c => /^sb-.+-auth-token$/.test(c.name));
+    if (single?.value) {
+      const sess = JSON.parse(decodeURIComponent(single.value));
+      if (sess.access_token) return sess.access_token as string;
+    }
+    const chunk0 = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
+    if (chunk0) {
+      const base = chunk0.name.replace('.0', '');
+      const chunks: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const v = jar.get(`${base}.${i}`)?.value;
+        if (!v) break;
+        chunks.push(v);
+      }
+      const sess = JSON.parse(decodeURIComponent(chunks.join('')));
+      if (sess.access_token) return sess.access_token as string;
+    }
+  } catch {}
+  return '';
+}
+
+function userJwtHeaders(token: string): Record<string, string> {
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  return { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+// Returns best available headers: user JWT > service role > null
+// User JWT is preferred — workspace rows are owned by the user, RLS allows auth.uid() = owner_user_id.
+// Service role fallback only if no user session (e.g. server-side calls).
+function bestHeaders(): Record<string, string> | null {
+  const token = extractAccessTokenFromCookies();
+  if (token) return userJwtHeaders(token);
+  const svc = serviceRoleHeaders();
+  if (svc) return svc;
+  return null;
+}
+
 async function sbGet(table: string, filter: string): Promise<any[]> {
-  const base = sbUrl();
-  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return [];
+  const base = sbBase();
+  const hdrs = bestHeaders();
+  if (!base || !hdrs) return [];
   const res = await fetch(`${base}/rest/v1/${table}?${filter}&select=*`, {
-    headers: { ...sbHeaders(), Accept: 'application/json' },
+    headers: { ...hdrs, Accept: 'application/json' },
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) return [];
@@ -35,11 +76,12 @@ async function sbGet(table: string, filter: string): Promise<any[]> {
 }
 
 async function sbPatch(table: string, filter: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const base = sbUrl();
-  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Supabase ikke konfigurert' };
+  const base = sbBase();
+  const hdrs = bestHeaders();
+  if (!base || !hdrs) return { ok: false, error: 'Supabase ikke konfigurert' };
   const res = await fetch(`${base}/rest/v1/${table}?${filter}`, {
     method: 'PATCH',
-    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    headers: { ...hdrs, Prefer: 'return=minimal' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(8000),
   });
@@ -51,11 +93,12 @@ async function sbPatch(table: string, filter: string, body: Record<string, unkno
 }
 
 async function sbInsert(table: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const base = sbUrl();
-  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Supabase ikke konfigurert' };
+  const base = sbBase();
+  const hdrs = bestHeaders();
+  if (!base || !hdrs) return { ok: false, error: 'Supabase ikke konfigurert' };
   const res = await fetch(`${base}/rest/v1/${table}`, {
     method: 'POST',
-    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    headers: { ...hdrs, Prefer: 'return=minimal' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(8000),
   });
@@ -99,9 +142,6 @@ async function loadPrefs(): Promise<Partial<KanalPreferanser>> {
 async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
   const wsId = getWorkspaceId();
   if (!wsId) throw new Error('Workspace ID mangler');
-
-  const base = sbUrl();
-  if (!base || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Supabase ikke konfigurert');
 
   // Read existing row (direct REST — bypasses JS-client auth / RLS issues)
   const rows = await sbGet('workspaces', `id=eq.${encodeURIComponent(wsId)}`);
