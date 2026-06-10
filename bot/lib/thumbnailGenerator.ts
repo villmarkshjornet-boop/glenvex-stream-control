@@ -660,7 +660,7 @@ export async function startThumbnailWorker(): Promise<void> {
     await db.from('content_highlights').update({ thumbnail_started_at: null }).eq('thumbnail_status', 'PENDING');
   } catch {}
 
-  const POLL_MS = 60_000; // 1 minutt
+  const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
     versjon: 'V2 (Sharp + Vision – ingen DALL-E)',

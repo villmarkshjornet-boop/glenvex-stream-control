@@ -58,27 +58,42 @@ export async function POST(req: NextRequest) {
   // V2b: reset stale-timer – ignorer feil (kolonne krever thumbnail-v2b-migration.sql)
   await db.from('content_highlights').update({ thumbnail_started_at: null }).eq('id', highlightId);
 
-  // Signal Railway om å starte umiddelbart (fast-path).
-  // Hvis HTTP feiler: status forblir PENDING og Railway-polleren plukker opp innen 90s.
   const botUrl = process.env.BOT_API_URL;
   if (!botUrl) {
-    // Ingen Railway – ingen som kan plukke opp PENDING-jobben
-    try {
-      await db.from('content_highlights').update({
-        thumbnail_status: 'FAILED',
-        thumbnail_error:  'BOT_API_URL ikke satt – Railway ikke tilkoblet',
-      }).eq('id', highlightId);
-    } catch {}
-    return NextResponse.json({ error: 'BOT_API_URL mangler' }, { status: 500 });
+    await db.from('content_highlights').update({
+      thumbnail_status: 'FAILED',
+      thumbnail_error:  'BOT_API_URL ikke satt – Railway ikke tilkoblet',
+    }).eq('id', highlightId);
+    return NextResponse.json({ error: 'BOT_API_URL mangler – sjekk Railway-tilkobling' }, { status: 500 });
   }
 
-  fetch(`${botUrl}/content-factory/thumbnail-build-v2/${highlightId}`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(8_000),
-  }).catch(() => {
-    // HTTP-signal feilet – status er fortsatt PENDING, Railway-poller tar det opp
-    console.warn(`[ThumbnailV2] Railway HTTP-signal feilet for ${highlightId} – poller tar det opp`);
-  });
+  // Signal Railway – venter på ACK (Railway returnerer 202 umiddelbart og bygger async).
+  // Kortere timeout (12s) enn Phase 2 siden dette er bare et HTTP-signal, ikke selve bygget.
+  let railwayAck = false;
+  let railwayFeil: string | null = null;
+  try {
+    const railwayRes = await fetch(`${botUrl}/content-factory/thumbnail-build-v2/${highlightId}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(12_000),
+    });
+    railwayAck = railwayRes.ok || railwayRes.status === 202;
+    if (!railwayAck) railwayFeil = `Railway HTTP ${railwayRes.status}`;
+  } catch (err: any) {
+    railwayFeil = err.name === 'TimeoutError'
+      ? 'Railway svarte ikke innen 12s (cold start?) – thumbnail plukkes opp av poller'
+      : `Railway ikke nådd: ${err.message?.slice(0, 80)}`;
+    // Timeout er ikke fatal – poller plukker opp PENDING innen 20s
+    railwayAck = err.name === 'TimeoutError';
+  }
 
-  return NextResponse.json({ ok: true, status: 'PENDING' });
+  if (!railwayAck && railwayFeil && !railwayFeil.startsWith('Railway svarte ikke')) {
+    // Railway eksplisitt feilet (ikke bare treg) – marker som FAILED
+    await db.from('content_highlights').update({
+      thumbnail_status: 'FAILED',
+      thumbnail_error:  `Railway ikke nådd: ${railwayFeil}`,
+    }).eq('id', highlightId);
+    return NextResponse.json({ error: railwayFeil }, { status: 502 });
+  }
+
+  return NextResponse.json({ ok: true, status: 'PENDING', railwaySignaled: railwayAck, melding: railwayFeil ?? undefined });
 }
