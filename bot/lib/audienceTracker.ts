@@ -12,8 +12,11 @@
 import { logBotAgentEvent } from './agentLogger';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const DEFAULT_WORKSPACE_ID  = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const HEARTBEAT_INTERVAL_MS = 2 * 60_000;
+
+// Kan overstyres per-stream av startAudienceTracking for multi-tenant.
+let currentWorkspaceId = DEFAULT_WORKSPACE_ID;
 
 interface ViewerSession {
   username: string;
@@ -33,7 +36,8 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 // ── Start tracking ────────────────────────────────────────────────────────────
 
-export function startAudienceTracking(streamId: string, game: string, title: string): void {
+export function startAudienceTracking(streamId: string, game: string, title: string, workspaceId?: string): void {
+  currentWorkspaceId = workspaceId ?? DEFAULT_WORKSPACE_ID;
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -68,11 +72,12 @@ export function startAudienceTracking(streamId: string, game: string, title: str
   }, HEARTBEAT_INTERVAL_MS);
 
   logSystemEvent({
+    workspaceId: currentWorkspaceId,
     source: 'twitch_bot',
     event_type: 'AUDIENCE_TRACKING_STARTED',
     title: `Publikumssporing startet: ${(title || game).slice(0, 60)}`,
     severity: 'info',
-    metadata: { streamId, game, title },
+    metadata: { workspaceId: currentWorkspaceId, streamId, game, title },
   });
 }
 
@@ -135,11 +140,13 @@ async function writeHeartbeatAndFlush(): Promise<void> {
 
   // Heartbeat to system_events (lightweight, for dashboard live status)
   logSystemEvent({
+    workspaceId: currentWorkspaceId,
     source: 'twitch_bot',
     event_type: 'AUDIENCE_TRACKING_HEARTBEAT',
     title: `Audience tracking aktiv – ${sessions.length} brukere observert`,
     severity: 'info',
     metadata: {
+      workspaceId: currentWorkspaceId,
       streamId,
       totalObserved: sessions.length,
       subscribers: sessions.filter(s => s.subscriber).length,
@@ -167,7 +174,7 @@ async function writeSnapshotDirect(streamId: string, sessions: ViewerSession[]):
       Prefer: 'return=minimal',
     },
     body: JSON.stringify({
-      workspace_id: WORKSPACE_ID,
+      workspace_id: currentWorkspaceId,
       source: 'twitch',
       event_type: 'AUDIENCE_SNAPSHOT',
       importance_score: 70,
@@ -195,7 +202,7 @@ async function restoreFromSnapshot(streamId: string): Promise<void> {
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!sbUrl || !sbKey) return;
 
-  const wsEncoded = encodeURIComponent(WORKSPACE_ID);
+  const wsEncoded = encodeURIComponent(currentWorkspaceId);
   // Twitch stream IDs are numeric — safe to embed directly in the URL filter.
   // Server-side filter on both workspace_id AND metadata stream_id prevents
   // cross-stream or cross-workspace restore contamination.
@@ -266,6 +273,7 @@ export async function stopAudienceTracking(): Promise<void> {
   }
 
   const streamId = activeStreamId;
+  const stoppedWorkspaceId = currentWorkspaceId;
   const sessions = Array.from(activeSessions.values());
   const retentionCopy = retentionSnapshots.slice();
   activeSessions.clear();
@@ -320,21 +328,24 @@ export async function stopAudienceTracking(): Promise<void> {
     }
   } catch (err: any) {
     logSystemEvent({
+      workspaceId: stoppedWorkspaceId,
       source: 'twitch_bot',
       event_type: 'AUDIENCE_TRACKING_FAILED',
       title: `Feil ved avslutning av audience tracking: ${err?.message ?? 'ukjent'}`,
       severity: 'error',
-      metadata: { streamId, error: err?.message },
+      metadata: { workspaceId: stoppedWorkspaceId, streamId, error: err?.message },
     });
   }
 
   // Always written — even if enrichment threw above
   logSystemEvent({
+    workspaceId: stoppedWorkspaceId,
     source: 'twitch_bot',
     event_type: 'AUDIENCE_TRACKING_STOPPED',
     title: `Publikumssporing ferdig: ${enriched.length} brukere`,
     severity: 'info',
     metadata: {
+      workspaceId: stoppedWorkspaceId,
       streamId,
       totalObserved: enriched.length,
       newViewers: enriched.filter(v => !(v as any).returningViewer).length,
@@ -353,7 +364,7 @@ async function fetchKnownViewers(): Promise<Set<string>> {
     if (!sbUrl || !sbKey) return new Set();
 
     const res = await fetch(
-      `${sbUrl}/rest/v1/ai_agent_memory?workspace_id=eq.${encodeURIComponent(WORKSPACE_ID)}&memory_type=eq.viewer&select=key`,
+      `${sbUrl}/rest/v1/ai_agent_memory?workspace_id=eq.${encodeURIComponent(currentWorkspaceId)}&memory_type=eq.viewer&select=key`,
       {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         signal: AbortSignal.timeout(5000),

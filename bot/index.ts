@@ -1402,7 +1402,7 @@ client.once('clientReady', () => {
   startLearningAggregator();
   startRecoveryEngine();
   startSystemEventsFlusher();
-  startWorkspaceManager();
+  startWorkspaceManager(client);
   // Discord historikk bootstrap: kjøres én gang per kanal, 5 min etter oppstart
   setTimeout(() => startDiscordHistoryBootstrap(client).catch(() => {}), 5 * 60_000);
   // Workspace-diagnose: logg til Railway-konsollen slik at man ser om WORKSPACE_ID er feil
@@ -1432,6 +1432,8 @@ client.once('clientReady', () => {
     statusKanal.send(tekst).catch(() => {});
   }
 
+  // I multi_tenant-mode kjører WorkspaceManager live-sjekk for andre workspaces.
+  // Default-workspace (WORKSPACE_ID) fortsetter å bruke checkLive() direkte.
   setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
   // Heartbeat: skriv til system_events hvert 5. min (sikrer at Coverage aldri viser 0)
   setTimeout(() => { writeHeartbeats(); setInterval(writeHeartbeats, 5 * 60_000); }, 60_000);

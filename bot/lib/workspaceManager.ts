@@ -1,126 +1,218 @@
 /**
- * WorkspaceManager – laster alle aktive workspaces fra Supabase og
- * starter en WorkspaceBot-instans per workspace (unntatt default-workspace
- * som håndteres av bot/index.ts direkte).
+ * WorkspaceManager — multi-tenant bot runtime.
  *
- * Poller Supabase hvert 5. minutt for nye workspaces.
+ * Laster alle aktive alpha-workspaces fra Supabase og kjører
+ * live-sjekk for hvert workspace via den delte Discord-klienten.
+ *
+ * Aktive workspaces krever:
+ *   alpha_enabled = true
+ *   onboarding_completed_at NOT NULL
+ *   twitch_login + twitch_connected_at
+ *   discord_guild_id + discord_connected_at
+ *   settings_json.kanalPreferanser.live (eller live_channel_id)
+ *
+ * Default-workspacet (WORKSPACE_ID env) håndteres av bot/index.ts —
+ * WorkspaceManager ekskluderer det for å unngå dobbel live-sjekk.
+ *
+ * BOT_MODE=single_tenant deaktiverer WorkspaceManager (nødfallback).
  */
 
-import { WorkspaceBot, type WorkspaceBotConfig } from './workspaceBot';
+import type { Client } from 'discord.js';
+import { WorkspaceRuntime, type WorkspaceConfig } from './workspaceRuntime';
+import { logSystemEvent } from './systemEvents';
 
-const DEFAULT_WS = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const LIVE_CHECK_INTERVAL_MS = 2 * 60 * 1000;   // Live-sjekk hvert 2. min
+const SYNC_INTERVAL_MS       = 3 * 60 * 1000;   // Sync nye workspaces hvert 3. min
+const STAGGER_MS             = 8_000;            // 8s mellom hvert workspace (rate limit buffer)
+const DEFAULT_WS             = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
-const activeBots = new Map<string, WorkspaceBot>();
+const runtimes = new Map<string, WorkspaceRuntime>();
 
 interface WorkspaceRow {
   id: string;
   brand_name: string | null;
-  streamer_name: string | null;
-  twitch_channel_name: string | null;
+  twitch_login: string | null;
+  twitch_user_id: string | null;
   discord_guild_id: string | null;
   live_channel_id: string | null;
-  settings_json: {
-    credentials?: {
-      discordBotToken?: string;
-      discordGuildId?: string;
-      discordLiveChannelId?: string;
-      discordChatChannelId?: string;
-      discordInviteUrl?: string;
-      twitchClientId?: string;
-      twitchClientSecret?: string;
-    };
-  } | null;
+  settings_json: { kanalPreferanser?: Record<string, string> } | null;
+  alpha_enabled: boolean | null;
+  onboarding_completed_at: string | null;
+  twitch_connected_at: string | null;
+  discord_connected_at: string | null;
 }
 
-async function loadWorkspaces(): Promise<WorkspaceBotConfig[]> {
+// ── Hent aktive workspaces fra Supabase ───────────────────────────────────────
+
+export async function loadActiveWorkspaces(): Promise<WorkspaceConfig[]> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return [];
 
   try {
     const qs = new URLSearchParams({
-      select: 'id,brand_name,streamer_name,twitch_channel_name,discord_guild_id,live_channel_id,settings_json',
-      'owner_user_id': 'not.is.null',
-      'id': `neq.${DEFAULT_WS}`,
+      select: [
+        'id', 'brand_name', 'twitch_login', 'twitch_user_id',
+        'discord_guild_id', 'live_channel_id', 'settings_json',
+        'alpha_enabled', 'onboarding_completed_at',
+        'twitch_connected_at', 'discord_connected_at',
+      ].join(','),
+      alpha_enabled:              'eq.true',
+      'onboarding_completed_at':  'not.is.null',
+      id:                         `neq.${DEFAULT_WS}`,
     });
+
     const res = await fetch(`${url}/rest/v1/workspaces?${qs}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
-      console.error(`[WorkspaceManager] Supabase feil ${res.status}: ${await res.text().catch(() => '')}`);
+      console.error(`[WorkspaceManager] Supabase ${res.status}: ${await res.text().catch(() => '')}`);
       return [];
     }
+
     const rows = await res.json() as WorkspaceRow[];
+    const configs: WorkspaceConfig[] = [];
 
-    return rows.flatMap((row): WorkspaceBotConfig[] => {
-      const creds = row.settings_json?.credentials;
-      const twitchChannel = row.twitch_channel_name ?? row.streamer_name;
-      if (!creds?.discordBotToken || !twitchChannel) return [];
+    for (const row of rows) {
+      const skip = (reason: string) => {
+        logSystemEvent({
+          workspaceId: row.id,
+          source: 'workspace_manager',
+          event_type: 'WORKSPACE_SKIPPED',
+          title: `Workspace ${row.brand_name ?? row.id} hoppet over: ${reason}`,
+          severity: 'info',
+          metadata: { workspaceId: row.id, reason },
+        });
+      };
 
-      return [{
-        workspaceId:          row.id,
-        brandName:            row.brand_name ?? row.id,
-        twitchChannel,
-        discordBotToken:      creds.discordBotToken,
-        discordGuildId:       row.discord_guild_id ?? creds.discordGuildId ?? '',
-        discordLiveChannelId: creds.discordLiveChannelId ?? row.live_channel_id ?? undefined,
-        discordChatChannelId: creds.discordChatChannelId ?? undefined,
-        discordInviteUrl:     creds.discordInviteUrl ?? undefined,
-        twitchClientId:       creds.twitchClientId ?? undefined,
-        twitchClientSecret:   creds.twitchClientSecret ?? undefined,
-      }];
-    });
+      if (!row.twitch_login || !row.twitch_connected_at) { skip('missing_twitch_connection'); continue; }
+      if (!row.discord_guild_id || !row.discord_connected_at) { skip('missing_discord_connection'); continue; }
+
+      const kanalPrefs = row.settings_json?.kanalPreferanser ?? {};
+      const liveChannelId = kanalPrefs.live ?? row.live_channel_id ?? '';
+
+      if (!liveChannelId) { skip('missing_live_channel'); continue; }
+
+      configs.push({
+        workspaceId:     row.id,
+        brandName:       row.brand_name ?? row.id,
+        twitchLogin:     row.twitch_login,
+        twitchUserId:    row.twitch_user_id ?? '',
+        discordGuildId:  row.discord_guild_id,
+        liveChannelId,
+        chatChannelId:   kanalPrefs.chat ?? undefined,
+        kanalPreferanser: kanalPrefs,
+      });
+    }
+
+    return configs;
   } catch (err: any) {
-    console.error('[WorkspaceManager] loadWorkspaces feil:', err.message?.slice(0, 120));
+    console.error('[WorkspaceManager] loadActiveWorkspaces feil:', err.message?.slice(0, 120));
     return [];
   }
 }
 
-async function syncWorkspaces() {
-  const configs = await loadWorkspaces();
-  const activeIds = new Set(configs.map(c => c.workspaceId));
+// ── Sync: start nye, stopp deaktiverte, oppdater endrede ─────────────────────
 
-  // Stopp bots for workspaces som er fjernet
-  for (const [id, bot] of activeBots) {
-    if (!activeIds.has(id)) {
-      console.log(`[WorkspaceManager] Stopper bot: ${id}`);
-      bot.stop();
-      activeBots.delete(id);
+async function syncWorkspaces(discordClient: Client): Promise<void> {
+  const configs = await loadActiveWorkspaces();
+  const incoming = new Map(configs.map(c => [c.workspaceId, c]));
+
+  // Stopp runtimes for workspaces som forsvant / ble deaktivert
+  for (const [id, runtime] of runtimes) {
+    if (!incoming.has(id)) {
+      runtime.stop();
+      runtimes.delete(id);
+      console.log(`[WorkspaceManager] Runtime stoppet: ${id}`);
     }
   }
 
-  // Start bots for nye workspaces
-  for (const config of configs) {
-    if (activeBots.has(config.workspaceId)) continue;
-
-    console.log(`[WorkspaceManager] Starter bot: ${config.workspaceId} (${config.brandName})`);
-    const bot = new WorkspaceBot(config);
-    activeBots.set(config.workspaceId, bot);
-
-    bot.start().catch((err: any) => {
-      console.error(`[WorkspaceManager] ${config.workspaceId} oppstart feilet:`, err.message?.slice(0, 120));
-      activeBots.delete(config.workspaceId);
-    });
-  }
-
-  if (configs.length > 0) {
-    console.log(`[WorkspaceManager] ${configs.length} aktive workspace-bot(er) + default (${DEFAULT_WS})`);
+  // Start nye / oppdater eksisterende
+  for (const [id, config] of incoming) {
+    if (runtimes.has(id)) {
+      runtimes.get(id)!.updateConfig(config);
+    } else {
+      const runtime = new WorkspaceRuntime(config);
+      runtimes.set(id, runtime);
+      runtime.start();
+      console.log(`[WorkspaceManager] Runtime startet: ${id} (${config.brandName})`);
+    }
   }
 }
 
-export function startWorkspaceManager(): void {
-  console.log('  ✓ WorkspaceManager startet (poller nye workspaces hvert 5. min)');
+// ── Staggeret live-sjekk — kjøres per workspace med 8s mellomrom ────────────
 
-  // Vent 15s så default-boten rekker å initialisere tmi.js-klienten
+async function runStaggeredLiveChecks(discordClient: Client): Promise<void> {
+  const all = Array.from(runtimes.values());
+  for (let i = 0; i < all.length; i++) {
+    const runtime = all[i];
+    setTimeout(() => {
+      runtime.checkLive(discordClient).catch((err: any) => {
+        logSystemEvent({
+          workspaceId: runtime.workspaceId,
+          source: 'workspace_manager',
+          event_type: 'BOT_WORKSPACE_ERROR',
+          title: `${runtime.config.brandName}: live-sjekk krasjet — ${err.message?.slice(0, 80)}`,
+          severity: 'error',
+          metadata: { workspaceId: runtime.workspaceId, error: err.message?.slice(0, 200) },
+        });
+      });
+    }, i * STAGGER_MS);
+  }
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+
+export function startWorkspaceManager(discordClient: Client): void {
+  const mode = process.env.BOT_MODE ?? 'multi_tenant';
+
+  if (mode === 'single_tenant') {
+    console.log('  ℹ️  BOT_MODE=single_tenant — WorkspaceManager deaktivert (kun default workspace)');
+    return;
+  }
+
+  console.log('  ✓ WorkspaceManager startet (multi-tenant · eksluderer default:', DEFAULT_WS, ')');
+
+  // Vent 20s på at Discord-klienten er ferdig initialisert
   setTimeout(async () => {
-    await syncWorkspaces().catch(err =>
+    await syncWorkspaces(discordClient).catch(err =>
       console.error('[WorkspaceManager] Initial sync feil:', err.message)
     );
-    setInterval(() => syncWorkspaces().catch(() => {}), 5 * 60 * 1000);
-  }, 15_000);
+
+    // Initial live-sjekk
+    await runStaggeredLiveChecks(discordClient).catch(() => {});
+
+    logSystemEvent({
+      source: 'workspace_manager',
+      event_type: 'BOT_MULTI_TENANT_STARTED',
+      title: `Multi-tenant bot startet: ${runtimes.size} ekstra workspace(s)`,
+      severity: 'info',
+      metadata: {
+        workspaceCount:    runtimes.size,
+        enabledWorkspaces: Array.from(runtimes.keys()),
+        defaultWorkspace:  DEFAULT_WS,
+        timestamp:         new Date().toISOString(),
+      },
+    });
+
+    console.log(`[WorkspaceManager] ${runtimes.size} ekstra workspace(r) aktive`);
+
+    // Periodisk live-sjekk
+    setInterval(() => runStaggeredLiveChecks(discordClient).catch(() => {}), LIVE_CHECK_INTERVAL_MS);
+
+    // Periodisk sync — oppdager nye alpha-testere uten restart
+    setInterval(() => syncWorkspaces(discordClient).catch(() => {}), SYNC_INTERVAL_MS);
+
+  }, 20_000);
 }
 
-/** Returner antall aktive workspace-bots (utenom default). */
+// ── Status ────────────────────────────────────────────────────────────────────
+
+export function getActiveRuntimes(): WorkspaceRuntime[] {
+  return Array.from(runtimes.values());
+}
+
 export function getActiveWorkspaceCount(): number {
-  return activeBots.size;
+  return runtimes.size;
 }
