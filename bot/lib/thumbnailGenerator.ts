@@ -691,9 +691,11 @@ export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean
   if (!h.clip_url && !h.vertical_clip_url) return { ok: false, melding: 'Ingen video-URL' };
 
   generererNå.add(highlightId);
-  genererThumbnail(highlightId)
+  // Always use V2 (Sharp + real frames). genererThumbnail (DALL-E) is retired.
+  const { buildThumbnailV2 } = require('./thumbnailBuilderV2');
+  buildThumbnailV2(highlightId)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail-generering startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V2 startet for ${highlightId}` };
 }
