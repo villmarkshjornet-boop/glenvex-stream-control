@@ -44,21 +44,8 @@ async function loadFromDb(): Promise<StreamDay[] | null> {
   return data?.settings_json?.streamplan ?? null;
 }
 
-async function ensureWorkspace(db: any) {
-  const wsId = getWorkspaceId();
-  const { data } = await db.from('workspaces').select('id').eq('id', wsId).single();
-  if (!data) {
-    await db.from('workspaces').insert({
-      id: wsId,
-      owner_user_id: 'glenvex',
-      streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
-      twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-      discord_guild_id: process.env.DISCORD_GUILD_ID,
-      bot_personality: 'dark_gaming',
-      plan: 'creator',
-    });
-  }
+async function ensureWorkspace(_db: any) {
+  // Workspace opprettes kun i onboarding — ikke her.
 }
 
 async function saveToDb(plan: StreamDay[]): Promise<boolean> {

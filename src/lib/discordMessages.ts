@@ -64,18 +64,8 @@ async function lagreTilDb(meldinger: Record<string, any>): Promise<boolean> {
       .single();
 
     if (!existing) {
-      await db.from('workspaces').insert({
-        id: wsId,
-        owner_user_id: 'glenvex',
-        streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-        brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Creator OS',
-        twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-        discord_guild_id: process.env.DISCORD_GUILD_ID,
-        bot_personality: 'dark_gaming',
-        plan: 'creator',
-        settings_json: { discordMeldinger: meldinger },
-      });
-      return true;
+      console.warn('[discordMessages] Workspace ikke funnet — fullfør onboarding først.');
+      return false;
     }
 
     const current = existing.settings_json ?? {};

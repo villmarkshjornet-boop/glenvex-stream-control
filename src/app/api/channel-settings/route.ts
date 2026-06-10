@@ -92,22 +92,6 @@ async function sbPatch(table: string, filter: string, body: Record<string, unkno
   return { ok: true };
 }
 
-async function sbInsert(table: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const base = sbBase();
-  const hdrs = bestHeaders();
-  if (!base || !hdrs) return { ok: false, error: 'Supabase ikke konfigurert' };
-  const res = await fetch(`${base}/rest/v1/${table}`, {
-    method: 'POST',
-    headers: { ...hdrs, Prefer: 'return=minimal' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    return { ok: false, error: `HTTP ${res.status}: ${txt.slice(0, 120)}` };
-  }
-  return { ok: true };
-}
 
 export interface KanalPreferanser {
   live: string;
@@ -149,30 +133,16 @@ async function savePrefs(prefs: Partial<KanalPreferanser>): Promise<void> {
   const nySettings = { ...current, kanalPreferanser: prefs };
   const now = new Date().toISOString();
 
-  if (rows.length > 0) {
-    // Row exists — PATCH it
-    const { ok, error } = await sbPatch(
-      'workspaces',
-      `id=eq.${encodeURIComponent(wsId)}`,
-      { settings_json: nySettings, updated_at: now }
-    );
-    if (!ok) throw new Error(`Lagring feilet: ${error}`);
-  } else {
-    // Row missing — INSERT (service role key bypasses RLS)
-    const { ok, error } = await sbInsert('workspaces', {
-      id: wsId,
-      owner_user_id: wsId,
-      brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? wsId,
-      streamer_name: wsId,
-      twitch_channel_name: wsId,
-      bot_personality: 'dark_gaming',
-      plan: 'creator',
-      settings_json: nySettings,
-      created_at: now,
-      updated_at: now,
-    });
-    if (!ok) throw new Error(`Opprettelse feilet: ${error}`);
+  if (rows.length === 0) {
+    throw Object.assign(new Error('Workspace mangler. Fullfør onboarding først.'), { status: 404 });
   }
+
+  const { ok, error } = await sbPatch(
+    'workspaces',
+    `id=eq.${encodeURIComponent(wsId)}`,
+    { settings_json: nySettings, updated_at: now }
+  );
+  if (!ok) throw new Error(`Lagring feilet: ${error}`);
 }
 
 export async function GET() {
@@ -226,9 +196,10 @@ export async function POST(req: NextRequest) {
     await savePrefs(body);
   } catch (err: any) {
     console.error('[channel-settings POST] Save failed:', err?.message);
+    const status = (err as any)?.status === 404 ? 404 : 500;
     return NextResponse.json(
       { success: false, error: err?.message ?? 'Ukjent feil' },
-      { status: 500 }
+      { status }
     );
   }
 
