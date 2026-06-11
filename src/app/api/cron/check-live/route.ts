@@ -33,21 +33,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Heartbeat: cron kjørte (vises i System Coverage → Scheduler)
   await logEvent('scheduler', 'HEARTBEAT', 'Cron check-live kjørte', 'info', {
     trigger: 'vercel_cron',
     ts: new Date().toISOString(),
   });
 
   try {
-    const settings = getSettings();
-    const stream = await getStreamInfo(settings.twitchUsername);
+    const wsId = getWorkspaceId();
+    const db   = getDb();
 
-    addLog(
-      'info',
-      `System sjekk fullført – ${stream.isLive ? 'LIVE' : 'Offline'}`,
-      'OK'
-    );
+    // Load workspace Twitch identity from DB — never use env/hardcode fallback
+    let twitchLogin: string | null = null;
+    let brandName:   string        = 'Stream';
+
+    if (db) {
+      const { data: ws } = await db
+        .from('workspaces')
+        .select('twitch_login,brand_name')
+        .eq('id', wsId)
+        .single();
+      twitchLogin = ws?.twitch_login ?? null;
+      brandName   = ws?.brand_name   ?? 'Stream';
+    }
+
+    if (!twitchLogin) {
+      await logEvent('scheduler', 'WORKSPACE_MISSING_TWITCH', 'Cron check-live: workspace mangler twitch_login', 'warning', {
+        wsId, field: 'twitch_login',
+      });
+      return NextResponse.json({ status: 'skipped', reason: 'twitch_not_connected' });
+    }
+
+    const settings = getSettings();
+    const stream   = await getStreamInfo(twitchLogin);
+
+    addLog('info', `System sjekk fullført – ${stream.isLive ? 'LIVE' : 'Offline'}`, 'OK');
 
     if (stream.isLive) {
       if (stream.id && stream.id === settings.lastNotifiedStreamId) {
@@ -56,10 +75,7 @@ export async function POST(req: NextRequest) {
           game: stream.game,
           viewerCount: stream.viewerCount,
         });
-        return NextResponse.json({
-          status: 'already_notified',
-          streamId: stream.id,
-        });
+        return NextResponse.json({ status: 'already_notified', streamId: stream.id });
       }
 
       await logEvent('scheduler', 'LIVE_DETECTED', `Stream er live: ${stream.title?.slice(0, 60) ?? 'Ingen tittel'}`, 'info', {
@@ -75,26 +91,21 @@ export async function POST(req: NextRequest) {
           await logEvent('scheduler', 'DISCORD_LIVE_ANNOUNCEMENT_SKIPPED', 'Live-varsel hoppet over — ingen kanal konfigurert', 'warning', {
             reason: 'missing_channel_preference',
             streamId: stream.id,
-            workspaceId: getWorkspaceId(),
-            fix: 'Gå til Dashboard → Settings → Discord → Velg live-kanal',
+            workspaceId: wsId,
           });
         } else {
           const liveSettings = { ...settings, discordLiveChannelId: liveKanalId };
-          await postLiveEmbed(stream, liveSettings);
-          addLog('success', 'Discord live-varsel sendt til #live', 'OK');
+          await postLiveEmbed(stream, liveSettings, { brandName, twitchLogin });
+          addLog('success', 'Discord live-varsel sendt', 'OK');
           await logEvent('scheduler', 'DISCORD_LIVE_ANNOUNCEMENT_SENT', `Discord varslet: ${stream.title?.slice(0, 60) ?? ''}`, 'info', {
-            workspaceId: getWorkspaceId(),
+            workspaceId: wsId,
             channelId: liveKanalId,
-            source: 'supabase',
             streamId: stream.id,
           });
         }
       }
 
-      if (stream.id) {
-        saveSettings({ lastNotifiedStreamId: stream.id });
-      }
-
+      if (stream.id) saveSettings({ lastNotifiedStreamId: stream.id });
       return NextResponse.json({ status: 'notified', stream });
     } else {
       if (settings.lastNotifiedStreamId) {

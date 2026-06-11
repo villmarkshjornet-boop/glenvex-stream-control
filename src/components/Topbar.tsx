@@ -4,12 +4,20 @@ import { useEffect, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
+interface WorkspaceMe {
+  brandName:          string | null;
+  twitchDisplayName:  string | null;
+  twitchLogin:        string | null;
+  twitchProfileImage: string | null;
+}
+
 export default function Topbar() {
   const router = useRouter();
-  const [time, setTime] = useState('');
-  const [email, setEmail] = useState('');
-  const [brandName, setBrandName] = useState('');
+  const [time, setTime]       = useState('');
+  const [email, setEmail]     = useState('');
+  const [ws, setWs]           = useState<WorkspaceMe | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin]   = useState(false);
 
   useEffect(() => {
     const update = () => {
@@ -20,16 +28,19 @@ export default function Topbar() {
     return () => clearInterval(id);
   }, []);
 
-  const [isAdmin, setIsAdmin] = useState(false);
-
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setEmail(user.email ?? '');
-        setBrandName(user.user_metadata?.brand_name ?? user.user_metadata?.workspace_id ?? '');
-      }
+      if (user) setEmail(user.email ?? '');
     });
+  }, []);
+
+  // Load workspace identity from DB — never hardcode brand or username
+  useEffect(() => {
+    fetch('/api/workspace/me')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: WorkspaceMe | null) => { if (d) setWs(d); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -46,14 +57,16 @@ export default function Topbar() {
     router.refresh();
   }
 
-  const initial = (brandName || email).slice(0, 1).toUpperCase() || 'G';
-  const displayName = brandName || email.split('@')[0] || 'GLENVEX';
+  // Display: Twitch display name > brand name > email prefix > fallback
+  const displayName = ws?.twitchDisplayName ?? ws?.brandName ?? email.split('@')[0] ?? '–';
+  const initial     = displayName.slice(0, 1).toUpperCase() || '?';
+  const profileImg  = ws?.twitchProfileImage ?? null;
 
   return (
     <header className="h-12 border-b border-g-border bg-g-sidebar/80 backdrop-blur-sm flex items-center justify-between px-6 flex-shrink-0">
       <div className="flex items-center gap-2">
         <span className="text-xs text-g-muted tracking-widest uppercase font-mono">
-          {process.env.NEXT_PUBLIC_APP_NAME || 'GLENVEX Stream Control'}
+          {process.env.NEXT_PUBLIC_APP_NAME || 'Stream Control'}
         </span>
       </div>
 
@@ -83,12 +96,18 @@ export default function Topbar() {
             onClick={() => setMenuOpen(v => !v)}
             className="flex items-center gap-2 border border-g-border rounded px-3 py-1 hover:border-g-green/30 transition-colors"
           >
-            <div className="w-6 h-6 rounded-full bg-g-green/20 border border-g-green/30 flex items-center justify-center">
-              <span className="text-[10px] text-g-green font-bold">{initial}</span>
+            <div className="w-6 h-6 rounded-full bg-g-green/20 border border-g-green/30 flex items-center justify-center overflow-hidden">
+              {profileImg ? (
+                <img src={profileImg} alt={displayName} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-[10px] text-g-green font-bold">{initial}</span>
+              )}
             </div>
             <div className="hidden sm:block text-left">
               <p className="text-[11px] text-g-text font-semibold leading-none">{displayName}</p>
-              <p className="text-[9px] text-g-muted leading-none mt-0.5">Admin</p>
+              <p className="text-[9px] text-g-muted leading-none mt-0.5">
+                {ws?.twitchLogin ? `twitch.tv/${ws.twitchLogin}` : email.split('@')[0] || '–'}
+              </p>
             </div>
             <span className="text-[9px] text-g-muted">▾</span>
           </button>
@@ -116,7 +135,6 @@ export default function Topbar() {
         </div>
       </div>
 
-      {/* Close menu on outside click */}
       {menuOpen && (
         <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
       )}

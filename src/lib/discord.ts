@@ -11,56 +11,44 @@ function getBotHeaders() {
   };
 }
 
+interface WorkspaceEmbed {
+  brandName: string;
+  twitchLogin: string;
+}
+
 export async function postLiveEmbed(
   stream: StreamInfo,
-  settings: Settings
+  settings: Settings,
+  ws?: WorkspaceEmbed
 ): Promise<void> {
   const channelId = settings.discordLiveChannelId;
   if (!channelId) {
     throw new Error('discordLiveChannelId er ikke konfigurert i innstillinger');
   }
 
+  // Always use workspace identity — never fall back to GLENVEX hardcode
+  const brand      = ws?.brandName   || stream.userName || 'Stream';
+  const login      = ws?.twitchLogin || stream.userName || '';
+  const twitchUrl  = login ? `https://twitch.tv/${login}` : (stream.streamUrl || '');
+
   const startedTs = stream.startedAt
     ? Math.floor(new Date(stream.startedAt).getTime() / 1000)
     : null;
 
   const embed = {
-    title: '🔴 GLENVEX ER LIVE!',
-    description:
-      'Systemet er aktivert. Kaoset starter nå.\nBli med nå – dette skjer bare én gang.',
+    title:       `🔴 ${brand.toUpperCase()} ER LIVE!`,
+    description: 'Bli med nå – dette skjer bare én gang.',
     color: 0x00ff41,
     fields: [
-      {
-        name: '🎮 Spill',
-        value: stream.game || 'Ukjent',
-        inline: true,
-      },
-      {
-        name: '👁️ Seere',
-        value: stream.viewerCount?.toString() || '–',
-        inline: true,
-      },
-      {
-        name: '​',
-        value: '​',
-        inline: true,
-      },
-      {
-        name: '📺 Tittel',
-        value: stream.title || 'Ingen tittel',
-        inline: false,
-      },
-      ...(startedTs
-        ? [{ name: '⏱️ Startet', value: `<t:${startedTs}:R>`, inline: true }]
-        : []),
-      {
-        name: '🔗 Se her',
-        value: `[twitch.tv/glenvex](${stream.streamUrl})`,
-        inline: true,
-      },
+      { name: '🎮 Spill',   value: stream.game || 'Ukjent',                    inline: true },
+      { name: '👁️ Seere',  value: stream.viewerCount?.toString() || '–',       inline: true },
+      { name: '​',          value: '​',                                           inline: true },
+      { name: '📺 Tittel',  value: stream.title || 'Ingen tittel',              inline: false },
+      ...(startedTs ? [{ name: '⏱️ Startet', value: `<t:${startedTs}:R>`, inline: true }] : []),
+      ...(twitchUrl ? [{ name: '🔗 Se her', value: `[${twitchUrl}](${twitchUrl})`, inline: true }] : []),
     ],
-    image: stream.thumbnailUrl ? { url: stream.thumbnailUrl } : undefined,
-    footer: { text: 'GLENVEX Stream Control • Auto-varsel' },
+    image:  stream.thumbnailUrl ? { url: stream.thumbnailUrl } : undefined,
+    footer: { text: `${brand} Stream Control • Auto-varsel` },
     timestamp: new Date().toISOString(),
   };
 

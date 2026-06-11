@@ -55,7 +55,9 @@ async function getAccessToken(): Promise<string> {
 
 export async function getStreamInfo(username?: string): Promise<StreamInfo> {
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const twitchUsername = username || process.env.TWITCH_USERNAME || 'glenvex';
+  const twitchUsername = username || process.env.TWITCH_USERNAME;
+  // Never fall back to a hardcoded channel — return offline if no identity available
+  if (!twitchUsername) return { isLive: false, streamUrl: '', userName: '' };
   const twitchUrl =
     process.env.TWITCH_URL || `https://twitch.tv/${twitchUsername}`;
 
@@ -105,8 +107,8 @@ export async function getStreamInfo(username?: string): Promise<StreamInfo> {
 
 export async function getBroadcasterId(username?: string): Promise<string | null> {
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const login = username || process.env.TWITCH_USERNAME || 'glenvex';
-  if (!clientId) return null;
+  const login = username || process.env.TWITCH_USERNAME;
+  if (!clientId || !login) return null;
 
   const token = await getAccessToken();
   const res = await fetch(

@@ -3,46 +3,72 @@ import { getStreamInfo } from '@/lib/twitch';
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings } from '@/lib/settings';
 import { getLiveKanalId } from '@/lib/discordChannel';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 import { addLog } from '@/lib/logger';
 import type { StreamInfo } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
+  const wsId = getWorkspaceId();
+  const db   = getDb();
+
+  // Load workspace Twitch identity from DB — never use env/hardcode fallback
+  let twitchLogin: string | null = null;
+  let brandName:   string        = 'Stream';
+
+  if (db) {
+    const { data: ws } = await db
+      .from('workspaces')
+      .select('twitch_login,brand_name')
+      .eq('id', wsId)
+      .single();
+    twitchLogin = ws?.twitch_login ?? null;
+    brandName   = ws?.brand_name   ?? 'Stream';
+  }
+
+  if (!twitchLogin) {
+    return NextResponse.json({
+      error: 'Twitch ikke koblet for dette workspace. Fullfør onboarding → Koble Twitch.',
+    }, { status: 400 });
+  }
+
   try {
     let stream: StreamInfo;
 
     try {
-      const live = await getStreamInfo();
+      const live = await getStreamInfo(twitchLogin);
       stream = live.isLive
         ? live
         : {
-            isLive: true,
-            id: 'test-' + Date.now(),
-            title: '⚠️ TEST: Kaoset starter nå',
-            game: 'Just Chatting',
+            isLive:      true,
+            id:          'test-' + Date.now(),
+            title:       '⚠️ TEST: Kaoset starter nå',
+            game:        'Just Chatting',
             viewerCount: 0,
-            startedAt: new Date().toISOString(),
-            streamUrl: process.env.TWITCH_URL || 'https://twitch.tv/glenvex',
-            userName: process.env.TWITCH_USERNAME || 'glenvex',
+            startedAt:   new Date().toISOString(),
+            streamUrl:   `https://twitch.tv/${twitchLogin}`,
+            userName:    twitchLogin,
           };
     } catch {
       stream = {
-        isLive: true,
-        id: 'test-' + Date.now(),
-        title: '⚠️ TEST: Kaoset starter nå',
-        game: 'Just Chatting',
+        isLive:      true,
+        id:          'test-' + Date.now(),
+        title:       '⚠️ TEST: Kaoset starter nå',
+        game:        'Just Chatting',
         viewerCount: 0,
-        startedAt: new Date().toISOString(),
-        streamUrl: process.env.TWITCH_URL || 'https://twitch.tv/glenvex',
-        userName: process.env.TWITCH_USERNAME || 'glenvex',
+        startedAt:   new Date().toISOString(),
+        streamUrl:   `https://twitch.tv/${twitchLogin}`,
+        userName:    twitchLogin,
       };
     }
 
-    const settings = getSettings();
+    const settings    = getSettings();
     const liveKanalId = await getLiveKanalId().catch(() => null) || settings.discordLiveChannelId;
     if (!liveKanalId) throw new Error('Live-kanal ikke konfigurert — gå til Dashboard → Settings → Discord');
-    await postLiveEmbed(stream, { ...settings, discordLiveChannelId: liveKanalId });
+
+    await postLiveEmbed(stream, { ...settings, discordLiveChannelId: liveKanalId }, { brandName, twitchLogin });
 
     addLog('success', 'Test live-varsel sendt til Discord', 'OK');
     return NextResponse.json({ success: true, message: 'Test varsel sendt til Discord!' });
