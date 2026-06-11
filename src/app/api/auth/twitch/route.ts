@@ -14,7 +14,9 @@ export async function GET() {
   const workspaceId = h.get('x-workspace-id');
 
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const baseUrl  = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '');
+  const host     = h.get('host') ?? '';
+  const proto    = host.startsWith('localhost') ? 'http' : 'https';
+  const baseUrl  = (process.env.NEXT_PUBLIC_BASE_URL ?? `${proto}://${host}`).replace(/\/$/, '');
 
   if (!clientId) return NextResponse.json({ error: 'TWITCH_CLIENT_ID ikke satt' }, { status: 500 });
   if (!baseUrl)  return NextResponse.json({ error: 'NEXT_PUBLIC_BASE_URL ikke satt' }, { status: 500 });
