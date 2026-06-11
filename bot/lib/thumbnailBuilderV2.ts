@@ -890,22 +890,36 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     if (!bestYtBuf && !bestTtBuf) throw new Error('Compositing feilet for alle forsøk');
 
-    // ── Upload ──────────────────────────────────────────────────────────────
-    logSystemEvent({ source: 'thumbnail', event_type: 'SUPABASE_UPLOAD_STARTED', title: 'Laster opp thumbnails (A+B+C)', severity: 'info', metadata: { highlight_id: highlightId } });
+    // ── Upload – sequential with hard evidence per step ─────────────────────
+    const wsId   = process.env.WORKSPACE_ID ?? '(ikke satt)';
     const baseSti = `content-factory/thumbnails/${h.vod_id}/${highlightId}`;
+    log('UPLOAD_CTX', `bucket=${STORAGE_BUCKET} vod=${h.vod_id} highlight=${highlightId} ws=${wsId}`);
+    logSystemEvent({ source: 'thumbnail', event_type: 'SUPABASE_UPLOAD_STARTED', title: 'Laster opp thumbnails (A+B+C)', severity: 'info', metadata: { highlight_id: highlightId, bucket: STORAGE_BUCKET } });
 
-    const [ytUrl, ttUrl, ytUrlB, ytUrlC] = await Promise.all([
-      bestYtBuf ? uploadPng(sb, bestYtBuf, `${baseSti}_youtube.png`)    : Promise.resolve(null),
-      bestTtBuf ? uploadPng(sb, bestTtBuf, `${baseSti}_tiktok.png`)     : Promise.resolve(null),
-      ytBufB    ? uploadPng(sb, ytBufB,    `${baseSti}_variant_b.png`)  : Promise.resolve(null),
-      ytBufC    ? uploadPng(sb, ytBufC,    `${baseSti}_variant_c.png`)  : Promise.resolve(null),
-    ]);
+    async function uploadAndLog(buf: Buffer | null, sti: string, label: string): Promise<string | null> {
+      if (!buf) { log(`UPLOAD_${label}_SKIP`, 'buffer null'); return null; }
+      log(`UPLOAD_${label}_START`, `size=${buf.length} path=${sti}`);
+      const url = await uploadPng(sb, buf, sti);
+      log(`UPLOAD_${label}_RESULT`, url
+        ? `OK url=...${url.slice(-60)}`
+        : `FAILED – ingen URL (sjekk UPLOAD_ERROR over)`
+      );
+      return url;
+    }
 
-    if (!ytUrl && !ttUrl) throw new Error('Opplasting til Supabase Storage feilet');
+    const ytUrl  = await uploadAndLog(bestYtBuf, `${baseSti}_youtube.png`,   'A');
+    const ttUrl  = await uploadAndLog(bestTtBuf, `${baseSti}_tiktok.png`,    'TIKTOK');
+    const ytUrlB = await uploadAndLog(ytBufB,    `${baseSti}_variant_b.png`, 'B');
+    const ytUrlC = await uploadAndLog(ytBufC,    `${baseSti}_variant_c.png`, 'C');
+
+    log('UPLOAD_SUMMARY', `A=${ytUrl ? 'OK' : 'NULL'} TT=${ttUrl ? 'OK' : 'NULL'} B=${ytUrlB ? 'OK' : 'NULL'} C=${ytUrlC ? 'OK' : 'NULL'}`);
+
+    if (!ytUrl && !ttUrl) throw new Error('Opplasting til Supabase Storage feilet (begge null)');
     logSystemEvent({ source: 'thumbnail', event_type: 'SUPABASE_UPLOAD_DONE', title: 'Thumbnails lastet opp', severity: 'info', metadata: { highlight_id: highlightId, yt_url: ytUrl, tt_url: ttUrl, b_url: ytUrlB, c_url: ytUrlC } });
 
-    // ── Primary DB update (existing columns – always runs) ──────────────────
-    const { error: doneErr } = await sb.from('content_highlights').update({
+    // ── Primary DB update ───────────────────────────────────────────────────
+    log('DB_UPDATE_START', `highlight_id=${highlightId} status=DONE yt=${ytUrl ? 'OK' : 'NULL'}`);
+    const { data: doneRows, error: doneErr } = await sb.from('content_highlights').update({
       thumbnail_status:       'DONE',
       thumbnail_youtube_url:  ytUrl  ?? null,
       thumbnail_tiktok_url:   ttUrl  ?? null,
@@ -914,8 +928,17 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
       thumbnail_generated_at: new Date().toISOString(),
       thumbnail_error:        null,
       thumbnail_prompt:       null,
-    }).eq('id', highlightId);
-    if (doneErr) throw new Error('DB DONE-oppdatering feilet: ' + doneErr.message);
+    }).eq('id', highlightId).select('id,thumbnail_status,thumbnail_youtube_url');
+
+    if (doneErr) {
+      log('DB_UPDATE_FAILED', `err=${doneErr.message} code=${(doneErr as any).code}`);
+      throw new Error('DB DONE-oppdatering feilet: ' + doneErr.message);
+    }
+    log('DB_UPDATE_SUCCESS', `affected=${doneRows?.length ?? 0} status=${doneRows?.[0]?.thumbnail_status ?? 'ukjent'} yt=${doneRows?.[0]?.thumbnail_youtube_url ? 'SET' : 'NULL'}`);
+
+    if ((doneRows?.length ?? 0) === 0) {
+      log('DB_UPDATE_WARN', `0 rader oppdatert – highlight_id=${highlightId} finnes kanskje ikke i Supabase`);
+    }
 
     await sb.from('content_highlights').update({
       thumbnail_source_frame:  usedFrameT,
@@ -932,10 +955,24 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
       }).eq('id', highlightId);
       if (varErr) {
         log('VARIANT_COLS_SKIP', varErr.message?.slice(0, 120));
+      } else {
+        log('VARIANT_COLS_OK', `B=${ytUrlB ? 'SET' : 'NULL'} C=${ytUrlC ? 'SET' : 'NULL'} ctr=${ctrResult.ctrScore}`);
       }
     } catch (variantErr: any) {
       log('VARIANT_COLS_SKIP', variantErr.message?.slice(0, 120));
     }
+
+    // ── DB read-back: hard proof of what Supabase actually stored ───────────
+    try {
+      const { data: rbRow, error: rbErr } = await sb.from('content_highlights')
+        .select('id,thumbnail_status,thumbnail_youtube_url,thumbnail_tiktok_url,thumbnail_variant_b_url,thumbnail_variant_c_url,thumbnail_ctr_score')
+        .eq('id', highlightId)
+        .single();
+      log('DB_READBACK', rbErr
+        ? `READ_ERROR: ${rbErr.message?.slice(0, 80)}`
+        : `status=${rbRow?.thumbnail_status} yt=${rbRow?.thumbnail_youtube_url ? 'SET' : 'NULL'} tt=${rbRow?.thumbnail_tiktok_url ? 'SET' : 'NULL'} b=${rbRow?.thumbnail_variant_b_url ? 'SET' : 'NULL'} c=${rbRow?.thumbnail_variant_c_url ? 'SET' : 'NULL'} ctr=${rbRow?.thumbnail_ctr_score ?? 'NULL'}`
+      );
+    } catch {}
 
     log('THUMBNAIL_V3_DONE', `score=${bestScore} frame=${usedFrameT.toFixed(1)}s CTR=${ctrResult.ctrScore}`);
     logSystemEvent({
