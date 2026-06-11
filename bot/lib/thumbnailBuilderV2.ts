@@ -339,33 +339,30 @@ async function applyColorGrade(buf: Buffer, W: number, H: number, grade: ColorGr
 
   if (grade === 'cinematic') {
     // Film-like: warm hue shift, moderate contrast, refined look
-    let img = sharp(buf).resize(W, H, { fit: 'cover', position: 'entropy' });
-    try { img = img.clahe({ width: 3, height: 3, maxSlope: 2 }); } catch {}
-    return img
-      .sharpen({ sigma: 1.8, m1: 0.9, m2: 0.4 })
-      .modulate({ brightness: 1.04, saturation: 1.35, hue: 5 })
-      .linear(1.1, -12)
+    return sharp(buf)
+      .resize(W, H, { fit: 'cover', position: 'entropy' })
+      .sharpen({ sigma: 0.5, m1: 0.3, m2: 2.5 })
+      .modulate({ brightness: 1.03, saturation: 1.28, hue: 5 })
+      .linear(1.06, -8)
       .toBuffer();
   }
 
   if (grade === 'drama') {
-    // Maximum impact: crushed blacks, hyper-saturated, extreme contrast
-    let img = sharp(buf).resize(W, H, { fit: 'cover', position: 'entropy' });
-    try { img = img.clahe({ width: 4, height: 4, maxSlope: 4 }); } catch {}
-    return img
-      .sharpen({ sigma: 2.8, m1: 1.5, m2: 0.8 })
-      .modulate({ brightness: 0.96, saturation: 1.85 })
-      .linear(1.28, -38)
+    // Maximum impact: crushed blacks, boosted saturation, strong contrast
+    return sharp(buf)
+      .resize(W, H, { fit: 'cover', position: 'entropy' })
+      .sharpen({ sigma: 0.7, m1: 0.4, m2: 3.0 })
+      .modulate({ brightness: 0.98, saturation: 1.55 })
+      .linear(1.14, -20)
       .toBuffer();
   }
 
-  // Gaming grade (Variant A): vibrant, punchy, high saturation
-  let img = sharp(buf).resize(W, H, { fit: 'cover', position: 'entropy' });
-  try { img = img.clahe({ width: 3, height: 3, maxSlope: 3 }); } catch {}
-  return img
-    .sharpen({ sigma: 2.2, m1: 1.2, m2: 0.5 })
-    .modulate({ brightness: 1.05, saturation: 1.65 })
-    .linear(1.08, -10)
+  // Gaming grade (Variant A): vibrant, punchy
+  return sharp(buf)
+    .resize(W, H, { fit: 'cover', position: 'entropy' })
+    .sharpen({ sigma: 0.6, m1: 0.4, m2: 2.8 })
+    .modulate({ brightness: 1.04, saturation: 1.38 })
+    .linear(1.06, -6)
     .toBuffer();
 }
 
