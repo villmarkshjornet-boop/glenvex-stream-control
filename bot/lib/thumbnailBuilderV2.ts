@@ -813,7 +813,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     let visionUsed = false;
     let ctrResult: CtrResult = { selectedIdx: 0, ctrScore: 50, reason: '' };
 
-    logSystemEvent({ source: 'thumbnail', event_type: 'FRAME_SELECTION_STARTED', title: `GPT Vision CTR-score (${scored.length} kandidater)`, severity: 'info', metadata: { highlight_id: highlightId, candidates: scored.length } });
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_ANALYSIS_STARTED', title: `GPT Vision CTR-analyse (${scored.length} kandidater)`, severity: 'info', metadata: { highlight_id: highlightId, candidates: scored.length } });
 
     if (scored.length > 1) {
       ctrResult  = await selectBestFrameWithCtr(client, scored, h.category, game);
@@ -821,7 +821,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     }
 
     logSystemEvent({
-      source: 'thumbnail', event_type: 'FRAME_SELECTED',
+      source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_SELECTED',
       title: `Frame valgt: t=${scored[ctrResult.selectedIdx]?.t?.toFixed(1) ?? '?'}s CTR=${ctrResult.ctrScore}/100`,
       severity: 'info',
       metadata: { highlight_id: highlightId, vision_used: visionUsed, frame_t: scored[ctrResult.selectedIdx]?.t, ctr_score: ctrResult.ctrScore, ctr_reason: ctrResult.reason },
@@ -873,15 +873,17 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
     }
 
     // ── Variants B and C from the winning frame ─────────────────────────────
+    // Use resolved videoUrl (clip_url ?? vertical_clip_url) so B/C work even
+    // when a highlight only has a vertical clip.
     const [ytBufB, ytBufC] = await Promise.all([
-      buildOneVariant(h.clip_url, usedFrameT, copy, h.category, channel, 'b', YT_W, YT_H, fontBase64, 'YT_B'),
-      buildOneVariant(h.clip_url, usedFrameT, copy, h.category, channel, 'c', YT_W, YT_H, fontBase64, 'YT_C'),
+      buildOneVariant(videoUrl, usedFrameT, copy, h.category, channel, 'b', YT_W, YT_H, fontBase64, 'YT_B'),
+      buildOneVariant(videoUrl, usedFrameT, copy, h.category, channel, 'c', YT_W, YT_H, fontBase64, 'YT_C'),
     ]);
 
     log('IMAGE_BUILD_DONE', `score=${bestScore} A=${!!bestYtBuf} B=${!!ytBufB} C=${!!ytBufC}`);
     logSystemEvent({
-      source: 'thumbnail', event_type: 'THUMBNAIL_RENDER_DONE',
-      title: `Render ferdig – A/B/C generert (score: ${bestScore}/100)`,
+      source: 'thumbnail', event_type: 'THUMBNAIL_VARIANTS_GENERATED',
+      title: `Varianter A/B/C generert (score: ${bestScore}/100)`,
       severity: 'info',
       metadata: { highlight_id: highlightId, score: bestScore, has_a: !!bestYtBuf, has_b: !!ytBufB, has_c: !!ytBufC },
     });
@@ -937,7 +939,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     log('THUMBNAIL_V3_DONE', `score=${bestScore} frame=${usedFrameT.toFixed(1)}s CTR=${ctrResult.ctrScore}`);
     logSystemEvent({
-      source: 'thumbnail', event_type: 'THUMBNAIL_DONE',
+      source: 'thumbnail', event_type: 'THUMBNAIL_COMPLETED',
       title: `Thumbnail FERDIG – score ${bestScore}/100 CTR ${ctrResult.ctrScore}/100`,
       description: `"${(h.title ?? '').slice(0, 80)}"`,
       severity: 'info',
