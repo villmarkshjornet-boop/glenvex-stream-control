@@ -1092,7 +1092,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
         thumbnail_status: 'NEEDS_MANUAL_REVIEW',
         thumbnail_error: `Ingen interessant frame funnet (alle boring, max action ${maxAction}/100). Bruk manuell opplasting.`,
       }).eq('id', highlightId);
-      logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FAILED', title: 'Thumbnail: NEEDS_MANUAL_REVIEW', description: `Alle frames boring – ingen konflikt/reaksjon funnet`, severity: 'warn', metadata: { highlight_id: highlightId } });
+      logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FAILED', title: 'Thumbnail: NEEDS_MANUAL_REVIEW', description: `Alle frames boring – ingen konflikt/reaksjon funnet`, severity: 'warning', metadata: { highlight_id: highlightId } });
       return;
     }
 
@@ -1229,7 +1229,7 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
       if (varErr) {
         log('VARIANT_COLS_SKIP', varErr.message?.slice(0, 120));
       } else {
-        log('VARIANT_COLS_OK', `B=${ytUrlB ? 'SET' : 'NULL'} C=${ytUrlC ? 'SET' : 'NULL'} ctr=${ctrResult.ctrScore}`);
+        log('VARIANT_COLS_OK', `B=${ytUrlB ? 'SET' : 'NULL'} C=${ytUrlC ? 'SET' : 'NULL'} ctr=${judgeScore}`);
       }
     } catch (variantErr: any) {
       log('VARIANT_COLS_SKIP', variantErr.message?.slice(0, 120));
