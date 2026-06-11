@@ -170,7 +170,7 @@ function scoreFrame(frame: RawFrame): number {
   return Math.round((scoreBrightness(frame.buf) * 0.5) + (scorePosition(frame.pct) * 0.5));
 }
 
-// ── CTR + Subject Vision Analysis ────────────────────────────────────────────
+// ── Frame Analysis (Vision: per-frame scoring + boring rejection) ─────────────
 
 interface SubjectBox {
   x: number; // 0-1 fraction of image width
@@ -179,53 +179,75 @@ interface SubjectBox {
   h: number;
 }
 
+type SubjectType = 'face' | 'character' | 'action' | 'object' | 'none';
+
+interface FrameAnalysis {
+  idx: number;          // 0-based index into the frames array
+  actionScore: number;  // 0-100: conflict/reaction/drama quality
+  boring: boolean;      // true = reject (standing, overview, no story)
+  reason: string;
+  subjectBox: SubjectBox | null;
+  subjectType: SubjectType;
+}
+
+// Kept for internal quality-score compatibility
 interface CtrResult {
   selectedIdx: number;
   ctrScore: number;
   reason: string;
   subjectBox: SubjectBox | null;
-  subjectType: 'face' | 'character' | 'action' | 'object' | 'none';
+  subjectType: SubjectType;
 }
 
-async function selectBestFrameWithCtr(
+function parseSubjectBox(d: any): SubjectBox | null {
+  if (typeof d?.sx !== 'number' || typeof d?.sw !== 'number') return null;
+  return {
+    x: Math.max(0, Math.min(0.99, d.sx)),
+    y: Math.max(0, Math.min(0.99, d.sy ?? 0)),
+    w: Math.max(0.05, Math.min(1 - Math.max(0, d.sx), d.sw)),
+    h: Math.max(0.05, Math.min(1 - Math.max(0, d.sy ?? 0), d.sh ?? 0.5)),
+  };
+}
+
+async function analyzeAllFrames(
   client: OpenAI,
   frames: RawFrame[],
   category: string,
   game: string
-): Promise<CtrResult> {
-  const fallback: CtrResult = {
-    selectedIdx: Math.floor(frames.length / 2),
-    ctrScore: 50,
-    reason: '',
-    subjectBox: null,
-    subjectType: 'none',
-  };
-  if (frames.length <= 1) return {
-    selectedIdx: 0,
-    ctrScore: 60,
-    reason: 'Single frame',
-    subjectBox: null,
-    subjectType: 'none',
-  };
+): Promise<FrameAnalysis[]> {
+  const fallback = (): FrameAnalysis[] => frames.map((_, i) => ({
+    idx: i, actionScore: 50, boring: false, reason: '', subjectBox: null, subjectType: 'none' as SubjectType,
+  }));
+
+  if (frames.length === 0) return [];
+  if (frames.length === 1) return [{ idx: 0, actionScore: 60, boring: false, reason: '', subjectBox: null, subjectType: 'none' }];
+
+  const isGtaRp = category === 'RP_MOMENT'
+    || game.toLowerCase().includes('gta')
+    || game.toLowerCase().includes('roleplay');
+
+  const rpExtra = isGtaRp
+    ? '\nGTA RP PRIORITY (weight heavily): police chase, arrest, weapon drawn, fight, crash, panic, fear, visible character reaction.\nBORING in GTA RP: standing idle, peaceful driving, overview map, conversation without visible conflict/weapon.'
+    : '';
 
   const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 15_000);
+  const tid = setTimeout(() => ctrl.abort(), 22_000);
   try {
     const res = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      max_tokens: 150,
+      max_tokens: 500,
       temperature: 0,
       messages: [{
         role: 'user',
         content: [
           {
             type: 'text',
-            text: `These ${frames.length} frames are from a ${game || 'video game'} gaming clip (${category || 'general'}).
-Pick the BEST YouTube thumbnail frame. Prioritize: visible face/reaction, dramatic action, clear emotion, strong story.
-For the chosen frame, estimate the MAIN SUBJECT bounding box.
-Reply ONLY with valid JSON on one line:
-{"selected":N,"ctr_score":0-100,"reason":"brief","sx":0.0,"sy":0.0,"sw":0.5,"sh":0.8,"subject":"face|character|action|object|none"}
-N=1-${frames.length}. sx/sy/sw/sh are 0.0-1.0 fractions of image width/height (left-to-right, top-to-bottom).`,
+            text: `These ${frames.length} frames are from a ${game || 'video game'} clip (${category || 'general'}).
+Score EACH frame for thumbnail potential (0-100 action score) and detect the main subject.${rpExtra}
+BORING = true if: characters just standing, no visible conflict/reaction/action, static overview shot, nothing interesting.
+For each frame give subject bounding box (0.0-1.0 fractions of width/height).
+Reply ONLY with valid JSON, no markdown:
+{"r":[{"n":1,"a":0-100,"b":true,"why":"brief","sx":0.0,"sy":0.0,"sw":0.5,"sh":0.8,"s":"face|character|action|object|none"},...]}`
           },
           ...frames.map(f => ({
             type: 'image_url' as const,
@@ -236,33 +258,36 @@ N=1-${frames.length}. sx/sy/sw/sh are 0.0-1.0 fractions of image width/height (l
     }, { signal: ctrl.signal } as any);
     clearTimeout(tid);
 
-    const text = res.choices[0]?.message?.content ?? '';
-    const m = text.match(/\{[\s\S]*?\}/);
-    if (m) {
-      const d = JSON.parse(m[0]);
-      const idx = (d.selected ?? 1) - 1;
-      if (idx >= 0 && idx < frames.length) {
-        const ctrScore    = Math.min(100, Math.max(0, d.ctr_score ?? 50));
-        const reason      = (d.reason ?? '').slice(0, 200);
-        const subjectType = (['face', 'character', 'action', 'object', 'none'].includes(d.subject) ? d.subject : 'none') as CtrResult['subjectType'];
-        const subjectBox: SubjectBox | null =
-          (typeof d.sx === 'number' && typeof d.sy === 'number' && typeof d.sw === 'number' && typeof d.sh === 'number')
-            ? {
-                x: Math.max(0, Math.min(0.99, d.sx)),
-                y: Math.max(0, Math.min(0.99, d.sy)),
-                w: Math.max(0.05, Math.min(1 - Math.max(0, d.sx), d.sw)),
-                h: Math.max(0.05, Math.min(1 - Math.max(0, d.sy), d.sh)),
-              }
-            : null;
+    const raw = res.choices[0]?.message?.content ?? '';
+    // Strip markdown fences if present
+    const clean = raw.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No JSON in response');
+    const d = JSON.parse(m[0]);
+    if (!Array.isArray(d.r)) throw new Error('Missing r array');
 
-        log('CTR_VISION', `Frame ${idx + 1}/${frames.length} score=${ctrScore} subject=${subjectType} box=${subjectBox ? `${(subjectBox.w*100).toFixed(0)}%x${(subjectBox.h*100).toFixed(0)}%@${(subjectBox.x*100).toFixed(0)},${(subjectBox.y*100).toFixed(0)}` : 'none'} t=${frames[idx].t.toFixed(1)}s`);
-        return { selectedIdx: idx, ctrScore, reason, subjectBox, subjectType };
-      }
-    }
-  } catch { clearTimeout(tid); }
+    const results: FrameAnalysis[] = d.r.map((item: any, i: number) => {
+      const idx = Math.max(0, Math.min(frames.length - 1, (item.n ?? i + 1) - 1));
+      const subjectType: SubjectType = (['face','character','action','object','none'].includes(item.s) ? item.s : 'none');
+      return {
+        idx,
+        actionScore: Math.min(100, Math.max(0, item.a ?? 50)),
+        boring: !!item.b,
+        reason: String(item.why ?? '').slice(0, 100),
+        subjectBox: parseSubjectBox(item),
+        subjectType,
+      };
+    });
 
-  log('CTR_VISION_FALLBACK', 'Bruker midterste frame');
-  return fallback;
+    const boringCount = results.filter(r => r.boring).length;
+    log('FRAME_ANALYSIS', `${frames.length} frames analyzed, ${boringCount} boring, top=${results.sort((a,b)=>b.actionScore-a.actionScore)[0]?.actionScore}`);
+    return results;
+
+  } catch (e: any) {
+    clearTimeout(tid);
+    log('FRAME_ANALYSIS_FAILED', e.message?.slice(0, 100));
+    return fallback();
+  }
 }
 
 // ── Copy Generation ───────────────────────────────────────────────────────────
@@ -287,12 +312,14 @@ async function generateCopy(
           role: 'system',
           content: `Du lager PUNCHLINE-tekst til AAA gaming YouTube-thumbnails. Svar KUN med JSON: {"headline":"...","subheadline":"..."}
 
-REGLER:
-- headline: MAKS 3 ORD. Store bokstaver. Norsk. Aggressiv clickbait-energi.
-- Tenk: "NEI NEI NEI", "JEG ER DØD", "HAN FALLER!", "DETTE VAR SYKT", "HVA SKJER?!", "ALDRI IGJEN", "SE DET SELV", "HAN TRODDE DET", "IKKE NÅ DA"
-- ALDRI mer enn 4 ord. Jo kortere jo bedre.
-- subheadline: 3-5 ord norsk som bygger spenning. Tom string "" hvis ikke naturlig.
-- Tenk på det du ser i bildet – konflikt, sjokk, reaksjon, fare, kaos, seier.`,
+KRITISKE REGLER:
+- headline: MAKS 3 ORD. Ideelt 1-2 ord. Maks 12 tegn. Store bokstaver. Norsk.
+- Teksten skal uttrykke FØLELSEN, ikke forklare hva som skjer.
+- FEIL: "SPILLER GTA MED POLITIJAKT" – det er en forklaring.
+- RIKTIG: "HAN STOPPER IKKE" / "JEG DØR" / "NEI NEI NEI" – det er følelser.
+- Andre eksempler: "HAN KOMMER", "STOPP NÅ", "DET GIKK GALT", "IKKE IGJEN", "SE DEG OM"
+- ALDRI mer enn 4 ord. ALDRI beskrivende setninger.
+- subheadline: tom string "" alltid, med mindre det er 1-2 ord som gir ekstra punch.`,
         },
         {
           role: 'user',
@@ -839,6 +866,85 @@ async function buildOneVariant(
   }
 }
 
+// ── Thumbnail Judge (Vision on finished thumbnail images) ─────────────────────
+
+interface JudgeScore {
+  thumbnailIdx: number; // 0-based
+  clickScore: number;   // 0-100
+  storyClear: boolean;
+  verdict: string;
+}
+
+async function runThumbnailJudge(
+  client: OpenAI,
+  thumbnailBufs: Buffer[]
+): Promise<{ winnerIdx: number; scores: JudgeScore[] }> {
+  const fallback = { winnerIdx: 0, scores: thumbnailBufs.map((_, i) => ({ thumbnailIdx: i, clickScore: 50, storyClear: true, verdict: '' })) };
+  if (thumbnailBufs.length <= 1) return fallback;
+
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 22_000);
+  try {
+    const sharp = require('sharp');
+    // Downscale for Vision (saves tokens, judge still sees layout+text)
+    const previews = await Promise.all(
+      thumbnailBufs.map(buf =>
+        sharp(buf).resize(400, 225, { fit: 'fill' }).jpeg({ quality: 75 }).toBuffer()
+      )
+    );
+
+    const res = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 300,
+      temperature: 0,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `These are ${previews.length} YouTube gaming thumbnail drafts.
+For each thumbnail judge:
+1. Can someone understand the story/conflict/emotion in under 1 second without reading the title?
+2. Is the main subject clearly visible and dominant?
+3. Would a typical YouTube viewer click this thumbnail?
+Pick the WINNER (highest click potential + clearest story).
+Reply ONLY with valid JSON, no markdown:
+{"scores":[{"n":1,"click":0-100,"clear":true,"verdict":"brief reason"},...], "winner":N}
+N is 1-${previews.length}.`
+          },
+          ...previews.map(buf => ({
+            type: 'image_url' as const,
+            image_url: { url: `data:image/jpeg;base64,${buf.toString('base64')}`, detail: 'low' as const },
+          })),
+        ],
+      }],
+    }, { signal: ctrl.signal } as any);
+    clearTimeout(tid);
+
+    const raw = res.choices[0]?.message?.content ?? '';
+    const clean = raw.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No JSON');
+    const d = JSON.parse(m[0]);
+
+    const scores: JudgeScore[] = (d.scores ?? []).map((s: any, i: number) => ({
+      thumbnailIdx: (s.n ?? i + 1) - 1,
+      clickScore: Math.min(100, Math.max(0, s.click ?? 50)),
+      storyClear: !!s.clear,
+      verdict: String(s.verdict ?? '').slice(0, 100),
+    }));
+
+    const winnerIdx = Math.max(0, Math.min(thumbnailBufs.length - 1, (d.winner ?? 1) - 1));
+    log('THUMBNAIL_JUDGE', `Winner: ${winnerIdx + 1}/${thumbnailBufs.length} scores=[${scores.map(s => s.clickScore).join(',')}]`);
+    return { winnerIdx, scores };
+
+  } catch (e: any) {
+    clearTimeout(tid);
+    log('THUMBNAIL_JUDGE_FAILED', e.message?.slice(0, 100));
+    return fallback;
+  }
+}
+
 // ── Quality Score ─────────────────────────────────────────────────────────────
 
 function computeQualityScore(opts: {
@@ -850,20 +956,23 @@ function computeQualityScore(opts: {
   bestFramePct: number;
   fontAvailable: boolean;
   subjectPlaced: boolean;
-  subjectType: CtrResult['subjectType'];
+  subjectType: SubjectType;
   ctrScore: number;
+  boringRejected?: number;
 }): number {
   let score = 0;
-  score += Math.min(20, Math.round((opts.extractedFrames / FRAME_COUNT) * 20));
+  score += Math.min(18, Math.round((opts.extractedFrames / FRAME_COUNT) * 18));
   score += opts.visionUsed ? 15 : 5;
   const words = opts.headline.trim().split(/\s+/).length;
-  score += words >= 2 && words <= 3 ? 25 : words === 4 ? 18 : words <= 5 ? 10 : 5;
-  score += opts.hasYoutube && opts.hasTiktok ? 15 : opts.hasYoutube || opts.hasTiktok ? 8 : 0;
+  score += words <= 2 ? 25 : words === 3 ? 22 : words === 4 ? 15 : 5;
+  score += opts.hasYoutube && opts.hasTiktok ? 12 : opts.hasYoutube || opts.hasTiktok ? 7 : 0;
   const pct = opts.bestFramePct;
-  score += pct >= 15 && pct <= 85 ? 8 : 3;
-  score += opts.subjectPlaced ? 12 : 0;
+  score += pct >= 15 && pct <= 85 ? 7 : 3;
+  score += opts.subjectPlaced ? 13 : 0;
   score += opts.subjectType === 'face' ? 5 : opts.subjectType !== 'none' ? 3 : 0;
-  score += opts.ctrScore >= 70 ? 5 : opts.ctrScore >= 50 ? 2 : 0;
+  score += opts.ctrScore >= 80 ? 8 : opts.ctrScore >= 60 ? 5 : opts.ctrScore >= 40 ? 2 : 0;
+  // Bonus if boring frames were filtered (means winner is genuinely interesting)
+  score += (opts.boringRejected ?? 0) > 0 ? 5 : 0;
   return Math.min(100, Math.round(score));
 }
 
@@ -956,103 +1065,106 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
 
     if (rawFrames.length === 0) throw new Error('Ingen frames kunne ekstraheres');
 
-    // ── Score + rank ────────────────────────────────────────────────────────
+    // ── Step 1: Heuristic score → top 5 candidates ──────────────────────────
     const scored = rawFrames
       .map(f => ({ ...f, score: scoreFrame(f) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, TOP_CANDIDATES);
 
-    // ── CTR + Subject Vision selection ──────────────────────────────────────
-    let visionUsed = false;
-    let ctrResult: CtrResult = { selectedIdx: 0, ctrScore: 50, reason: '', subjectBox: null, subjectType: 'none' };
+    // ── Step 2: Vision frame analysis – score + boring rejection ────────────
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_ANALYSIS_STARTED', title: `Vision frame-analyse (${scored.length} kandidater)`, severity: 'info', metadata: { highlight_id: highlightId, candidates: scored.length } });
 
-    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_ANALYSIS_STARTED', title: `GPT Vision CTR+Subject analyse (${scored.length} kandidater)`, severity: 'info', metadata: { highlight_id: highlightId, candidates: scored.length } });
+    const frameAnalyses = await analyzeAllFrames(client, scored, h.category, game);
 
-    if (scored.length > 1) {
-      ctrResult  = await selectBestFrameWithCtr(client, scored, h.category, game);
-      visionUsed = true;
-    }
+    // Sort by action score, filter boring first
+    const nonBoring  = frameAnalyses.filter(a => !a.boring).sort((a, b) => b.actionScore - a.actionScore);
+    const allSorted  = frameAnalyses.slice().sort((a, b) => b.actionScore - a.actionScore);
+    const candidates = (nonBoring.length > 0 ? nonBoring : allSorted).slice(0, 3);
 
-    log('SUBJECT_DATA', `type=${ctrResult.subjectType} box=${ctrResult.subjectBox ? `${(ctrResult.subjectBox.w*100).toFixed(0)}%x${(ctrResult.subjectBox.h*100).toFixed(0)}%` : 'none'} ctr=${ctrResult.ctrScore}`);
+    const boringRejected = frameAnalyses.length - nonBoring.length;
+    log('BORING_REJECTION', `${boringRejected}/${frameAnalyses.length} frames rejected as boring`);
 
-    logSystemEvent({
-      source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_SELECTED',
-      title: `Frame valgt: t=${scored[ctrResult.selectedIdx]?.t?.toFixed(1) ?? '?'}s CTR=${ctrResult.ctrScore}/100 subject=${ctrResult.subjectType}`,
-      severity: 'info',
-      metadata: { highlight_id: highlightId, vision_used: visionUsed, frame_t: scored[ctrResult.selectedIdx]?.t, ctr_score: ctrResult.ctrScore, ctr_reason: ctrResult.reason, subject_type: ctrResult.subjectType },
-    });
-
-    const orderedCandidates = [
-      scored[ctrResult.selectedIdx],
-      ...scored.filter((_, i) => i !== ctrResult.selectedIdx),
-    ];
-
-    // ── NEEDS_MANUAL_REVIEW check ───────────────────────────────────────────
-    if (ctrResult.ctrScore < 25 && ctrResult.subjectType === 'none') {
-      log('NEEDS_MANUAL_REVIEW', `ctr=${ctrResult.ctrScore} no subject found across ${scored.length} candidates`);
+    // NEEDS_MANUAL_REVIEW: every frame boring AND max actionScore < 20
+    const maxAction = allSorted[0]?.actionScore ?? 0;
+    if (boringRejected === frameAnalyses.length && maxAction < 20) {
+      log('NEEDS_MANUAL_REVIEW', `all ${frameAnalyses.length} frames boring, max action=${maxAction}`);
       await sb.from('content_highlights').update({
         thumbnail_status: 'NEEDS_MANUAL_REVIEW',
-        thumbnail_error: `Ingen sterk thumbnail-frame funnet (CTR ${ctrResult.ctrScore}/100, ingen tydelig motiv). Bruk manuell opplasting.`,
+        thumbnail_error: `Ingen interessant frame funnet (alle boring, max action ${maxAction}/100). Bruk manuell opplasting.`,
       }).eq('id', highlightId);
-      logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FAILED', title: 'Thumbnail: NEEDS_MANUAL_REVIEW', description: `CTR ${ctrResult.ctrScore}/100 – ingen tydelig motiv`, severity: 'warn', metadata: { highlight_id: highlightId } });
+      logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_FAILED', title: 'Thumbnail: NEEDS_MANUAL_REVIEW', description: `Alle frames boring – ingen konflikt/reaksjon funnet`, severity: 'warn', metadata: { highlight_id: highlightId } });
       return;
     }
 
-    // ── Copy generation ─────────────────────────────────────────────────────
-    const copy = await generateCopy(client, h, vod, copies, orderedCandidates[0].buf.toString('base64'));
+    const bestCandidate = candidates[0];
+    logSystemEvent({
+      source: 'thumbnail', event_type: 'THUMBNAIL_FRAME_SELECTED',
+      title: `Beste frame: t=${scored[bestCandidate.idx]?.t?.toFixed(1) ?? '?'}s action=${bestCandidate.actionScore}/100 subject=${bestCandidate.subjectType}`,
+      severity: 'info',
+      metadata: { highlight_id: highlightId, frame_t: scored[bestCandidate.idx]?.t, action_score: bestCandidate.actionScore, subject_type: bestCandidate.subjectType, boring_rejected: boringRejected },
+    });
+
+    // ── Step 3: Copy generation from best candidate's frame ──────────────────
+    const copy = await generateCopy(client, h, vod, copies, scored[bestCandidate.idx].buf.toString('base64'));
     log('COPY_GENERATED', `"${copy.headline}" / "${copy.subheadline}"`);
 
-    // ── Variant A: retry loop for quality ───────────────────────────────────
-    log('IMAGE_BUILD_STARTED', 'Varianter A/B/C');
-    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_RENDER_STARTED', title: `Kompositter: "${copy.headline}"`, severity: 'info', metadata: { highlight_id: highlightId, headline: copy.headline, font: fontPath ? 'BebasNeue' : 'system' } });
+    logSystemEvent({ source: 'thumbnail', event_type: 'THUMBNAIL_RENDER_STARTED', title: `Bygg ${candidates.length} thumbnail-drafts: "${copy.headline}"`, severity: 'info', metadata: { highlight_id: highlightId, headline: copy.headline, font: fontPath ? 'BebasNeue' : 'system', drafts: candidates.length } });
 
-    let bestYtBuf: Buffer | null = null;
-    let bestTtBuf: Buffer | null = null;
-    let usedFrameT = orderedCandidates[0].t;
-    let bestScore  = 0;
-    const ttSource = h.vertical_clip_url ?? h.clip_url;
-    const attemptsToTry = Math.min(orderedCandidates.length, MAX_RETRIES + 1);
+    // ── Step 4: Build Layout A drafts for all candidates (parallel) ──────────
+    const draftResults = await Promise.all(
+      candidates.map(analysis => {
+        const frame = scored[analysis.idx];
+        return buildOneVariant(videoUrl, frame.t, copy, h.category, channel, 'a', YT_W, YT_H, fontPath, `DRAFT_${analysis.idx}`, analysis.subjectBox)
+          .then(buf => ({ buf, analysis, frameT: frame.t }));
+      })
+    );
+    const validDrafts = draftResults.filter(d => d.buf !== null) as { buf: Buffer; analysis: FrameAnalysis; frameT: number }[];
+    log('DRAFTS_BUILT', `${validDrafts.length}/${candidates.length} OK`);
 
-    for (let attempt = 0; attempt < attemptsToTry; attempt++) {
-      const candidate = orderedCandidates[attempt];
-      const [ytBuf, ttBuf] = await Promise.all([
-        buildOneVariant(h.clip_url, candidate.t, copy, h.category, channel, 'a', YT_W, YT_H, fontPath, 'YT_A', ctrResult.subjectBox),
-        buildOneVariant(ttSource,   candidate.t, copy, h.category, channel, 'a', TT_W, TT_H, fontPath, 'TT_A', ctrResult.subjectBox),
-      ]);
-      const score = computeQualityScore({
-        extractedFrames: rawFrames.length,
-        visionUsed,
-        headline: copy.headline,
-        hasYoutube: !!ytBuf,
-        hasTiktok:  !!ttBuf,
-        bestFramePct: candidate.pct,
-        fontAvailable: !!fontPath,
-        subjectPlaced: !!(ytBuf), // approximation
-        subjectType: ctrResult.subjectType,
-        ctrScore: ctrResult.ctrScore,
-      });
-      log(`ATTEMPT_${attempt + 1}_SCORE`, `${score} (t=${candidate.t.toFixed(1)}s)`);
-      if (score > bestScore || (!bestYtBuf && !bestTtBuf)) {
-        bestYtBuf  = ytBuf;
-        bestTtBuf  = ttBuf;
-        bestScore  = score;
-        usedFrameT = candidate.t;
-      }
-      if (score >= QUALITY_THRESHOLD) break;
+    if (validDrafts.length === 0) throw new Error('Alle draft-builds feilet');
+
+    // ── Step 5: Thumbnail Judge – Vision picks best finished thumbnail ────────
+    let winnerDraft = validDrafts[0];
+    let judgeScore  = 50;
+    if (validDrafts.length > 1) {
+      const { winnerIdx, scores } = await runThumbnailJudge(client, validDrafts.map(d => d.buf));
+      winnerDraft = validDrafts[winnerIdx] ?? validDrafts[0];
+      judgeScore  = scores[winnerIdx]?.clickScore ?? 50;
+      log('JUDGE_RESULT', `Winner draft ${winnerIdx + 1}/${validDrafts.length} click=${judgeScore} subject=${winnerDraft.analysis.subjectType}`);
     }
 
-    // ── Variants B and C from the winning frame ─────────────────────────────
-    const [ytBufB, ytBufC] = await Promise.all([
-      buildOneVariant(videoUrl, usedFrameT, copy, h.category, channel, 'b', YT_W, YT_H, fontPath, 'YT_B', ctrResult.subjectBox),
-      buildOneVariant(videoUrl, usedFrameT, copy, h.category, channel, 'c', YT_W, YT_H, fontPath, 'YT_C', ctrResult.subjectBox),
+    const usedFrameT    = winnerDraft.frameT;
+    const winnerAnalysis = winnerDraft.analysis;
+    const bestYtBuf     = winnerDraft.buf;           // reuse winning draft as Variant A
+    const ttSource      = h.vertical_clip_url ?? h.clip_url;
+
+    // ── Step 6: Build TikTok + Variants B/C for winner ──────────────────────
+    const [bestTtBuf, ytBufB, ytBufC] = await Promise.all([
+      buildOneVariant(ttSource,  usedFrameT, copy, h.category, channel, 'a', TT_W, TT_H, fontPath, 'TT_A',  winnerAnalysis.subjectBox),
+      buildOneVariant(videoUrl,  usedFrameT, copy, h.category, channel, 'b', YT_W, YT_H, fontPath, 'YT_B',  winnerAnalysis.subjectBox),
+      buildOneVariant(videoUrl,  usedFrameT, copy, h.category, channel, 'c', YT_W, YT_H, fontPath, 'YT_C',  winnerAnalysis.subjectBox),
     ]);
 
-    log('IMAGE_BUILD_DONE', `score=${bestScore} A=${!!bestYtBuf} B=${!!ytBufB} C=${!!ytBufC}`);
+    const bestScore = computeQualityScore({
+      extractedFrames: rawFrames.length,
+      visionUsed: true,
+      headline: copy.headline,
+      hasYoutube: !!bestYtBuf,
+      hasTiktok:  !!bestTtBuf,
+      bestFramePct: scored[winnerAnalysis.idx]?.pct ?? 50,
+      fontAvailable: !!fontPath,
+      subjectPlaced: winnerAnalysis.subjectBox !== null,
+      subjectType: winnerAnalysis.subjectType,
+      ctrScore: judgeScore,
+      boringRejected,
+    });
+
+    log('IMAGE_BUILD_DONE', `score=${bestScore} judge=${judgeScore} A=${!!bestYtBuf} B=${!!ytBufB} C=${!!ytBufC}`);
     logSystemEvent({
       source: 'thumbnail', event_type: 'THUMBNAIL_VARIANTS_GENERATED',
-      title: `Varianter A/B/C generert (score: ${bestScore}/100)`,
+      title: `Varianter A/B/C generert (score: ${bestScore}/100, judge: ${judgeScore}/100)`,
       severity: 'info',
-      metadata: { highlight_id: highlightId, score: bestScore, has_a: !!bestYtBuf, has_b: !!ytBufB, has_c: !!ytBufC },
+      metadata: { highlight_id: highlightId, score: bestScore, judge_score: judgeScore, has_a: !!bestYtBuf, has_b: !!ytBufB, has_c: !!ytBufC },
     });
 
     if (!bestYtBuf && !bestTtBuf) throw new Error('Compositing feilet for alle forsøk');
@@ -1111,8 +1223,8 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
       const { error: varErr } = await sb.from('content_highlights').update({
         thumbnail_variant_b_url: ytUrlB ?? null,
         thumbnail_variant_c_url: ytUrlC ?? null,
-        thumbnail_ctr_score:     ctrResult.ctrScore,
-        thumbnail_ctr_reason:    ctrResult.reason || null,
+        thumbnail_ctr_score:     judgeScore,
+        thumbnail_ctr_reason:    winnerAnalysis.reason || null,
       }).eq('id', highlightId);
       if (varErr) {
         log('VARIANT_COLS_SKIP', varErr.message?.slice(0, 120));
@@ -1135,13 +1247,13 @@ export async function buildThumbnailV2(highlightId: string): Promise<void> {
       );
     } catch {}
 
-    log('THUMBNAIL_V4_DONE', `score=${bestScore} frame=${usedFrameT.toFixed(1)}s CTR=${ctrResult.ctrScore} subject=${ctrResult.subjectType}`);
+    log('THUMBNAIL_V4_DONE', `score=${bestScore} judge=${judgeScore} frame=${usedFrameT.toFixed(1)}s subject=${winnerAnalysis.subjectType} boring_rejected=${boringRejected}`);
     logSystemEvent({
       source: 'thumbnail', event_type: 'THUMBNAIL_COMPLETED',
-      title: `Thumbnail FERDIG – score ${bestScore}/100 CTR ${ctrResult.ctrScore}/100`,
+      title: `Thumbnail FERDIG – score ${bestScore}/100 judge ${judgeScore}/100`,
       description: `"${(h.title ?? '').slice(0, 80)}"`,
       severity: 'info',
-      metadata: { highlight_id: highlightId, score: bestScore, ctr_score: ctrResult.ctrScore, ctr_reason: ctrResult.reason, frame_t: usedFrameT, yt_url: ytUrl, tt_url: ttUrl, b_url: ytUrlB, c_url: ytUrlC, subject_type: ctrResult.subjectType },
+      metadata: { highlight_id: highlightId, score: bestScore, judge_score: judgeScore, frame_t: usedFrameT, yt_url: ytUrl, tt_url: ttUrl, b_url: ytUrlB, c_url: ytUrlC, subject_type: winnerAnalysis.subjectType, boring_rejected: boringRejected },
     });
 
   } catch (err: any) {
