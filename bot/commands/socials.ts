@@ -34,7 +34,7 @@ export function byggSocialsEmbed(s: Record<string, string | undefined>, twitchUr
 export const socialsCommand = {
   data: new SlashCommandBuilder()
     .setName('socials')
-    .setDescription('Viser alle sosiale medier for GLENVEX.'),
+    .setDescription('Viser alle sosiale medier for streameren.'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
@@ -43,13 +43,13 @@ export const socialsCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('🔗 GLENVEX – Finn meg overalt')
+      .setTitle('🔗 Finn oss overalt')
       .setDescription(
         links.length
           ? links.join('\n\n')
           : 'Ingen sosiale medier konfigurert ennå. Bruk dashboardet for å legge til lenker.'
       )
-      .setFooter({ text: 'GLENVEX Stream Control' })
+      .setFooter({ text: 'Stream Control' })
       .setTimestamp();
 
     return interaction.editReply({ embeds: [embed] });

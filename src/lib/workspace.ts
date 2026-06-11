@@ -38,10 +38,10 @@ export async function getOrCreateWorkspace(): Promise<Workspace> {
   const wsId = getWorkspaceId();
   const defaultWs: Workspace = {
     id: wsId,
-    owner_user_id: 'glenvex',
-    streamer_name: process.env.TWITCH_USERNAME ?? 'glenvex',
-    brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'GLENVEX Stream Control',
-    twitch_channel_name: process.env.TWITCH_USERNAME ?? 'glenvex',
+    owner_user_id: wsId,
+    streamer_name: process.env.TWITCH_USERNAME ?? 'streameren',
+    brand_name: process.env.NEXT_PUBLIC_APP_NAME ?? 'Stream Control',
+    twitch_channel_name: process.env.TWITCH_USERNAME ?? '',
     twitch_channel_id: undefined,
     discord_guild_id: process.env.DISCORD_GUILD_ID,
     live_channel_id: process.env.DISCORD_LIVE_CHANNEL_ID,

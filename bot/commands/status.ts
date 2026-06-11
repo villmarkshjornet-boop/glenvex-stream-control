@@ -23,7 +23,7 @@ export const statusCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('⊛ GLENVEX Systemstatus')
+      .setTitle('⊛ Systemstatus')
       .addFields(
         { name: 'Twitch API', value: twitchStatus, inline: true },
         { name: 'Discord Bot', value: discordStatus, inline: true },
@@ -33,7 +33,7 @@ export const statusCommand = {
           { name: '👁️ Seere', value: streamData.viewerCount?.toLocaleString() || '–', inline: true },
         ] : [])
       )
-      .setFooter({ text: 'GLENVEX Stream Control' })
+      .setFooter({ text: 'Stream Control' })
       .setTimestamp();
 
     return interaction.editReply({ embeds: [embed] });

@@ -26,7 +26,7 @@ export async function postLiveEmbed(
     throw new Error('discordLiveChannelId er ikke konfigurert i innstillinger');
   }
 
-  // Always use workspace identity — never fall back to GLENVEX hardcode
+  // Always use workspace identity — never fall back to hardcoded defaults
   const brand      = ws?.brandName   || stream.userName || 'Stream';
   const login      = ws?.twitchLogin || stream.userName || '';
   const twitchUrl  = login ? `https://twitch.tv/${login}` : (stream.streamUrl || '');

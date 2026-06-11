@@ -10,7 +10,7 @@ const VERKTOY = [
   { href: '/ai-producer', icon: '◆', label: 'AI Producer', desc: 'Automatiske handlinger under stream – titler, kampanjer, merch' },
   { href: '/stream-coach', icon: '◈', label: 'Stream Coach', desc: 'AI-analyse av dine streams – tips for engagement og vekst' },
   { href: '/statistikk', icon: '▩', label: 'Statistikk', desc: 'Seere, følgere, peak-tider og historisk ytelse' },
-  { href: '/rp-manager', icon: '◉', label: 'Future RP', desc: 'Karakterer, storylines og RP-planlegging for GLENVEX RP' },
+  { href: '/rp-manager', icon: '◉', label: 'Future RP', desc: 'Karakterer, storylines og RP-planlegging' },
 ];
 
 export default function TwitchHub() {

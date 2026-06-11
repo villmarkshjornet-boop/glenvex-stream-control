@@ -22,7 +22,7 @@ async function finnEllerOpprettRolle(guild: Guild, navn: string, farge: number) 
     rolle = await guild.roles.create({
       name: navn,
       color: farge,
-      reason: 'GLENVEX Community Intelligence – auto-opprettet',
+      reason: 'Community Intelligence – auto-opprettet',
     });
   }
   return rolle;

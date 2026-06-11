@@ -355,7 +355,7 @@ export default function PartnerHubPage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { felt: 'navn', label: 'Navn', ph: 'Komplett.no' },
-                { felt: 'rabattkode', label: 'Rabattkode', ph: 'GLENVEX10' },
+                { felt: 'rabattkode', label: 'Rabattkode', ph: 'PARTNER10' },
                 { felt: 'nettadresse', label: 'Nettadresse', ph: 'https://komplett.no' },
                 { felt: 'affiliateLink', label: 'Affiliate-link', ph: 'https://...' },
               ].map(({ felt, label, ph }) => (

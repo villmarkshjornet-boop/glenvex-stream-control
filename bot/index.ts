@@ -62,7 +62,8 @@ async function discordSend(kanal: TextChannel, melding: string | object, konteks
   });
 }
 
-const token = process.env.DISCORD_BOT_TOKEN;
+const token     = process.env.DISCORD_BOT_TOKEN;
+const BOT_BRAND = process.env.BRAND_NAME ?? process.env.TWITCH_USERNAME ?? 'streameren';
 if (!token) {
   console.error('DISCORD_BOT_TOKEN mangler i .env');
   process.exit(1);
@@ -330,7 +331,7 @@ async function checkLive() {
         tittel: `Live-varsel: ${stream.title}`,
         type: 'live-varsel',
         status: 'publisert',
-        tekst: `🔴 GLENVEX ER LIVE – ${stream.game}: ${stream.title}`,
+        tekst: `🔴 ${BOT_BRAND} ER LIVE – ${stream.game}: ${stream.title}`,
         kanalId: effectiveLiveKanalId,
         modul: 'Auto Live',
         opprettetAv: 'bot',
@@ -418,7 +419,7 @@ async function analyserStreamKontekst(tittel: string, spill: string) {
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `GLENVEX er nå live med tittel: "${tittel}" og spill: "${spill}".
+        content: `${BOT_BRAND} er nå live med tittel: "${tittel}" og spill: "${spill}".
 Lag en kort norsk melding (2 setninger) til Discord-chatten som:
 1. Nevner spillet/serveren naturlig
 2. Spør om de vil oppdatere Discord-strukturen for dette spillet (f.eks. legge til ${erFutureRP ? 'Future RP' : 'GTA RP'}-kanaler, fjerne utdaterte)
@@ -438,7 +439,7 @@ Vær direkte og engasjerende.`,
       .setColor(0x00ff41)
       .setTitle(`◆ Stream detektert – ${serverNavn}`)
       .setDescription(melding)
-      .setFooter({ text: 'GLENVEX Stream Control • Smart Live-deteksjon' });
+      .setFooter({ text: 'Stream Control • Smart Live-deteksjon' });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -480,7 +481,7 @@ async function handleStreamKnapp(interaction: ButtonInteraction) {
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `GLENVEX streamer ${server}. Foreslå 2-3 karakternavn og roller som passer for en norsk ${server}-server. Format: Navn – Rolle (1 linje per karakter). Norsk. Maks 50 ord.`,
+        content: `Streameren spiller ${server}. Foreslå 2-3 karakternavn og roller som passer for en norsk ${server}-server. Format: Navn – Rolle (1 linje per karakter). Norsk. Maks 50 ord.`,
       }],
       max_tokens: 100,
       temperature: 0.9,
@@ -491,7 +492,7 @@ async function handleStreamKnapp(interaction: ButtonInteraction) {
       .setColor(0x00ff41)
       .setTitle('◆ Karakterforslag')
       .setDescription(`Her er noen karakterforslag for **${server}**:\n\n${forslag}\n\nVil du opprette en kanal for en av disse? Bruk \`/kanaler opprett\``)
-      .setFooter({ text: 'GLENVEX Stream Control' });
+      .setFooter({ text: 'Stream Control' });
 
     await interaction.followUp({ embeds: [embed], ephemeral: false });
   }
@@ -516,7 +517,7 @@ async function handleStreamKnapp(interaction: ButtonInteraction) {
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `Discord-server for GLENVEX streamer nå ${server}. Nåværende kanaler: ${kanaler}.
+        content: `Discord-server for streameren som nå spiller ${server}. Nåværende kanaler: ${kanaler}.
 Foreslå på norsk:
 1. Hvilke kanaler bør fjernes (utdaterte/irrelevante for ${server})?
 2. Hvilke kanaler bør legges til for ${server}?
@@ -531,7 +532,7 @@ Maks 100 ord. Vær konkret.`,
       .setColor(0x00ff41)
       .setTitle(`◆ Discord-oppdatering for ${server}`)
       .setDescription(forslag + '\n\nBruk **Discord**-fanen i dashboardet for å utføre endringene.')
-      .setFooter({ text: 'GLENVEX Stream Control' });
+      .setFooter({ text: 'Stream Control' });
 
     await interaction.followUp({ embeds: [embed], ephemeral: false });
   }
@@ -573,7 +574,7 @@ async function autoPostStreamplan() {
             model: 'gpt-4o-mini',
             messages: [{
               role: 'user',
-              content: `Basert på disse tidligere stream-øktene for GLENVEX, foreslå en ukentlig streamplan for denne uken som JSON-array:
+              content: `Basert på disse tidligere stream-øktene, foreslå en ukentlig streamplan for denne uken som JSON-array:
 [{"dag": "Mandag", "tid": "20:00", "spill": "Future RP", "tittel": "", "aktiv": true}]
 
 Historikk: ${historikk.slice(0, 5).map(h => `${h.game} (${new Date(h.startedAt).toLocaleDateString('no-NO', { weekday: 'long' })} kl. ${new Date(h.startedAt).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
@@ -662,7 +663,7 @@ async function autoRyddKanaler() {
     const liste = kandidater.map(k => `#${k.navn} (${k.dager === 999 ? 'aldri brukt' : `${k.dager} dager inaktiv`})`).join(', ');
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: `Disse Discord-kanalene er inaktive i GLENVEX sitt community: ${liste}. Gi en kort norsk vurdering (maks 2 setninger) av hvilke som ikke trengs og bør fjernes. Vær konkret.` }],
+      messages: [{ role: 'user', content: `Disse Discord-kanalene er inaktive i ${BOT_BRAND} sitt community: ${liste}. Gi en kort norsk vurdering (maks 2 setninger) av hvilke som ikke trengs og bør fjernes. Vær konkret.` }],
       max_tokens: 150,
       temperature: 0.7,
     });
@@ -680,7 +681,7 @@ async function autoRyddKanaler() {
         inline: true,
       }))
     )
-    .setFooter({ text: 'Bruk /kanaler rydd for å slette • GLENVEX Stream Control' })
+    .setFooter({ text: 'Bruk /kanaler rydd for å slette • Stream Control' })
     .setTimestamp();
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -715,12 +716,12 @@ async function postPreLiveHype(tittel: string, spill: string) {
     const openai = new OpenAI({ apiKey });
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: `GLENVEX starter stream nå med ${spill}: "${tittel}". Lag en kort hype-melding på norsk (maks 2 setninger, energisk, community-fokusert). Ingen emojis i starten.` }],
+      messages: [{ role: 'user', content: `${BOT_BRAND} starter stream nå med ${spill}: "${tittel}". Lag en kort hype-melding på norsk (maks 2 setninger, energisk, community-fokusert). Ingen emojis i starten.` }],
       max_tokens: 80,
       temperature: 0.9,
     });
     const melding = res.choices[0]?.message?.content ?? '';
-    if (melding) await discordSend(kanal, `🔴 **GLENVEX ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
+    if (melding) await discordSend(kanal, `🔴 **${BOT_BRAND} ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
   } catch {}
 }
 
@@ -824,14 +825,14 @@ async function delSocialsSubtilt() {
   if (links.length === 0) return;
 
   const apiKey = process.env.OPENAI_API_KEY;
-  let intro = '🔗 Finn GLENVEX på alle plattformer:';
+  let intro = `🔗 Finn ${BOT_BRAND} på alle plattformer:`;
 
   if (apiKey) {
     try {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'Skriv én kort, naturlig norsk setning (maks 10 ord) som oppfordrer folk til å følge GLENVEX på sosiale medier. Ikke nevn "følg" direkte. Vær kreativ.' }],
+        messages: [{ role: 'user', content: `Skriv én kort, naturlig norsk setning (maks 10 ord) som oppfordrer folk til å følge ${BOT_BRAND} på sosiale medier. Ikke nevn "følg" direkte. Vær kreativ.` }],
         max_tokens: 40,
         temperature: 0.95,
       });
@@ -842,7 +843,7 @@ async function delSocialsSubtilt() {
   const embed = new EmbedBuilder()
     .setColor(0x00ff41)
     .setDescription(`${intro}\n\n${links.join('\n')}`)
-    .setFooter({ text: 'GLENVEX' });
+    .setFooter({ text: BOT_BRAND });
 
   await discordSend(kanal, { embeds: [embed] }, { trigger: 'socials_promo' });
   addToMemory({ type: 'socials', innhold: 'delt sosiale lenker' });
@@ -890,7 +891,7 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
         model: 'gpt-4o-mini',
         messages: [{
           role: 'user',
-          content: `Skriv en autentisk norsk Discord-promo (maks 2 setninger) for GLENVEXs partner: ${partner.navn} – ${partner.beskrivelse ?? ''}.${partner.rabattkode ? ` Kode: ${partner.rabattkode}.` : ''} Lenke: ${partner.finalUrl}.${contextHints ? ` Community-kontekst: ${contextHints}.` : ''} Naturlig tone, ikke salesy.`,
+          content: `Skriv en autentisk norsk Discord-promo (maks 2 setninger) for partner: ${partner.navn} – ${partner.beskrivelse ?? ''}.${partner.rabattkode ? ` Kode: ${partner.rabattkode}.` : ''} Lenke: ${partner.finalUrl}.${contextHints ? ` Community-kontekst: ${contextHints}.` : ''} Naturlig tone, ikke salesy.`,
         }],
         max_tokens: 120,
         temperature: 0.8,
@@ -936,7 +937,7 @@ async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
     const openai = new OpenAI({ apiKey });
     const res2 = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: `Skriv en kort og energisk norsk Discord-melding (maks 2 setninger) om at GLENVEX streamer ${neste.spill} ${neste.dag} kl. ${neste.tid}${neste.tittel ? ` med tittelen "${neste.tittel}"` : ''}. Ikke start med emoji.` }],
+      messages: [{ role: 'user', content: `Skriv en kort og energisk norsk Discord-melding (maks 2 setninger) om at ${BOT_BRAND} streamer ${neste.spill} ${neste.dag} kl. ${neste.tid}${neste.tittel ? ` med tittelen "${neste.tittel}"` : ''}. Ikke start med emoji.` }],
       max_tokens: 80,
       temperature: 0.9,
     });
@@ -1011,7 +1012,7 @@ async function sjekkUkentligStats() {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `Du er GLENVEX BOT. Skriv én kort, energisk norsk setning (maks 15 ord) som oppsummerer uken. Følgere: ${stats.followerCount}. Clips: ${stats.clipCount}.` }],
+        messages: [{ role: 'user', content: `Du er community-boten for ${BOT_BRAND}. Skriv én kort, energisk norsk setning (maks 15 ord) som oppsummerer uken. Følgere: ${stats.followerCount}. Clips: ${stats.clipCount}.` }],
         max_tokens: 60,
         temperature: 0.9,
       });
@@ -1031,7 +1032,7 @@ async function sjekkUkentligStats() {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('📊 Ukentlig statistikk – GLENVEX')
+      .setTitle(`📊 Ukentlig statistikk – ${BOT_BRAND}`)
       .setDescription(kommentar || 'Enda en uke i boken!')
       .addFields(
         { name: '👥 Følgere', value: stats.followerCount.toLocaleString(), inline: true },
@@ -1041,7 +1042,7 @@ async function sjekkUkentligStats() {
         { name: '🎁 Topp gift-givers', value: giftSubTekst, inline: false },
         { name: '🏆 Topp clips', value: topClipsTekst, inline: false },
       )
-      .setFooter({ text: `Uke ${uke} • GLENVEX Stream Control` })
+      .setFooter({ text: `Uke ${uke} • ${BOT_BRAND} Stream Control` })
       .setTimestamp();
 
     await discordSend(kanal, { embeds: [embed] }, { trigger: 'ukentlig_stats', uke });
@@ -1071,7 +1072,7 @@ async function postTopClip() {
       .setTitle(`🎬 ${nyClip.title}`)
       .setDescription(`👀 **${nyClip.viewCount}** visninger • ⏱️ ${Math.round(nyClip.duration)}s\n\n[Se clipsen her](${nyClip.url})`)
       .setImage(nyClip.thumbnailUrl)
-      .setFooter({ text: 'GLENVEX Stream Control • Auto Clip' })
+      .setFooter({ text: 'Stream Control • Auto Clip' })
       .setTimestamp();
 
     await discordSend(kanal, { content: '🔥 Har dere sett denne clipsen?', embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
@@ -1085,7 +1086,7 @@ async function postTopClip() {
 
 client.on('guildMemberAdd', async (member) => {
   logBotAgentEvent({ source: 'discord', event_type: 'member_join', username: member.user.username, importance_score: 50, metadata: { userId: member.user.id } });
-  upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: member.user.id, summary: `${member.displayName} ble med i GLENVEX Discord`, confidence_score: 0.6, metadata: { username: member.user.username } }).catch(() => {});
+  upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: member.user.id, summary: `${member.displayName} ble med i ${BOT_BRAND} Discord`, confidence_score: 0.6, metadata: { username: member.user.username } }).catch(() => {});
   upsertMember(member.user.id, member.user.username, member.displayName);
   if (member.guild) {
     const { tildeltSpesialRolle } = await import('./lib/roleManager');
@@ -1097,7 +1098,7 @@ client.on('guildMemberAdd', async (member) => {
 
   const apiKey = process.env.OPENAI_API_KEY;
   const twitchUrlVelkomst = await getTwitchUrl().catch(() => `https://twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`);
-  let velkomst = `Hei **${member.displayName}**, velkommen til GLENVEX sitt community! Sjekk ${twitchUrlVelkomst} og slå på varslinger.`;
+  let velkomst = `Hei **${member.displayName}**, velkommen til ${BOT_BRAND} sitt community! Sjekk ${twitchUrlVelkomst} og slå på varslinger.`;
 
   if (apiKey) {
     try {
@@ -1105,7 +1106,7 @@ client.on('guildMemberAdd', async (member) => {
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: `Du er GLENVEX BOT. Skriv en kort, varm og energisk velkomstmelding på norsk. Nevn ${twitchUrlVelkomst}. Maks 2 setninger.` },
+          { role: 'system', content: `Du er community-boten for ${BOT_BRAND}. Skriv en kort, varm og energisk velkomstmelding på norsk. Nevn ${twitchUrlVelkomst}. Maks 2 setninger.` },
           { role: 'user', content: `Nytt medlem: ${member.displayName}` },
         ],
         max_tokens: 100,
@@ -1130,7 +1131,7 @@ client.on('threadCreate', async (thread: ThreadChannel) => {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `Skriv en kort, engasjerende norsk hilsen (1 setning) for en ny Discord-tråd ved navn: "${thread.name}". Gaming-vibe, GLENVEX community.` }],
+        messages: [{ role: 'user', content: `Skriv en kort, engasjerende norsk hilsen (1 setning) for en ny Discord-tråd ved navn: "${thread.name}". Gaming-vibe, ${BOT_BRAND} community.` }],
         max_tokens: 60,
         temperature: 0.9,
       });
@@ -1269,13 +1270,13 @@ async function sjekkPreHype() {
     }
 
     const apiKey = process.env.OPENAI_API_KEY;
-    let melding = `🔥 **GLENVEX** streamer om ${diffTilStream} minutt${diffTilStream > 1 ? 'er' : ''}! ${planlagtStream.spill} starter kl. ${planlagtStream.tid}`;
+    let melding = `🔥 **${BOT_BRAND}** streamer om ${diffTilStream} minutt${diffTilStream > 1 ? 'er' : ''}! ${planlagtStream.spill} starter kl. ${planlagtStream.tid}`;
     if (apiKey) {
       try {
         const openai = new OpenAI({ apiKey });
         const res2 = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: `GLENVEX streamer ${planlagtStream.spill} om ${diffTilStream} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
+          messages: [{ role: 'user', content: `${BOT_BRAND} streamer ${planlagtStream.spill} om ${diffTilStream} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
           max_tokens: 80,
           temperature: 0.9,
         });
@@ -1446,10 +1447,10 @@ client.once('clientReady', () => {
   setTimeout(() => startDiscordHistoryBootstrap(client).catch(() => {}), 5 * 60_000);
   // Workspace-diagnose: logg til Railway-konsollen slik at man ser om WORKSPACE_ID er feil
   logWorkspaceIdDiagnose().catch(() => {});
-  logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: 'GLENVEX Bot startet', severity: 'info' });
+  logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});
-  console.log(`\n✓ GLENVEX Bot pålogget som: ${client.user?.tag}`);
+  console.log(`\n✓ ${BOT_BRAND} Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);
   console.log('\n  System aktivert. Kaoset starter nå.\n');
@@ -1592,7 +1593,7 @@ client.on('messageCreate', async (message) => {
       const embed = new EmbedBuilder()
         .setColor(0x00ff41)
         .setImage(svar.bildeUrl)
-        .setFooter({ text: 'GLENVEX Bot • AI-generert bilde' });
+        .setFooter({ text: `${BOT_BRAND} Bot • AI-generert bilde` });
 
       await message.reply({ content: svar.tekst ?? undefined, embeds: [embed] });
       logSystemEvent({

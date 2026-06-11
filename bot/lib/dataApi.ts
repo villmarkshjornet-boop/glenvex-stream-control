@@ -406,7 +406,7 @@ export function startDataApi(port = 4242) {
           const client = new OpenAI({ apiKey });
           const response = await client.images.generate({
             model: 'dall-e-3',
-            prompt: `GTA RP character portrait, cinematic dark style. ${prompt}. Norwegian RP server GLENVEX. Dark neon green and black, dramatic lighting, no text.`,
+            prompt: `GTA RP character portrait, cinematic dark style. ${prompt}. Norwegian RP server. Dark neon green and black, dramatic lighting, no text.`,
             n: 1, size: '1024x1024', quality: 'standard',
           });
           res.writeHead(200);
@@ -442,7 +442,7 @@ export function startDataApi(port = 4242) {
                   title: '📅 Streamplan oppdatert',
                   description: planTekst,
                   color: 0x00ff41,
-                  footer: { text: 'GLENVEX Creator OS' },
+                  footer: { text: 'Creator OS' },
                 }],
               }),
             }).catch(() => {});
@@ -667,7 +667,7 @@ export function startDataApi(port = 4242) {
       res.end(JSON.stringify(data ?? { error: 'Ingen data' }));
     } else {
       res.writeHead(200);
-      res.end(JSON.stringify({ status: 'GLENVEX Bot Data API', endpoints: [...Object.keys(endpointMap), '/generate-image', '/content-factory/process', '/content-factory/status/:vodId'] }));
+      res.end(JSON.stringify({ status: 'Stream Control Bot Data API', endpoints: [...Object.keys(endpointMap), '/generate-image', '/content-factory/process', '/content-factory/status/:vodId'] }));
     }
   });
 

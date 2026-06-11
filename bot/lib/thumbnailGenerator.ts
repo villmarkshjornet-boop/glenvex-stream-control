@@ -215,7 +215,7 @@ async function generateThumbnailCopy(
   vod: any,
   creatorContext: string
 ): Promise<ThumbnailCopy> {
-  const system = `Du er ekspert på gaming YouTube/TikTok thumbnails for norsk Twitch-streamer GLENVEX.
+  const system = `Du er ekspert på gaming YouTube/TikTok thumbnails for norsk Twitch-streamer.
 Lag thumbnail-tekst basert på klippet.
 
 Regler for headline:
@@ -301,7 +301,7 @@ function byggDallePrompt(
     : 'large bold white text, centered horizontally, safe zone respected – keep 10% margin from all edges';
 
   return [
-    `Ultra-high-quality ${format} for Norwegian Twitch streamer GLENVEX.`,
+    `Ultra-high-quality ${format} for Norwegian Twitch streamer.`,
     `Game: ${spill}.`,
     frameDescription ? `Scene: ${frameDescription}` : '',
     `Main text overlay: "${copy.headline}" as ${textPlacement}.`,

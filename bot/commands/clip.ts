@@ -3,7 +3,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from '
 export const clipCommand = {
   data: new SlashCommandBuilder()
     .setName('clip')
-    .setDescription('Forklarer hvordan du kan lage clips fra GLENVEX sin stream.'),
+    .setDescription('Forklarer hvordan du kan lage clips fra streamen.'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     const twitchUrl = process.env.TWITCH_URL || 'https://twitch.tv/glenvex';
@@ -35,11 +35,11 @@ export const clipCommand = {
         },
         {
           name: '💡 Tips',
-          value: 'Beste clips blir kanskje fremhevet på sosiale medier av GLENVEX!',
+          value: 'Beste clips blir kanskje fremhevet på sosiale medier!',
           inline: false,
         }
       )
-      .setFooter({ text: 'GLENVEX Stream Control' })
+      .setFooter({ text: 'Stream Control' })
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });

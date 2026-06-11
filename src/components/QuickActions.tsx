@@ -78,7 +78,7 @@ export default function QuickActions({ twitchUrl, onRefresh }: Props) {
       label: 'Se På Stream',
       icon: '▶',
       fn: async () => {
-        window.open(twitchUrl || 'https://twitch.tv/glenvex', '_blank');
+        window.open(twitchUrl || 'https://twitch.tv', '_blank');
         return { ok: true, message: 'Åpner Twitch...' };
       },
     },

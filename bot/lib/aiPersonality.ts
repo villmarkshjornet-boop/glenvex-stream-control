@@ -18,7 +18,11 @@ const cooldowns = new Map<string, number>();
 const MAX_HISTORY = 14;
 const COOLDOWN_MS = 8_000;
 
-const SYSTEM_PROMPT = `Du er GLENVEX BOT – skapt av Glenn Ove Karlsen (gkarlsen) som AI-kompis og community manager for det norske Twitch-communityet GLENVEX.
+const BOT_BRAND  = process.env.BRAND_NAME ?? process.env.TWITCH_USERNAME ?? 'streameren';
+const BOT_OWNER  = process.env.BOT_ADMIN_USERNAME ?? 'administrator';
+const TWITCH_LINK = process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'streameren'}`;
+
+const SYSTEM_PROMPT = `Du er community-boten for ${BOT_BRAND} – AI-kompis og community manager for et norsk Twitch-community.
 
 Personlighet:
 - Norsk, litt rå og direkte – som en gaming-kompis, ikke en kundeservice-robot
@@ -27,11 +31,11 @@ Personlighet:
 - Bred gaming-kunnskap – kjenner mange sjangre og spill, ikke låst til ett spill
 - Bruker det du vet om communityet aktivt i svarene
 
-Som "selger" for GLENVEX:
+Som "selger" for ${BOT_BRAND}:
 - Skap FOMO – folk som ikke følger går glipp av noe genuint bra
 - Vær konkret: "sist stream skjedde X og du var ikke der" slår "sjekk kanalen" 10-0
 - Oppfordre til klipp og deling naturlig – ikke som en robot, men som en som faktisk ble imponert
-- Minne om ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`} og varslinger når det passer naturlig
+- Minne om ${TWITCH_LINK} og varslinger når det passer naturlig
 - Bruk community-kunnskap til å gjøre promotering personlig og relevant
 
 Regler:
@@ -40,7 +44,7 @@ Regler:
 - Bruk emojis naturlig og sparsomt
 - Vær en faktisk kompis, ikke en bot
 - Si ikke at du er en AI med mindre noen spør direkte
-- Hvis noen spør hvem som lagde deg: Glenn Ove Karlsen (gkarlsen) bygde deg
+- Hvis noen spør hvem som lagde deg: ${BOT_OWNER} bygde deg
 
 KRITISK – Minner og fakta:
 - Bruk KUN det som faktisk er injisert i denne prompten om community-folk og hendelser
@@ -156,7 +160,7 @@ async function genererBilde(client: OpenAI, prompt: string): Promise<string | nu
   try {
     const response = await client.images.generate({
       model: 'dall-e-3',
-      prompt: `${prompt}. Dark cinematic style, neon green accents, gaming aesthetic. Norwegian gaming community GLENVEX.`,
+      prompt: `${prompt}. Dark cinematic style, neon green accents, gaming aesthetic. Norwegian gaming community.`,
       n: 1,
       size: '1024x1024',
       quality: 'standard',
@@ -206,7 +210,7 @@ export async function generateChatReply(
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'Lag en kort DALL-E bildeprompt på engelsk (maks 50 ord). Kun prompt, ingen forklaring.' },
-          { role: 'user', content: `Bruker ber om: ${message}. Kontekst: GLENVEX norsk gaming community.` },
+          { role: 'user', content: `Bruker ber om: ${message}. Kontekst: ${BOT_BRAND} norsk gaming community.` },
         ],
         max_tokens: 80,
         temperature: 0.7,
@@ -244,14 +248,14 @@ export async function generateChatReply(
 // ── Proaktive meldinger ───────────────────────────────────────────────────────
 
 const PROAKTIVE_MELDINGER = [
-  `👀 Er det noen her som ikke har fulgt ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`} ennå? Det er ulovlig og dere vet det 🔴`,
-  '🎬 Seriøst spørsmål – hva er den beste clipsen dere har sett fra GLENVEX? Del den her, beste clip vinner æren 👑',
-  '🔥 Hvilket spill vil dere se GLENVEX ta mer? Stem i chatten – vi hører faktisk på dere (noen ganger)',
+  `👀 Er det noen her som ikke har fulgt ${TWITCH_LINK} ennå? Det er ulovlig og dere vet det 🔴`,
+  `🎬 Seriøst spørsmål – hva er den beste clipsen dere har sett fra ${BOT_BRAND}? Del den her, beste clip vinner æren 👑`,
+  `🔥 Hvilket spill vil dere se ${BOT_BRAND} ta mer? Stem i chatten – vi hører faktisk på dere (noen ganger)`,
   '⚡ Utfordring: Send stream-linken til én venn i dag. Én ny seer fra deg = du er offisielt en MVP 💪',
   '🎮 Hva er det kuleste som har skjedd på stream så langt? Noen som har clipset det? Hvis ikke – GJØR DET neste gang 📸',
-  '💬 Hot take: Hva er GLENVEX sitt beste spill? Diskuter. Jeg har meninger og de er riktige 😤',
-  `🔔 PSA: Hvis du ikke har slått på Twitch-varslinger for GLENVEX, sover du gjennom de beste øyeblikkene. Fix it. ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`}`,
-  '🚀 Én deling av en clip kan gi GLENVEX hundrevis av nye seere. Del gjerne neste gang dere ser noe bra 📢',
+  `💬 Hot take: Hva er ${BOT_BRAND} sitt beste spill? Diskuter. Jeg har meninger og de er riktige 😤`,
+  `🔔 PSA: Hvis du ikke har slått på Twitch-varslinger for ${BOT_BRAND}, sover du gjennom de beste øyeblikkene. Fix it. ${TWITCH_LINK}`,
+  `🚀 Én deling av en clip kan gi ${BOT_BRAND} hundrevis av nye seere. Del gjerne neste gang dere ser noe bra 📢`,
   '🎯 Ukens spørsmål: Hva vil dere se mer av på stream? Fortell meg alt, jeg videresender (kanskje) 👂',
   '😤 Ingen clips fra siste stream? Hva holder dere på med? Neste gang det skjer noe episk – klikk clip-knappen.',
 ];

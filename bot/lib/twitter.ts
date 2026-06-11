@@ -22,9 +22,10 @@ export async function tweetLiveNå(stream: StreamInfo): Promise<void> {
 
   const spill = stream.game || 'Gaming';
   const tittel = stream.title || 'Live nå';
-  const url = stream.streamUrl || 'https://twitch.tv/glenvex';
+  const url = stream.streamUrl || process.env.TWITCH_URL || 'https://twitch.tv';
+  const brand = process.env.BRAND_NAME ?? process.env.TWITCH_USERNAME ?? 'NorwegianStreamer';
 
-  const tekst = `🔴 LIVE NÅ på Twitch!\n\n🎮 ${spill}\n📺 ${tittel}\n\n${url}\n\n#Twitch #${spill.replace(/\s/g, '')} #NorwegianStreamer #GLENVEX`;
+  const tekst = `🔴 LIVE NÅ på Twitch!\n\n🎮 ${spill}\n📺 ${tittel}\n\n${url}\n\n#Twitch #${spill.replace(/\s/g, '')} #NorwegianStreamer #${brand}`;
 
   try {
     await client.v2.tweet(tekst.slice(0, 280));

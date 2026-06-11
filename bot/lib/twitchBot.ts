@@ -12,7 +12,8 @@ import { logApiError } from './observability';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
-const KANAL = process.env.TWITCH_USERNAME?.toLowerCase() || 'glenvex';
+const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
+const BOT_BRAND  = process.env.BRAND_NAME ?? process.env.TWITCH_USERNAME ?? 'streameren';
 
 const cooldowns = new Map<string, number>();
 
@@ -38,7 +39,7 @@ export function setOnSubCallback(cb: (username: string) => Promise<void>): void 
 async function getDiscordMeldinger(): Promise<string[]> {
   const url = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
   return [
-    `Bli med i GLENVEX sitt Discord! Snakk med community, se klipp og få live-varsling: ${url} GlitchCat`,
+    `Bli med i ${BOT_BRAND} sitt Discord! Snakk med community, se klipp og få live-varsling: ${url} GlitchCat`,
     `Har du ikke jotnet Discord ennå? Kom innom: ${url} PogChamp`,
     `Discord-chatten er varm nå! Bli med: ${url} 👾`,
     `For drops, klipp og kaos utenom stream – Discord er stedet: ${url} Kappa`,
@@ -48,7 +49,7 @@ async function getDiscordMeldinger(): Promise<string[]> {
 
 async function getSystemPrompt(): Promise<string> {
   const discordUrl = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'discord.gg/glenvex';
-  return `Du er GLENVEX BOT i Twitch-chat.
+  return `Du er community-boten for ${BOT_BRAND} i Twitch-chat.
 Regler:
 - VELDIG korte svar – maks 1 setning, helst under 10 ord
 - Norsk med litt gaming-slang
@@ -134,7 +135,7 @@ async function aiSvar(kontekst: string, discordCtx?: string): Promise<string> {
   if (!apiKey) return '';
   try {
     const openai = new OpenAI({ apiKey });
-    let systemPrompt = await getSystemPrompt().catch(() => 'Du er GLENVEX BOT i Twitch-chat. Veldig korte norske svar.');
+    let systemPrompt = await getSystemPrompt().catch(() => `Du er community-boten for ${BOT_BRAND} i Twitch-chat. Veldig korte norske svar.`);
     if (discordCtx) {
       systemPrompt += `\n\nFersk Discord-aktivitet (bruk til å svare på Discord-spørsmål):\n${discordCtx}`;
       logBotAgentEvent({ source: 'twitch', event_type: 'cross_platform_context_used', metadata: { type: 'TWITCH_BOT_USED_DISCORD_CONTEXT' } });
@@ -236,7 +237,7 @@ async function sjekkNyeFollowers() {
       source: 'twitch_bot',
       event_type: 'FOLLOW_RECEIVED',
       title: navnListe.length > 0
-        ? `${antallNye === 1 ? navnListe[0] : `${navnListe[0]} og ${antallNye - 1} til`} fulgte GLENVEX`
+        ? `${antallNye === 1 ? navnListe[0] : `${navnListe[0]} og ${antallNye - 1} til`} fulgte ${BOT_BRAND}`
         : `${antallNye} ny${antallNye > 1 ? 'e' : ''} følger${antallNye > 1 ? 'e' : ''}`,
       severity: 'info',
       metadata: { antallNye, totalFollowers: nyAntall, names: navnListe.slice(0, 5) },
@@ -254,8 +255,8 @@ async function sjekkNyeFollowers() {
       const navnListe = nyeNavn.length > 0 ? nyeNavn : Array(Math.min(antallNye, 3)).fill(null).map(() => null as null);
       for (const navn of navnListe) {
         const tekst = navn
-          ? `${navn} fulgte nettopp GLENVEX! Lag én kort, varm velkomst på norsk. Maks 10 ord.`
-          : `Noen nye fulgte GLENVEX! Lag én kort velkomst til de nye seerne på norsk. Maks 10 ord.`;
+          ? `${navn} fulgte nettopp ${BOT_BRAND}! Lag én kort, varm velkomst på norsk. Maks 10 ord.`
+          : `Noen nye fulgte ${BOT_BRAND}! Lag én kort velkomst til de nye seerne på norsk. Maks 10 ord.`;
         const svar = await aiSvar(tekst);
         const hilsen = svar || (navn ? `@${navn} Takk for follow! Velkommen! PogChamp` : `Takk til alle nye følgere! PogChamp FeelsGoodMan`);
         client.say(`#${KANAL}`, hilsen).catch(() => {});
@@ -268,7 +269,7 @@ async function sjekkNyeFollowers() {
 
     if (nyeNavn.length > 0) {
       const beskrivelse = antallNye === 1
-        ? `**${nyeNavn[0]}** fulgte nettopp GLENVEX! Velkommen til familien! 💚`
+        ? `**${nyeNavn[0]}** fulgte nettopp ${BOT_BRAND}! Velkommen til familien! 💚`
         : nyeNavn.map(n => `💚 **${n}**`).join('\n') + (antallNye > nyeNavn.length ? `\n... og ${antallNye - nyeNavn.length} til` : '');
 
       await postTilDiscord(kanalId, {
@@ -276,7 +277,7 @@ async function sjekkNyeFollowers() {
           title: antallNye === 1 ? '💚 Ny følger!' : `💚 ${antallNye} nye følgere!`,
           description: beskrivelse,
           color: 0x00e676,
-          footer: { text: `GLENVEX har nå ${nyAntall.toLocaleString()} følgere på Twitch` },
+          footer: { text: `${BOT_BRAND} har nå ${nyAntall.toLocaleString()} følgere på Twitch` },
           timestamp: new Date().toISOString(),
         }],
       });
@@ -308,7 +309,7 @@ async function sendTwitchPartnerPromo(): Promise<void> {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `Skriv en veldig kort Twitch-chat promo (maks 15 ord) for GLENVEXs partner: ${partner.navn}${partner.beskrivelse ? ` – ${partner.beskrivelse}` : ''}. Norsk, uformell, ikke salesy. Ikke start med emoji.` }],
+        messages: [{ role: 'user', content: `Skriv en veldig kort Twitch-chat promo (maks 15 ord) for partner: ${partner.navn}${partner.beskrivelse ? ` – ${partner.beskrivelse}` : ''}. Norsk, uformell, ikke salesy. Ikke start med emoji.` }],
         max_tokens: 40,
         temperature: 0.8,
       });
@@ -378,7 +379,7 @@ export function startTwitchBot() {
     trackRaid(username, viewers);
     logBotAgentEvent({ source: 'twitch', event_type: 'raid', username, importance_score: Math.min(100, viewers / 2), metadata: { viewers } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_EVENT_RECEIVED', title: `Raid fra ${username}: ${viewers} seere`, severity: 'info', metadata: { type: 'raid', username, viewers } });
-    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet GLENVEX med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet kanalen med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
 
     const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
     const discordUrlRaid = await getDiscordInviteUrl();
@@ -395,7 +396,7 @@ export function startTwitchBot() {
           { name: '👥 Raid-størrelse', value: viewers.toString(), inline: true },
           { name: '🎮 Raider', value: `[twitch.tv/${username}](https://twitch.tv/${username})`, inline: true },
         ],
-        footer: { text: 'GLENVEX Stream Control • Raid' },
+        footer: { text: 'Stream Control • Raid' },
         timestamp: new Date().toISOString(),
       }],
     });
@@ -406,7 +407,7 @@ export function startTwitchBot() {
   client.on('subscription', async (channel, username, _method, _message, _userstate) => {
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
-    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på GLENVEX`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
+    upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på ${BOT_BRAND}`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`, { trigger: 'sub', username });
     _onSubCallback?.(username).catch(() => {});
@@ -456,7 +457,7 @@ export function startTwitchBot() {
         title: `🎁 MASSE GIFT SUBS – ${username}`,
         description: `**${username}** giftet **${numbOfSubs} subs** til chatten! Dette er sjenerøsitet på et annet nivå! 👑`,
         color: 0xffd700,
-        footer: { text: 'GLENVEX Stream Control • Gift Sub' },
+        footer: { text: 'Stream Control • Gift Sub' },
         timestamp: new Date().toISOString(),
       }],
     });
@@ -469,7 +470,7 @@ export function startTwitchBot() {
     const username = userstate.username ?? 'Noen';
     const bitsNum = typeof bits === 'string' ? parseInt(bits) || 0 : bits;
     logBotAgentEvent({ source: 'twitch', event_type: 'cheer', username, importance_score: Math.min(90, bitsNum / 10), metadata: { bits: bitsNum } });
-    if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på GLENVEX`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});
+    if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på ${BOT_BRAND}`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`, { trigger: 'cheer', username, bits });
   });
@@ -560,7 +561,7 @@ export function startTwitchBot() {
     }
 
     const botNamnLower = botNavn.toLowerCase();
-    const erTagget = tekLower.includes(botNamnLower) || tekLower.includes('@glenvex');
+    const erTagget = tekLower.includes(botNamnLower) || (process.env.TWITCH_USERNAME ? tekLower.includes(`@${process.env.TWITCH_USERNAME.toLowerCase()}`) : false);
     const svarSjanse = await getSvarSjanse();
     if (!erTagget && Math.random() > svarSjanse) return;
 

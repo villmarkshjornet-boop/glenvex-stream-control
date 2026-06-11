@@ -551,7 +551,7 @@ function svgLayoutA(p: {
 
   const safeHead = sanitizeSvg(headline.toUpperCase());
   const safeSub  = sanitizeSvg(subheadline || '');
-  const safeCh   = sanitizeSvg((channelName || 'GLENVEX').toUpperCase());
+  const safeCh   = sanitizeSvg((channelName || process.env.BRAND_NAME || process.env.TWITCH_USERNAME || 'STREAM').toUpperCase());
   const safeCat  = sanitizeSvg(category || '');
 
   // Text zone: right portion if subject placed, full width otherwise
@@ -651,7 +651,7 @@ function svgLayoutB(p: {
 
   const safeHead = sanitizeSvg(headline.toUpperCase());
   const safeSub  = sanitizeSvg(subheadline || '');
-  const safeCh   = sanitizeSvg((channelName || 'GLENVEX').toUpperCase());
+  const safeCh   = sanitizeSvg((channelName || process.env.BRAND_NAME || process.env.TWITCH_USERNAME || 'STREAM').toUpperCase());
   const safeCat  = sanitizeSvg(category || '');
 
   const lbTop = Math.round(H * 0.11);
@@ -738,7 +738,7 @@ function svgLayoutC(p: {
 
   const safeHead = sanitizeSvg(headline.toUpperCase());
   const safeSub  = sanitizeSvg(subheadline || '');
-  const safeCh   = sanitizeSvg((channelName || 'GLENVEX').toUpperCase());
+  const safeCh   = sanitizeSvg((channelName || process.env.BRAND_NAME || process.env.TWITCH_USERNAME || 'STREAM').toUpperCase());
   const safeCat  = sanitizeSvg(category || '');
 
   // Text zone: left portion if subject on right

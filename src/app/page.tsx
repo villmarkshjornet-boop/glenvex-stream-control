@@ -328,7 +328,7 @@ function Kontrollsenter({ data, loading }: {
   );
 }
 
-// ─── DETTE VET GLENVEX NÅ ─────────────────────────────────────────────────────
+// ─── AI-KONTEKST NÅ ──────────────────────────────────────────────────────────
 
 const CONFIDENCE_FARGE: Record<string, string> = {
   for_lite_datagrunnlag: 'text-g-muted border-g-border',
@@ -377,7 +377,7 @@ function DetteVetGlenvex({ data, loading }: { data: Lærdom | undefined; loading
   return (
     <div className="bg-g-card border border-g-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Dette vet GLENVEX nå</p>
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI-kontekst nå</p>
         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${CONFIDENCE_FARGE[confidenceLabel] ?? CONFIDENCE_FARGE.lav}`}>
           {confidenceLabel === 'for_lite_datagrunnlag' ? 'Lite data' : `Confidence: ${confidenceLabel}`}
         </span>
@@ -913,7 +913,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Creator Operations Center</h1>
-          <p className="text-[9px] text-g-muted mt-0.5">GLENVEX Creator OS · Ingenting skjer uten at systemet vet om det</p>
+          <p className="text-[9px] text-g-muted mt-0.5">Creator OS · Ingenting skjer uten at systemet vet om det</p>
         </div>
         <div className="flex items-center gap-3">
           {sistOppdatert && (
@@ -945,7 +945,7 @@ export default function Dashboard() {
       {/* ── SYSTEMDEKNING ───────────────────────────────────────────────────── */}
       <EventCoverage data={live?.coverage} loading={loadingLive} />
 
-      {/* ── DETTE VET GLENVEX NÅ ────────────────────────────────────────────── */}
+      {/* ── AI-KONTEKST NÅ ─────────────────────────────────────────────────── */}
       <DetteVetGlenvex data={live?.lærdom} loading={loadingLive} />
 
       {/* ── SEKSJON 2 + 3: Activity Feed + Job Monitor ───────────────────────── */}

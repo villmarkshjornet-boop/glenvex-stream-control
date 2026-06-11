@@ -30,7 +30,7 @@ const ROLES_TO_CREATE = [
 export const setupCommand = {
   data: new SlashCommandBuilder()
     .setName('setup')
-    .setDescription('Oppretter anbefalt Discord-struktur for GLENVEX community.')
+    .setDescription('Oppretter anbefalt Discord-struktur for streaming community.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -118,7 +118,7 @@ export const setupCommand = {
           value: skipped.length ? skipped.slice(0, 10).join(', ') : 'Ingen',
         }
       )
-      .setFooter({ text: 'GLENVEX Stream Control' })
+      .setFooter({ text: 'Stream Control' })
       .setTimestamp();
 
     return interaction.editReply({ embeds: [embed] });

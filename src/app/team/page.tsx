@@ -54,9 +54,9 @@ export default function TeamHub() {
       </div>
 
       <div className="bg-g-card border border-g-green/10 rounded-xl p-4">
-        <p className="text-xs text-g-green font-bold mb-1">GLENVEX Creator OS</p>
+        <p className="text-xs text-g-green font-bold mb-1">Creator OS</p>
         <p className="text-[10px] text-g-muted leading-relaxed">
-          Et sentralisert kontrollsenter for hele GLENVEX-teamet. Hver seksjon dekker ett ansvarsområde –
+          Et sentralisert kontrollsenter for hele teamet. Hver seksjon dekker ett ansvarsområde –
           bruk sidebaren for å navigere, eller start fra Dashboard for daglig drift.
         </p>
       </div>

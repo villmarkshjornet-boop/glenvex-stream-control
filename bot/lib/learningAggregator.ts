@@ -262,7 +262,7 @@ export async function kjørAggregering(): Promise<void> {
       messages: [
         {
           role: 'user',
-          content: `Du er læringsagenten for GLENVEX Creator OS. Analyser disse hendelsene og trekk ut kunnskap.
+          content: `Du er læringsagenten for Creator OS. Analyser disse hendelsene og trekk ut kunnskap.
 
 HENDELSER (siste 15-20 min):
 ${eventLinjer}${sysKontekst}
@@ -304,7 +304,7 @@ Returner KUN JSON:
           agent_type: 'twitch',
           memory_type: 'viewer',
           key: lower,
-          summary: seer.hvorfor ?? `Aktiv seer på GLENVEX`,
+          summary: seer.hvorfor ?? `Aktiv seer på kanalen`,
           confidence_score: 0.6,
           metadata: { lastSeen: new Date().toISOString(), source: 'twitch' },
         });
@@ -315,7 +315,7 @@ Returner KUN JSON:
           agent_type: 'discord',
           memory_type: 'member',
           key: lower,
-          summary: seer.hvorfor ?? `Aktiv Discord-member i GLENVEX`,
+          summary: seer.hvorfor ?? `Aktiv Discord-member i communityet`,
           confidence_score: 0.6,
           metadata: { lastSeen: new Date().toISOString(), source: 'discord' },
         });

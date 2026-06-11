@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const BRAND_SLUG = process.env.NEXT_PUBLIC_BRAND_SLUG ?? 'glenvex';
+const BRAND_SLUG = process.env.NEXT_PUBLIC_BRAND_SLUG ?? 'streamer';
 
 interface Highlight {
   id: string;

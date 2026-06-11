@@ -789,8 +789,8 @@ export default function InnstillingerSide() {
                     </h2>
                     <div className="space-y-3">
                       {[
-                        { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'glenvex' },
-                        { label: 'Twitch URL', field: 'twitchUrl' as keyof Settings, placeholder: 'https://twitch.tv/glenvex' },
+                        { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'ditt-brukernavn' },
+                        { label: 'Twitch URL', field: 'twitchUrl' as keyof Settings, placeholder: 'https://twitch.tv/ditt-brukernavn' },
                       ].map(({ label, field, placeholder }) => (
                         <div key={field}>
                           <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
@@ -808,7 +808,7 @@ export default function InnstillingerSide() {
                           type="text"
                           value={(settings.contentFactoryChannel as string) || ''}
                           onChange={e => update('contentFactoryChannel', e.target.value as Settings['contentFactoryChannel'])}
-                          placeholder={settings.twitchUsername || 'glenvex'}
+                          placeholder={settings.twitchUsername || 'ditt-brukernavn'}
                           className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40"
                         />
                         <p className="text-[9px] text-g-muted mt-1 leading-relaxed">
@@ -829,7 +829,7 @@ export default function InnstillingerSide() {
                           <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{platform}</label>
                           <input type="text" value={settings.socials?.[platform] || ''}
                             onChange={e => updateSocial(platform, e.target.value)}
-                            placeholder={`https://${platform}.com/glenvex`}
+                            placeholder={`https://${platform}.com/ditt-brukernavn`}
                             className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
                         </div>
                       ))}
@@ -925,7 +925,7 @@ export default function InnstillingerSide() {
                 <div className="space-y-3">
                   {[
                     { tittel: 'Passord-basert innlogging', tekst: 'Sett et passord for raskere innlogging. Magic link (e-post) er alltid tilgjengelig som backup.' },
-                    { tittel: 'Én bruker per workspace', tekst: 'GLENVEX Creator OS er bygget for én administrator. Kontakt support for flerbruker-oppsett.' },
+                    { tittel: 'Én bruker per workspace', tekst: 'Creator OS er bygget for én administrator per workspace. Kontakt support for flerbruker-oppsett.' },
                     { tittel: 'Supabase-autentisering', tekst: 'Innlogging håndteres av Supabase Auth. Sessions er kryptert og utløper automatisk.' },
                   ].map(t => (
                     <div key={t.tittel} className="border-b border-g-border/30 pb-3 last:border-0 last:pb-0">

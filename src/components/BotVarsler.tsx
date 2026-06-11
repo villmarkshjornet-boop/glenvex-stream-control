@@ -58,7 +58,7 @@ export default function BotVarsler() {
             if (status.stream?.isLive) {
               setVarsler(prev => [{
                 id: `live_${Date.now()}`,
-                tekst: `🔴 GLENVEX gikk LIVE – Discord-embed postet`,
+                tekst: `🔴 Streameren gikk LIVE – Discord-embed postet`,
                 type: 'discord' as const,
                 tid: new Date(),
               }, ...prev].slice(0, 5));

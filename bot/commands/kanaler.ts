@@ -94,7 +94,7 @@ async function handleAnalyse(interaction: ChatInputCommandInteraction) {
     messages: [
       {
         role: 'user',
-        content: `Du er Discord-administrator for GLENVEX, et norsk Twitch streaming community.
+        content: `Du er Discord-administrator for et norsk Twitch streaming community.
 
 Nåværende serverstruktur:
 ${linjer.join('\n')}
@@ -117,7 +117,7 @@ Vær konkret. Maks 350 ord.`,
     .setColor(0x00ff41)
     .setTitle('◆ Kanal-analyse')
     .setDescription(analyse)
-    .setFooter({ text: `${guild.channels.cache.size} kanaler analysert • GLENVEX Stream Control` })
+    .setFooter({ text: `${guild.channels.cache.size} kanaler analysert • Stream Control` })
     .setTimestamp();
 
   return interaction.editReply({ embeds: [embed] });
@@ -181,7 +181,7 @@ async function handleRydd(interaction: ChatInputCommandInteraction) {
         inline: true,
       }))
     )
-    .setFooter({ text: 'GLENVEX Stream Control' })
+    .setFooter({ text: 'Stream Control' })
     .setTimestamp();
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];

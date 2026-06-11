@@ -13,8 +13,8 @@ export const promoCommand = {
     const stream = await getStreamInfo().catch(() => ({
       isLive: false,
       game: 'Gaming',
-      streamUrl: process.env.TWITCH_URL || 'https://twitch.tv/glenvex',
-      userName: 'glenvex',
+      streamUrl: process.env.TWITCH_URL || 'https://twitch.tv',
+      userName: process.env.TWITCH_USERNAME || 'streameren',
     }));
 
     const promo = await generatePromo(stream).catch(() => null);
@@ -35,7 +35,7 @@ export const promoCommand = {
         { name: '🐦 Twitter/X', value: promo.twitter.slice(0, 200), inline: false },
         { name: '🎬 YouTube', value: promo.youtube.slice(0, 200), inline: false }
       )
-      .setFooter({ text: 'GLENVEX Stream Control • AI Generert' })
+      .setFooter({ text: 'Stream Control • AI Generert' })
       .setTimestamp();
 
     if (promo.imageUrl) {

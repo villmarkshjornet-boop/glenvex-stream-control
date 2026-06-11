@@ -4,7 +4,7 @@ import { getStreamInfo } from '@/lib/twitch';
 export const liveCommand = {
   data: new SlashCommandBuilder()
     .setName('live')
-    .setDescription('Sjekker om GLENVEX er live på Twitch akkurat nå.'),
+    .setDescription('Sjekker om streameren er live på Twitch akkurat nå.'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
@@ -20,13 +20,13 @@ export const liveCommand = {
     if (!stream.isLive) {
       const embed = new EmbedBuilder()
         .setColor(0x333333)
-        .setTitle('⚫ GLENVEX er ikke live')
+        .setTitle('⚫ Ikke live')
         .setDescription('Ingen aktiv stream detektert.')
         .addFields({
           name: '🔗 Twitch',
-          value: `[twitch.tv/glenvex](${stream.streamUrl})`,
+          value: `[${stream.streamUrl}](${stream.streamUrl})`,
         })
-        .setFooter({ text: 'GLENVEX Stream Control' })
+        .setFooter({ text: 'Stream Control' })
         .setTimestamp();
 
       return interaction.editReply({ embeds: [embed] });
@@ -38,21 +38,21 @@ export const liveCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('🔴 GLENVEX ER LIVE!')
+      .setTitle('🔴 VI ER LIVE!')
       .setDescription('Systemet er aktivert. Kaoset starter nå.')
       .addFields(
         { name: '🎮 Spill', value: stream.game || 'Ukjent', inline: true },
         { name: '👁️ Seere', value: stream.viewerCount?.toLocaleString() || '–', inline: true },
         { name: '📺 Tittel', value: stream.title || '–', inline: false },
         ...(startedTs ? [{ name: '⏱️ Startet', value: `<t:${startedTs}:R>`, inline: true }] : []),
-        { name: '🔗 Se her', value: `[twitch.tv/glenvex](${stream.streamUrl})`, inline: true }
+        { name: '🔗 Se her', value: `[${stream.streamUrl}](${stream.streamUrl})`, inline: true }
       );
 
     if (stream.thumbnailUrl) {
       embed.setImage(stream.thumbnailUrl);
     }
 
-    embed.setFooter({ text: 'GLENVEX Stream Control' }).setTimestamp();
+    embed.setFooter({ text: 'Stream Control' }).setTimestamp();
 
     return interaction.editReply({ embeds: [embed] });
   },
