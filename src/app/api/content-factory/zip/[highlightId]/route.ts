@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isContentFactoryEnabled } from '@/lib/content-factory';
 import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 import JSZip from 'jszip';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-const BRAND_SLUG = process.env.BRAND_SLUG ?? 'glenvex';
 
 export async function GET(
   _req: NextRequest,
@@ -18,6 +17,17 @@ export async function GET(
 
   const { highlightId } = params;
   const db = getDb();
+  const wsId = getWorkspaceId();
+
+  let brandName = 'streameren';
+  let brandSlug  = process.env.BRAND_SLUG ?? 'streamer';
+  if (db) {
+    const { data: wsBrand } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    if (wsBrand?.brand_name) {
+      brandName = wsBrand.brand_name;
+      brandSlug  = wsBrand.brand_name.toLowerCase().replace(/[^\w]/g, '_').slice(0, 20);
+    }
+  }
   if (!db) return NextResponse.json({ error: 'DB ikke tilkoblet' }, { status: 500 });
 
   const { data: h } = await db
@@ -107,7 +117,7 @@ export async function GET(
   const tidStr = `${String(minSek).padStart(2, '0')}:${String(sekRest).padStart(2, '0')}`;
 
   const readme = [
-    'GLENVEX Highlight-pakke',
+    `${brandName} Highlight-pakke`,
     '======================',
     `Tittel:    ${h.title ?? 'Ukjent'}`,
     `Kategori:  ${h.category ?? 'Ukjent'}`,
@@ -134,7 +144,7 @@ export async function GET(
     dc ? '✓ discord.txt  – post-tekst for Discord' : '✗ discord.txt  – ikke generert',
     '✓ metadata.json – komplett metadata',
     '',
-    'Generert av GLENVEX Creator OS',
+    `Generert av ${brandName} Creator OS`,
   ].join('\n');
 
   zip.file('README.txt', readme, { compression: 'DEFLATE' });
@@ -191,7 +201,7 @@ export async function GET(
   // ─── Generer og returner ZIP ────────────────────────────────────────────────
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-  const filnavn = `${BRAND_SLUG}_highlight_${tittelSlug}.zip`;
+  const filnavn = `${brandSlug}_highlight_${tittelSlug}.zip`;
 
   return new NextResponse(new Uint8Array(zipBuffer), {
     headers: {

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getStreamInfo } from '@/lib/twitch';
 import { hentBotData } from '@/lib/botData';
@@ -34,11 +34,12 @@ export async function GET() {
     // ─── Stream Coach historikk + Community-data ──────────────────────────
     let streamHistorikk: any[] = [];
     let communityTopLine = '';
+    let brandName = 'streameren';
     const db = getDb();
     if (db) {
       try {
         const cut14d = new Date(Date.now() - 14 * 86400_000).toISOString();
-        const [histRes, commRes] = await Promise.all([
+        const [histRes, commRes, wsRow] = await Promise.all([
           db.from('stream_history')
             .select('title,game,peak_viewers,avg_viewers,duration_minutes,followers_gained,chat_messages,subs_gained')
             .eq('workspace_id', getWorkspaceId())
@@ -49,9 +50,14 @@ export async function GET() {
             .eq('workspace_id', getWorkspaceId())
             .order('xp', { ascending: false })
             .limit(20),
+          db.from('workspaces').select('brand_name').eq('id', getWorkspaceId()).single(),
         ]);
         streamHistorikk = histRes.data ?? [];
         const allMembers = commRes.data ?? [];
+        brandName = (wsRow as any)?.data?.brand_name ?? 'streameren';
+        if (!brandName || brandName === 'streameren') {
+          void db.from('system_events').insert({ workspace_id: getWorkspaceId(), source: 'ai_producer', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'AI Producer: workspace mangler brand_name', severity: 'warning', metadata: { workspaceId: getWorkspaceId() } });
+        }
         const top5 = allMembers.slice(0, 5).map((m: any) => `${m.display_name ?? m.username} (Lv${m.level})`).join(', ');
         const atRisk = allMembers.filter((m: any) => (m.last_seen ?? '') < cut14d && (m.xp ?? 0) > 100).length;
         const heroCount = allMembers.filter((m: any) => (m.level ?? 0) >= 30 || ((m.subs ?? 0) + (m.gift_subs ?? 0) * 2 + (m.raids ?? 0) * 3) >= 5).length;
@@ -94,9 +100,8 @@ export async function GET() {
         model: 'gpt-4o',
         messages: [{
           role: 'system',
-          content: `Du er AI-produsent for GLENVEX, en norsk Twitch-streamer. Du kjenner kanalen godt og hjelper med å maksimere vekst og engasjement under stream.
+          content: `Du er AI-produsent for ${brandName}, en norsk Twitch-streamer. Du kjenner kanalen godt og hjelper med å maksimere vekst og engasjement under stream.
 Kanalens tone: energisk, litt edgy norsk gaming-humor, autentisk, ikke overdrevent corporat.
-Kanalen streamer primært Future RP (GTA RP-server) og andre spill.
 Du skal ALLTID generere faktisk klar-til-bruk innhold for hvert tiltak som involverer en tekst/post – ikke bare si "post noe", men LAG selve teksten.`,
         }, {
           role: 'user',
@@ -214,3 +219,4 @@ Gi 3-5 tiltak. Alltid generer faktisk innhold for tiltak som krever en tekst. Ti
     return NextResponse.json({ isLive: false, stream: null, analyse: null, tiltak: [], error: (err as Error).message });
   }
 }
+

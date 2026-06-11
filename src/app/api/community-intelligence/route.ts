@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import OpenAI from 'openai';
@@ -13,6 +13,12 @@ export async function GET() {
 
   const db = getDb()!;
   const ws = getWorkspaceId();
+
+  const { data: wsBrand } = await db.from('workspaces').select('brand_name').eq('id', ws).single();
+  const brandName = wsBrand?.brand_name ?? 'streameren';
+  if (!wsBrand?.brand_name) {
+    void db.from('system_events').insert({ workspace_id: ws, source: 'community_intelligence', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'Community Intelligence: workspace mangler brand_name', severity: 'warning', metadata: { wsId: ws } });
+  }
 
   const now = Date.now();
   const cut24h = new Date(now - 24 * 3600_000).toISOString();
@@ -200,7 +206,7 @@ export async function GET() {
         temperature: 0.4,
         messages: [{
           role: 'user',
-          content: `Du er AI Community Manager for GLENVEX (norsk Twitch-community).
+          content: `Du er AI Community Manager for ${brandName} (norsk Twitch-community).
 
 COMMUNITY DATA:
 - Totale membres: ${total} | Aktive 24t: ${aktive24h} | 7d: ${aktive7d} | 30d: ${aktive30d}
@@ -233,3 +239,4 @@ Analyser community-helsen og gi 2 konkrete handlingsanbefalinger. Norsk. Maks 10
     generertKl: new Date().toLocaleTimeString('no-NO'),
   });
 }
+

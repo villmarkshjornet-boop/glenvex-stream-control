@@ -50,7 +50,7 @@ const FALLBACK_CONTEXT: Omit<CreatorContext, 'workspaceId'> = {
   contentPatterns: [],
   gamePatterns: [],
   streamPatterns: [],
-  channelProfile: 'GLENVEX – norsk gaming streamer. Spiller Tarkov, GTA RP og andre spill.',
+  channelProfile: 'Streameren – norsk gaming streamer.',
   contentStrategy: 'Fokus på genuine reaksjoner, episke øyeblikk og community-interaksjon.',
   communityContext: 'Norsk gaming community, engasjerte seere.',
   recentInsights: [],
@@ -240,7 +240,7 @@ export async function addInsight(insight: {
 
 export function buildContextPrompt(ctx: CreatorContext): string {
   if (ctx.streamCount === 0 && ctx.topViewers.length === 0 && ctx.runningJokes.length === 0) {
-    return 'Kanal: GLENVEX – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
+    return 'Kanal: streameren – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
   }
 
   const deler: string[] = [`KANALKUNNSKAP (${ctx.streamCount} streams analysert):`];
@@ -278,6 +278,6 @@ export function buildContextPrompt(ctx: CreatorContext): string {
     deler.push(`- Siste utførte tiltak (${ctx.recentExecutedTips.length}): ${ctx.recentExecutedTips.slice(0, 3).map(t => `"${t.tip.slice(0, 60)}"`).join(', ')}`);
   }
 
-  deler.push('\nBruk denne kunnskapen aktivt: gi HØYERE score til øyeblikk som historisk fungerer bra for GLENVEX.');
+  deler.push('\nBruk denne kunnskapen aktivt: gi HØYERE score til øyeblikk som historisk fungerer bra for streameren.');
   return deler.join('\n');
 }

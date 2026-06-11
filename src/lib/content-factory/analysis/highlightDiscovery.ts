@@ -148,7 +148,7 @@ export async function oppdagHighlights(
       const { buildContextPrompt } = await import('@/lib/ai/creatorContext');
       kontekst = buildContextPrompt(knowledge);
     } else {
-      kontekst = 'Kanal: GLENVEX – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
+      kontekst = 'Kanal: streameren – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
     }
 
     const begrenset = unikKandidater.slice(0, 12);
@@ -158,7 +158,7 @@ export async function oppdagHighlights(
       messages: [
         {
           role: 'user',
-          content: `Du er AI Producer for GLENVEX. Analyser disse stream-øyeblikkene og velg de beste highlights.
+          content: `Du er AI Producer for en norsk Twitch-kanal. Analyser disse stream-øyeblikkene og velg de beste highlights.
 ${kontekst}
 
 SCORING (0-100):

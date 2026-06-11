@@ -18,6 +18,9 @@ export async function GET(
   const ws = getWorkspaceId();
   const discordId = params.id;
 
+  const { data: wsBrand } = await db.from('workspaces').select('brand_name').eq('id', ws).single();
+  const brandName = wsBrand?.brand_name ?? 'streameren';
+
   const { data: m, error } = await db
     .from('community_members')
     .select('*')
@@ -100,7 +103,7 @@ export async function GET(
         temperature: 0.4,
         messages: [{
           role: 'user',
-          content: `Du er AI Community Manager for GLENVEX (norsk Twitch-community). Beskriv dette community-medlemmet i 2-3 setninger på norsk. Vær konkret og bruk tallene. Ikke gjenta navn i starten.
+          content: `Du er AI Community Manager for ${brandName} (norsk Twitch-community). Beskriv dette community-medlemmet i 2-3 setninger på norsk. Vær konkret og bruk tallene. Ikke gjenta navn i starten.
 
 Navn: ${username}
 Level: ${m.level} | XP: ${m.xp}

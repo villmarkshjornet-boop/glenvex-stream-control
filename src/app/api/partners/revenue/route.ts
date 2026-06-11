@@ -1,10 +1,20 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getPartners } from '@/lib/partners';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
+
   const partners = await getPartners();
   const totalInntekt = partners.reduce((s, p) => s + (p.estimertInntekt ?? 0), 0);
   const totalKlikk = partners.reduce((s, p) => s + (p.klikk ?? 0), 0);
@@ -24,7 +34,7 @@ export async function GET() {
         model: 'gpt-4o-mini',
         messages: [{
           role: 'user',
-          content: `Analyser disse partner-dataene for streameren GLENVEX og gi 3 konkrete anbefalinger på norsk. Returner KUN JSON: {"anbefalinger": ["...", "...", "..."]}
+          content: `Analyser disse partner-dataene for streameren ${brandName} og gi 3 konkrete anbefalinger på norsk. Returner KUN JSON: {"anbefalinger": ["...", "...", "..."]}
 
 Partnere:
 ${partners.map(p => `- ${p.navn}: ${p.eksponering} eksponeringer, ${p.klikk} klikk, ${p.provisjon}% provisjon, ${p.kategori}`).join('\n')}`,
@@ -40,3 +50,4 @@ ${partners.map(p => `- ${p.navn}: ${p.eksponering} eksponeringer, ${p.klikk} kli
 
   return NextResponse.json({ totalInntekt, totalKlikk, totalEksponering, ranked, analyse });
 }
+

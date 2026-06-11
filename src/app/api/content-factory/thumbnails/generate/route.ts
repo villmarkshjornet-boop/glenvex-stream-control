@@ -35,7 +35,7 @@ async function lagCopy(
       messages: [
         {
           role: 'system',
-          content: `Du er ekspert på gaming YouTube/TikTok thumbnails for norsk streamer GLENVEX.
+          content: `Du er ekspert på gaming YouTube/TikTok thumbnails for en norsk streamer.
 Svar KUN med JSON: {"headline":"...","subheadline":"...","style":"..."}
 headline: 2–5 ORD, STORE BOKSTAVER, norsk, høy klikkverdi
 Eksempler: "DETTE VAR SYKT", "HAN HADDE IKKE SJANS", "BOSSEN BLE KNUST", "RP DRAMA ESKALERTE"

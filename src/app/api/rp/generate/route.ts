@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +38,14 @@ export async function POST(req: NextRequest) {
   const data = await req.json() as RPData;
   const client = new OpenAI({ apiKey });
 
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
+
   // Kjør Discord-henting og GPT parallelt
   const guildId = process.env.DISCORD_GUILD_ID;
 
@@ -48,7 +58,7 @@ export async function POST(req: NextRequest) {
         content: `Lag innhold for GTA RP-karakteren ${data.karakterNavn} på serveren ${data.serverNavn}. Returner KUN gyldig JSON:
 {
   "karakterkort": "Discord-karakterkort med bold/kursiv markdown, maks 200 ord. Start med navn, rolle, beskrivelse, backstory.",
-  "servermelding": "Kort Discord-annonseringsmelding (maks 100 ord) om at GLENVEX nå spiller ${data.serverNavn} med ${data.karakterNavn}. Energisk og mørk gaming-vibe.${data.erstattNXT ? ' Nevn at vi går fra NXT.' : ''}"
+  "servermelding": "Kort Discord-annonseringsmelding (maks 100 ord) om at ${brandName} nå spiller ${data.serverNavn} med ${data.karakterNavn}. Energisk og mørk gaming-vibe.${data.erstattNXT ? ' Nevn at vi går fra NXT.' : ''}"
 }
 
 Karakterinfo:
@@ -101,3 +111,4 @@ Backstory: ${data.backstory}`,
 
   return NextResponse.json(generert);
 }
+

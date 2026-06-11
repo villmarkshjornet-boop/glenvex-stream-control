@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getStreamplanKanalId } from '@/lib/discordChannel';
 import { postOgOppdater } from '@/lib/discordMessages';
 import { addContent } from '@/lib/contentLibrary';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +28,16 @@ interface StreamDay {
 export async function POST(req: NextRequest) {
   const { plan } = await req.json() as { plan: StreamDay[] };
 
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  let twitchLogin: string | null = null;
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name,twitch_login').eq('id', wsId).single();
+    brandName  = ws?.brand_name  ?? 'streameren';
+    twitchLogin = ws?.twitch_login ?? null;
+  }
+
   // Bruk annonseringskanal – ikke chat
   const kanalId = await getStreamplanKanalId();
   if (!kanalId) {
@@ -45,12 +57,12 @@ export async function POST(req: NextRequest) {
     title: '📅 Streamplan denne uken',
     description: planLinjer,
     color: 0x00ff41,
-    fields: [{
+    fields: twitchLogin ? [{
       name: '📺 Se streamen her',
-      value: `[twitch.tv/glenvex](${process.env.TWITCH_URL || 'https://twitch.tv/glenvex'})`,
+      value: `[twitch.tv/${twitchLogin}](https://twitch.tv/${twitchLogin})`,
       inline: true,
-    }],
-    footer: { text: 'GLENVEX Stream Control • Streamplan' },
+    }] : [],
+    footer: { text: `${brandName} Stream Control • Streamplan` },
     timestamp: new Date().toISOString(),
   };
 
@@ -79,3 +91,4 @@ function getWeekNumber(): number {
   const start = new Date(now.getFullYear(), 0, 1);
   return Math.ceil(((now.getTime() - start.getTime()) / 86_400_000 + start.getDay() + 1) / 7);
 }
+

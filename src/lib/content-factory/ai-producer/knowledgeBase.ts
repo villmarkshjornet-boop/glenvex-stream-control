@@ -10,7 +10,7 @@ export interface KnowledgeBase {
 }
 
 const FALLBACK: KnowledgeBase = {
-  channelProfile: 'GLENVEX – norsk gaming streamer. Spiller Tarkov, GTA RP og andre spill.',
+  channelProfile: 'Streameren – norsk gaming streamer.',
   contentStrategy: 'Fokus på genuine reaksjoner, episke øyeblikk og community-interaksjon.',
   communityContext: 'Norsk gaming community, engasjerte tittere.',
   gameContext: 'Escape from Tarkov: boss-kills, rare loot, clutch-ekstraksjon scorer høyt. GTA RP: dramatiske scene-øyeblikk fungerer bra.',

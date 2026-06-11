@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getChatKanalId } from '@/lib/discordChannel';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 import { getAllContent, updateContent } from '@/lib/contentLibrary';
 import { slettGammelMelding, lagreMsgId, hentSisteMsgId } from '@/lib/discordMessages';
 
@@ -54,6 +56,14 @@ export async function POST(req: NextRequest) {
 
   const guildId = process.env.DISCORD_GUILD_ID;
   const resultater: string[] = [];
+
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
 
   // 1. Omdøp NXT-kanaler
   for (const k of body.kanalForslag ?? []) {
@@ -120,7 +130,7 @@ export async function POST(req: NextRequest) {
       title: `◆ ${body.karakterNavn.toUpperCase()}`,
       description: body.karakterIntro,
       color: 0x00ff41,
-      footer: { text: `${body.serverNavn} • GLENVEX Stream Control` },
+      footer: { text: `${body.serverNavn} • ${brandName} Stream Control` },
       timestamp: new Date().toISOString(),
     };
 
@@ -193,3 +203,4 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ resultater });
 }
+

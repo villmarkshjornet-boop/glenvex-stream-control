@@ -1,4 +1,4 @@
-import { assertContentFactoryEnabled } from '../index';
+﻿import { assertContentFactoryEnabled } from '../index';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import OpenAI from 'openai';
@@ -26,11 +26,14 @@ export async function genererCopy(
 
   const openai = new OpenAI({ apiKey });
 
+  const { data: wsRow } = await db.from('workspaces').select('brand_name').eq('id', getWorkspaceId()).single();
+  const streamerName = wsRow?.brand_name ?? 'streameren';
+
   const res = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{
       role: 'user',
-      content: `Du er content manager for GLENVEX (norsk Twitch-streamer). Lag innholdstekster for dette clipset. Returner KUN JSON:
+      content: `Du er content manager for en norsk Twitch-streamer. Lag innholdstekster for dette clipset. Returner KUN JSON:
 {
   "youtube": {
     "tittel": "SEO-optimalisert tittel (maks 70 tegn)",
@@ -51,7 +54,7 @@ export async function genererCopy(
 }
 
 Clip-info:
-Streamer: GLENVEX
+Streamer: ${streamerName}
 Spill: ${spillKategori}
 Stream: ${streamTittel}
 Highlight-kategori: ${highlight.category ?? 'Gaming'}
@@ -148,3 +151,4 @@ export async function hentCopyForVod(vodId: string): Promise<ContentCopy[]> {
     hashtags: r.hashtags, caption: r.caption, discordPost: r.discord_post,
   }));
 }
+

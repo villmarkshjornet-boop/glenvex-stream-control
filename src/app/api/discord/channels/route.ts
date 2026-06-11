@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +57,14 @@ export async function GET() {
   const channels = await res.json() as any[];
   const sorted = channels.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ channels: sorted, suggestions: null });
@@ -82,7 +92,7 @@ export async function GET() {
     model: 'gpt-4o-mini',
     messages: [{
       role: 'user',
-      content: `Du er en erfaren Discord-administrator for GLENVEX sitt Twitch community (Future RP, Tarkov, FPS).
+      content: `Du er en erfaren Discord-administrator for ${brandName} sitt Twitch community.
 
 Analyser strukturen NØYE. Sjekk:
 1. Duplikater – kanaler med samme formål
@@ -268,7 +278,7 @@ Kanal: #${ch.navn}`,
       title: `◆ ${ch.navn.toUpperCase().replace(/-/g, ' ')}`,
       description: tekst,
       color: 0x00ff41,
-      footer: { text: 'GLENVEX Stream Control • Karakter' },
+      footer: { text: 'Stream Control • Karakter' },
       timestamp: new Date().toISOString(),
     };
     if (bildeUrl) embed.image = { url: bildeUrl };
@@ -306,3 +316,4 @@ Kanal: #${ch.navn}`,
     }
   }
 }
+

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
@@ -46,6 +46,17 @@ export async function GET(req: NextRequest) {
     const workspaceId = getWorkspaceId();
     const url = new URL(req.url);
     const requestedStreamId = url.searchParams.get('streamId');
+
+    // ── Last workspace brand ─────────────────────────────────────────────────
+    let brandName = 'streameren';
+    if (db) {
+      const { data: wsRow } = await db.from('workspaces').select('brand_name').eq('id', workspaceId).single();
+      if (wsRow?.brand_name) {
+        brandName = wsRow.brand_name;
+      } else {
+        void db.from('system_events').insert({ workspace_id: workspaceId, source: 'stream_coach', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'Stream Coach: workspace mangler brand_name', severity: 'warning', metadata: { workspaceId } });
+      }
+    }
 
     // ── Hent stream-historikk ────────────────────────────────────────────────
     let history: any[] = [];
@@ -167,7 +178,7 @@ Score: ${streamScore.total}/100 (${streamScore.grade})${audiencePart}${retention
           model: 'gpt-4o-mini',
           messages: [{
             role: 'user',
-            content: `Du er GLENVEX sin personlige stream-coach. Analyser denne streamen og gi konkrete, norske tilbakemeldinger.
+            content: `Du er ${brandName} sin personlige stream-coach. Analyser denne streamen og gi konkrete, norske tilbakemeldinger.
 
 ${contextPrompt ? `${contextPrompt}\n\n` : ''}${streamData}
 
@@ -206,7 +217,7 @@ Krav: Bruk KUN data fra denne streamen. Ingen generiske råd. Vær spesifikk.`,
           model: 'gpt-4o-mini',
           messages: [{
             role: 'user',
-            content: `Analyser disse ${Math.min(10, history.length)} streamene for GLENVEX og finn mønstre:
+            content: `Analyser disse ${Math.min(10, history.length)} streamene for ${brandName} og finn mønstre:
 ${history.slice(0, 10).map((s: any) => `- ${s.game ?? '?'} (${new Date(s.started_at).toLocaleDateString('no-NO')}): peak ${s.peak_viewers ?? 0}, snitt ${s.avg_viewers ?? 0}, ${s.chat_messages ?? 0} mld, +${s.followers_gained ?? 0} flw`).join('\n')}
 
 Returner KUN gyldig JSON:
@@ -258,3 +269,4 @@ Returner KUN gyldig JSON:
     return NextResponse.json({ history: [], analyse: null, audience: null, streamScore: null });
   }
 }
+

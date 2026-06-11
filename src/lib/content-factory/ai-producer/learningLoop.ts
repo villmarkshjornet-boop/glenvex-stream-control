@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+﻿import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import OpenAI from 'openai';
 import { lagreStreamMemory, oppdaterContentPatterns } from './streamMemory';
@@ -63,7 +63,7 @@ export async function kjørLearningLoop(vodId: string): Promise<void> {
       messages: [
         {
           role: 'user',
-          content: `Du er AI Producer for GLENVEX, en norsk streaming-kanal. Analyser denne streamen og bygg kanalens kunnskap.
+          content: `Du er AI Producer for en norsk streaming-kanal. Analyser denne streamen og bygg kanalens kunnskap.
 
 STREAM INFO:
 - Tittel: ${vod?.title ?? 'Ukjent'}
@@ -163,11 +163,13 @@ Returner KUN JSON:
         .slice(0, 3)
         .map((p: any) => `${p.category} (snitt ${p.avg_score})`)
         .join(', ');
+      const { data: wsRow } = await db.from('workspaces').select('brand_name').eq('id', workspaceId).single();
+      const brandName = wsRow?.brand_name ?? 'streameren';
       await upsertMemory({
         agent_type: 'global',
         memory_type: 'stream_pattern',
         key: 'channel_profile',
-        summary: `GLENVEX – norsk gaming streamer. ${nyStreamCount} streams analysert. Beste highlight-typer: ${toppKat}.`,
+        summary: `${brandName} – norsk gaming streamer. ${nyStreamCount} streams analysert. Beste highlight-typer: ${toppKat}.`,
         confidence_score: 0.9,
         metadata: { streamCount: nyStreamCount },
       });
@@ -253,3 +255,4 @@ Returner KUN JSON:
     console.error('[LearningLoop] Feil:', err.message?.slice(0, 200));
   }
 }
+

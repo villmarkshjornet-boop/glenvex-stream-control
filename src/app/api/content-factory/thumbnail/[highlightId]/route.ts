@@ -19,7 +19,7 @@ async function lagThumbnailTekst(
   const ytCopy = copies.find((c: any) => c.platform === 'youtube');
   const ttCopy = copies.find((c: any) => c.platform === 'tiktok');
 
-  const system = `Du er ekspert på gaming YouTube/TikTok thumbnails for norsk streamer GLENVEX.
+  const system = `Du er ekspert på gaming YouTube/TikTok thumbnails for en norsk streamer.
 Lag thumbnail-tekst. Svar KUN med JSON: {"headline":"...","subheadline":"...","style":"..."}
 headline: 2–5 ORD, STORE BOKSTAVER, norsk, høy klikkverdi (eks: "DETTE VAR SYKT", "HAN HADDE IKKE SJANS", "BOSSEN BLE KNUST")
 subheadline: maks 5 ord, norsk, kan være tom string

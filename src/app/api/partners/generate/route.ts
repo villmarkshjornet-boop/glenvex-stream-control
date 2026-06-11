@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -13,6 +15,14 @@ export async function POST(req: NextRequest) {
     type: 'discord' | 'twitch' | 'instagram' | 'twitter' | 'facebook' | 'giveaway';
     genererBilde?: boolean;
   };
+
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
 
   const client = new OpenAI({ apiKey });
 
@@ -29,7 +39,7 @@ export async function POST(req: NextRequest) {
     model: 'gpt-4o-mini',
     messages: [{
       role: 'user',
-      content: `Lag en ${typeInstruksjoner[type]} for partner "${partner.navn}" på vegne av streameren GLENVEX. Norsk tekst.
+      content: `Lag en ${typeInstruksjoner[type]} for partner "${partner.navn}" på vegne av streameren ${brandName}. Norsk tekst.
 
 Partner-info:
 - Navn: ${partner.navn}
@@ -57,7 +67,7 @@ Returner KUN JSON:
     try {
       const bildeRes = await client.images.generate({
         model: 'dall-e-3',
-        prompt: `Premium gaming affiliate marketing banner for "${partner.navn}". Dark cinematic style, neon green accents, professional esports aesthetic. Norwegian streamer GLENVEX. Show product/brand prominently. No text overlays.`,
+        prompt: `Premium gaming affiliate marketing banner for "${partner.navn}". Dark cinematic style, neon green accents, professional esports aesthetic. Norwegian streamer ${brandName}. Show product/brand prominently. No text overlays.`,
         n: 1,
         size: '1024x1024',
         quality: 'standard',
@@ -68,3 +78,4 @@ Returner KUN JSON:
 
   return NextResponse.json({ ...innhold, bildeUrl });
 }
+

@@ -35,7 +35,7 @@ export async function POST() {
     streamInfo,
     ctxRes,
   ] = await Promise.allSettled([
-    db.from('workspaces').select('settings_json').eq('id', ws).single(),
+    db.from('workspaces').select('settings_json,brand_name,twitch_display_name').eq('id', ws).single(),
     db.from('ai_agent_insights').select('title,summary,confidence_score,created_at').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(5),
     db.from('ai_agent_events').select('event_type,username,message_text,importance_score,created_at').eq('workspace_id', ws).eq('source', 'discord').gte('created_at', cutoff24h).order('importance_score', { ascending: false }).limit(20),
     db.from('ai_agent_events').select('event_type,username,message_text,importance_score,created_at').eq('workspace_id', ws).eq('source', 'twitch').gte('created_at', cutoff24h).order('importance_score', { ascending: false }).limit(20),
@@ -46,7 +46,12 @@ export async function POST() {
     getCreatorContext({ limit: 8 }),
   ]);
 
-  const settings   = workspaceRes.status === 'fulfilled'  ? workspaceRes.value.data?.settings_json  : null;
+  const settings    = workspaceRes.status === 'fulfilled'  ? workspaceRes.value.data?.settings_json   : null;
+  const brandName   = workspaceRes.status === 'fulfilled'  ? (workspaceRes.value.data?.brand_name ?? 'streameren') : 'streameren';
+  const displayName = workspaceRes.status === 'fulfilled'  ? (workspaceRes.value.data?.twitch_display_name ?? brandName) : brandName;
+  if (brandName === 'streameren') {
+    void db.from('system_events').insert({ workspace_id: ws, source: 'stream_briefing', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'Stream Briefing: workspace mangler brand_name', severity: 'warning', metadata: { wsId: ws } });
+  }
   const insights   = insightsRes.status === 'fulfilled'   ? insightsRes.value.data   ?? [] : [];
   const discord    = discordRes.status === 'fulfilled'    ? discordRes.value.data    ?? [] : [];
   const twitch     = twitchRes.status === 'fulfilled'     ? twitchRes.value.data     ?? [] : [];
@@ -84,8 +89,8 @@ export async function POST() {
     messages: [
       {
         role: 'system',
-        content: `Du er AI-produsent for GLENVEX – et norsk Twitch-community.
-Du lager en konsis pre-stream briefing (maks 600 ord) for streameren Glenn Ove Karlsen (gkarlsen).
+        content: `Du er AI-produsent for ${brandName} – et norsk Twitch-community.
+Du lager en konsis pre-stream briefing (maks 600 ord) for streameren (${displayName}).
 Svar KUN med JSON i dette formatet:
 {
   "overskrift": "en kort, energisk tittel for briefingen",
@@ -99,7 +104,7 @@ Svar KUN med JSON i dette formatet:
       },
       {
         role: 'user',
-        content: `Her er all tilgjengelig data om GLENVEX nå:\n\n${dataKontekst}`,
+        content: `Her er all tilgjengelig data om ${brandName} nå:\n\n${dataKontekst}`,
       },
     ],
   });

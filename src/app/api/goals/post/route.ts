@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getAnnonseringsKanalId } from '@/lib/discordChannel';
 import { postOgOppdater } from '@/lib/discordMessages';
+import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,14 @@ export async function POST(req: NextRequest) {
     goals: { type: string; label: string; mal: number; gjeldende: number; aktiv: boolean }[];
     live: { followers: number; discordMembres: number };
   };
+
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
 
   const kanalId = await getAnnonseringsKanalId();
   if (!kanalId) return NextResponse.json({ error: 'Ingen kanal funnet' }, { status: 400 });
@@ -37,7 +47,7 @@ export async function POST(req: NextRequest) {
 
       const res = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `Skriv én engasjerende norsk Discord-melding (maks 2 setninger) om disse målene for GLENVEX sitt community: ${målTekst}. Mørk gaming-vibe, oppfordre til å hjelpe. Ingen emojis i starten.` }],
+        messages: [{ role: 'user', content: `Skriv én engasjerende norsk Discord-melding (maks 2 setninger) om disse målene for ${brandName} sitt community: ${målTekst}. Mørk gaming-vibe, oppfordre til å hjelpe. Ingen emojis i starten.` }],
         max_tokens: 80,
         temperature: 0.9,
       });
@@ -61,7 +71,7 @@ export async function POST(req: NextRequest) {
     description: intro,
     color: 0x00ff41,
     fields,
-    footer: { text: 'GLENVEX • Oppdateres automatisk' },
+    footer: { text: `${brandName} • Oppdateres automatisk` },
     timestamp: new Date().toISOString(),
   };
 
@@ -69,3 +79,4 @@ export async function POST(req: NextRequest) {
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
   return NextResponse.json({ ok: true, msgId: result.msgId });
 }
+

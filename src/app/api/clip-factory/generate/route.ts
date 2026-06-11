@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     model: 'gpt-4o-mini',
     messages: [{
       role: 'user',
-      content: `Lag innholdstekster for denne Twitch-clipsen fra streameren GLENVEX. Returner KUN JSON:
+      content: `Lag innholdstekster for denne Twitch-clipsen fra en norsk streamer. Returner KUN JSON:
 {
   "tiktok": { "tittel": "...", "beskrivelse": "...", "hashtags": "#..." },
   "youtube": { "tittel": "...", "beskrivelse": "..." },
@@ -31,7 +31,7 @@ Regler:
 - Energisk og fengende
 - TikTok: maks 150 tegn tittel, snappy beskrivelse, 5-8 hashtags
 - YouTube: SEO-optimalisert tittel, 2-3 setninger beskrivelse
-- Instagram: engasjerende caption, 10-12 hashtags inkl. #GLENVEX #Twitch`,
+- Instagram: engasjerende caption, 10-12 hashtags inkl. #Twitch #NorwegianStreamer`,
     }],
     max_tokens: 500,
     temperature: 0.85,

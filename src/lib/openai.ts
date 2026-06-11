@@ -1,19 +1,27 @@
 import OpenAI from 'openai';
 import type { StreamInfo, PromoContent } from '@/types';
 
-export async function generatePromo(stream: StreamInfo): Promise<PromoContent> {
+export async function generatePromo(
+  stream: StreamInfo,
+  ws?: { brandName?: string; twitchLogin?: string }
+): Promise<PromoContent> {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
-    return buildFallbackPromo(stream);
+    return buildFallbackPromo(stream, ws);
   }
 
   const client = new OpenAI({ apiKey });
 
-  const prompt = `Du er promo-hjelper for den norske streameren GLENVEX.
+  const brandName = ws?.brandName ?? 'streameren';
+  const twitchUrl = ws?.twitchLogin
+    ? `twitch.tv/${ws.twitchLogin}`
+    : (process.env.TWITCH_URL ?? 'twitch.tv');
+
+  const prompt = `Du er promo-hjelper for den norske streameren ${brandName}.
 Lag kortfattet, mørk og energisk promo-tekst TILPASSET spillet som spilles.
 
-Streamer: GLENVEX
+Streamer: ${brandName}
 Spill: ${stream.game || 'Gaming'}
 Stream-tittel: ${stream.title || 'Live nå'}
 Status: ${stream.isLive ? 'ER LIVE NÅ' : 'Generell promo'}
@@ -30,7 +38,7 @@ Twitter-regler:
 - Inkluder 4-6 hashtags som faktisk er i bruk på Twitter for dette spillet
 - Eksempel GTA RP: #GTARP #NoPixel #GTA5 #Twitch #NorwegianStreamer
 - Eksempel Tarkov: #EscapeFromTarkov #Tarkov #EFT #Twitch #Gaming
-- Avslutt alltid med ${process.env.TWITCH_URL ?? `twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`}
+- Avslutt alltid med ${twitchUrl}
 
 Instagram-regler:
 - Inkluder 8-10 relevante hashtags for spillet og gaming-nisjen
@@ -62,18 +70,18 @@ Svar KUN med gyldig JSON (ingen forklaring, ingen markdown):
   if (stream.thumbnailUrl) {
     promo.imageUrl = stream.thumbnailUrl;
   } else {
-    promo.imageUrl = await generatePromoImage(client, stream);
+    promo.imageUrl = await generatePromoImage(client, stream, brandName);
   }
 
   return promo;
 }
 
-async function generatePromoImage(client: OpenAI, stream: StreamInfo): Promise<string | undefined> {
+async function generatePromoImage(client: OpenAI, stream: StreamInfo, brandName: string): Promise<string | undefined> {
   try {
     const game = stream.game || 'gaming';
     const response = await client.images.generate({
       model: 'dall-e-3',
-      prompt: `Dark cinematic gaming thumbnail for Norwegian streamer GLENVEX. Game: ${game}. Dark neon green and black, dramatic lighting, cyberpunk aesthetic. No text or logos.`,
+      prompt: `Dark cinematic gaming thumbnail for Norwegian streamer ${brandName}. Game: ${game}. Dark neon green and black, dramatic lighting, cyberpunk aesthetic. No text or logos.`,
       n: 1,
       size: '1024x1024',
       quality: 'standard',
@@ -84,20 +92,22 @@ async function generatePromoImage(client: OpenAI, stream: StreamInfo): Promise<s
   }
 }
 
-function buildFallbackPromo(stream: StreamInfo): PromoContent {
+function buildFallbackPromo(stream: StreamInfo, ws?: { brandName?: string; twitchLogin?: string }): PromoContent {
   const game = stream.game || 'Gaming';
   const safeGame = game.replace(/\s+/g, '');
+  const brand = ws?.brandName ?? 'streameren';
+  const url = ws?.twitchLogin ? `twitch.tv/${ws.twitchLogin}` : (process.env.TWITCH_URL ?? 'twitch.tv');
 
   return {
-    tiktok: `🔴 GLENVEX er LIVE.\nSystemet er aktivert. ${game}-kaoset starter nå.\nKom inn før alt går galt. #GLENVEX #${safeGame} #Gaming`,
-    instagram: `Ny stream er LIVE!\n${game} – action og kaos.\nLink i bio!\n#${safeGame} #Gaming #GLENVEX #Live`,
-    twitter: `LIVE NÅ: ${game} med GLENVEX!\nKom inn og se kaoset unfold.\ntwitch.tv/glenvex\n#${safeGame} #Live #GLENVEX`,
-    discord: `🔴 **GLENVEX ER LIVE!**\nSystemet er aktivert. ${game}-kaoset starter nå.\nBli med på stream nå! → twitch.tv/glenvex`,
-    youtube: `GLENVEX LIVE: ${game} – ${stream.title || 'Kaos og action på stream'}`,
+    tiktok: `🔴 ${brand} er LIVE.\nSystemet er aktivert. ${game}-kaoset starter nå.\nKom inn før alt går galt. #${safeGame} #Gaming`,
+    instagram: `Ny stream er LIVE!\n${game} – action og kaos.\nLink i bio!\n#${safeGame} #Gaming #Live`,
+    twitter: `LIVE NÅ: ${game} med ${brand}!\nKom inn og se kaoset unfold.\n${url}\n#${safeGame} #Live`,
+    discord: `🔴 **${brand.toUpperCase()} ER LIVE!**\nSystemet er aktivert. ${game}-kaoset starter nå.\nBli med på stream nå! → ${url}`,
+    youtube: `${brand} LIVE: ${game} – ${stream.title || 'Kaos og action på stream'}`,
     clipTitles: [
-      `Dette skjedde på GLENVEX sin stream... 😱`,
-      `GLENVEX ${game} – Umulig øyeblikk`,
-      `Ingen tror det skjedde her 🔥 #GLENVEX`,
+      `Dette skjedde på ${brand} sin stream... 😱`,
+      `${brand} ${game} – Umulig øyeblikk`,
+      `Ingen tror det skjedde her 🔥`,
     ],
   };
 }

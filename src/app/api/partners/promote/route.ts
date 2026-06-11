@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getPartners, updatePartner, type Partner } from '@/lib/partners';
 import { getPartnerKanalId } from '@/lib/discordChannel';
@@ -25,6 +25,16 @@ function velgPartner(partners: Partner[]): Partner | null {
 export async function POST(req: NextRequest) {
   const { manuellPartnerId } = await req.json().catch(() => ({})) as { manuellPartnerId?: string };
 
+  const { getDb } = await import('@/lib/db');
+  const { getWorkspaceId } = await import('@/lib/workspace');
+  const wsId = getWorkspaceId();
+  const db = getDb();
+  let brandName = 'streameren';
+  if (db) {
+    const { data: ws } = await db.from('workspaces').select('brand_name').eq('id', wsId).single();
+    brandName = ws?.brand_name ?? 'streameren';
+  }
+
   const partners = await getPartners();
   const partner = manuellPartnerId
     ? partners.find(p => p.id === manuellPartnerId)
@@ -45,7 +55,7 @@ export async function POST(req: NextRequest) {
         model: 'gpt-4o-mini',
         messages: [{
           role: 'user',
-          content: `Lag en kort, engasjerende Discord-partnerpost for "${partner.navn}" på vegne av GLENVEX. Norsk, gaming-vibe, maks 3 setninger. ${partner.rabattkode ? `Inkluder kode: ${partner.rabattkode}.` : ''} ${partner.affiliateLink ? `Inkluder link: ${partner.affiliateLink}` : ''}`,
+          content: `Lag en kort, engasjerende Discord-partnerpost for "${partner.navn}" på vegne av ${brandName}. Norsk, gaming-vibe, maks 3 setninger. ${partner.rabattkode ? `Inkluder kode: ${partner.rabattkode}.` : ''} ${partner.affiliateLink ? `Inkluder link: ${partner.affiliateLink}` : ''}`,
         }],
         max_tokens: 150,
         temperature: 0.9,
@@ -64,7 +74,7 @@ export async function POST(req: NextRequest) {
     title: `🤝 Partner: ${partner.navn}`,
     description: tekst,
     color: 0x00ff41,
-    footer: { text: `GLENVEX Partner Hub${partner.ownedBrand ? ' • Eget merke' : ''}` },
+    footer: { text: `${brandName} Partner Hub${partner.ownedBrand ? ' • Eget merke' : ''}` },
     timestamp: new Date().toISOString(),
   };
   if (partner.rabattkode) {
@@ -83,3 +93,4 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: result.ok, partner: partner.navn, error: result.error });
 }
+
