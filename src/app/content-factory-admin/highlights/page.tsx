@@ -28,6 +28,10 @@ interface Highlight {
   thumbnail_subheadline?: string | null;
   thumbnail_quality_score?: number | null;
   thumbnail_source_frame?: number | null;
+  thumbnail_variant_b_url?: string | null;
+  thumbnail_variant_c_url?: string | null;
+  thumbnail_ctr_score?: number | null;
+  thumbnail_ctr_reason?: string | null;
 }
 
 interface Copy {
@@ -469,22 +473,38 @@ export default function HighlightViewerPage() {
                           </span>
                         </div>
 
-                        {/* Quality score + source frame */}
+                        {/* Quality score + CTR score + source frame */}
                         {h.thumbnail_status === 'DONE' && (
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {h.thumbnail_quality_score != null && (
-                              <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
-                                h.thumbnail_quality_score >= 80 ? 'text-green-400 border-green-400/30 bg-green-400/5' :
-                                h.thumbnail_quality_score >= 60 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
-                                'text-red-400 border-red-400/30 bg-red-400/5'
-                              }`}>
-                                ★ Score {h.thumbnail_quality_score}/100
-                              </span>
-                            )}
-                            {h.thumbnail_source_frame != null && (
-                              <span className="text-[9px] text-g-muted">
-                                Frame @ {h.thumbnail_source_frame.toFixed(1)}s
-                              </span>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {h.thumbnail_quality_score != null && (
+                                <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
+                                  h.thumbnail_quality_score >= 80 ? 'text-green-400 border-green-400/30 bg-green-400/5' :
+                                  h.thumbnail_quality_score >= 60 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
+                                  'text-red-400 border-red-400/30 bg-red-400/5'
+                                }`}>
+                                  ★ Score {h.thumbnail_quality_score}/100
+                                </span>
+                              )}
+                              {h.thumbnail_ctr_score != null && (
+                                <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
+                                  h.thumbnail_ctr_score >= 75 ? 'text-purple-400 border-purple-400/30 bg-purple-400/5' :
+                                  h.thumbnail_ctr_score >= 55 ? 'text-blue-400 border-blue-400/30 bg-blue-400/5' :
+                                  'text-g-muted border-g-border'
+                                }`}>
+                                  ◈ CTR {h.thumbnail_ctr_score}/100
+                                </span>
+                              )}
+                              {h.thumbnail_source_frame != null && (
+                                <span className="text-[9px] text-g-muted">
+                                  Frame @ {h.thumbnail_source_frame.toFixed(1)}s
+                                </span>
+                              )}
+                            </div>
+                            {h.thumbnail_ctr_reason && (
+                              <p className="text-[9px] text-g-muted italic">
+                                Vision: {h.thumbnail_ctr_reason}
+                              </p>
                             )}
                           </div>
                         )}
@@ -538,6 +558,46 @@ export default function HighlightViewerPage() {
                               className="inline-block px-3 py-1 bg-g-bg border border-purple-400/30 rounded text-[10px] text-purple-400 hover:bg-purple-400/10 transition-all font-bold"
                             >
                               ↓ Last ned TikTok thumbnail
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Variant B – Cinema */}
+                        {h.thumbnail_variant_b_url && (
+                          <div className="space-y-1.5 border-t border-g-border pt-3">
+                            <p className="text-[9px] text-indigo-400 font-bold uppercase">◈ Variant B – Cinema</p>
+                            <img
+                              src={h.thumbnail_variant_b_url}
+                              alt="Variant B thumbnail"
+                              className="w-full rounded border border-indigo-400/20"
+                              style={{ maxHeight: '160px', objectFit: 'cover' }}
+                            />
+                            <a
+                              href={h.thumbnail_variant_b_url}
+                              download="thumbnail_variant_b.png"
+                              className="inline-block px-3 py-1 bg-g-bg border border-indigo-400/30 rounded text-[10px] text-indigo-400 hover:bg-indigo-400/10 transition-all font-bold"
+                            >
+                              ↓ Last ned Variant B
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Variant C – Impact Block */}
+                        {h.thumbnail_variant_c_url && (
+                          <div className="space-y-1.5 border-t border-g-border pt-3">
+                            <p className="text-[9px] text-orange-400 font-bold uppercase">◈ Variant C – Impact Block</p>
+                            <img
+                              src={h.thumbnail_variant_c_url}
+                              alt="Variant C thumbnail"
+                              className="w-full rounded border border-orange-400/20"
+                              style={{ maxHeight: '160px', objectFit: 'cover' }}
+                            />
+                            <a
+                              href={h.thumbnail_variant_c_url}
+                              download="thumbnail_variant_c.png"
+                              className="inline-block px-3 py-1 bg-g-bg border border-orange-400/30 rounded text-[10px] text-orange-400 hover:bg-orange-400/10 transition-all font-bold"
+                            >
+                              ↓ Last ned Variant C
                             </a>
                           </div>
                         )}
