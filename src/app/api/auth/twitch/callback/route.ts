@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { decodeState, safeReturnUrl } from '@/lib/oauthState';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,32 +10,40 @@ export async function GET(req: NextRequest) {
   const state = searchParams.get('state');
   const error = searchParams.get('error');
 
-  const onboardingUrl = `${origin}/onboarding`;
+  const fallbackUrl = `${origin}/onboarding`;
 
   if (error || !code || !state) {
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_cancelled`);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_cancelled`);
   }
 
-  // Decode and verify state
-  let wsId: string, nonce: string;
-  try {
-    const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-    wsId  = decoded.wsId;
-    nonce = decoded.nonce;
-  } catch {
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_state_invalid`);
+  const stateSecret = process.env.OAUTH_STATE_SECRET;
+  if (!stateSecret) {
+    console.error('[twitch/callback] OAUTH_STATE_SECRET ikke satt');
+    return NextResponse.redirect(`${fallbackUrl}?error=server_config`);
   }
 
+  const decoded = decodeState(state, stateSecret);
+  if (!decoded.ok) {
+    console.error('[twitch/callback] state decode failed:', decoded.error);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_state_${decoded.error}`);
+  }
+
+  const { wsId, ret, nonce } = decoded.state;
+
+  // CSRF check: nonce in signed state must match cookie
   const storedNonce = req.cookies.get('twitch_oauth_nonce')?.value;
   if (!storedNonce || storedNonce !== nonce) {
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_state_mismatch`);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_state_mismatch`);
   }
 
   const clientId     = process.env.TWITCH_CLIENT_ID ?? '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET ?? '';
-  const baseUrl      = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ?? origin;
+  const centralBase  = (
+    process.env.GLENVEX_OAUTH_BASE ??
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    origin
+  ).replace(/\/$/, '');
 
-  // Exchange code for tokens
   const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -43,7 +52,7 @@ export async function GET(req: NextRequest) {
       client_secret: clientSecret,
       code,
       grant_type:    'authorization_code',
-      redirect_uri:  `${baseUrl}/api/auth/twitch/callback`,
+      redirect_uri:  `${centralBase}/api/auth/twitch/callback`,
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -51,14 +60,13 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok) {
     const body = await tokenRes.text().catch(() => '');
     console.error('[twitch/callback] token exchange failed:', tokenRes.status, body);
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_token_failed`);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_token_failed`);
   }
 
   const tokens = await tokenRes.json() as {
     access_token: string; refresh_token: string; scope: string; token_type: string;
   };
 
-  // Get user info from Twitch
   const userRes = await fetch('https://api.twitch.tv/helix/users', {
     headers: {
       Authorization: `Bearer ${tokens.access_token}`,
@@ -68,7 +76,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!userRes.ok) {
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_user_failed`);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_user_failed`);
   }
 
   const userData = await userRes.json() as { data: Array<{
@@ -76,12 +84,11 @@ export async function GET(req: NextRequest) {
   }> };
   const twitchUser = userData.data[0];
   if (!twitchUser) {
-    return NextResponse.redirect(`${onboardingUrl}?error=twitch_no_user`);
+    return NextResponse.redirect(`${fallbackUrl}?error=twitch_no_user`);
   }
 
-  // Save to workspace
   const db = getDb();
-  if (!db) return NextResponse.redirect(`${onboardingUrl}?error=db_unavailable`);
+  if (!db) return NextResponse.redirect(`${fallbackUrl}?error=db_unavailable`);
 
   const { error: dbErr } = await db.from('workspaces').update({
     twitch_user_id:       twitchUser.id,
@@ -99,10 +106,9 @@ export async function GET(req: NextRequest) {
 
   if (dbErr) {
     console.error('[twitch/callback] db update failed:', dbErr.message);
-    return NextResponse.redirect(`${onboardingUrl}?error=db_save_failed`);
+    return NextResponse.redirect(`${fallbackUrl}?error=db_save_failed`);
   }
 
-  // Observability
   try { await db.from('system_events').insert({
     workspace_id: wsId,
     source:       'onboarding',
@@ -112,7 +118,10 @@ export async function GET(req: NextRequest) {
     metadata:     { twitchUserId: twitchUser.id, login: twitchUser.login, displayName: twitchUser.display_name },
   }); } catch {}
 
-  const response = NextResponse.redirect(`${onboardingUrl}?step=3`);
+  const redirectTo = safeReturnUrl(ret, `${fallbackUrl}?step=3`);
+  const response = NextResponse.redirect(
+    redirectTo.startsWith('/') ? `${origin}${redirectTo}` : redirectTo
+  );
   response.cookies.delete('twitch_oauth_nonce');
   return response;
 }
