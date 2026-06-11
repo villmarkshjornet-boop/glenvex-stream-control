@@ -130,6 +130,11 @@ export async function getClipsKanalId(): Promise<string> {
   return prefs.clips || prefs.chat || process.env.DISCORD_CHAT_CHANNEL_ID || '';
 }
 
+export async function getPartnerKanalId(): Promise<string> {
+  const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
+  return prefs.partner || prefs.chat || process.env.DISCORD_CHAT_CHANNEL_ID || '';
+}
+
 export async function getChatKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
   return prefs.chat || process.env.DISCORD_CHAT_CHANNEL_ID || '';

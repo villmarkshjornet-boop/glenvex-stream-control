@@ -33,7 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -124,6 +124,38 @@ async function finnChatKanal(): Promise<TextChannel | null> {
     (ch.name.includes('chat') || ch.name.includes('general') || ch.name.includes('gaming'))
   );
   return (fallback as TextChannel) ?? null;
+}
+
+let _clipsKanalIdCache: string | null = null;
+let _clipsKanalIdTs = 0;
+
+async function finnClipsKanal(): Promise<TextChannel | null> {
+  const now = Date.now();
+  if (now - _clipsKanalIdTs > 10 * 60_000) {
+    _clipsKanalIdCache = await getSbClipsKanalId().catch(() => null);
+    _clipsKanalIdTs = now;
+  }
+  if (_clipsKanalIdCache) {
+    const ch = client.channels.cache.get(_clipsKanalIdCache);
+    if (ch instanceof TextChannel) return ch;
+  }
+  return finnChatKanal(); // fall back to chat if no clips channel configured
+}
+
+let _partnerKanalIdCache: string | null = null;
+let _partnerKanalIdTs = 0;
+
+async function finnPartnerKanal(): Promise<TextChannel | null> {
+  const now = Date.now();
+  if (now - _partnerKanalIdTs > 10 * 60_000) {
+    _partnerKanalIdCache = await getSbPartnerKanalId().catch(() => null);
+    _partnerKanalIdTs = now;
+  }
+  if (_partnerKanalIdCache) {
+    const ch = client.channels.cache.get(_partnerKanalIdCache);
+    if (ch instanceof TextChannel) return ch;
+  }
+  return finnChatKanal(); // fall back to chat if no partner channel configured
 }
 
 function ukeNummer(): number {
@@ -922,20 +954,27 @@ async function sendProaktivMelding() {
     getPauseProaktiv().catch(() => false),
   ]);
   if (!aktiv || pauseDiscord || pauseProaktiv) return;
-  const kanal = await finnChatKanal();
-  if (!kanal) return;
 
   const runde = proaktivRunde % 3;
   proaktivRunde++;
 
   try {
     if (runde === 0) {
-      await sendPartnerPromoMelding(kanal);
+      // Partner-promo → partner-kanal (konfigurert i kanal-innstillinger)
+      const partnerKanal = await finnPartnerKanal();
+      if (!partnerKanal) return;
+      await sendPartnerPromoMelding(partnerKanal);
     } else if (runde === 1) {
-      await sendStreamInfoMelding(kanal);
+      // Stream-info → chat (greit som det er)
+      const chatKanal = await finnChatKanal();
+      if (!chatKanal) return;
+      await sendStreamInfoMelding(chatKanal);
     } else {
+      // Community-melding → chat
+      const chatKanal = await finnChatKanal();
+      if (!chatKanal) return;
       const melding = getProaktivMelding();
-      await discordSend(kanal, melding, { trigger: 'proaktiv_community' });
+      await discordSend(chatKanal, melding, { trigger: 'proaktiv_community' });
       addToMemory({ type: 'proaktiv', innhold: melding });
     }
   } catch {}
@@ -1017,7 +1056,7 @@ async function sjekkUkentligStats() {
 // ─── Clip-deling ─────────────────────────────────────────────────────────────
 
 async function postTopClip() {
-  const kanal = await finnChatKanal();
+  const kanal = await finnClipsKanal();
   if (!kanal) return;
   try {
     const broadcasterId = await getBroadcasterId();
