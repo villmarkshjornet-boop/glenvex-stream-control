@@ -23,6 +23,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${fallbackUrl}?error=server_config`);
   }
 
+  // Never use request origin as redirect_uri — must match what's registered in Discord dev console
+  const centralBase = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+  if (!centralBase) {
+    console.error('[discord-bot/callback] GLENVEX_OAUTH_BASE ikke satt');
+    return NextResponse.redirect(`${fallbackUrl}?error=server_config`);
+  }
+
   const decoded = decodeState(state, stateSecret);
   if (!decoded.ok) {
     console.error('[discord-bot/callback] state decode failed:', decoded.error);
@@ -30,23 +37,32 @@ export async function GET(req: NextRequest) {
   }
 
   const { wsId, ret, nonce } = decoded.state;
+  const db = getDb();
 
-  // CSRF check: nonce in signed state must match cookie
+  const logFailed = (reason: string, extra?: Record<string, unknown>) => {
+    void db?.from('system_events').insert({
+      workspace_id: wsId,
+      source:       'onboarding',
+      event_type:   'OAUTH_FAILED',
+      title:        `Discord OAuth mislyktes: ${reason}`,
+      severity:     'warning',
+      metadata:     { reason, provider: 'discord', ...extra },
+    });
+  };
+
+  // CSRF check: nonce in HMAC-signed state must match cookie
   const storedNonce = req.cookies.get('discord_oauth_nonce')?.value;
   if (!storedNonce || storedNonce !== nonce) {
+    logFailed('nonce_mismatch');
     return NextResponse.redirect(`${fallbackUrl}?error=discord_state_mismatch`);
   }
 
   const clientId     = process.env.DISCORD_CLIENT_ID ?? '';
   const clientSecret = process.env.DISCORD_CLIENT_SECRET ?? '';
-  const centralBase  = (
-    process.env.GLENVEX_OAUTH_BASE ??
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    origin
-  ).replace(/\/$/, '');
 
   if (!clientSecret) {
     console.error('[discord-bot/callback] DISCORD_CLIENT_SECRET ikke satt');
+    logFailed('server_config_missing', { field: 'DISCORD_CLIENT_SECRET' });
     return NextResponse.redirect(`${fallbackUrl}?error=discord_config_missing`);
   }
 
@@ -66,6 +82,7 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok) {
     const body = await tokenRes.text().catch(() => '');
     console.error('[discord-bot/callback] token exchange failed:', tokenRes.status, body);
+    logFailed('token_exchange_failed', { httpStatus: tokenRes.status });
     return NextResponse.redirect(`${fallbackUrl}?error=discord_token_failed`);
   }
 
@@ -92,10 +109,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (!resolvedGuildId) {
+    logFailed('no_guild_in_response');
     return NextResponse.redirect(`${fallbackUrl}?error=discord_no_guild`);
   }
 
-  const db = getDb();
   if (!db) return NextResponse.redirect(`${fallbackUrl}?error=db_unavailable`);
 
   const { error: dbErr } = await db.from('workspaces').update({
@@ -108,13 +125,14 @@ export async function GET(req: NextRequest) {
 
   if (dbErr) {
     console.error('[discord-bot/callback] db update failed:', dbErr.message);
+    logFailed('db_save_failed', { dbMessage: dbErr.message });
     return NextResponse.redirect(`${fallbackUrl}?error=db_save_failed`);
   }
 
   try { await db.from('system_events').insert({
     workspace_id: wsId,
     source:       'onboarding',
-    event_type:   'DISCORD_CONNECTED',
+    event_type:   'OAUTH_DISCORD_CONNECTED',
     title:        `Discord tilkoblet: ${resolvedGuildName ?? resolvedGuildId}`,
     severity:     'info',
     metadata:     { guildId: resolvedGuildId, guildName: resolvedGuildName },

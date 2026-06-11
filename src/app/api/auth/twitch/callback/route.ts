@@ -22,6 +22,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${fallbackUrl}?error=server_config`);
   }
 
+  // Never use request origin as redirect_uri — must match what's registered in Twitch dev console
+  const centralBase = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+  if (!centralBase) {
+    console.error('[twitch/callback] GLENVEX_OAUTH_BASE ikke satt');
+    return NextResponse.redirect(`${fallbackUrl}?error=server_config`);
+  }
+
   const decoded = decodeState(state, stateSecret);
   if (!decoded.ok) {
     console.error('[twitch/callback] state decode failed:', decoded.error);
@@ -29,20 +36,28 @@ export async function GET(req: NextRequest) {
   }
 
   const { wsId, ret, nonce } = decoded.state;
+  const db = getDb();
 
-  // CSRF check: nonce in signed state must match cookie
+  const logFailed = (reason: string, extra?: Record<string, unknown>) => {
+    void db?.from('system_events').insert({
+      workspace_id: wsId,
+      source:       'onboarding',
+      event_type:   'OAUTH_FAILED',
+      title:        `Twitch OAuth mislyktes: ${reason}`,
+      severity:     'warning',
+      metadata:     { reason, provider: 'twitch', ...extra },
+    });
+  };
+
+  // CSRF check: nonce in HMAC-signed state must match cookie
   const storedNonce = req.cookies.get('twitch_oauth_nonce')?.value;
   if (!storedNonce || storedNonce !== nonce) {
+    logFailed('nonce_mismatch');
     return NextResponse.redirect(`${fallbackUrl}?error=twitch_state_mismatch`);
   }
 
   const clientId     = process.env.TWITCH_CLIENT_ID ?? '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET ?? '';
-  const centralBase  = (
-    process.env.GLENVEX_OAUTH_BASE ??
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    origin
-  ).replace(/\/$/, '');
 
   const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
     method: 'POST',
@@ -60,6 +75,7 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok) {
     const body = await tokenRes.text().catch(() => '');
     console.error('[twitch/callback] token exchange failed:', tokenRes.status, body);
+    logFailed('token_exchange_failed', { httpStatus: tokenRes.status });
     return NextResponse.redirect(`${fallbackUrl}?error=twitch_token_failed`);
   }
 
@@ -76,6 +92,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!userRes.ok) {
+    logFailed('user_fetch_failed', { httpStatus: userRes.status });
     return NextResponse.redirect(`${fallbackUrl}?error=twitch_user_failed`);
   }
 
@@ -84,10 +101,10 @@ export async function GET(req: NextRequest) {
   }> };
   const twitchUser = userData.data[0];
   if (!twitchUser) {
+    logFailed('no_user_in_response');
     return NextResponse.redirect(`${fallbackUrl}?error=twitch_no_user`);
   }
 
-  const db = getDb();
   if (!db) return NextResponse.redirect(`${fallbackUrl}?error=db_unavailable`);
 
   const { error: dbErr } = await db.from('workspaces').update({
@@ -106,13 +123,14 @@ export async function GET(req: NextRequest) {
 
   if (dbErr) {
     console.error('[twitch/callback] db update failed:', dbErr.message);
+    logFailed('db_save_failed', { dbMessage: dbErr.message });
     return NextResponse.redirect(`${fallbackUrl}?error=db_save_failed`);
   }
 
   try { await db.from('system_events').insert({
     workspace_id: wsId,
     source:       'onboarding',
-    event_type:   'TWITCH_CONNECTED',
+    event_type:   'OAUTH_TWITCH_CONNECTED',
     title:        `Twitch tilkoblet: ${twitchUser.display_name} (${twitchUser.login})`,
     severity:     'info',
     metadata:     { twitchUserId: twitchUser.id, login: twitchUser.login, displayName: twitchUser.display_name },

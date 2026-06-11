@@ -5,8 +5,7 @@ import { encodeState } from '@/lib/oauthState';
 
 export const dynamic = 'force-dynamic';
 
-// Required env vars: DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, OAUTH_STATE_SECRET
-// Optional: GLENVEX_OAUTH_BASE (central domain, defaults to NEXT_PUBLIC_BASE_URL)
+// Required env vars: DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, OAUTH_STATE_SECRET, GLENVEX_OAUTH_BASE
 // Register ONE redirect URI in Discord dev console: {GLENVEX_OAUTH_BASE}/api/auth/discord-bot/callback
 
 // Permissions: SEND_MESSAGES | EMBED_LINKS | ATTACH_FILES | READ_MESSAGE_HISTORY
@@ -20,14 +19,12 @@ export async function GET(req: NextRequest) {
 
   const clientId    = process.env.DISCORD_CLIENT_ID;
   const stateSecret = process.env.OAUTH_STATE_SECRET;
-  const centralBase = (
-    process.env.GLENVEX_OAUTH_BASE ??
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    `https://${h.get('host') ?? 'app.glenvex.com'}`
-  ).replace(/\/$/, '');
+  // Never fall back to the request host — redirect_uri must be the registered central domain
+  const centralBase = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
 
   if (!clientId)    return NextResponse.json({ error: 'DISCORD_CLIENT_ID ikke satt' }, { status: 500 });
   if (!stateSecret) return NextResponse.json({ error: 'OAUTH_STATE_SECRET ikke satt' }, { status: 500 });
+  if (!centralBase) return NextResponse.json({ error: 'GLENVEX_OAUTH_BASE ikke satt' }, { status: 500 });
 
   let wsId = workspaceId;
   if (!wsId && userId) {
@@ -39,9 +36,7 @@ export async function GET(req: NextRequest) {
   }
   if (!wsId) return NextResponse.json({ error: 'Workspace ikke funnet — fullfør steg 1 først' }, { status: 400 });
 
-  // returnUrl: where to send the customer after Discord auth (defaults to step 4)
-  const returnUrl = req.nextUrl.searchParams.get('returnUrl') ?? '/onboarding?step=4';
-
+  const returnUrl   = req.nextUrl.searchParams.get('returnUrl') ?? '/onboarding?step=4';
   const { encoded, nonce } = encodeState(wsId, returnUrl, stateSecret);
   const redirectUri = `${centralBase}/api/auth/discord-bot/callback`;
 
@@ -52,6 +47,15 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('scope', 'bot identify guilds');
   url.searchParams.set('permissions', BOT_PERMISSIONS);
   url.searchParams.set('state', encoded);
+
+  void getDb()?.from('system_events').insert({
+    workspace_id: wsId,
+    source:       'onboarding',
+    event_type:   'OAUTH_DISCORD_STARTED',
+    title:        'Discord OAuth påbegynt',
+    severity:     'info',
+    metadata:     { redirectUri, returnUrl },
+  });
 
   const response = NextResponse.redirect(url.toString());
   response.cookies.set('discord_oauth_nonce', nonce, {
