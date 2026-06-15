@@ -49,8 +49,9 @@ export async function POST(req: NextRequest) {
   // Sett PENDING – Railway-worker claimer jobben og setter GENERATING
   // clip_status røres ALDRI
   const { error: pendingErr } = await db.from('content_highlights').update({
-    thumbnail_status: 'PENDING',
-    thumbnail_error:  null,
+    thumbnail_status:       'PENDING',
+    thumbnail_error:        null,
+    thumbnail_reject_count: 0,
   }).eq('id', highlightId);
   if (pendingErr) {
     return NextResponse.json({ error: 'Klarte ikke sette PENDING: ' + pendingErr.message }, { status: 500 });

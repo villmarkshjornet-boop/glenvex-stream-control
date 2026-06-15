@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWorker';
 import { forceThumbnail, getThumbnailWorkerStatus } from './thumbnailGenerator';
-import { buildThumbnailV2 } from './thumbnailBuilderV2';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 
@@ -597,9 +596,9 @@ export function startDataApi(port = 4242) {
         res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
       }
       res.writeHead(202);
-      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V2 startet for ${highlightId}` }));
-      buildThumbnailV2(highlightId).catch((e: any) =>
-        console.error('[DataApi] thumbnailV2 feil:', e.message)
+      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V5.5 startet for ${highlightId}` }));
+      forceThumbnail(highlightId).catch((e: any) =>
+        console.error('[DataApi] thumbnailV55 feil:', e.message)
       );
       return;
     }
