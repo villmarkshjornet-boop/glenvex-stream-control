@@ -43,7 +43,16 @@ export async function GET() {
 
   try {
     const stream = await getStreamInfo(twitchLogin);
-    if (!stream.isLive) return NextResponse.json({ targets: [], reason: 'Ikke live' });
+    if (!stream.isLive) {
+      void logSystemEvent({
+        source:     'raid_manager',
+        event_type: 'RAID_SKIPPED_NOT_LIVE',
+        title:      'Raid Manager: hoppet over – streamen er ikke live',
+        severity:   'info',
+        metadata:   { twitchLogin, brandName },
+      });
+      return NextResponse.json({ targets: [], reason: 'Ikke live' });
+    }
 
     const broadcasterId = twitchUserId ?? await getBroadcasterId(twitchLogin);
     const clientId = process.env.TWITCH_CLIENT_ID;
@@ -57,6 +66,14 @@ export async function GET() {
     let gameId: string | null = null;
 
     if (token && stream.game) {
+      void logSystemEvent({
+        source:     'raid_manager',
+        event_type: 'RAID_SEARCH_STARTED',
+        title:      `Raid-søk startet: ${stream.game} (${stream.viewerCount ?? 0} seere)`,
+        severity:   'info',
+        metadata:   { game: stream.game, currentViewers: stream.viewerCount ?? 0, twitchLogin },
+      });
+
       const gameRes = await fetch(
         `https://api.twitch.tv/helix/games?name=${encodeURIComponent(stream.game)}`,
         { headers: { 'Client-ID': clientId!, Authorization: `Bearer ${token}` } }
@@ -83,7 +100,35 @@ export async function GET() {
         };
 
         let streams = await tryFetch('no');
-        if (streams.length < 3) streams = await tryFetch();
+        if (streams.length < 3) {
+          void logSystemEvent({
+            source:     'raid_manager',
+            event_type: 'RAID_LANGUAGE_FALLBACK',
+            title:      `Norsk filter ga ${streams.length} treff – utvider til alle språk`,
+            severity:   'info',
+            metadata:   { norskTreff: streams.length, game: stream.game },
+          });
+          streams = await tryFetch();
+        }
+
+        // Filter out channels that are too large or too small relative to current viewers
+        const myViewers = stream.viewerCount ?? 0;
+        if (myViewers > 0) {
+          const before = streams.length;
+          streams = streams.filter((s: any) => {
+            const ratio = s.viewer_count / myViewers;
+            return ratio >= 0.1 && ratio <= 5;
+          });
+          if (streams.length < before) {
+            void logSystemEvent({
+              source:     'raid_manager',
+              event_type: 'RAID_CANDIDATE_FILTERED',
+              title:      `${before - streams.length} raid-kandidater filtrert bort (viewer-ratio utenfor 0.1x–5x)`,
+              severity:   'info',
+              metadata:   { before, after: streams.length, myViewers, filterMin: Math.round(myViewers * 0.1), filterMax: myViewers * 5 },
+            });
+          }
+        }
 
         targets = streams.slice(0, 10).map((s: any) => ({
           username: s.user_name,
@@ -95,6 +140,16 @@ export async function GET() {
           language: s.language,
         }));
       }
+    }
+
+    if (targets.length === 0) {
+      void logSystemEvent({
+        source:     'raid_manager',
+        event_type: 'RAID_NO_MATCHES_FOUND',
+        title:      `Raid Manager: ingen kandidater funnet for ${stream.game ?? 'ukjent spill'}`,
+        severity:   'warning',
+        metadata:   { game: stream.game, gameId, currentViewers: stream.viewerCount ?? 0, twitchLogin },
+      });
     }
 
     await logSystemEvent({

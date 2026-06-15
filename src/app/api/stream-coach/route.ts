@@ -72,7 +72,13 @@ export async function GET(req: NextRequest) {
       history = data ?? [];
     }
 
-    if (history.length === 0) return NextResponse.json({ history: [], analyse: null, audience: null, streamScore: null });
+    if (history.length === 0) {
+      void db?.from('system_events').insert({ workspace_id: workspaceId, source: 'stream_coach', event_type: 'STREAM_COACH_NO_HISTORY', title: 'Stream Coach: ingen stream-historikk funnet', severity: 'warning', metadata: { workspaceId } });
+      return NextResponse.json({
+        history: [], analyse: null, audience: null, streamScore: null,
+        diagnostics: { hasAudienceData: false, hasHistory: false, noHistoryReason: 'Ingen stream-historikk funnet. Stream Coach trenger minst én fullført stream registrert av boten.' },
+      });
+    }
 
     // Velg stream å analysere
     const selectedStream = requestedStreamId
@@ -239,6 +245,18 @@ Returner KUN gyldig JSON:
       }
     }
 
+    // ── Diagnostics: log when audience data is missing ───────────────────────
+    if (!audienceData) {
+      void db?.from('system_events').insert({
+        workspace_id: workspaceId,
+        source:       'stream_coach',
+        event_type:   'STREAM_COACH_NO_AUDIENCE_DATA',
+        title:        'Stream Coach: ingen audience-data – bot var sannsynligvis ikke aktiv under streamen',
+        severity:     'warning',
+        metadata:     { workspaceId, streamId: selectedStream.stream_id || selectedStream.id, streamTitle: selectedStream.title },
+      });
+    }
+
     // ── Log til system_events ─────────────────────────────────────────────────
     logSystemEvent({
       source: 'stream_coach',
@@ -264,6 +282,14 @@ Returner KUN gyldig JSON:
       streamScore,
       analyse,
       historiskAnalyse,
+      diagnostics: {
+        hasAudienceData:    !!audienceData,
+        hasRetentionData:   !!retentionCurve,
+        hasHistory:         history.length > 0,
+        noAudienceDataReason: !audienceData
+          ? 'Ingen audience-data funnet. Boten var sannsynligvis ikke aktiv under streamen – AUDIENCE_SESSION_COMPLETE event mangler.'
+          : null,
+      },
     });
   } catch {
     return NextResponse.json({ history: [], analyse: null, audience: null, streamScore: null });

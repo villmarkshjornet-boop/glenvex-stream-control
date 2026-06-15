@@ -26,8 +26,11 @@ export async function genererCopy(
 
   const openai = new OpenAI({ apiKey });
 
-  const { data: wsRow } = await db.from('workspaces').select('brand_name').eq('id', getWorkspaceId()).single();
+  const { data: wsRow } = await db.from('workspaces').select('brand_name,twitch_channel_name').eq('id', getWorkspaceId()).single();
   const streamerName = wsRow?.brand_name ?? 'streameren';
+  const twitchUrl    = wsRow?.twitch_channel_name
+    ? `https://twitch.tv/${wsRow.twitch_channel_name}`
+    : null;
 
   const res = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -37,7 +40,7 @@ export async function genererCopy(
 {
   "youtube": {
     "tittel": "SEO-optimalisert tittel (maks 70 tegn)",
-    "beskrivelse": "Engasjerende beskrivelse (150-300 tegn) + #tags",
+    "beskrivelse": "Engasjerende beskrivelse (150-300 tegn) + #tags${twitchUrl ? ` + Twitch-link` : ''}",
     "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5"]
   },
   "tiktok": {
@@ -61,8 +64,9 @@ Highlight-kategori: ${highlight.category ?? 'Gaming'}
 Tittel: ${highlight.title ?? 'Epic moment'}
 Begrunnelse: ${highlight.begrunnelse ?? ''}
 Score: ${highlight.score}/100
+${twitchUrl ? `Twitch-kanal: ${twitchUrl}` : ''}
 
-Norsk tekst. Engasjerende. Gaming-vibe. Ikke generisk.`,
+Norsk tekst. Engasjerende. Gaming-vibe. Ikke generisk.${twitchUrl ? ` Inkluder alltid "${twitchUrl}" som CTA i YouTube-beskrivelsen og Discord-posten.` : ''}`,
     }],
     max_tokens: 600,
     temperature: 0.85,

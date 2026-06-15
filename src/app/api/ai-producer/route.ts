@@ -35,6 +35,7 @@ export async function GET() {
     let streamHistorikk: any[] = [];
     let communityTopLine = '';
     let brandName = 'streameren';
+    let twitchUrl: string | null = null;
     const db = getDb();
     if (db) {
       try {
@@ -50,11 +51,13 @@ export async function GET() {
             .eq('workspace_id', getWorkspaceId())
             .order('xp', { ascending: false })
             .limit(20),
-          db.from('workspaces').select('brand_name').eq('id', getWorkspaceId()).single(),
+          db.from('workspaces').select('brand_name,twitch_channel_name').eq('id', getWorkspaceId()).single(),
         ]);
         streamHistorikk = histRes.data ?? [];
         const allMembers = commRes.data ?? [];
         brandName = (wsRow as any)?.data?.brand_name ?? 'streameren';
+        const twitchChannelName: string | null = (wsRow as any)?.data?.twitch_channel_name ?? null;
+        twitchUrl = twitchChannelName ? `https://twitch.tv/${twitchChannelName}` : null;
         if (!brandName || brandName === 'streameren') {
           void db.from('system_events').insert({ workspace_id: getWorkspaceId(), source: 'ai_producer', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'AI Producer: workspace mangler brand_name', severity: 'warning', metadata: { workspaceId: getWorkspaceId() } });
         }
@@ -101,7 +104,7 @@ export async function GET() {
         messages: [{
           role: 'system',
           content: `Du er AI-produsent for ${brandName}, en norsk Twitch-streamer. Du kjenner kanalen godt og hjelper med å maksimere vekst og engasjement under stream.
-Kanalens tone: energisk, litt edgy norsk gaming-humor, autentisk, ikke overdrevent corporat.
+Kanalens tone: energisk, litt edgy norsk gaming-humor, autentisk, ikke overdrevent corporat.${twitchUrl ? `\nTwitch-kanal: ${twitchUrl} — inkluder alltid denne lenken som CTA i sosiale medier-tekster.` : ''}
 Du skal ALLTID generere faktisk klar-til-bruk innhold for hvert tiltak som involverer en tekst/post – ikke bare si "post noe", men LAG selve teksten.`,
         }, {
           role: 'user',
@@ -135,7 +138,8 @@ Returner KUN gyldig JSON:
       "innhold": {
         "tiktok": "Ferdig TikTok-tekst med emojier og hashtags",
         "instagram": "Ferdig Instagram-caption",
-        "twitter": "Ferdig tweet under 280 tegn"
+        "twitter": "Ferdig tweet under 280 tegn",
+        "url": "Twitch-lenke som CTA (tom streng hvis ingen)"
       }
     },
     {

@@ -24,8 +24,28 @@ export async function POST() {
   const cutoff24h = new Date(Date.now() - 24 * 3600_000).toISOString();
   const cutoff7d  = new Date(Date.now() - 7  * 24 * 3600_000).toISOString();
 
+  // Phase 1: resolve workspace identity before parallel queries so getStreamInfo
+  // gets the correct Twitch channel rather than the TWITCH_USERNAME env fallback.
+  const { data: wsData } = await db
+    .from('workspaces')
+    .select('settings_json,brand_name,twitch_display_name,twitch_channel_name')
+    .eq('id', ws)
+    .single();
+
+  const settings      = wsData?.settings_json ?? null;
+  const brandName     = wsData?.brand_name ?? 'streameren';
+  const displayName   = wsData?.twitch_display_name ?? brandName;
+  const twitchChannel = wsData?.twitch_channel_name ?? null;
+
+  if (brandName === 'streameren') {
+    void db.from('system_events').insert({ workspace_id: ws, source: 'stream_briefing', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'Stream Briefing: workspace mangler brand_name', severity: 'warning', metadata: { wsId: ws } });
+  }
+  if (!twitchChannel) {
+    void db.from('system_events').insert({ workspace_id: ws, source: 'stream_briefing', event_type: 'BRIEFING_STREAM_INFO_ENV_FALLBACK', title: 'Stream Briefing: workspace mangler twitch_channel_name – bruker TWITCH_USERNAME env fallback', severity: 'warning', metadata: { wsId: ws, envFallback: process.env.TWITCH_USERNAME ?? null } });
+  }
+
+  // Phase 2: all remaining queries in parallel with correct workspace/Twitch identity
   const [
-    workspaceRes,
     insightsRes,
     discordRes,
     twitchRes,
@@ -35,23 +55,16 @@ export async function POST() {
     streamInfo,
     ctxRes,
   ] = await Promise.allSettled([
-    db.from('workspaces').select('settings_json,brand_name,twitch_display_name').eq('id', ws).single(),
     db.from('ai_agent_insights').select('title,summary,confidence_score,created_at').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(5),
     db.from('ai_agent_events').select('event_type,username,message_text,importance_score,created_at').eq('workspace_id', ws).eq('source', 'discord').gte('created_at', cutoff24h).order('importance_score', { ascending: false }).limit(20),
     db.from('ai_agent_events').select('event_type,username,message_text,importance_score,created_at').eq('workspace_id', ws).eq('source', 'twitch').gte('created_at', cutoff24h).order('importance_score', { ascending: false }).limit(20),
-    db.from('content_highlights').select('title,category,clip_status,thumbnail_status,created_at').gte('created_at', cutoff7d).order('created_at', { ascending: false }).limit(10),
+    db.from('content_highlights').select('title,category,clip_status,thumbnail_status,created_at').eq('workspace_id', ws).gte('created_at', cutoff7d).order('created_at', { ascending: false }).limit(10),
     db.from('content_vods').select('title,status,created_at').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(5),
     db.from('ai_agent_memory').select('key,summary,occurrence_count,memory_type').eq('workspace_id', ws).order('occurrence_count', { ascending: false }).limit(10),
-    getStreamInfo(),
+    getStreamInfo(twitchChannel ?? undefined),
     getCreatorContext({ limit: 8 }),
   ]);
 
-  const settings    = workspaceRes.status === 'fulfilled'  ? workspaceRes.value.data?.settings_json   : null;
-  const brandName   = workspaceRes.status === 'fulfilled'  ? (workspaceRes.value.data?.brand_name ?? 'streameren') : 'streameren';
-  const displayName = workspaceRes.status === 'fulfilled'  ? (workspaceRes.value.data?.twitch_display_name ?? brandName) : brandName;
-  if (brandName === 'streameren') {
-    void db.from('system_events').insert({ workspace_id: ws, source: 'stream_briefing', event_type: 'WORKSPACE_MISSING_BRAND_CONTEXT', title: 'Stream Briefing: workspace mangler brand_name', severity: 'warning', metadata: { wsId: ws } });
-  }
   const insights   = insightsRes.status === 'fulfilled'   ? insightsRes.value.data   ?? [] : [];
   const discord    = discordRes.status === 'fulfilled'    ? discordRes.value.data    ?? [] : [];
   const twitch     = twitchRes.status === 'fulfilled'     ? twitchRes.value.data     ?? [] : [];

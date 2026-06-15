@@ -1450,6 +1450,37 @@ client.once('clientReady', () => {
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
   lasterMedlemmerFraSupabase().catch(() => {});
+
+  // VOD startup recovery: if CONTENT_FACTORY_ENABLED and stream is offline at startup,
+  // call detect-latest after 16 min to process any VOD missed due to bot restart.
+  // Covers the case where bot restarts after stream ends and vodWatcher module-level
+  // state (forrigeStream/offlineSiden) is reset to defaults.
+  if (process.env.CONTENT_FACTORY_ENABLED === 'true') {
+    setTimeout(async () => {
+      try {
+        const streamNå = await getStreamInfo().catch(() => null);
+        if (streamNå?.isLive) {
+          logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_WATCHER_RECOVERY_SKIPPED', title: 'VOD startup recovery: stream er live – hopper over', severity: 'info', metadata: {} });
+          return;
+        }
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
+        if (!appUrl) {
+          logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_WATCHER_RECOVERY_SKIPPED', title: 'VOD startup recovery: NEXT_PUBLIC_APP_URL mangler', severity: 'warning', metadata: {} });
+          return;
+        }
+        const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+        logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_WATCHER_RECOVERY_TRIGGERED', title: 'VOD startup recovery: sjekker Twitch for ubehandlet VOD etter bot-restart', severity: 'info', metadata: { reason: 'bot_restart_module_state_reset' } });
+        const res = await fetch(`${url}/api/vod/detect-latest`, { method: 'POST', signal: AbortSignal.timeout(30_000) });
+        const result = await res.json() as any;
+        if (result?.ok) {
+          logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_WATCHER_RECOVERY_TRIGGERED', title: `VOD startup recovery: pipeline startet for "${result.vod?.title ?? 'ukjent'}"`, severity: 'info', metadata: { vodId: result.vodId, title: result.vod?.title } });
+          addLog('success', `VOD startup recovery: pipeline startet for "${result.vod?.title ?? result.vodId}"`, 'RECOVERY');
+        } else if (result?.alleredeBehandlet) {
+          logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_WATCHER_RECOVERY_SKIPPED', title: 'VOD startup recovery: alle siste VODer er allerede behandlet', severity: 'info', metadata: {} });
+        }
+      } catch {}
+    }, 16 * 60_000);
+  }
   console.log(`\n✓ ${BOT_BRAND} Bot pålogget som: ${client.user?.tag}`);
   console.log(`  Guilds: ${client.guilds.cache.size}`);
   console.log(`  Kommandoer: ${commands.size}`);
