@@ -53,13 +53,68 @@ export async function getStreamSyklus(): Promise<Record<string, string | null>> 
   } catch { return {}; }
 }
 
-export async function getStreamplan(): Promise<any[]> {
+// ─── StreamEntry model ────────────────────────────────────────────────────────
+
+export interface StreamEntry {
+  id: string;
+  type: 'weekly' | 'single';
+  // weekly: which weekday (0=sun … 6=sat), single: undefined
+  weekday?: number;
+  dag?: string;              // legacy weekday name kept for compat
+  // single: ISO date string "YYYY-MM-DD"
+  date?: string;
+  tid: string;               // "HH:MM"
+  spill: string;
+  tittel: string;
+  aktiv: boolean;
+  status?: 'upcoming' | 'completed' | 'skipped';
+  pre_hype_enabled?: boolean;
+  pre_hype_minutes_before?: number;
+}
+
+// Migrate legacy StreamDay entries (dag/tid/spill/tittel/aktiv) to StreamEntry
+function migrateEntry(raw: any, idx: number): StreamEntry {
+  if (raw.type === 'weekly' || raw.type === 'single') {
+    return raw as StreamEntry;
+  }
+  // Legacy: has dag (weekday name), no type
+  return {
+    id: raw.id ?? `legacy-${idx}`,
+    type: 'weekly',
+    dag: raw.dag,
+    weekday: undefined,
+    tid: raw.tid ?? '20:00',
+    spill: raw.spill ?? '',
+    tittel: raw.tittel ?? '',
+    aktiv: raw.aktiv !== false,
+    status: 'upcoming',
+    pre_hype_enabled: true,
+    pre_hype_minutes_before: 60,
+  };
+}
+
+export async function getStreamplan(): Promise<StreamEntry[]> {
   const db = getDb();
   if (!db) return [];
   try {
     const { data } = await db.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single();
-    return data?.settings_json?.streamplan ?? [];
+    const raw: any[] = data?.settings_json?.streamplan ?? [];
+    return raw.map((e, i) => migrateEntry(e, i));
   } catch { return []; }
+}
+
+export async function updateStreamEntryStatus(entryId: string, status: StreamEntry['status']): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  try {
+    const { data: ws_ } = await db.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single();
+    const existing = ws_?.settings_json ?? {};
+    const plan: any[] = existing.streamplan ?? [];
+    const updated = plan.map((e: any) => e.id === entryId ? { ...e, status } : e);
+    await db.from('workspaces').update({ settings_json: { ...existing, streamplan: updated } }).eq('id', WORKSPACE_ID);
+  } catch (err: any) {
+    console.error('[BotEvents] updateStreamEntryStatus feil:', err.message);
+  }
 }
 
 export async function resetStreamSyklus(): Promise<void> {

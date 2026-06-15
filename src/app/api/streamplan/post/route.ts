@@ -16,17 +16,22 @@ function botHeaders() {
   };
 }
 
-interface StreamDay {
-  dag: string;
+interface StreamEntry {
+  id?: string;
+  type?: 'weekly' | 'single';
+  dag?: string;
+  date?: string;
   tid: string;
   spill: string;
   tittel: string;
   aktiv: boolean;
+  status?: string;
+  pre_hype_enabled?: boolean;
+  pre_hype_minutes_before?: number;
 }
 
-
 export async function POST(req: NextRequest) {
-  const { plan } = await req.json() as { plan: StreamDay[] };
+  const { plan } = await req.json() as { plan: StreamEntry[] };
 
   const wsId = getWorkspaceId();
   const db = getDb();
@@ -44,17 +49,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Ingen annonseringskanal funnet. Sett DISCORD_ANNOUNCE_CHANNEL_ID eller DISCORD_LIVE_CHANNEL_ID.' }, { status: 400 });
   }
 
-  const aktive = plan.filter(d => d.aktiv);
+  const osloDatoISO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(new Date());
+  const aktive = plan.filter(e => {
+    if (!e.aktiv) return false;
+    if (e.type === 'single') return !!e.date && e.date >= osloDatoISO && e.status !== 'completed';
+    return true;
+  });
   if (aktive.length === 0) {
     return NextResponse.json({ error: 'Ingen aktive stream-dager å poste' }, { status: 400 });
   }
 
   const planLinjer = aktive
-    .map(d => `**${d.dag}** kl. ${d.tid}  ·  ${d.spill}${d.tittel ? `  –  *${d.tittel}*` : ''}`)
+    .map(e => {
+      const dagLabel = e.type === 'single'
+        ? `📌 ${e.date} kl. ${e.tid}`
+        : `🔁 **${e.dag ?? 'Ukentlig'}** kl. ${e.tid}`;
+      return `${dagLabel}  ·  ${e.spill}${e.tittel ? `  –  *${e.tittel}*` : ''}`;
+    })
     .join('\n');
 
   const embed = {
-    title: '📅 Streamplan denne uken',
+    title: '📅 Streamplan',
     description: planLinjer,
     color: 0x00ff41,
     fields: twitchLogin ? [{
@@ -80,7 +95,7 @@ export async function POST(req: NextRequest) {
     opprettetAv: 'dashboard',
     discordMsgId: result.msgId,
     publisert: new Date().toISOString(),
-    tags: aktive.map(d => d.dag),
+    tags: aktive.map(e => e.dag ?? e.date ?? '').filter(Boolean),
   });
 
   return NextResponse.json({ ok: true, msgId: result.msgId, antallDager: aktive.length, kanalId });

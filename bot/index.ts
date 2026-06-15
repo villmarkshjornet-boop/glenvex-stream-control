@@ -24,7 +24,7 @@ import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
-import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan } from './lib/botEvents';
+import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
@@ -33,10 +33,11 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
+import { scanForDuplicates, dupReports } from './lib/duplicateDetector';
 import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
@@ -157,6 +158,23 @@ async function finnPartnerKanal(): Promise<TextChannel | null> {
     if (ch instanceof TextChannel) return ch;
   }
   return finnChatKanal(); // fall back to chat if no partner channel configured
+}
+
+async function finnAdminKanal(): Promise<TextChannel | null> {
+  const id = await getAdminKanalId().catch(() => '');
+  if (id) {
+    const ch = client.channels.cache.get(id);
+    if (ch instanceof TextChannel) return ch;
+  }
+  // No public fallback per spec — missing admin channel must be logged and skipped
+  return null;
+}
+
+async function finnPreHypeKanal(): Promise<TextChannel | null> {
+  const id = await getPreHypeKanalId().catch(() => '');
+  if (!id) return null;
+  const ch = client.channels.cache.get(id);
+  return ch instanceof TextChannel ? ch : null;
 }
 
 function ukeNummer(): number {
@@ -460,6 +478,58 @@ Vær direkte og engasjerende.`,
   } catch {}
 }
 
+// ─── Håndter duplikat-knapper ────────────────────────────────────────────────
+
+async function handleDuplikatKnapp(interaction: ButtonInteraction) {
+  const { customId } = interaction;
+  const isSlett = customId.startsWith('dup_slett_');
+  const reportId = customId.replace('dup_slett_', '').replace('dup_ignorer_', '');
+
+  const report = dupReports.get(reportId);
+  if (!report) {
+    await interaction.reply({ content: 'Rapport ikke funnet (kan være utdatert ved bot-restart).', ephemeral: true });
+    return;
+  }
+
+  if (!isSlett) {
+    dupReports.delete(reportId);
+    await interaction.update({ content: `✅ Rapport ${reportId} ignorert.`, embeds: [], components: [] });
+    logSystemEvent({ source: 'duplicate_detector', event_type: 'DUPLICATE_IGNORED', title: `Duplikat-rapport ignorert av ${interaction.user.tag}`, severity: 'info', metadata: { reportId, kanalNavn: report.kanalNavn } });
+    return;
+  }
+
+  // Slett alle duplikater bortsett fra den nyeste
+  const sorted = [...report.meldinger].sort((a, b) => b.ts - a.ts);
+  const beholdId = sorted[0].messageId;
+  const slettIds = sorted.slice(1).map(m => m.messageId);
+
+  const kanal = client.channels.cache.get(report.kanalId);
+  if (!(kanal instanceof TextChannel)) {
+    await interaction.reply({ content: 'Kanal ikke funnet.', ephemeral: true });
+    return;
+  }
+
+  let slettet = 0;
+  for (const msgId of slettIds) {
+    try {
+      const msg = await kanal.messages.fetch(msgId);
+      await msg.delete();
+      slettet++;
+    } catch {}
+  }
+
+  dupReports.delete(reportId);
+  await interaction.update({ content: `🗑️ ${slettet} duplikat${slettet !== 1 ? 'er' : ''} slettet i #${report.kanalNavn}. Beholdt nyeste (${beholdId}).`, embeds: [], components: [] });
+
+  logSystemEvent({
+    source: 'duplicate_detector',
+    event_type: 'DUPLICATE_DELETED',
+    title: `${slettet} duplikater slettet i #${report.kanalNavn} av ${interaction.user.tag}`,
+    severity: 'info',
+    metadata: { reportId, kanalNavn: report.kanalNavn, slettet, beholdt: beholdId, utførtAv: interaction.user.tag },
+  });
+}
+
 // ─── Håndter stream-kontekst knapper ─────────────────────────────────────────
 
 async function handleStreamKnapp(interaction: ButtonInteraction) {
@@ -552,51 +622,16 @@ async function autoPostStreamplan() {
   (global as any)[cacheKey] = true;
 
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const planFil = path.join(process.cwd(), 'data', 'schedule.json');
+    // Load from DB (not file) — getStreamplan() migrates legacy entries automatically
+    const plan = await getStreamplan();
+    const osloDatoISO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(new Date());
 
-    let plan: any[] = [];
-    if (fs.existsSync(planFil)) {
-      plan = JSON.parse(fs.readFileSync(planFil, 'utf-8'));
-    }
-
-    let aktive = plan.filter((d: any) => d.aktiv);
-
-    // Ingen plan satt – generer fra stream-historikk
-    if (aktive.length === 0) {
-      const historikkFil = path.join(process.cwd(), 'data', 'stream-history.json');
-      if (fs.existsSync(historikkFil)) {
-        const historikk = JSON.parse(fs.readFileSync(historikkFil, 'utf-8')) as any[];
-        if (historikk.length > 0 && process.env.OPENAI_API_KEY) {
-          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          const res = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [{
-              role: 'user',
-              content: `Basert på disse tidligere stream-øktene, foreslå en ukentlig streamplan for denne uken som JSON-array:
-[{"dag": "Mandag", "tid": "20:00", "spill": "Future RP", "tittel": "", "aktiv": true}]
-
-Historikk: ${historikk.slice(0, 5).map(h => `${h.game} (${new Date(h.startedAt).toLocaleDateString('no-NO', { weekday: 'long' })} kl. ${new Date(h.startedAt).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
-
-Returner kun JSON-array.`,
-            }],
-            max_tokens: 300,
-            temperature: 0.7,
-            response_format: { type: 'json_object' },
-          });
-
-          try {
-            const parsed = JSON.parse(res.choices[0]?.message?.content ?? '{}');
-            aktive = (parsed.plan ?? parsed.streamplan ?? []).filter((d: any) => d.aktiv);
-            if (aktive.length > 0) {
-              fs.writeFileSync(planFil, JSON.stringify(aktive.map((d: any) => ({ ...d, aktiv: true })), null, 2));
-              addLog('info', `Streamplan auto-generert fra historikk (uke ${uke})`, 'OK');
-            }
-          } catch {}
-        }
-      }
-    }
+    // Include weekly entries + single-date entries that are still upcoming
+    const aktive = plan.filter((e: StreamEntry) => {
+      if (!e.aktiv) return false;
+      if (e.type === 'single') return !!e.date && e.date >= osloDatoISO && e.status !== 'completed';
+      return true;
+    });
 
     if (aktive.length === 0) return;
 
@@ -629,8 +664,19 @@ async function autoRyddKanaler() {
   logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: autoRyddKanaler', severity: 'info', metadata: { job_name: 'autoRyddKanaler', uke } });
 
   const guild = client.guilds.cache.first();
-  const chatKanal = await finnChatKanal();
-  if (!guild || !chatKanal) return;
+  if (!guild) return;
+
+  const adminKanal = await finnAdminKanal();
+  if (!adminKanal) {
+    logSystemEvent({
+      source: 'cron',
+      event_type: 'DISCORD_ADMIN_CHANNEL_MISSING',
+      title: 'Kanal-analyse hoppet over – admin-kanal ikke konfigurert',
+      severity: 'warning',
+      metadata: { job_name: 'autoRyddKanaler', fix: 'Gå til Settings → Discord Kanaler → sett Admin/Bot-analyse kanal' },
+    });
+    return;
+  }
 
   const INAKTIV_DAGER = 60;
   const kandidater: { id: string; navn: string; dager: number }[] = [];
@@ -698,7 +744,7 @@ async function autoRyddKanaler() {
     rows.push(row);
   }
 
-  await chatKanal.send({ embeds: [embed], components: rows });
+  await adminKanal.send({ embeds: [embed], components: rows });
   addLog('info', `Kanal-analyse: ${kandidater.length} inaktive kanaler funnet`, 'OK');
   logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: `Cron ferdig: autoRyddKanaler — ${kandidater.length} kandidater`, severity: 'info', metadata: { job_name: 'autoRyddKanaler', kandidater: kandidater.length } });
 }
@@ -723,6 +769,68 @@ async function postPreLiveHype(tittel: string, spill: string) {
     const melding = res.choices[0]?.message?.content ?? '';
     if (melding) await discordSend(kanal, `🔴 **${BOT_BRAND} ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
   } catch {}
+}
+
+// ─── Duplicate Detector ──────────────────────────────────────────────────────
+
+let sisteDupSkanUke = -1;
+
+async function kjørDuplikatSkan() {
+  const now = new Date();
+  if (now.getDay() !== 1) return; // Kun mandag
+  const uke = ukeNummer();
+  if (uke === sisteDupSkanUke) return;
+  sisteDupSkanUke = uke;
+
+  logSystemEvent({ source: 'cron', event_type: 'CRON_EXECUTED', title: 'Cron startet: kjørDuplikatSkan', severity: 'info', metadata: { job_name: 'kjørDuplikatSkan', uke } });
+
+  const guild = client.guilds.cache.first();
+  if (!guild) return;
+
+  const adminKanal = await finnAdminKanal();
+  if (!adminKanal) {
+    logSystemEvent({
+      source: 'cron',
+      event_type: 'DISCORD_ADMIN_CHANNEL_MISSING',
+      title: 'Duplikat-skanning hoppet over – admin-kanal ikke konfigurert',
+      severity: 'warning',
+      metadata: { job_name: 'kjørDuplikatSkan', fix: 'Gå til Settings → Discord Kanaler → sett Admin/Bot-analyse kanal' },
+    });
+    return;
+  }
+
+  const reports = await scanForDuplicates(guild.channels.cache, client.user!.id, 24).catch(() => []);
+
+  if (reports.length === 0) {
+    logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: 'Duplikat-skanning ferdig: ingen duplikater funnet', severity: 'info', metadata: { job_name: 'kjørDuplikatSkan', uke } });
+    return;
+  }
+
+  const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = await import('discord.js');
+
+  for (const report of reports.slice(0, 5)) {
+    const embed = new EmbedBuilder()
+      .setColor(0xff4400)
+      .setTitle(`◆ Duplikate bot-meldinger i #${report.kanalNavn}`)
+      .setDescription(`**${report.meldinger.length} like meldinger** funnet siste 24t.\n\n${report.meldinger.map((m, i) => `${i + 1}. [${new Date(m.ts).toLocaleTimeString('no-NO')}] ${m.preview}`).join('\n')}`)
+      .setFooter({ text: `Report ID: ${report.id} • Kun botens egne meldinger skannes` })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`dup_slett_${report.id}`)
+        .setLabel('Slett duplikater (behold nyeste)')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`dup_ignorer_${report.id}`)
+        .setLabel('Ignorer')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    await adminKanal.send({ embeds: [embed], components: [row] }).catch(() => {});
+  }
+
+  logSystemEvent({ source: 'cron', event_type: 'CRON_COMPLETED', title: `Duplikat-skanning ferdig: ${reports.length} rapport(er)`, severity: 'info', metadata: { job_name: 'kjørDuplikatSkan', uke, rapporter: reports.length } });
 }
 
 // ─── Smart Velkomst tilbake ───────────────────────────────────────────────────
@@ -925,19 +1033,41 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
 
 async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
   const plan = await getStreamplan();
-  const aktive = plan.filter((d: any) => d.aktiv);
+  const osloDatoISO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(new Date());
+  const { day: idag } = getOsloTime();
+
+  // Single-date entries only if date >= today; weekly entries always eligible
+  const aktive = plan.filter((e: StreamEntry) => {
+    if (!e.aktiv) return false;
+    if (e.type === 'single') return !!e.date && e.date >= osloDatoISO && e.status !== 'completed';
+    return true;
+  });
   if (aktive.length === 0) return;
-  const DAGER = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
-  const idag = new Date().getDay();
-  const neste = aktive.find((d: any) => DAGER.indexOf(d.dag) >= idag) ?? aktive[0];
+
+  // Find the next upcoming entry (soonest weekday or single date)
+  const scoredEntries = aktive.map((e: StreamEntry) => {
+    if (e.type === 'single') {
+      return { entry: e, daysAhead: (new Date(e.date!).getTime() - new Date(osloDatoISO).getTime()) / 86_400_000 };
+    }
+    const dagIdx = e.weekday ?? DAGNAVN_BOT.indexOf(e.dag ?? '');
+    const daysAhead = ((dagIdx - idag + 7) % 7) || 7;
+    return { entry: e, daysAhead };
+  }).sort((a: any, b: any) => a.daysAhead - b.daysAhead);
+
+  const neste: StreamEntry = scoredEntries[0].entry;
+  const dagLabel = neste.type === 'single'
+    ? `${neste.date} kl. ${neste.tid}`
+    : `${neste.dag ?? DAGNAVN_BOT[neste.weekday ?? 0]} kl. ${neste.tid} (ukentlig)`;
+
   const apiKey = process.env.OPENAI_API_KEY;
   const twitchUrl = await getTwitchUrl().catch(() => `https://twitch.tv/${process.env.TWITCH_USERNAME ?? 'glenvex'}`);
-  let tekst = `📅 Neste stream: **${neste.dag}** kl. ${neste.tid} – **${neste.spill}**${neste.tittel ? ` – *${neste.tittel}*` : ''}\nFølg med på ${twitchUrl} 🔴`;
+  let tekst = `📅 Neste stream: **${dagLabel}** – **${neste.spill}**${neste.tittel ? ` – *${neste.tittel}*` : ''}\nFølg med på ${twitchUrl} 🔴`;
   if (apiKey) {
     const openai = new OpenAI({ apiKey });
+    const ukentligInfo = neste.type === 'weekly' ? ' (gjentas ukentlig)' : '';
     const res2 = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: `Skriv en kort og energisk norsk Discord-melding (maks 2 setninger) om at ${BOT_BRAND} streamer ${neste.spill} ${neste.dag} kl. ${neste.tid}${neste.tittel ? ` med tittelen "${neste.tittel}"` : ''}. Ikke start med emoji.` }],
+      messages: [{ role: 'user', content: `Skriv en kort og energisk norsk Discord-melding (maks 2 setninger) om at ${BOT_BRAND} streamer ${neste.spill} ${dagLabel}${ukentligInfo}${neste.tittel ? ` med tittelen "${neste.tittel}"` : ''}. Ikke start med emoji.` }],
       max_tokens: 80,
       temperature: 0.9,
     });
@@ -1226,29 +1356,47 @@ function getOsloTime(): { day: number; minutes: number; dagNavn: string } {
 async function sjekkPreHype() {
   try {
     const syklus = await getStreamSyklus();
-    if (syklus.pre_hype_sendt_at) return; // allerede sendt
-
-    const plan = await getStreamplan();
-    const aktive = plan.filter((d: any) => d.aktiv);
-    if (aktive.length === 0) {
+    if (syklus.pre_hype_sendt_at) {
+      logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_ALREADY_SENT', title: 'Pre-hype allerede sendt denne syklusen', severity: 'info', metadata: { sendt_at: syklus.pre_hype_sendt_at } });
       return;
     }
 
-    // Bruk Europe/Oslo-tid (Railway kjører UTC – uten dette er planleggeren 1-2 timer feil)
-    const { day: idag, minutes: minutter, dagNavn } = getOsloTime();
+    const plan = await getStreamplan();
+    const aktive = plan.filter((e: StreamEntry) => e.aktiv && e.pre_hype_enabled !== false && e.status !== 'completed');
+    if (aktive.length === 0) return;
 
-    let planlagtStream: any = null;
+    // Oslo time: Railway runs UTC
+    const { day: idag, minutes: minutter, dagNavn } = getOsloTime();
+    // Oslo ISO date for single-stream comparison
+    const osloDatoISO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(new Date()); // "YYYY-MM-DD"
+
+    let planlagtStream: StreamEntry | null = null;
     let diffTilStream = 9999;
 
-    for (const dag of aktive) {
-      const dagIdx = DAGNAVN_BOT.indexOf(dag.dag);
-      if (dagIdx !== idag) continue;
-      const [timer, min] = (dag.tid ?? '20:00').split(':').map(Number);
+    for (const entry of aktive) {
+      const preHypeMin = entry.pre_hype_minutes_before ?? 60;
+
+      if (entry.type === 'single') {
+        // Never promote past single-date streams
+        if (!entry.date || entry.date < osloDatoISO) {
+          if (entry.date && entry.date < osloDatoISO && entry.status !== 'completed') {
+            await updateStreamEntryStatus(entry.id, 'completed');
+          }
+          continue;
+        }
+        if (entry.date !== osloDatoISO) continue;
+      } else {
+        // weekly: match by dag name (legacy) or weekday index
+        const dagIdx = entry.weekday ?? DAGNAVN_BOT.indexOf(entry.dag ?? '');
+        if (dagIdx !== idag) continue;
+      }
+
+      const [timer, min] = (entry.tid ?? '20:00').split(':').map(Number);
       const streamMin = timer * 60 + min;
       const diff = streamMin - minutter;
-      if (diff > 0 && diff <= 60 && diff < diffTilStream) {
+      if (diff > 0 && diff <= preHypeMin && diff < diffTilStream) {
         diffTilStream = diff;
-        planlagtStream = dag;
+        planlagtStream = entry;
       }
     }
 
@@ -1258,25 +1406,37 @@ async function sjekkPreHype() {
       source: 'scheduler',
       event_type: 'PREHYPE_SCHEDULED',
       title: `Pre-hype: stream om ${diffTilStream} min (${planlagtStream.spill})`,
-      description: `Oslo-tid dag=${dagNavn} minutter=${minutter}. Stream kl. ${planlagtStream.tid}.`,
       severity: 'info',
-      metadata: { spill: planlagtStream.spill, dag: planlagtStream.dag, tid: planlagtStream.tid, diffMinutter: diffTilStream, osloDag: dagNavn, osloMinutter: minutter },
+      metadata: {
+        spill: planlagtStream.spill,
+        type: planlagtStream.type,
+        date: planlagtStream.date,
+        dag: planlagtStream.dag,
+        tid: planlagtStream.tid,
+        diffMinutter: diffTilStream,
+        osloDag: dagNavn,
+        osloMinutter: minutter,
+      },
     });
 
-    const kanal = await finnChatKanal();
+    const kanal = await finnPreHypeKanal();
     if (!kanal) {
-      logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_SCHEDULED', title: 'Pre-hype: Discord-kanal ikke funnet', severity: 'warning', metadata: { spill: planlagtStream.spill } });
+      logSystemEvent({ source: 'scheduler', event_type: 'PRE_HYPE_SKIPPED_MISSING_CHANNEL', title: 'Pre-hype hoppet over – pre-hype kanal ikke konfigurert', severity: 'warning', metadata: { spill: planlagtStream.spill, fix: 'Gå til Settings → Discord Kanaler → sett Pre-Hype kanal' } });
       return;
     }
 
     const apiKey = process.env.OPENAI_API_KEY;
-    let melding = `🔥 **${BOT_BRAND}** streamer om ${diffTilStream} minutt${diffTilStream > 1 ? 'er' : ''}! ${planlagtStream.spill} starter kl. ${planlagtStream.tid}`;
+    const ukelabel = planlagtStream.type === 'weekly' ? ' (ukentlig)' : '';
+    let melding = `🔥 **${BOT_BRAND}** streamer om ${diffTilStream} minutt${diffTilStream > 1 ? 'er' : ''}! ${planlagtStream.spill} starter kl. ${planlagtStream.tid}${ukelabel}`;
     if (apiKey) {
       try {
         const openai = new OpenAI({ apiKey });
+        const typeKontekst = planlagtStream.type === 'single'
+          ? `Dette er en engangsstream den ${planlagtStream.date}.`
+          : 'Dette er en ukentlig stream.';
         const res2 = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: `${BOT_BRAND} streamer ${planlagtStream.spill} om ${diffTilStream} minutter. Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
+          messages: [{ role: 'user', content: `${BOT_BRAND} streamer ${planlagtStream.spill} om ${diffTilStream} minutter. ${typeKontekst} Lag en kort, energisk norsk hype-melding (maks 2 setninger, community-fokusert). Ingen emojis i starten.` }],
           max_tokens: 80,
           temperature: 0.9,
         });
@@ -1287,20 +1447,26 @@ async function sjekkPreHype() {
 
     const sendtOk = await discordSend(kanal, melding, { trigger: 'pre_hype', spill: planlagtStream.spill, minutter: diffTilStream }).then(() => true).catch(() => false);
     await updateStreamSyklus({ pre_hype_sendt_at: new Date().toISOString() });
-    logBotEvent('pre_hype', { spill: planlagtStream.spill, tittel: planlagtStream.tittel ?? '', minutter_til: diffTilStream });
+
+    // Mark single-stream as completed so it's never re-promoted after today
+    if (planlagtStream.type === 'single') {
+      await updateStreamEntryStatus(planlagtStream.id, 'completed');
+    }
+
+    logBotEvent('pre_hype', { spill: planlagtStream.spill, tittel: planlagtStream.tittel ?? '', minutter_til: diffTilStream, type: planlagtStream.type });
 
     logSystemEvent({
       source: 'scheduler',
       event_type: 'PREHYPE_SENT',
       title: `Pre-hype sendt: ${planlagtStream.spill} om ${diffTilStream} min`,
       severity: sendtOk ? 'info' : 'warning',
-      metadata: { spill: planlagtStream.spill, kanal: kanal.id, sendtOk, diffMinutter: diffTilStream },
+      metadata: { spill: planlagtStream.spill, type: planlagtStream.type, kanal: kanal.id, sendtOk, diffMinutter: diffTilStream },
     });
 
     addLog(sendtOk ? 'success' : 'warning', `Pre-hype ${sendtOk ? 'sendt' : 'feilet'}: ${planlagtStream.spill} om ${diffTilStream}min`, sendtOk ? 'OK' : 'WARN');
   } catch (err: any) {
     console.error('[PreHype] Feil:', err.message);
-    logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_SCHEDULED', title: `Pre-hype feil: ${err.message.slice(0, 100)}`, severity: 'error' });
+    logSystemEvent({ source: 'scheduler', event_type: 'PREHYPE_ERROR', title: `Pre-hype feil: ${err.message.slice(0, 100)}`, severity: 'error' });
   }
 }
 
@@ -1515,6 +1681,7 @@ client.once('clientReady', () => {
   setTimeout(() => { withCron('sjekk-goals', sjekkGoals); setInterval(() => withCron('sjekk-goals', sjekkGoals), GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
   setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
   setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
+  setInterval(kjørDuplikatSkan, RYDD_SJEKK_INTERVAL);
   setInterval(() => sjekkStuckeVodsPeriodisk().catch(() => {}), 30 * 60 * 1000); // Stuck-sjekk hvert 30. min
   setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
 });
@@ -1659,6 +1826,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
     if (interaction.customId.startsWith('stream_')) {
       await handleStreamKnapp(interaction).catch(console.error);
+      return;
+    }
+    if (interaction.customId.startsWith('dup_slett_') || interaction.customId.startsWith('dup_ignorer_')) {
+      await handleDuplikatKnapp(interaction).catch(console.error);
       return;
     }
     return;

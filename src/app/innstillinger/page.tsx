@@ -470,6 +470,8 @@ function DiscordKanalerPanel() {
     { felt: 'streamplan',      label: 'Streamplan',           desc: 'Streamplan-oppdateringer' },
     { felt: 'content_factory', label: 'Content Factory',      desc: 'Ferdige highlights og thumbnails' },
     { felt: 'errors',          label: 'Feil & Varsler',       desc: 'Tekniske feil fra boten' },
+    { felt: 'pre_hype',        label: 'Pre-Hype',             desc: 'Pre-hype varsler før stream starter' },
+    { felt: 'admin',           label: 'Admin / Bot-analyse',  desc: 'Kanal-analyse og bot-rapporter (kun admin)' },
   ];
 
   const ingenKanal = { id: '', navn: '— Ikke satt —' };

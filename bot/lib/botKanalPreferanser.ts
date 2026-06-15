@@ -149,3 +149,13 @@ export async function getRaidKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
   return prefs.raid || prefs.chat || process.env.DISCORD_CHAT_CHANNEL_ID || '';
 }
+
+export async function getAdminKanalId(): Promise<string> {
+  const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
+  return prefs.admin || process.env.DISCORD_ADMIN_CHANNEL_ID || '';
+}
+
+export async function getPreHypeKanalId(): Promise<string> {
+  const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
+  return prefs.pre_hype || '';
+}

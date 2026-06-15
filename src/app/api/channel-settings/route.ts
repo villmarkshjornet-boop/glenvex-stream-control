@@ -111,6 +111,7 @@ export interface KanalPreferanser {
   ai_producer: string;
   content_factory: string;
   errors: string;
+  admin: string;
 }
 
 // ── Load / Save ───────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ export async function GET(req: NextRequest) {
     ai_producer: lagret.ai_producer ?? '',
     content_factory: lagret.content_factory ?? '',
     errors: lagret.errors ?? '',
+    admin: lagret.admin ?? '',
   };
 
   return NextResponse.json({ kanaler, preferanser });
