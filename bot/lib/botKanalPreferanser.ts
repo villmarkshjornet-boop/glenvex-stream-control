@@ -159,3 +159,52 @@ export async function getPreHypeKanalId(): Promise<string> {
   const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
   return prefs.pre_hype || '';
 }
+
+export async function getCommunityKanalId(): Promise<string> {
+  const prefs = await loadPrefs().catch(() => ({} as Record<string, string>));
+  return prefs.community || ''; // no env fallback — missing = skip per spec
+}
+
+// ─── Community Settings ───────────────────────────────────────────────────────
+
+export interface RewardRole {
+  level: number;
+  roleId: string;
+  roleName: string;
+}
+
+export interface CommunitySettings {
+  aktiv: boolean;
+  xpAktiv: boolean;
+  levelUpMeldingerAktiv: boolean;
+  rewardRoles: RewardRole[];
+  xpCooldownSek: number;
+  xpMinMeldingslengde: number;
+}
+
+const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
+  aktiv: true,
+  xpAktiv: true,
+  levelUpMeldingerAktiv: true,
+  rewardRoles: [],
+  xpCooldownSek: 60,
+  xpMinMeldingslengde: 4,
+};
+
+let _communitySettingsCache: CommunitySettings | null = null;
+let _communitySettingsCacheTime = 0;
+
+export async function getCommunitySettings(): Promise<CommunitySettings> {
+  if (_communitySettingsCache && Date.now() - _communitySettingsCacheTime < CACHE_TTL) {
+    return _communitySettingsCache;
+  }
+  try {
+    const json = await loadSettingsJson();
+    const stored = json?.communitySettings;
+    _communitySettingsCache = stored ? { ...DEFAULT_COMMUNITY_SETTINGS, ...stored } : { ...DEFAULT_COMMUNITY_SETTINGS };
+    _communitySettingsCacheTime = Date.now();
+    return _communitySettingsCache;
+  } catch {
+    return { ...DEFAULT_COMMUNITY_SETTINGS };
+  }
+}

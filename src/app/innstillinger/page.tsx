@@ -471,6 +471,7 @@ function DiscordKanalerPanel() {
     { felt: 'content_factory', label: 'Content Factory',      desc: 'Ferdige highlights og thumbnails' },
     { felt: 'errors',          label: 'Feil & Varsler',       desc: 'Tekniske feil fra boten' },
     { felt: 'pre_hype',        label: 'Pre-Hype',             desc: 'Pre-hype varsler før stream starter' },
+    { felt: 'community',       label: 'Community',            desc: 'Level-ups, hype og community-aktivitet' },
     { felt: 'admin',           label: 'Admin / Bot-analyse',  desc: 'Kanal-analyse og bot-rapporter (kun admin)' },
   ];
 

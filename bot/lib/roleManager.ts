@@ -93,6 +93,72 @@ export async function tildeltSpesialRolle(
   }
 }
 
+// ─── Configurable reward roles ────────────────────────────────────────────────
+
+export interface RewardRole {
+  level: number;
+  roleId: string;
+  roleName: string;
+}
+
+/**
+ * Assign role by configured reward role (Discord role ID).
+ * Falls back to default LEVEL_ROLLER behavior when rewardRoles is empty.
+ * Logs COMMUNITY_REWARD_ROLE_MISSING if configured role ID doesn't exist in guild.
+ */
+export async function tildeltRolleKonfigurert(
+  guild: Guild,
+  member: GuildMember,
+  level: number,
+  rewardRoles: RewardRole[],
+): Promise<{ rolleNavn: string | null }> {
+  if (rewardRoles.length === 0) {
+    const rolleNavn = await tildeltRolle(guild, member, level);
+    return { rolleNavn };
+  }
+
+  const matching = [...rewardRoles]
+    .filter(r => level >= r.level)
+    .sort((a, b) => b.level - a.level)[0];
+
+  if (!matching) return { rolleNavn: null };
+
+  const rolle = guild.roles.cache.get(matching.roleId);
+  if (!rolle) {
+    logSystemEvent({
+      source:     'community_manager',
+      event_type: 'COMMUNITY_REWARD_ROLE_MISSING',
+      title:      `Reward-rolle ikke funnet i guild: "${matching.roleName}" (ID: ${matching.roleId})`,
+      severity:   'warning',
+      metadata:   { level, configuredRoleId: matching.roleId, roleName: matching.roleName, fix: 'Sjekk at Discord-rolle-ID er korrekt i Community-innstillinger' },
+    });
+    return { rolleNavn: null };
+  }
+
+  try {
+    if (!member.roles.cache.has(rolle.id)) {
+      await member.roles.add(rolle);
+      logSystemEvent({
+        source:     'community_manager',
+        event_type: 'DISCORD_ROLE_ASSIGNED',
+        title:      `Reward-rolle tildelt: ${member.displayName} → ${matching.roleName} (Level ${level})`,
+        severity:   'info',
+        metadata:   { discordId: member.id, username: member.displayName, rolle: matching.roleName, level },
+      });
+    }
+    return { rolleNavn: matching.roleName };
+  } catch (err: any) {
+    logSystemEvent({
+      source:     'community_manager',
+      event_type: 'COMMUNITY_REWARD_ROLE_MISSING',
+      title:      `Rolle-tildeling feilet for ${member.displayName}: ${err.message?.slice(0, 80)}`,
+      severity:   'error',
+      metadata:   { discordId: member.id, rolleId: matching.roleId, error: err.message?.slice(0, 200) },
+    });
+    return { rolleNavn: null };
+  }
+}
+
 // Sjekk om boten har MANAGE_ROLES og at botens rolle er over rollene den tildeler
 export async function sjekkRollePermissions(guild: Guild): Promise<{
   ok: boolean;

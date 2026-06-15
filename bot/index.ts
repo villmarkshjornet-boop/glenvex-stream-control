@@ -26,14 +26,14 @@ import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
-import { tildeltRolle } from './lib/roleManager';
+import { tildeltRolle, tildeltRolleKonfigurert } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
 import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
-import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId } from './lib/botKanalPreferanser';
+import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId, getCommunityKanalId, getCommunitySettings } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
@@ -175,6 +175,14 @@ async function finnPreHypeKanal(): Promise<TextChannel | null> {
   if (!id) return null;
   const ch = client.channels.cache.get(id);
   return ch instanceof TextChannel ? ch : null;
+}
+
+async function finnCommunityKanal(): Promise<TextChannel | null> {
+  const id = await getCommunityKanalId().catch(() => '');
+  if (!id) return null;
+  const ch = client.channels.cache.get(id);
+  return ch instanceof TextChannel ? ch : null;
+  // No public fallback — missing community channel = skip, not post to chat
 }
 
 function ukeNummer(): number {
@@ -769,6 +777,43 @@ async function postPreLiveHype(tittel: string, spill: string) {
     const melding = res.choices[0]?.message?.content ?? '';
     if (melding) await discordSend(kanal, `🔴 **${BOT_BRAND} ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
   } catch {}
+}
+
+// ─── Level-up handler ────────────────────────────────────────────────────────
+
+async function handleLevelUp(
+  userId: string,
+  displayName: string,
+  newLevel: number,
+  guild: import('discord.js').Guild | null,
+  guildMember: import('discord.js').GuildMember | null,
+): Promise<void> {
+  const [communityKanal, adminKanal, settings] = await Promise.all([
+    finnCommunityKanal(),
+    finnAdminKanal(),
+    getCommunitySettings().catch(() => null),
+  ]);
+
+  // Gratulasjon i community-kanal (aldri fallback til public chat)
+  if (communityKanal && settings?.levelUpMeldingerAktiv !== false) {
+    await communityKanal.send(`🎉 **${displayName}** nådde **Level ${newLevel}**! PogChamp`).catch(() => {});
+  }
+
+  // Tildel rolle
+  if (guild && guildMember) {
+    const rewardRoles = settings?.rewardRoles ?? [];
+    const { rolleNavn } = await tildeltRolleKonfigurert(guild, guildMember, newLevel, rewardRoles);
+    if (rolleNavn && communityKanal) {
+      await communityKanal.send(`🏅 **${displayName}** fikk rollen **@${rolleNavn}**! 👑`).catch(() => {});
+    }
+  }
+
+  // Logg til admin-kanal
+  if (adminKanal) {
+    await adminKanal.send(`📊 Level-up: **${displayName}** → Level **${newLevel}**`).catch(() => {});
+  }
+
+  logBotEvent('level_up', { username: displayName, level: newLevel, userId });
 }
 
 // ─── Duplicate Detector ──────────────────────────────────────────────────────
@@ -1703,23 +1748,14 @@ client.on('messageCreate', async (message) => {
         upsertBotMemory({ agent_type: 'discord', memory_type: 'member', key: message.author.id, summary: `${member.displayName ?? message.author.username} – aktiv Discord-member (${member.messages} meldinger, Level ${member.level})`, confidence_score: 0.75, metadata: { username: message.author.username, messages: member.messages, level: member.level } }).catch(() => {});
       }
     }
-    const xpResult = addMessageXP(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+    const displayName = message.author.displayName ?? message.author.username;
+    const xpResult = addMessageXP(message.author.id, message.author.username, displayName, message.content);
     // Track stream attendance (once per stream day when bot knows stream is live)
     if (getActiveSession()) {
-      addStreamAttendance(message.author.id, message.author.username, message.author.displayName ?? message.author.username);
+      addStreamAttendance(message.author.id, message.author.username, displayName);
     }
     if (xpResult?.leveledUp) {
-      message.channel.send(`🎉 **${message.author.displayName ?? message.author.username}** nådde **Level ${xpResult.newLevel}**! PogChamp`).catch(() => {});
-      logBotEvent('level_up', { username: message.author.displayName ?? message.author.username, level: xpResult.newLevel });
-
-      // Tildel rolle basert på nytt level
-      if (message.guild && message.member) {
-        tildeltRolle(message.guild, message.member, xpResult.newLevel).then(rolleNavn => {
-          if (rolleNavn) {
-            message.channel.send(`🏅 **${message.author.displayName ?? message.author.username}** fikk rollen **@${rolleNavn}**! 👑`).catch(() => {});
-          }
-        }).catch(() => {});
-      }
+      handleLevelUp(message.author.id, displayName, xpResult.newLevel, message.guild, message.member).catch(() => {});
     }
     // Smart velkomst (sjelden, for aktive membres)
     if (Math.random() < 0.05) {
