@@ -14,15 +14,23 @@ export interface CommunitySettings {
   aktiv: boolean;
   xpAktiv: boolean;
   levelUpMeldingerAktiv: boolean;
+  communityHypeAktiv: boolean;
+  idlePromptsAktiv: boolean;
+  idleThresholdMinutes: number;
+  maxBotPostsPerDay: number;
   rewardRoles: RewardRole[];
   xpCooldownSek: number;
   xpMinMeldingslengde: number;
 }
 
-export const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
+const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   aktiv: true,
   xpAktiv: true,
   levelUpMeldingerAktiv: true,
+  communityHypeAktiv: true,
+  idlePromptsAktiv: true,
+  idleThresholdMinutes: 120,
+  maxBotPostsPerDay: 2,
   rewardRoles: [],
   xpCooldownSek: 60,
   xpMinMeldingslengde: 4,

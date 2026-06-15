@@ -41,6 +41,7 @@ import { scanForDuplicates, dupReports } from './lib/duplicateDetector';
 import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
+import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
 // Log + send Discord-melding
@@ -183,6 +184,68 @@ async function finnCommunityKanal(): Promise<TextChannel | null> {
   const ch = client.channels.cache.get(id);
   return ch instanceof TextChannel ? ch : null;
   // No public fallback — missing community channel = skip, not post to chat
+}
+
+// ─── Community Manager wrappers ───────────────────────────────────────────────
+
+async function sjekkOgSendMVP(): Promise<void> {
+  const settings = await getCommunitySettings().catch(() => null);
+  if (settings?.aktiv === false) return;
+
+  // Only post MVP after noon Oslo time
+  const osloHour = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Oslo', hour: 'numeric', hour12: false }).format(new Date()),
+    10,
+  );
+  if (osloHour < 12) return;
+
+  const kanal = await finnCommunityKanal();
+  if (!kanal) {
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_ACTIVITY_SKIPPED_MISSING_CHANNEL',
+      title: 'MVP hoppet over – community-kanal ikke konfigurert',
+      severity: 'warning',
+      metadata: { type: 'mvp', fix: 'Innstillinger → Discord Kanaler → sett Community-kanal' },
+    });
+    return;
+  }
+  await velgDagensMVP(kanal).catch(() => {});
+}
+
+async function sjekkOgSendHype(): Promise<void> {
+  const settings = await getCommunitySettings().catch(() => null);
+  if (settings?.aktiv === false || settings?.communityHypeAktiv === false) return;
+
+  const kanal = await finnCommunityKanal();
+  if (!kanal) {
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_HYPE_SKIPPED_MISSING_CHANNEL',
+      title: 'Community hype hoppet over – community-kanal ikke konfigurert',
+      severity: 'warning',
+      metadata: { fix: 'Innstillinger → Discord Kanaler → sett Community-kanal' },
+    });
+    return;
+  }
+  await sendCommunityHype(kanal).catch(() => {});
+}
+
+async function sjekkIdlePrompt(): Promise<void> {
+  if (!client.user) return;
+  const settings = await getCommunitySettings().catch(() => null);
+  if (settings?.aktiv === false || settings?.idlePromptsAktiv === false) return;
+
+  const kanal = await finnCommunityKanal();
+  if (!kanal) {
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_ACTIVITY_SKIPPED_MISSING_CHANNEL',
+      title: 'Idle-prompt hoppet over – community-kanal ikke konfigurert',
+      severity: 'warning',
+      metadata: { fix: 'Innstillinger → Discord Kanaler → sett Community-kanal' },
+    });
+    return;
+  }
+  const threshold = settings?.idleThresholdMinutes ?? 120;
+  await sjekkIdleOgPrompt(kanal, client.user.id, threshold).catch(() => {});
 }
 
 function ukeNummer(): number {
@@ -1729,6 +1792,11 @@ client.once('clientReady', () => {
   setInterval(kjørDuplikatSkan, RYDD_SJEKK_INTERVAL);
   setInterval(() => sjekkStuckeVodsPeriodisk().catch(() => {}), 30 * 60 * 1000); // Stuck-sjekk hvert 30. min
   setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
+  // Community Manager Phase C: MVP daily (check every 4h, posts only after noon),
+  // hype every 8h, idle check every 30 min
+  setTimeout(() => { withCron('community-mvp', sjekkOgSendMVP); setInterval(() => withCron('community-mvp', sjekkOgSendMVP), 4 * 60 * 60 * 1000); }, 60 * 60 * 1000);
+  setTimeout(() => { withCron('community-hype', sjekkOgSendHype); setInterval(() => withCron('community-hype', sjekkOgSendHype), 8 * 60 * 60 * 1000); }, 2 * 60 * 60 * 1000);
+  setInterval(() => sjekkIdlePrompt().catch(() => {}), 30 * 60 * 1000);
 });
 
 // ─── Meldingslytter ───────────────────────────────────────────────────────────

@@ -177,6 +177,10 @@ export interface CommunitySettings {
   aktiv: boolean;
   xpAktiv: boolean;
   levelUpMeldingerAktiv: boolean;
+  communityHypeAktiv: boolean;
+  idlePromptsAktiv: boolean;
+  idleThresholdMinutes: number;
+  maxBotPostsPerDay: number;
   rewardRoles: RewardRole[];
   xpCooldownSek: number;
   xpMinMeldingslengde: number;
@@ -186,6 +190,10 @@ const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   aktiv: true,
   xpAktiv: true,
   levelUpMeldingerAktiv: true,
+  communityHypeAktiv: true,
+  idlePromptsAktiv: true,
+  idleThresholdMinutes: 120,
+  maxBotPostsPerDay: 2,
   rewardRoles: [],
   xpCooldownSek: 60,
   xpMinMeldingslengde: 4,
@@ -203,7 +211,7 @@ export async function getCommunitySettings(): Promise<CommunitySettings> {
     const stored = json?.communitySettings;
     _communitySettingsCache = stored ? { ...DEFAULT_COMMUNITY_SETTINGS, ...stored } : { ...DEFAULT_COMMUNITY_SETTINGS };
     _communitySettingsCacheTime = Date.now();
-    return _communitySettingsCache;
+    return _communitySettingsCache!;
   } catch {
     return { ...DEFAULT_COMMUNITY_SETTINGS };
   }
