@@ -32,7 +32,7 @@ const YT_W = 1280;  const YT_H = 720;
 const TT_W = 1080;  const TT_H = 1920;
 
 const FRAME_COUNT    = 20;
-const BRIGHTNESS_MIN = 40;   // Hard reject frames below this (0-255 scale)
+const BRIGHTNESS_MIN = 40;   // Hard reject frames below this — perceptual (0.299R+0.587G+0.114B)
 const SAT_STD_MIN    = 5;    // Hard reject near-grayscale frames
 const CTR_THRESHOLD  = 60;
 const MAX_REJECTS    = 3;
@@ -112,15 +112,16 @@ async function prepareFont(): Promise<string | null> {
 
 function fontDeclaration(fontPath: string | null): { decl: string; fontFamily: string } {
   if (fontPath && fs.existsSync(fontPath)) {
+    // Embed font as base64 — file:// URLs are unreliable in librsvg on Railway
+    const b64 = fs.readFileSync(fontPath).toString('base64');
     return {
-      decl: `@font-face { font-family: 'Anton'; src: url('file://${fontPath}'); font-weight: normal; font-style: normal; }`,
+      decl: `@font-face { font-family: 'Anton'; src: url('data:font/truetype;base64,${b64}'); font-weight: normal; font-style: normal; }`,
       fontFamily: "'Anton', 'Impact', 'DejaVu Sans Bold', sans-serif",
     };
   }
-  // DejaVu Sans Bold: always on Debian/Ubuntu, supports full Unicode including æøå
   return {
     decl: '',
-    fontFamily: "'Impact', 'DejaVu Sans Bold', 'Liberation Sans Bold', sans-serif",
+    fontFamily: "'DejaVu Sans Bold', 'Liberation Sans Bold', 'Impact', sans-serif",
   };
 }
 
@@ -153,11 +154,13 @@ async function getFrameStats(buf: Buffer): Promise<{ brightness: number; satStd:
     const center = await sharp(buf).extract({ left: cX, top: cY, width: cW, height: cH }).toBuffer();
     const stats  = await sharp(center).stats();
 
-    const means: number[] = stats.channels.slice(0, 3).map((c: any) => c.mean as number);
-    const brightness = means.reduce((a, b) => a + b, 0) / means.length;
-    const satStd = Math.sqrt(
-      means.reduce((sum, m) => sum + (m - brightness) ** 2, 0) / means.length
-    );
+    const r = stats.channels[0]?.mean ?? 128;
+    const g = stats.channels[1]?.mean ?? 128;
+    const b = stats.channels[2]?.mean ?? 128;
+    // Perceptual brightness — avviser blå-neon nattscener korrekt (R=20,G=20,B=120 → 31, ikke 53)
+    const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+    const avg = (r + g + b) / 3;
+    const satStd = Math.sqrt(((r-avg)**2 + (g-avg)**2 + (b-avg)**2) / 3);
     return { brightness, satStd };
   } catch { return { brightness: 128, satStd: 20 }; }
 }
@@ -811,6 +814,12 @@ export async function buildThumbnailV5(highlightId: string): Promise<void> {
       thumbnail_ctr_score:    gate.score,
       thumbnail_concept:      hook.emotion,
       thumbnail_hook:         hook,
+      // Rydd gamle V4-thumbnails så de ikke vises ved siden av de nye
+      thumbnail_variant_b_url: null,
+      thumbnail_variant_c_url: null,
+      thumbnail_quality_score: null,
+      thumbnail_source_frame:  null,
+      thumbnail_ctr_reason:    null,
     }).eq('id', highlightId);
 
     wLog('INFO', 'THUMBNAIL_V55_DONE', {
