@@ -623,8 +623,8 @@ async function kjørThumbnailSyklus(): Promise<void> {
 
     wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
 
-    const { buildThumbnailV2 } = require('./thumbnailBuilderV2');
-    buildThumbnailV2(h.id)
+    const { buildThumbnailV5 } = require('./thumbnailBuilderV5');
+    buildThumbnailV5(h.id)
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -663,7 +663,7 @@ export async function startThumbnailWorker(): Promise<void> {
   const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
-    versjon: 'V2 (Sharp + Vision – ingen DALL-E)',
+    versjon: 'V5 (CTR Multi-Concept + gpt-image-1)',
     filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
   });
   await kjørThumbnailSyklus();
@@ -691,11 +691,10 @@ export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean
   if (!h.clip_url && !h.vertical_clip_url) return { ok: false, melding: 'Ingen video-URL' };
 
   generererNå.add(highlightId);
-  // Always use V2 (Sharp + real frames). genererThumbnail (DALL-E) is retired.
-  const { buildThumbnailV2 } = require('./thumbnailBuilderV2');
-  buildThumbnailV2(highlightId)
+  const { buildThumbnailV5 } = require('./thumbnailBuilderV5');
+  buildThumbnailV5(highlightId)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail V2 startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V5 startet for ${highlightId}` };
 }
