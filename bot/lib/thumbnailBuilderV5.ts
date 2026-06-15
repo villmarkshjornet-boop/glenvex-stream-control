@@ -1,13 +1,15 @@
 /**
- * Thumbnail Builder V5 – CTR-optimised Multi-Concept Engine
+ * Thumbnail Builder V5.5 – Sharp/SVG 7-layer CTR pipeline
  *
- * Phase 1: Hook Discovery          (GPT-4o-mini, metadata)
- * Phase 2: CTR Frame Selection     (GPT-4o-mini Vision, all frames)
- * Phase 3: 5 Concepts              (GPT-4o-mini)
- * Phase 4: Pre-score → top 2      (GPT-4o-mini, text-only)
- * Phase 5: Generate 4 images       (gpt-image-1, parallel: YT+TT × 2)
- * Phase 6: CTR Judge               (GPT-4o Vision, compare YT variants)
- * Phase 7: Upload winner + save DB
+ * Layer 1: Original frame (ffmpeg extract)
+ * Layer 2: Brightness + saturation enhancement (Sharp)
+ * Layer 3: Vignette + left-side darkening (SVG radialGradient)
+ * Layer 4: Massive headline text 20-25% of height (Anton font, Norwegian-safe)
+ * Layer 5: Red arrow pointing at detected subject (SVG, if box available)
+ * Layer 6: Badge with secondary hook text (SVG rect + text)
+ * CTR Gate: GPT-4o Vision strict gate — score < 60 → THUMBNAIL_REJECTED_LOW_CTR
+ *
+ * NO gpt-image-1. NO AI image generation. Text rendered only via Sharp/SVG.
  */
 
 import fs from 'fs';
@@ -18,10 +20,24 @@ import { logSystemEvent } from './systemEvents';
 
 const execAsync = require('util').promisify(require('child_process').exec);
 
-const STORAGE_BUCKET = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
-const THUMB_BASE     = path.join(process.cwd(), 'data', 'thumbnails');
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-// ── Utilities ──────────────────────────────────────────────────────────────────
+const STORAGE_BUCKET   = process.env.STORAGE_BUCKET ?? 'glenvex-assets';
+const THUMB_BASE       = path.join(process.cwd(), 'data', 'thumbnails');
+const FONT_DIR         = '/tmp/glenvex-fonts';
+const FONT_ANTON_PATH  = path.join(FONT_DIR, 'Anton-Regular.ttf');
+const FONT_ANTON_URL   = 'https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf';
+
+const YT_W = 1280;  const YT_H = 720;
+const TT_W = 1080;  const TT_H = 1920;
+
+const FRAME_COUNT    = 20;
+const BRIGHTNESS_MIN = 40;   // Hard reject frames below this (0-255 scale)
+const SAT_STD_MIN    = 5;    // Hard reject near-grayscale frames
+const CTR_THRESHOLD  = 60;
+const MAX_REJECTS    = 3;
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 function getDb() {
   const url = process.env.SUPABASE_URL;
@@ -32,7 +48,7 @@ function getDb() {
 
 function wLog(level: 'INFO' | 'WARN' | 'ERROR', event: string, data?: Record<string, any>) {
   const suffix = data ? ' ' + JSON.stringify(data) : '';
-  console.log(`[ThumbnailV5][${level}] ${event}${suffix}`);
+  console.log(`[ThumbnailV55][${level}] ${event}${suffix}`);
 }
 
 function sikreDir(dir: string) {
@@ -47,6 +63,12 @@ function ryddDir(dir: string) {
   try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 
+function sanitizeSvg(s: string): string {
+  return s
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
 async function lastNedFil(url: string, dest: string): Promise<boolean> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
@@ -56,79 +78,162 @@ async function lastNedFil(url: string, dest: string): Promise<boolean> {
   } catch { return false; }
 }
 
-async function lastOppBuffer(db: any, buf: Buffer, storageSti: string): Promise<string | null> {
+async function uploadBuffer(db: any, buf: Buffer, storagePath: string): Promise<string | null> {
   try {
-    const { error } = await db.storage.from(STORAGE_BUCKET).upload(storageSti, buf, {
-      contentType: 'image/png',
-      upsert: true,
+    const { error } = await db.storage.from(STORAGE_BUCKET).upload(storagePath, buf, {
+      contentType: 'image/png', upsert: true,
     });
     if (error) throw error;
-    const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(storageSti);
+    const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
     return (data as any)?.publicUrl ?? null;
   } catch (err: any) {
-    wLog('ERROR', 'THUMB_UPLOAD_FAIL', { storageSti, err: err.message?.slice(0, 200) });
+    wLog('ERROR', 'UPLOAD_FAIL', { storagePath, err: err.message?.slice(0, 200) });
     return null;
   }
 }
 
-// ── Frame extraction ───────────────────────────────────────────────────────────
+// ── Font ─────────────────────────────────────────────────────────────────────
 
-interface Frame { path: string; percent: number; }
+async function prepareFont(): Promise<string | null> {
+  try {
+    if (!fs.existsSync(FONT_ANTON_PATH)) {
+      fs.mkdirSync(FONT_DIR, { recursive: true });
+      const res = await fetch(FONT_ANTON_URL, { signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) { wLog('WARN', 'FONT_DOWNLOAD_FAIL', { status: res.status }); return null; }
+      fs.writeFileSync(FONT_ANTON_PATH, Buffer.from(await res.arrayBuffer()));
+      wLog('INFO', 'FONT_DOWNLOADED', { path: FONT_ANTON_PATH });
+    }
+    return FONT_ANTON_PATH;
+  } catch (e: any) {
+    wLog('WARN', 'FONT_PREP_FAIL', { err: e.message?.slice(0, 100) });
+    return null;
+  }
+}
 
-async function hentVideoDuration(videoSti: string): Promise<number> {
+function fontDeclaration(fontPath: string | null): { decl: string; fontFamily: string } {
+  if (fontPath && fs.existsSync(fontPath)) {
+    return {
+      decl: `@font-face { font-family: 'Anton'; src: url('file://${fontPath}'); font-weight: normal; font-style: normal; }`,
+      fontFamily: "'Anton', 'Impact', 'DejaVu Sans Bold', sans-serif",
+    };
+  }
+  // DejaVu Sans Bold: always on Debian/Ubuntu, supports full Unicode including æøå
+  return {
+    decl: '',
+    fontFamily: "'Impact', 'DejaVu Sans Bold', 'Liberation Sans Bold', sans-serif",
+  };
+}
+
+// ── Frame extraction ──────────────────────────────────────────────────────────
+
+interface Frame { buf: Buffer; pct: number; t: number; brightness: number; }
+
+async function getVideoDuration(videoPath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(
-      `ffprobe -v quiet -print_format json -show_format "${videoSti}"`,
+      `ffprobe -v quiet -print_format json -show_format "${videoPath}"`,
       { timeout: 15_000 }
     );
     return parseFloat((JSON.parse(stdout) as any)?.format?.duration ?? '0') || 30;
   } catch { return 30; }
 }
 
-async function hentFrames(videoSti: string, highlightId: string): Promise<Frame[]> {
-  const durSek   = await hentVideoDuration(videoSti);
+async function getFrameStats(buf: Buffer): Promise<{ brightness: number; satStd: number }> {
+  const sharp = require('sharp');
+  try {
+    // Sample center 60% of frame to avoid dark borders
+    const meta   = await sharp(buf).metadata();
+    const W      = meta.width ?? 640;
+    const H      = meta.height ?? 360;
+    const cW     = Math.round(W * 0.60);
+    const cH     = Math.round(H * 0.60);
+    const cX     = Math.round((W - cW) / 2);
+    const cY     = Math.round((H - cH) / 2);
+
+    const center = await sharp(buf).extract({ left: cX, top: cY, width: cW, height: cH }).toBuffer();
+    const stats  = await sharp(center).stats();
+
+    const means: number[] = stats.channels.slice(0, 3).map((c: any) => c.mean as number);
+    const brightness = means.reduce((a, b) => a + b, 0) / means.length;
+    const satStd = Math.sqrt(
+      means.reduce((sum, m) => sum + (m - brightness) ** 2, 0) / means.length
+    );
+    return { brightness, satStd };
+  } catch { return { brightness: 128, satStd: 20 }; }
+}
+
+async function extractFrames(videoPath: string, highlightId: string): Promise<Frame[]> {
+  const dur      = await getVideoDuration(videoPath);
   const frameDir = path.join(THUMB_BASE, highlightId, 'frames');
   sikreDir(frameDir);
 
+  const percentages = Array.from(
+    { length: FRAME_COUNT },
+    (_, i) => 5 + (i * 90 / (FRAME_COUNT - 1))
+  );
   const frames: Frame[] = [];
-  for (const pct of [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95]) {
-    const sek      = Math.min((durSek * pct) / 100, durSek - 0.5);
-    const frameSti = path.join(frameDir, `frame_${String(pct).padStart(2, '0')}.jpg`);
-    try {
-      await execAsync(
-        `ffmpeg -y -ss ${sek.toFixed(2)} -i "${videoSti}" -vf "scale=640:360" -frames:v 1 -q:v 3 "${frameSti}"`,
-        { timeout: 20_000 }
-      );
-      if (fs.existsSync(frameSti) && fs.statSync(frameSti).size > 4_000) {
-        frames.push({ path: frameSti, percent: pct });
-      }
-    } catch {}
+  const BATCH = 4;
+
+  for (let i = 0; i < percentages.length; i += BATCH) {
+    const batch = percentages.slice(i, i + BATCH);
+    const results = await Promise.all(batch.map(async (pct) => {
+      const t        = Math.max(0.5, (dur * pct) / 100);
+      const frameSti = path.join(frameDir, `f${Math.round(pct).toString().padStart(2, '0')}.jpg`);
+      try {
+        await execAsync(
+          `ffmpeg -y -ss ${t.toFixed(2)} -i "${videoPath}" -vframes 1 -q:v 2 -vf "scale=640:360" "${frameSti}"`,
+          { timeout: 15_000 }
+        );
+        if (!fs.existsSync(frameSti) || fs.statSync(frameSti).size < 4_000) return null;
+        const buf  = fs.readFileSync(frameSti);
+        const { brightness, satStd } = await getFrameStats(buf);
+
+        if (brightness < BRIGHTNESS_MIN) {
+          wLog('INFO', 'THUMBNAIL_FRAME_REJECTED_DARK', { highlightId, pct: Math.round(pct), brightness: Math.round(brightness) });
+          logSystemEvent({
+            source: 'thumbnail_worker', event_type: 'THUMBNAIL_FRAME_REJECTED_DARK',
+            title: `Frame forkastet: for mørk — ${Math.round(pct)}% (lyshet ${Math.round(brightness)}/255)`,
+            severity: 'info',
+            metadata: { highlightId, pct: Math.round(pct), brightness: Math.round(brightness) },
+          });
+          return null;
+        }
+        if (satStd < SAT_STD_MIN && brightness < 70) {
+          wLog('INFO', 'FRAME_REJECTED_DESATURATED', { highlightId, pct: Math.round(pct) });
+          return null;
+        }
+
+        return { buf, pct, t, brightness };
+      } catch { return null; }
+    }));
+    frames.push(...(results.filter(Boolean) as Frame[]));
   }
   return frames;
 }
 
-// ── Phase 1: Hook Discovery ────────────────────────────────────────────────────
+// ── Phase 1: Hook Discovery ───────────────────────────────────────────────────
 
 interface HookData {
-  hook: string;
-  emotion: string;
-  conflict: string;
-  curiosity: string;
-  thumbnail_text: string[];
+  hook:       string;
+  emotion:    string;
+  headline:   string;   // 2–4 words, CAPS, Norwegian-safe
+  badge_text: string;   // 3–6 words, CAPS
 }
 
 async function hookDiscovery(
   client: OpenAI,
-  highlight: any,
+  h: any,
   vod: any,
   highlightId: string
 ): Promise<HookData> {
+  const cat = h.category ?? '';
   const fallback: HookData = {
-    hook: highlight.title ?? 'Epic gaming moment',
-    emotion: 'excitement',
-    conflict: 'high stakes',
-    curiosity: 'what happens next',
-    thumbnail_text: ['SJEKK DETTE', 'IKKE TRO', 'DETTE SKJEDDE'],
+    hook:       h.title ?? 'Episk øyeblikk',
+    emotion:    'excitement',
+    headline:   cat === 'FUNNY' ? 'DETTE VAR SYKT' : cat === 'FAIL' ? 'DET GIKK GALT'
+                : cat === 'RAGE' ? 'HAN MISTET DET' : cat === 'RP_MOMENT' ? 'IKKE MULIG'
+                : 'SJEKK DETTE',
+    badge_text: 'JEG TRODDE IKKE DETTE',
   };
 
   try {
@@ -136,363 +241,416 @@ async function hookDiscovery(
       model: 'gpt-4o-mini',
       messages: [{
         role: 'system',
-        content: `Du er ekspert på viral gaming-innhold. Analyser klippet og finn den sterkeste thumbnail-kroken.
+        content: `Du er ekspert på norske YouTube gaming-thumbnails med høy CTR.
+Lag thumbnail-tekst. Norsk er OK — æ, ø, å er støttet i fonten.
+
 Svar KUN med JSON:
 {
-  "hook": "kjernespenningen i én setning",
-  "emotion": "primæremosjon (shock/curiosity/joy/rage/triumph/fear)",
-  "conflict": "hva som står på spill",
-  "curiosity": "hva seeren trenger å vite",
-  "thumbnail_text": ["2-4 ORD CAPS", "ALTERNATIV 2", "ALTERNATIV 3"]
+  "hook": "kjernespenningen i 1 setning",
+  "emotion": "shock|curiosity|rage|triumph|fear|joy",
+  "headline": "2-4 ORD CAPS — følelsen, IKKE beskrivelse",
+  "badge_text": "3-6 ORD CAPS — nysgjerrig undertittel"
 }
-thumbnail_text: 2–4 ord, STORE BOKSTAVER, norsk, ærlig — reflekter klippets faktiske innhold.`,
+
+Gode headline-eksempler: "DET GIKK GALT", "ALT FORSVANT", "HAN MISTET DET", "NEI NEI NEI", "IKKE IGJEN", "JEG KØDDER", "ALDRI MER"
+Gode badge-eksempler: "JEG TRODDE IKKE DETTE", "HVEM GJØR DETTE", "VERDENS DUMMESTE FEIL", "DET KUNNE IKKE GÅ VERRE"
+ALDRI beskrivende titler. ALLTID emosjonell reaksjon. MAKS 4 ord headline.`,
       }, {
         role: 'user',
         content: [
-          `Klipp: ${highlight.title ?? 'Ukjent'}`,
-          `Kategori: ${highlight.category ?? 'Ukjent'}`,
+          `Klipp: ${h.title ?? 'Ukjent'}`,
+          `Kategori: ${h.category ?? 'Ukjent'}`,
           `Spill: ${vod?.category ?? vod?.title ?? 'Ukjent'}`,
-          highlight.begrunnelse ? `Begrunnelse: ${highlight.begrunnelse}` : '',
+          h.begrunnelse ? `Hva skjedde: ${h.begrunnelse}` : '',
         ].filter(Boolean).join('\n'),
       }],
-      max_tokens: 220,
-      temperature: 0.8,
+      max_tokens: 200,
+      temperature: 0.9,
     });
-
     const text  = res.choices[0]?.message?.content ?? '';
     const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as HookData;
-  } catch (err: any) {
-    wLog('WARN', 'HOOK_DISCOVERY_FAIL', { highlightId, err: err.message?.slice(0, 100) });
+    if (match) return { ...fallback, ...JSON.parse(match[0]) };
+  } catch (e: any) {
+    wLog('WARN', 'HOOK_DISCOVERY_FAIL', { highlightId, err: e.message?.slice(0, 100) });
   }
   return fallback;
 }
 
-// ── Phase 2: CTR Frame Selection ──────────────────────────────────────────────
+// ── Phase 3: Vision frame analysis ───────────────────────────────────────────
 
-async function selectFrameForCTR(
+interface SubjectBox { x: number; y: number; w: number; h: number; }
+type SubjectType = 'face' | 'character' | 'vehicle' | 'action' | 'object' | 'none';
+interface SubjectAnalysis { box: SubjectBox | null; type: SubjectType; }
+
+async function analyzeFramesWithVision(
   client: OpenAI,
   frames: Frame[],
   hook: HookData,
   highlightId: string
-): Promise<{ frame: Frame; description: string }> {
-  const fallback = [...frames].sort((a, b) => Math.abs(a.percent - 50) - Math.abs(b.percent - 50))[0] ?? frames[0];
+): Promise<{ bestFrame: Frame; subject: SubjectAnalysis }> {
+  const fallbackSubject: SubjectAnalysis = { box: null, type: 'none' };
+  // Score heuristically: brightness quality + position bonus
+  const scored = frames
+    .map(f => ({
+      ...f,
+      hScore:
+        Math.min(1, Math.max(0, (f.brightness - BRIGHTNESS_MIN) / 140)) * 0.55 +
+        Math.max(0, 1 - Math.abs(f.pct - 50) / 50) * 0.45,
+    }))
+    .sort((a, b) => b.hScore - a.hScore);
 
-  if (frames.length === 0) return { frame: fallback, description: '' };
+  const candidates = scored.slice(0, Math.min(5, scored.length));
+  if (candidates.length === 0) throw new Error('Ingen brukbare frames');
 
-  // Pick up to 6 frames spread evenly
-  const step      = Math.max(1, Math.floor(frames.length / 6));
-  const kandidater = frames.filter((_, i) => i % step === 0).slice(0, 6);
+  const fallback = { bestFrame: candidates[0], subject: fallbackSubject };
+  if (candidates.length === 1) return fallback;
 
   try {
-    const imageContent: any[] = kandidater.map(f => ({
+    const imageContent: any[] = candidates.map(f => ({
       type: 'image_url',
-      image_url: { url: `data:image/jpeg;base64,${fs.readFileSync(f.path).toString('base64')}`, detail: 'low' },
+      image_url: {
+        url: `data:image/jpeg;base64,${f.buf.toString('base64')}`,
+        detail: 'low',
+      },
     }));
     imageContent.push({
       type: 'text',
-      text: `${kandidater.length} frames from a gaming clip (at ${kandidater.map(f => f.percent + '%').join(', ')} through the video).
-Hook: "${hook.hook}" | Emotion: ${hook.emotion}
+      text: `${candidates.length} frames from a gaming clip. Hook: "${hook.hook}" | Emotion: ${hook.emotion}
 
-Score each frame for YouTube thumbnail CTR. Priority: face/reaction > shock moment > explosion/boss > intense action > loot > static.
-Pick the single best frame.
+Score each frame 0-100 for THUMBNAIL CTR potential at 120×90px mobile size:
+- Brightness OK? Subject clearly visible? Conflict/reaction visible? More colorful?
+- Prefer: visible faces/reactions > dramatic conflict > clear subject > good lighting
 
-Reply ONLY with JSON:
-{"best": <1-${kandidater.length}>, "description": "<what's visible, 1-2 sentences>", "reason": "<why CTR-optimal>"}`,
+Also identify the winning frame's MAIN SUBJECT and its bounding box.
+Subject types: face | character | vehicle | action | object | none
+
+Reply ONLY with valid JSON (no markdown):
+{
+  "scores": [{"n":1,"s":0-100,"why":"brief"},{"n":2,...}],
+  "winner": <1-${candidates.length}>,
+  "subject": {"type":"face|character|vehicle|action|object|none","sx":0.0,"sy":0.0,"sw":0.5,"sh":0.7}
+}`,
     });
 
     const res = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: imageContent }],
-      max_tokens: 220,
-      temperature: 0.2,
+      max_tokens: 350,
+      temperature: 0.1,
     });
 
-    const text  = res.choices[0]?.message?.content ?? '';
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const p   = JSON.parse(match[0]) as { best?: number; description?: string };
-      const idx = Math.max(0, (p.best ?? 1) - 1);
-      return { frame: kandidater[idx] ?? fallback, description: p.description ?? '' };
-    }
-  } catch (err: any) {
-    wLog('WARN', 'CTR_FRAME_SELECT_FAIL', { highlightId, err: err.message?.slice(0, 100) });
-  }
-  return { frame: fallback, description: '' };
-}
+    const raw   = (res.choices[0]?.message?.content ?? '').replace(/```[a-z]*\n?/gi, '').trim();
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return fallback;
 
-// ── Phase 3: 5 Concepts ───────────────────────────────────────────────────────
+    const d       = JSON.parse(match[0]);
+    const winnerN = Math.max(1, Math.min(candidates.length, d.winner ?? 1));
+    const best    = candidates[winnerN - 1];
 
-interface Concept {
-  type: 'drama' | 'shock' | 'curiosity' | 'comedy' | 'competitive';
-  headline: string;
-  subtext: string;
-  style: string;
-  imagePrompt: string;
-}
+    const sub = d.subject ?? {};
+    const boxValid = typeof sub.sx === 'number' && typeof sub.sw === 'number'
+      && sub.sw > 0.04 && sub.sh > 0.04;
+    const box: SubjectBox | null = boxValid ? {
+      x: Math.max(0, Math.min(0.95, sub.sx)),
+      y: Math.max(0, Math.min(0.95, sub.sy ?? 0)),
+      w: Math.max(0.05, Math.min(0.98, sub.sw)),
+      h: Math.max(0.05, Math.min(0.98, sub.sh ?? 0.5)),
+    } : null;
 
-async function generateConcepts(
-  client: OpenAI,
-  highlight: any,
-  vod: any,
-  hook: HookData,
-  frameDescription: string,
-  highlightId: string
-): Promise<Concept[]> {
-  const spill = vod?.category ?? vod?.title ?? 'gaming';
+    const validTypes: SubjectType[] = ['face','character','vehicle','action','object','none'];
+    const subjectType: SubjectType = validTypes.includes(sub.type) ? sub.type : 'none';
 
-  try {
-    const res = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'system',
-        content: `Du er world-class YouTube thumbnail designer for gaming. Lag 5 thumbnail-konsepter — ett per emosjonell vinkel.
-
-Svar KUN med JSON-array med 5 objekter:
-[
-  {
-    "type": "drama|shock|curiosity|comedy|competitive",
-    "headline": "2-4 ORD CAPS norsk",
-    "subtext": "valgfri undertext maks 5 ord, kan være tom string",
-    "style": "kort visuell stil-beskrivelse",
-    "imagePrompt": "komplett engelsk prompt for gpt-image-1, maks 120 ord"
-  }
-]
-
-imagePrompt-regler:
-- Inkluder: "YouTube gaming thumbnail, 16:9, landscape"
-- Beskriv scenen basert på frame og klipp-kontekst
-- Inkluder: "with large bold white text '[HEADLINE]' in Impact font, dark stroke, placed in lower third"
-- Stil: dark cinematic background, neon green (#00FF87) accent, high contrast, dramatic
-- Representer innholdet ærlig — ingen clickbait som ikke stemmer med klippet`,
-      }, {
-        role: 'user',
-        content: `Klipp: ${highlight.title ?? 'Ukjent'}
-Kategori: ${highlight.category ?? 'Ukjent'}
-Spill: ${spill}
-Hook: ${hook.hook}
-Emosjon: ${hook.emotion}
-Konflikt: ${hook.conflict}
-Foreslåtte tekster: ${hook.thumbnail_text.join(' / ')}
-Frame-scene: ${frameDescription || 'intense gaming action'}
-${highlight.begrunnelse ? `Begrunnelse: ${highlight.begrunnelse}` : ''}`,
-      }],
-      max_tokens: 1400,
-      temperature: 0.9,
+    wLog('INFO', 'VISION_ANALYSIS_DONE', {
+      highlightId,
+      winner: winnerN,
+      brightness: Math.round(best.brightness),
+      subjectType,
+      hasBox: !!box,
     });
 
-    const text  = res.choices[0]?.message?.content ?? '';
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) {
-      const parsed = JSON.parse(match[0]) as Concept[];
-      if (Array.isArray(parsed) && parsed.length >= 3) return parsed.slice(0, 5);
-    }
-  } catch (err: any) {
-    wLog('WARN', 'CONCEPTS_FAIL', { highlightId, err: err.message?.slice(0, 100) });
+    return { bestFrame: best, subject: { box, type: subjectType } };
+  } catch (e: any) {
+    wLog('WARN', 'VISION_ANALYSIS_FAIL', { highlightId, err: e.message?.slice(0, 100) });
+    return fallback;
   }
-
-  // Fallback: minimal concepts from hook texts
-  return hook.thumbnail_text.slice(0, 3).map((txt, i) => ({
-    type: (['drama', 'shock', 'curiosity'] as const)[i] ?? 'drama',
-    headline: txt,
-    subtext: '',
-    style: 'Dark cinematic gaming thumbnail with neon green accents',
-    imagePrompt: `YouTube gaming thumbnail, 16:9, landscape, ${spill}, ${frameDescription || 'intense action'}, with large bold white text '${txt}' in Impact font, dark stroke, placed in lower third, neon green (#00FF87) accent lighting, dark background, high contrast, cinematic, dramatic mood`,
-  }));
 }
 
-// ── Phase 4: Pre-score → top 2 ────────────────────────────────────────────────
+// ── SVG helpers ───────────────────────────────────────────────────────────────
 
-async function preScoreConcepts(
+function accentColor(category: string): string {
+  switch (category) {
+    case 'RAGE':        return '#FF3333';
+    case 'CLUTCH':      return '#00FF87';
+    case 'FUNNY':       return '#FFD700';
+    case 'RP_MOMENT':   return '#FF69B4';
+    case 'EDUCATIONAL': return '#00BFFF';
+    case 'FAIL':        return '#FF6600';
+    case 'TACTICAL':    return '#9B59B6';
+    default:            return '#FFFFFF';
+  }
+}
+
+function splitLines(text: string, maxPerLine: number): string[] {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= 2 || text.length <= maxPerLine) return [text];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}
+
+function calcFontSize(text: string, availW: number, maxFontH: number): number {
+  const lines   = splitLines(text, Math.ceil(availW / (maxFontH * 0.52)));
+  const longest = lines.reduce((a, b) => a.length > b.length ? a : b, '');
+  const byWidth = Math.floor(availW / (Math.max(1, longest.length) * 0.52));
+  return Math.min(maxFontH, Math.max(30, byWidth));
+}
+
+function buildArrowSvg(
+  startX: number, startY: number,
+  targetX: number, targetY: number
+): string {
+  const dx  = targetX - startX;
+  const dy  = targetY - startY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 60) return '';
+
+  const angle   = Math.atan2(dy, dx) * 180 / Math.PI;
+  const bodyLen = Math.max(40, len - 45).toFixed(0);
+  const tipX    = (parseFloat(bodyLen) + 36).toFixed(0);
+
+  return `<g transform="translate(${startX.toFixed(0)},${startY.toFixed(0)}) rotate(${angle.toFixed(1)})">
+    <rect x="0" y="-7" width="${bodyLen}" height="14" rx="7"
+      fill="#FF2D2D" stroke="black" stroke-width="4" paint-order="stroke fill"/>
+    <polygon points="${bodyLen},-28 ${tipX},0 ${bodyLen},28"
+      fill="#FF2D2D" stroke="black" stroke-width="4" paint-order="stroke fill"/>
+  </g>`;
+}
+
+// ── Phase 5: 7-layer composite ────────────────────────────────────────────────
+
+async function buildComposite(
+  frameBuf: Buffer,
+  W: number,
+  H: number,
+  hook: HookData,
+  subject: SubjectAnalysis,
+  category: string,
+  fontPath: string | null,
+  platform: 'youtube' | 'tiktok'
+): Promise<Buffer> {
+  const sharp = require('sharp');
+  const { decl, fontFamily } = fontDeclaration(fontPath);
+  const primary = accentColor(category);
+  const isYT    = platform === 'youtube';
+
+  // === Layer 1 + 2: Frame resize + enhancement ===
+  const enhanced = await sharp(frameBuf)
+    .resize(W, H, { fit: 'cover', position: 'entropy' })
+    .sharpen({ sigma: 0.7, m1: 0.4, m2: 3.2 })
+    .modulate({ brightness: 1.12, saturation: 1.40 })
+    .linear(1.06, -8)
+    .toBuffer();
+
+  // === Headline sizing: target full block = 22-25% of height ===
+  const safeHead  = sanitizeSvg(hook.headline.toUpperCase());
+  const safeBadge = sanitizeSvg(hook.badge_text.toUpperCase());
+
+  const textZoneLeft = Math.round(W * (isYT ? 0.04 : 0.06));
+  const textZoneW    = Math.round(W * (isYT ? 0.56 : 0.88));
+
+  const wordCount    = hook.headline.trim().split(/\s+/).length;
+  const lineCount    = wordCount <= 2 ? 1 : 2;
+  const targetBlkH   = Math.round(H * (isYT ? 0.24 : 0.16));
+  const maxFontH     = Math.round(targetBlkH / (lineCount * 1.15));
+  const hSize        = calcFontSize(safeHead, textZoneW, maxFontH);
+  const hStroke      = Math.max(7, Math.round(hSize / 6));
+  const lineSpacing  = hSize * 1.14;
+
+  const headLines  = splitLines(safeHead, Math.floor(textZoneW / (hSize * 0.52)));
+  const totalTextH = headLines.length * lineSpacing;
+
+  // Badge sizing
+  const badgeFontH = Math.round(H * (isYT ? 0.058 : 0.04));
+  const badgeH     = badgeFontH + 26;
+  const badgeApproxW = Math.min(
+    Math.round(W * 0.75),
+    Math.round(safeBadge.length * badgeFontH * 0.54 + 46)
+  );
+  const badgeBadgeStroke = Math.max(2, Math.round(badgeFontH / 11));
+
+  // Positions (bottom-up layout)
+  const badgeBottomY = H - Math.round(H * 0.045);
+  const badgeTopY    = badgeBottomY - badgeH;
+  const badgeX       = isYT ? textZoneLeft : Math.round((W - badgeApproxW) / 2);
+  const badgeCenterX = badgeX + Math.round(badgeApproxW / 2);
+  const badgeCenterY = badgeTopY + Math.round(badgeH / 2);
+
+  const textBottomY = badgeTopY - Math.round(H * 0.035);
+  const headTopY    = textBottomY - totalTextH;
+  const headAnchorX = isYT ? textZoneLeft : Math.round(W / 2);
+  const textAnchor  = isYT ? 'start' : 'middle';
+
+  const headTspans = headLines.map((line, i) =>
+    `<tspan x="${headAnchorX}" dy="${i === 0 ? 0 : lineSpacing.toFixed(0)}">${line}</tspan>`
+  ).join('');
+
+  // Arrow: from mid-right of text zone toward subject
+  let arrowSvgStr = '';
+  if (subject.box && subject.type !== 'none') {
+    const sub = subject.box;
+    const subX = Math.round((sub.x + sub.w * 0.25) * W);
+    const subY = Math.round((sub.y + sub.h * 0.50) * H);
+    // Start arrow from the right edge of the text block, vertically centered
+    const arrowStartX = Math.round(headAnchorX + textZoneW * (isYT ? 0.75 : 0.5));
+    const arrowStartY = Math.round(headTopY + totalTextH * 0.5);
+    arrowSvgStr = buildArrowSvg(arrowStartX, arrowStartY, subX, subY);
+  }
+
+  // Vignette and gradient values
+  const gradStartY    = Math.round(H * 0.42);
+  const vigCX         = isYT ? '65%' : '50%';
+
+  // === SVG overlay: layers 3-6 ===
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <defs>
+    <style>${decl}</style>
+    <radialGradient id="vig" cx="${vigCX}" cy="50%" r="75%" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="black" stop-opacity="0"/>
+      <stop offset="50%"  stop-color="black" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.70"/>
+    </radialGradient>
+    <linearGradient id="g-left" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="black" stop-opacity="0.80"/>
+      <stop offset="58%" stop-color="black" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="g-bot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="black" stop-opacity="0"/>
+      <stop offset="48%"  stop-color="black" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.88"/>
+    </linearGradient>
+    <filter id="glow-h" x="-25%" y="-60%" width="150%" height="220%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="blur"/>
+      <feFlood flood-color="${primary}" flood-opacity="0.88" result="c"/>
+      <feComposite in="c" in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="drop">
+      <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="black" flood-opacity="0.92"/>
+    </filter>
+  </defs>
+
+  <!-- Layer 3: Vignette -->
+  <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)"/>
+  <rect x="0" y="0" width="${W}" height="${H}" fill="url(#g-left)"/>
+  <rect x="0" y="${gradStartY}" width="${W}" height="${H - gradStartY}" fill="url(#g-bot)"/>
+
+  <!-- Layer 4: Headline -->
+  <text x="${headAnchorX}" y="${Math.round(headTopY + hSize * 0.88)}"
+    text-anchor="${textAnchor}"
+    font-family="${fontFamily}" font-size="${hSize}px" font-weight="900"
+    fill="${primary}" stroke="black" stroke-width="${hStroke}" stroke-linejoin="round"
+    paint-order="stroke fill" letter-spacing="2" filter="url(#glow-h)">${headTspans}</text>
+
+  <!-- Layer 5: Arrow (if subject detected) -->
+  ${arrowSvgStr}
+
+  <!-- Layer 6: Badge -->
+  <g transform="rotate(-2,${badgeCenterX},${badgeCenterY})">
+    <rect x="${badgeX}" y="${badgeTopY}" width="${badgeApproxW}" height="${badgeH}" rx="8"
+      fill="#CC0000" opacity="0.95" filter="url(#drop)"/>
+    <rect x="${badgeX}" y="${badgeTopY}" width="${badgeApproxW}" height="3" rx="1"
+      fill="white" opacity="0.30"/>
+    <text x="${badgeCenterX}" y="${Math.round(badgeTopY + badgeH * 0.65)}"
+      text-anchor="middle"
+      font-family="${fontFamily}" font-size="${badgeFontH}px" font-weight="900"
+      fill="white" stroke="black" stroke-width="${badgeBadgeStroke}" paint-order="stroke fill">
+      ${safeBadge}
+    </text>
+  </g>
+
+  <!-- Accent bar -->
+  <rect x="0" y="${H - 5}" width="${W}" height="5" fill="${primary}" opacity="0.88"/>
+</svg>`;
+
+  return sharp(enhanced)
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png({ compressionLevel: 7 })
+    .toBuffer();
+}
+
+// ── Phase 6: CTR Gate ─────────────────────────────────────────────────────────
+
+interface CtrGateResult {
+  passed:         boolean;
+  score:          number;
+  reason:         string;
+  subjectVisible: boolean;
+  textReadable:   boolean;
+}
+
+async function runCtrGate(
   client: OpenAI,
-  concepts: Concept[],
+  ytBuf: Buffer,
   hook: HookData,
   highlightId: string
-): Promise<[Concept, Concept]> {
-  const fallback: [Concept, Concept] = [concepts[0], concepts[1] ?? concepts[0]];
+): Promise<CtrGateResult> {
+  const hardFail: CtrGateResult = {
+    passed: false, score: 0,
+    reason: 'CTR Gate feilet teknisk — thumbnail avvist',
+    subjectVisible: false, textReadable: false,
+  };
 
   try {
-    const list = concepts.map((c, i) =>
-      `${i + 1}. [${c.type.toUpperCase()}] "${c.headline}"${c.subtext ? ` / "${c.subtext}"` : ''} — ${c.style}`
-    ).join('\n');
+    const sharp   = require('sharp');
+    const preview = await sharp(ytBuf).resize(320, 180, { fit: 'fill' }).jpeg({ quality: 80 }).toBuffer();
 
-    const res = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'system',
-        content: `Du er CTR-ekspert på gaming thumbnails. Ranger disse konseptene basert på tekst og stil alene.
-Hook: "${hook.hook}" | Emosjon: ${hook.emotion}
-
-Score basert på: emosjonelt trykk, nysgjerrighet, tekststyrke, mobillesbarhet.
-Svar KUN med JSON: {"ranked": [<1-5>, <1-5>, <1-5>, <1-5>, <1-5>], "reason": "begrunnelse for topp 2"}
-ranked = numre fra best til dårligst.`,
-      }, {
-        role: 'user',
-        content: list,
-      }],
-      max_tokens: 160,
-      temperature: 0.3,
-    });
-
-    const text  = res.choices[0]?.message?.content ?? '';
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const p      = JSON.parse(match[0]) as { ranked?: number[]; reason?: string };
-      const ranked = (p.ranked ?? []).map(n => n - 1);
-      const top1   = concepts[ranked[0]] ?? concepts[0];
-      const top2   = concepts[ranked[1]] ?? concepts[1] ?? concepts[0];
-      logSystemEvent({
-        source: 'thumbnail_worker', event_type: 'THUMBNAIL_CONCEPTS_PRESCORED',
-        title: `Topp 2: ${top1.type} + ${top2.type}`,
-        severity: 'info',
-        metadata: { highlightId, top1: top1.type, top2: top2.type, reason: p.reason },
-      });
-      return [top1, top2];
-    }
-  } catch (err: any) {
-    wLog('WARN', 'PRESCORE_FAIL', { highlightId, err: err.message?.slice(0, 100) });
-  }
-  return fallback;
-}
-
-// ── Phase 5: Generate images (gpt-image-1) ────────────────────────────────────
-
-interface GeneratedVariant {
-  ytBuffer: Buffer | null;
-  ttBuffer: Buffer | null;
-  concept:  Concept;
-}
-
-async function generateVariant(
-  client: OpenAI,
-  concept: Concept,
-  highlightId: string,
-  label: string
-): Promise<GeneratedVariant> {
-  const ytPrompt = `${concept.imagePrompt} Landscape 16:9 format for YouTube. Text in lower third.`;
-  const ttPrompt = `${concept.imagePrompt} Vertical 9:16 format for TikTok/Shorts. Text centered, 10% safe-zone margins.`.replace('16:9, landscape', '9:16, vertical');
-
-  let ytBuffer: Buffer | null = null;
-  let ttBuffer: Buffer | null = null;
-
-  const [ytRes, ttRes] = await Promise.allSettled([
-    client.images.generate({
-      model: 'gpt-image-1' as any,
-      prompt: ytPrompt,
-      n: 1,
-      size: '1536x1024' as any,
-    }),
-    client.images.generate({
-      model: 'gpt-image-1' as any,
-      prompt: ttPrompt,
-      n: 1,
-      size: '1024x1536' as any,
-    }),
-  ]);
-
-  if (ytRes.status === 'fulfilled') {
-    const b64 = (ytRes.value.data?.[0] as any)?.b64_json as string | undefined;
-    if (b64) ytBuffer = Buffer.from(b64, 'base64');
-  } else {
-    wLog('WARN', `V5_YT_GENERATE_FAIL_${label}`, { highlightId, err: (ytRes.reason as any)?.message?.slice(0, 150) });
-  }
-
-  if (ttRes.status === 'fulfilled') {
-    const b64 = (ttRes.value.data?.[0] as any)?.b64_json as string | undefined;
-    if (b64) ttBuffer = Buffer.from(b64, 'base64');
-  } else {
-    wLog('WARN', `V5_TT_GENERATE_FAIL_${label}`, { highlightId, err: (ttRes.reason as any)?.message?.slice(0, 150) });
-  }
-
-  return { ytBuffer, ttBuffer, concept };
-}
-
-// ── Phase 6: CTR Judge ─────────────────────────────────────────────────────────
-
-interface JudgeResult { winnerIdx: 0 | 1; ctrScore: number; reason: string; }
-
-async function ctrJudge(
-  client: OpenAI,
-  variantA: GeneratedVariant,
-  variantB: GeneratedVariant,
-  hook: HookData,
-  highlightId: string
-): Promise<JudgeResult> {
-  const fallback: JudgeResult = { winnerIdx: 0, ctrScore: 55, reason: 'CTR judge fallback – valgte konsept A' };
-
-  const images: { buffer: Buffer; label: string; idx: 0 | 1 }[] = [];
-  if (variantA.ytBuffer) images.push({ buffer: variantA.ytBuffer, label: 'A', idx: 0 });
-  if (variantB.ytBuffer) images.push({ buffer: variantB.ytBuffer, label: 'B', idx: 1 });
-
-  if (images.length === 0) return fallback;
-
-  const scorePrompt = `Rate this YouTube gaming thumbnail for CTR potential.
-Hook: "${hook.hook}"
-
-Score each category (0-max points):
-- Curiosity trigger:   /20
-- Emotional impact:    /20
-- Visual contrast:     /10
-- Subject clarity:     /20
-- Text impact:         /20
-- Mobile readability:  /10
-Total: /100
-
-Reply ONLY with JSON: {"ctr_score": <0-100>, "reason": "<1-2 sentences>"}`;
-
-  if (images.length === 1) {
-    try {
-      const res = await client.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: [
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${images[0].buffer.toString('base64')}`, detail: 'low' } },
-          { type: 'text', text: scorePrompt },
-        ] }],
-        max_tokens: 140,
-        temperature: 0.2,
-      });
-      const match = (res.choices[0]?.message?.content ?? '').match(/\{[\s\S]*\}/);
-      if (match) {
-        const p = JSON.parse(match[0]) as { ctr_score?: number; reason?: string };
-        return { winnerIdx: images[0].idx, ctrScore: Math.min(100, Math.max(0, p.ctr_score ?? 55)), reason: p.reason ?? '' };
-      }
-    } catch (err: any) {
-      wLog('WARN', 'CTR_JUDGE_SINGLE_FAIL', { highlightId, err: err.message?.slice(0, 100) });
-    }
-    return { winnerIdx: images[0].idx, ctrScore: 55, reason: 'Scoring fallback' };
-  }
-
-  // Compare A vs B
-  try {
     const res = await client.chat.completions.create({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: [
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${images[0].buffer.toString('base64')}`, detail: 'low' } },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${images[1].buffer.toString('base64')}`, detail: 'low' } },
-        { type: 'text', text: `These are 2 YouTube gaming thumbnail variants (A=left, B=right).
-Hook: "${hook.hook}" | Emotion: ${hook.emotion}
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image_url',
+          image_url: { url: `data:image/jpeg;base64,${preview.toString('base64')}`, detail: 'low' },
+        }, {
+          type: 'text',
+          text: `YouTube gaming thumbnail evaluated at mobile feed size (120×90px equivalent).
+Context: "${hook.hook}"
 
-For each, score: Curiosity/20 + Emotion/20 + Contrast/10 + SubjectClarity/20 + TextImpact/20 + Mobile/10 = /100
+Strict criteria:
+1. subject_visible: Can you clearly see the MAIN SUBJECT (person, character, vehicle, action)? A mostly dark or empty frame = false.
+2. text_readable: Is the LARGE TEXT legible? Boxes □ or scrambled characters = false. Missing text = false.
+3. Score 0-100:
+   - Subject visibility  /25: can you tell what's happening?
+   - Text impact         /25: large, bold, readable, emotional?
+   - Emotional signal    /25: does this image make you feel something?
+   - Curiosity trigger   /25: would you click this over 20 other videos?
 
-Pick the winner. Reply ONLY with JSON:
-{"winner": "A" or "B", "score_a": <0-100>, "score_b": <0-100>, "ctr_score": <winner score>, "reason": "<1-2 sentences>"}` },
-      ] }],
-      max_tokens: 200,
-      temperature: 0.2,
+Score ≥ 60 = publishable. Score < 60 = must be regenerated.
+
+Reply ONLY with JSON:
+{"subject_visible":true/false,"text_readable":true/false,"score":0-100,"reason":"1-2 sentences"}`,
+        }],
+      }],
+      max_tokens: 160,
+      temperature: 0.1,
     });
 
-    const match = (res.choices[0]?.message?.content ?? '').match(/\{[\s\S]*\}/);
-    if (match) {
-      const p      = JSON.parse(match[0]) as { winner?: string; ctr_score?: number; reason?: string };
-      const wLabel = (p.winner ?? 'A').toUpperCase();
-      const wImg   = images.find(i => i.label === wLabel) ?? images[0];
-      return { winnerIdx: wImg.idx, ctrScore: Math.min(100, Math.max(0, p.ctr_score ?? 55)), reason: p.reason ?? '' };
-    }
-  } catch (err: any) {
-    wLog('WARN', 'CTR_JUDGE_COMPARE_FAIL', { highlightId, err: err.message?.slice(0, 100) });
-  }
+    const text  = res.choices[0]?.message?.content ?? '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return hardFail;
 
-  return fallback;
+    const d             = JSON.parse(match[0]);
+    const subjectVisible = !!d.subject_visible;
+    const textReadable   = !!d.text_readable;
+    const score          = Math.min(100, Math.max(0, d.score ?? 0));
+    const reason         = String(d.reason ?? '').slice(0, 200);
+    const passed         = subjectVisible && textReadable && score >= CTR_THRESHOLD;
+
+    return { passed, score, reason, subjectVisible, textReadable };
+  } catch (e: any) {
+    wLog('WARN', 'CTR_GATE_FAIL', { highlightId, err: e.message?.slice(0, 100) });
+    return hardFail;
+  }
 }
 
 // ── Main export ────────────────────────────────────────────────────────────────
@@ -504,156 +662,174 @@ export async function buildThumbnailV5(highlightId: string): Promise<void> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY mangler');
 
-  const client   = new OpenAI({ apiKey });
-  const thumbDir = path.join(THUMB_BASE, highlightId);
-  const videoSti = path.join(thumbDir, 'video_tmp.mp4');
-
+  const client    = new OpenAI({ apiKey });
+  const thumbDir  = path.join(THUMB_BASE, highlightId);
+  const videoPath = path.join(thumbDir, 'video_tmp.mp4');
   sikreDir(thumbDir);
 
   try {
-    wLog('INFO', 'THUMBNAIL_V5_STARTED', { highlightId });
+    wLog('INFO', 'THUMBNAIL_V55_STARTED', { highlightId });
     logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V5_STARTED',
-      title: `Thumbnail V5 startet for ${highlightId}`, severity: 'info',
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V55_STARTED',
+      title: `Thumbnail V5.5 startet for ${highlightId}`, severity: 'info',
       metadata: { highlightId },
     });
 
-    // Load highlight + VOD
+    // Load data
     const { data: h } = await db.from('content_highlights')
-      .select('id,vod_id,title,category,begrunnelse,clip_url,vertical_clip_url')
+      .select('id,vod_id,title,category,begrunnelse,clip_url,vertical_clip_url,thumbnail_reject_count')
       .eq('id', highlightId).single();
     if (!h) throw new Error('Highlight ikke funnet');
 
     const videoUrl = h.clip_url ?? h.vertical_clip_url;
-    if (!videoUrl) {
-      await db.from('content_highlights').update({
-        thumbnail_status: 'FAILED',
-        thumbnail_error: 'Ingen clip_url',
-      }).eq('id', highlightId);
-      return;
-    }
+    if (!videoUrl) throw new Error('Ingen clip_url');
 
     const { data: vod } = await db.from('content_vods')
       .select('id,title,category').eq('id', h.vod_id).single();
 
-    // Download video
-    if (!await lastNedFil(videoUrl, videoSti)) throw new Error('Kunne ikke laste ned video');
+    // Font
+    const fontPath = await prepareFont();
+    wLog('INFO', fontPath ? 'FONT_READY' : 'FONT_FALLBACK', { font: fontPath ? 'Anton' : 'system (DejaVu/Impact)' });
 
-    // Extract frames
-    const frames = await hentFrames(videoSti, highlightId);
-    if (frames.length === 0) throw new Error('Ingen frames ekstrahert');
+    // Download video
+    if (!await lastNedFil(videoUrl, videoPath)) throw new Error('Kunne ikke laste ned video');
 
     // Phase 1: Hook Discovery
     const hook = await hookDiscovery(client, h, vod, highlightId);
-    wLog('INFO', 'THUMBNAIL_HOOK_DISCOVERED', { highlightId, emotion: hook.emotion });
-    logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_HOOK_DISCOVERED',
-      title: `Hook: ${hook.hook}`, severity: 'info',
-      metadata: { highlightId, hook: hook.hook, emotion: hook.emotion },
-    });
+    wLog('INFO', 'HOOK_DISCOVERED', { highlightId, headline: hook.headline, badge: hook.badge_text, emotion: hook.emotion });
 
-    // Phase 2: CTR Frame Selection
-    const { frame: bestFrame, description: frameDescription } = await selectFrameForCTR(client, frames, hook, highlightId);
-    wLog('INFO', 'THUMBNAIL_FRAME_SELECTED', { highlightId, percent: bestFrame.percent });
+    // Phase 2: Frame extraction + brightness filter
+    const frames = await extractFrames(videoPath, highlightId);
+    if (frames.length === 0) throw new Error('Ingen brukbare frames — alle for mørke eller desaturerte');
+    wLog('INFO', 'FRAMES_EXTRACTED', { highlightId, antall: frames.length });
+
+    // Phase 3: Vision frame analysis
+    const { bestFrame, subject } = await analyzeFramesWithVision(client, frames, hook, highlightId);
+    wLog('INFO', 'THUMBNAIL_FRAME_SELECTED', {
+      highlightId, pct: Math.round(bestFrame.pct),
+      brightness: Math.round(bestFrame.brightness), subjectType: subject.type,
+    });
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_FRAME_SELECTED',
-      title: `Frame valgt: ${bestFrame.percent}%`, severity: 'info',
-      metadata: { highlightId, percent: bestFrame.percent, description: frameDescription.slice(0, 100) },
+      title: `Frame: ${Math.round(bestFrame.pct)}%, lyshet ${Math.round(bestFrame.brightness)}/255, motiv: ${subject.type}`,
+      severity: 'info',
+      metadata: { highlightId, pct: Math.round(bestFrame.pct), brightness: Math.round(bestFrame.brightness), subjectType: subject.type, hasBox: !!subject.box },
     });
 
-    // Phase 3: 5 Concepts
-    const concepts = await generateConcepts(client, h, vod, hook, frameDescription, highlightId);
-    wLog('INFO', 'THUMBNAIL_CONCEPTS_CREATED', { highlightId, antall: concepts.length });
-    logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_CONCEPTS_CREATED',
-      title: `${concepts.length} konsepter generert`, severity: 'info',
-      metadata: { highlightId, antall: concepts.length, typer: concepts.map(c => c.type) },
-    });
-
-    // Phase 4: Pre-score → top 2
-    const [top1, top2] = await preScoreConcepts(client, concepts, hook, highlightId);
-    wLog('INFO', 'THUMBNAIL_CONCEPTS_PRESCORED', { highlightId, top1: top1.type, top2: top2.type });
-
-    // Phase 5: Generate images (gpt-image-1, parallel)
-    wLog('INFO', 'THUMBNAIL_VARIANTS_GENERATING', { highlightId, konsepter: [top1.type, top2.type] });
-    const [variantA, variantB] = await Promise.all([
-      generateVariant(client, top1, highlightId, 'A'),
-      generateVariant(client, top2, highlightId, 'B'),
+    // Phase 4+5: Build composites (YouTube + TikTok)
+    const [ytBuf, ttBuf] = await Promise.all([
+      buildComposite(bestFrame.buf, YT_W, YT_H, hook, subject, h.category, fontPath, 'youtube'),
+      buildComposite(bestFrame.buf, TT_W, TT_H, hook, subject, h.category, fontPath, 'tiktok'),
     ]);
 
-    const variantsGenerated =
-      (variantA.ytBuffer ? 1 : 0) + (variantA.ttBuffer ? 1 : 0) +
-      (variantB.ytBuffer ? 1 : 0) + (variantB.ttBuffer ? 1 : 0);
-    wLog('INFO', 'THUMBNAIL_VARIANTS_GENERATED', { highlightId, antall: variantsGenerated });
+    wLog('INFO', 'THUMBNAIL_TEXT_RENDERED', {
+      highlightId, headline: hook.headline, badge: hook.badge_text,
+      font: fontPath ? 'Anton' : 'system-fallback',
+    });
     logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_VARIANTS_GENERATED',
-      title: `${variantsGenerated}/4 varianter generert`, severity: variantsGenerated < 2 ? 'warning' : 'info',
-      metadata: { highlightId, antall: variantsGenerated },
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_TEXT_RENDERED',
+      title: `Tekst: "${hook.headline}" / badge: "${hook.badge_text}" / font: ${fontPath ? 'Anton' : 'system'}`,
+      severity: 'info',
+      metadata: { highlightId, headline: hook.headline, badge: hook.badge_text, font: fontPath ? 'Anton' : 'system' },
     });
 
-    if (!variantA.ytBuffer && !variantB.ytBuffer) {
-      throw new Error('Alle billedgenereringer feilet');
-    }
-
-    // Phase 6: CTR Judge
-    const judge  = await ctrJudge(client, variantA, variantB, hook, highlightId);
-    const winner = judge.winnerIdx === 0 ? variantA : variantB;
-    wLog('INFO', 'THUMBNAIL_CTR_JUDGED', { highlightId, score: judge.ctrScore, vinner: winner.concept.type, reason: judge.reason });
-    logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_CTR_JUDGED',
-      title: `CTR-score: ${judge.ctrScore}/100 — Vinner: ${winner.concept.type}`, severity: judge.ctrScore < 60 ? 'warning' : 'info',
-      metadata: { highlightId, ctrScore: judge.ctrScore, vinner: winner.concept.type, reason: judge.reason },
-    });
-
-    if (judge.ctrScore < 60) {
-      wLog('WARN', 'THUMBNAIL_LOW_CTR_WARNING', { highlightId, score: judge.ctrScore });
+    if (subject.box && subject.type !== 'none') {
+      wLog('INFO', 'THUMBNAIL_SUBJECT_MARKED', { highlightId, type: subject.type });
       logSystemEvent({
-        source: 'thumbnail_worker', event_type: 'THUMBNAIL_LOW_CTR_WARNING',
-        title: `Lav CTR-score: ${judge.ctrScore}/100`, severity: 'warning',
-        metadata: { highlightId, ctrScore: judge.ctrScore, reason: judge.reason },
+        source: 'thumbnail_worker', event_type: 'THUMBNAIL_SUBJECT_MARKED',
+        title: `Motiv markert med pil: ${subject.type}`,
+        severity: 'info',
+        metadata: { highlightId, subjectType: subject.type, box: subject.box },
       });
     }
 
-    // Phase 7: Upload winner + save
+    // Phase 6: CTR Gate
+    const gate        = await runCtrGate(client, ytBuf, hook, highlightId);
+    const rejectCount = (h.thumbnail_reject_count ?? 0);
+
+    wLog(
+      gate.passed ? 'INFO' : 'WARN',
+      gate.passed ? 'THUMBNAIL_CTR_GATE_PASSED' : 'THUMBNAIL_REJECTED_LOW_CTR',
+      { highlightId, score: gate.score, subjectVisible: gate.subjectVisible, textReadable: gate.textReadable, reason: gate.reason },
+    );
+    logSystemEvent({
+      source: 'thumbnail_worker',
+      event_type: gate.passed ? 'THUMBNAIL_CTR_GATE_PASSED' : 'THUMBNAIL_REJECTED_LOW_CTR',
+      title: gate.passed
+        ? `CTR Gate: GODKJENT — ${gate.score}/100`
+        : `CTR Gate: AVVIST — ${gate.score}/100 (${!gate.subjectVisible ? 'motiv ikke synlig' : !gate.textReadable ? 'tekst ikke lesbar' : 'for lav score'})`,
+      severity: gate.passed ? 'info' : 'warning',
+      metadata: { highlightId, score: gate.score, subjectVisible: gate.subjectVisible, textReadable: gate.textReadable, reason: gate.reason, rejectCount: rejectCount + (gate.passed ? 0 : 1) },
+    });
+
+    if (!gate.passed) {
+      const newCount   = rejectCount + 1;
+      const maxReached = newCount >= MAX_REJECTS;
+
+      if (maxReached) {
+        wLog('WARN', 'THUMBNAIL_NEEDS_MANUAL_REVIEW', { highlightId, totalRejects: newCount });
+        logSystemEvent({
+          source: 'thumbnail_worker', event_type: 'THUMBNAIL_NEEDS_MANUAL_REVIEW',
+          title: `Thumbnail: maks ${MAX_REJECTS} CTR-avvisninger — manuell opplasting påkrevd`,
+          severity: 'warning',
+          metadata: { highlightId, totalRejects: newCount },
+        });
+        await db.from('content_highlights').update({
+          thumbnail_status:       'NEEDS_MANUAL_REVIEW',
+          thumbnail_reject_count: newCount,
+          thumbnail_error:        `Maks ${MAX_REJECTS} CTR-avvisninger. Siste: ${gate.reason}`,
+        }).eq('id', highlightId);
+      } else {
+        // Reset to PENDING — worker picks up on next cycle with incremented reject_count
+        await db.from('content_highlights').update({
+          thumbnail_status:       'PENDING',
+          thumbnail_reject_count: newCount,
+          thumbnail_error:        `CTR_REJECTED #${newCount}: score=${gate.score} — ${gate.reason}`,
+        }).eq('id', highlightId);
+      }
+      return; // Controlled rejection, not a crash
+    }
+
+    // Phase 7: Upload winner
     const vodId = h.vod_id ?? 'unknown';
+    const base  = `content-factory/thumbnails/${vodId}/${highlightId}`;
     const [ytUrl, ttUrl] = await Promise.all([
-      winner.ytBuffer
-        ? lastOppBuffer(db, winner.ytBuffer, `content-factory/thumbnails/${vodId}/${highlightId}_youtube_v5.png`)
-        : Promise.resolve(null),
-      winner.ttBuffer
-        ? lastOppBuffer(db, winner.ttBuffer, `content-factory/thumbnails/${vodId}/${highlightId}_tiktok_v5.png`)
-        : Promise.resolve(null),
+      uploadBuffer(db, ytBuf, `${base}_youtube_v55.png`),
+      uploadBuffer(db, ttBuf, `${base}_tiktok_v55.png`),
     ]);
 
-    if (!ytUrl && !ttUrl) throw new Error('Opplasting av vinner-thumbnails feilet');
+    if (!ytUrl && !ttUrl) throw new Error('Opplasting av thumbnails feilet');
 
     await db.from('content_highlights').update({
       thumbnail_status:       'DONE',
       thumbnail_youtube_url:  ytUrl,
       thumbnail_tiktok_url:   ttUrl,
-      thumbnail_headline:     winner.concept.headline,
-      thumbnail_subheadline:  winner.concept.subtext || null,
-      thumbnail_prompt:       winner.concept.imagePrompt.slice(0, 500),
+      thumbnail_headline:     hook.headline,
+      thumbnail_subheadline:  hook.badge_text || null,
       thumbnail_generated_at: new Date().toISOString(),
       thumbnail_error:        null,
-      thumbnail_ctr_score:    judge.ctrScore,
-      thumbnail_concept:      winner.concept.type,
+      thumbnail_ctr_score:    gate.score,
+      thumbnail_concept:      hook.emotion,
       thumbnail_hook:         hook,
     }).eq('id', highlightId);
 
-    wLog('INFO', 'THUMBNAIL_V5_DONE', { highlightId, score: judge.ctrScore, headline: winner.concept.headline });
+    wLog('INFO', 'THUMBNAIL_V55_DONE', {
+      highlightId, score: gate.score, headline: hook.headline,
+      harYT: !!ytUrl, harTT: !!ttUrl,
+    });
     logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V5_DONE',
-      title: `Thumbnail V5 ferdig — CTR ${judge.ctrScore}/100`, severity: 'info',
-      metadata: { highlightId, ctrScore: judge.ctrScore, concept: winner.concept.type, headline: winner.concept.headline, harYoutube: !!ytUrl, harTikTok: !!ttUrl },
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V55_DONE',
+      title: `Thumbnail V5.5 ferdig — CTR ${gate.score}/100 — "${hook.headline}"`,
+      severity: 'info',
+      metadata: { highlightId, ctrScore: gate.score, headline: hook.headline, badge: hook.badge_text, harYoutube: !!ytUrl, harTikTok: !!ttUrl },
     });
 
   } catch (err: any) {
     const msg = err.message?.slice(0, 300) ?? 'Ukjent feil';
-    wLog('ERROR', 'THUMBNAIL_V5_FAILED', { highlightId, err: msg });
+    wLog('ERROR', 'THUMBNAIL_V55_FAILED', { highlightId, err: msg });
     logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V5_FAILED',
-      title: `Thumbnail V5 feilet: ${msg}`, severity: 'error',
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V55_FAILED',
+      title: `Thumbnail V5.5 feilet: ${msg}`, severity: 'error',
       metadata: { highlightId, error: msg },
     });
     try {
@@ -664,7 +840,7 @@ export async function buildThumbnailV5(highlightId: string): Promise<void> {
     } catch {}
     throw err;
   } finally {
-    ryddFiler(videoSti);
+    ryddFiler(videoPath);
     ryddDir(path.join(THUMB_BASE, highlightId, 'frames'));
   }
 }

@@ -577,7 +577,7 @@ async function kjørThumbnailSyklus(): Promise<void> {
   const lock = Array.from(generererNå);
   const baseQuery = db
     .from('content_highlights')
-    .select('id,clip_url')
+    .select('id,clip_url,thumbnail_reject_count')
     .eq('clip_status', 'CLIPPED')
     .eq('thumbnail_status', 'PENDING')
     .not('clip_url', 'is', null)
@@ -594,6 +594,18 @@ async function kjørThumbnailSyklus(): Promise<void> {
 
   for (const h of highlights) {
     if (generererNå.has(h.id)) continue;
+
+    // Skip highlights that exhausted all CTR Gate retries before claiming
+    const rejectCount = (h.thumbnail_reject_count ?? 0) as number;
+    if (rejectCount >= 3) {
+      wLog('WARN', 'THUMBNAIL_MAX_REJECTS_SKIP', { id: h.id, rejectCount });
+      await db.from('content_highlights').update({
+        thumbnail_status: 'NEEDS_MANUAL_REVIEW',
+        thumbnail_error:  'Maks 3 CTR-avvisninger. Manuell opplasting påkrevd.',
+      }).eq('id', h.id);
+      continue;
+    }
+
     generererNå.add(h.id);
 
     // Atomic claim – sikrer mot race med HTTP fast-path
@@ -663,7 +675,7 @@ export async function startThumbnailWorker(): Promise<void> {
   const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
-    versjon: 'V5 (CTR Multi-Concept + gpt-image-1)',
+    versjon: 'V5.5 (Sharp + SVG 7-lag + CTR Gate)',
     filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
   });
   await kjørThumbnailSyklus();
@@ -696,5 +708,5 @@ export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail V5 startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V5.5 (Sharp/SVG CTR) startet for ${highlightId}` };
 }
