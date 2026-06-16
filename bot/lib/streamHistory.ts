@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { startAudienceTracking, recordViewerCount, stopAudienceTracking } from './audienceTracker';
+import { logSystemEvent } from './systemEvents';
 
 const FILE = path.join(process.cwd(), 'data', 'stream-history.json');
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
@@ -100,27 +101,82 @@ export function endSession(followerGain = 0) {
   history.unshift(session);
   save(history.slice(0, 50));
   activeSession = null;
-  stopAudienceTracking().catch(() => {});
 
-  // Sync til Supabase stream_history for at Sponsor Manager og andre API-er får data
+  stopAudienceTracking().catch((err: any) => {
+    logSystemEvent({
+      workspaceId: WORKSPACE_ID,
+      source: 'twitch_bot',
+      event_type: 'AUDIENCE_TRACKING_FAILED',
+      title: `stopAudienceTracking kastet uventet feil: ${err?.message ?? 'ukjent'}`,
+      severity: 'error',
+      metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: err?.message },
+    });
+  });
+
+  // Sync til Supabase stream_history for at Stream Coach, Sponsor Manager og andre API-er får data.
+  // VIKTIG: stream_history.id er UUID (DB-generert) — Twitch sin numeriske stream-id går i
+  // stream_id-kolonnen. Tidligere ble Twitch-IDen skrevet rett inn i `id`, som garantert feiler
+  // mot UUID-kolonnetypen — feilen ble svelget av en tom .catch(), så det så ut som det fungerte.
   const sb = getSupabase();
-  if (sb) {
-    sb.from('stream_history').upsert({
-      id: session.id,
-      workspace_id: WORKSPACE_ID,
-      title: session.title,
-      game: session.game,
-      started_at: session.startedAt,
-      ended_at: session.endedAt,
-      peak_viewers: session.peakViewers,
-      avg_viewers: session.avgViewers,
-      duration_minutes: session.durationMinutes,
-      followers_gained: session.followerGain,
-      chat_messages: session.chatMessages,
-      raids_during: session.raidsDuring,
-      subs_gained: session.subsGained,
-    }, { onConflict: 'id' }).then(undefined, () => {});
+  if (!sb) {
+    logSystemEvent({
+      workspaceId: WORKSPACE_ID,
+      source: 'twitch_bot',
+      event_type: 'STREAM_HISTORY_UPSERT_FAILED',
+      title: 'stream_history upsert hoppet over — Supabase ikke konfigurert (SUPABASE_URL/SERVICE_ROLE_KEY mangler)',
+      severity: 'error',
+      metadata: { streamId: session.id, workspaceId: WORKSPACE_ID },
+    });
+    return;
   }
+
+  sb.from('stream_history').upsert({
+    workspace_id: WORKSPACE_ID,
+    stream_id: session.id,
+    title: session.title,
+    game: session.game,
+    started_at: session.startedAt,
+    ended_at: session.endedAt,
+    peak_viewers: session.peakViewers,
+    avg_viewers: session.avgViewers,
+    duration_minutes: session.durationMinutes,
+    followers_gained: session.followerGain,
+    chat_messages: session.chatMessages,
+    raids_during: session.raidsDuring,
+    subs_gained: session.subsGained,
+  }, { onConflict: 'stream_id' }).then(
+    ({ error }: { error: any }) => {
+      if (error) {
+        logSystemEvent({
+          workspaceId: WORKSPACE_ID,
+          source: 'twitch_bot',
+          event_type: 'STREAM_HISTORY_UPSERT_FAILED',
+          title: `stream_history upsert feilet: ${error.message?.slice(0, 100) ?? 'ukjent'}`,
+          severity: 'error',
+          metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: error.message, code: error.code },
+        });
+      } else {
+        logSystemEvent({
+          workspaceId: WORKSPACE_ID,
+          source: 'twitch_bot',
+          event_type: 'STREAM_HISTORY_UPSERTED',
+          title: `stream_history skrevet: ${session.title || session.game || session.id}`,
+          severity: 'info',
+          metadata: { streamId: session.id, workspaceId: WORKSPACE_ID },
+        });
+      }
+    },
+    (err: any) => {
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'STREAM_HISTORY_UPSERT_FAILED',
+        title: `stream_history upsert kastet exception: ${err?.message?.slice(0, 100) ?? 'ukjent'}`,
+        severity: 'error',
+        metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: err?.message },
+      });
+    }
+  );
 }
 
 export function getHistory(): StreamSession[] {

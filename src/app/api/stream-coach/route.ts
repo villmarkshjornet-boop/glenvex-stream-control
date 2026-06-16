@@ -40,10 +40,96 @@ function calcStreamScore(stream: any, audience: any) {
   };
 }
 
+async function buildFallbackFromEvents(db: NonNullable<ReturnType<typeof getDb>>, workspaceId: string) {
+  const cutoff = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const { data: events } = await db
+    .from('ai_agent_events')
+    .select('event_type, metadata, created_at')
+    .eq('workspace_id', workspaceId)
+    .in('event_type', ['AUDIENCE_SESSION_COMPLETE', 'RETENTION_CURVE', 'AUDIENCE_SNAPSHOT', 'active_chatter', 'stream_offline'])
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (!events || events.length === 0) return null;
+
+  const withStreamId = events.find(e => (e.metadata as any)?.stream_id);
+  const targetStreamId: string | null = withStreamId ? (withStreamId.metadata as any).stream_id : null;
+
+  // Grupper events som hører til samme stream: match på stream_id hvis tilgjengelig,
+  // ellers fall tilbake til et 6-timers tidsvindu fra siste event som proxy for "samme stream".
+  const grouped = targetStreamId
+    ? events.filter(e => (e.metadata as any)?.stream_id === targetStreamId)
+    : events.filter(e => new Date(events[0].created_at).getTime() - new Date(e.created_at).getTime() <= 6 * 3600_000);
+
+  if (grouped.length === 0) return null;
+
+  const sessionComplete = grouped.find(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
+  const retention = grouped.find(e => e.event_type === 'RETENTION_CURVE');
+  const snapshot = grouped.find(e => e.event_type === 'AUDIENCE_SNAPSHOT');
+  const offline = grouped.find(e => e.event_type === 'stream_offline');
+
+  const meta = ((sessionComplete ?? snapshot)?.metadata ?? {}) as any;
+  const retentionMeta = (retention?.metadata ?? {}) as any;
+  const snapshots: Array<{ ts: string; count: number }> = retentionMeta.snapshots ?? [];
+
+  const oldestEvent = grouped[grouped.length - 1];
+  const startedAt = snapshots[0]?.ts ?? oldestEvent.created_at;
+  const endedAt = offline?.created_at ?? sessionComplete?.created_at ?? grouped[0].created_at;
+
+  const durationMinutes = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000));
+  const peak = snapshots.length > 0 ? Math.max(...snapshots.map(s => s.count)) : (meta.total ?? 0);
+  const avg = snapshots.length > 0 ? Math.round(snapshots.reduce((sum, s) => sum + s.count, 0) / snapshots.length) : (meta.total ?? 0);
+  const chatMessages = Array.isArray(meta.viewers)
+    ? meta.viewers.reduce((sum: number, v: any) => sum + (v.messagesSent ?? v.messages_sent ?? 0), 0)
+    : (meta.active_chatters ?? 0);
+
+  const syntheticStream = {
+    id: targetStreamId ?? `fallback-${oldestEvent.created_at}`,
+    stream_id: targetStreamId,
+    title: meta.title ?? '',
+    game: meta.game ?? '',
+    started_at: startedAt,
+    ended_at: endedAt,
+    duration_minutes: durationMinutes,
+    peak_viewers: peak,
+    avg_viewers: avg,
+    chat_messages: chatMessages,
+    followers_gained: 0,
+    subs_gained: meta.subscribers ?? 0,
+    raids_during: 0,
+  };
+
+  const audienceData = (sessionComplete || snapshot) ? {
+    viewers: meta.viewers ?? [],
+    total: meta.total ?? 0,
+    newViewers: meta.new_viewers ?? 0,
+    returningViewers: meta.returning_viewers ?? 0,
+    subscribers: meta.subscribers ?? 0,
+    moderators: meta.moderators ?? 0,
+    vips: meta.vips ?? 0,
+    activeChattters: meta.active_chatters ?? 0,
+    topChattters: meta.top_chatters ?? [],
+    lurkers: (meta.total ?? 0) - (meta.active_chatters ?? 0),
+  } : null;
+
+  const retentionCurve = snapshots.length > 0
+    ? snapshots.map(s => ({
+        ts: s.ts,
+        count: s.count,
+        minuteFromStart: Math.round((new Date(s.ts).getTime() - new Date(startedAt).getTime()) / 60_000),
+      })).filter(s => s.minuteFromStart >= 0)
+    : null;
+
+  return { syntheticStream, audienceData, retentionCurve };
+}
+
 export async function GET(req: NextRequest) {
+  const workspaceId = getWorkspaceId();
+  const db = getDb();
+  let knownStreamId: string | null = null;
+
   try {
-    const db = getDb();
-    const workspaceId = getWorkspaceId();
     const url = new URL(req.url);
     const requestedStreamId = url.searchParams.get('streamId');
 
@@ -72,70 +158,107 @@ export async function GET(req: NextRequest) {
       history = data ?? [];
     }
 
-    if (history.length === 0) {
-      void db?.from('system_events').insert({ workspace_id: workspaceId, source: 'stream_coach', event_type: 'STREAM_COACH_NO_HISTORY', title: 'Stream Coach: ingen stream-historikk funnet', severity: 'warning', metadata: { workspaceId } });
-      return NextResponse.json({
-        history: [], analyse: null, audience: null, streamScore: null,
-        diagnostics: { hasAudienceData: false, hasHistory: false, noHistoryReason: 'Ingen stream-historikk funnet. Stream Coach trenger minst én fullført stream registrert av boten.' },
-      });
-    }
-
-    // Velg stream å analysere
-    const selectedStream = requestedStreamId
-      ? (history.find(s => s.id === requestedStreamId || s.stream_id === requestedStreamId) ?? history[0])
-      : history[0];
-
-    // ── Hent publikumsdata fra ai_agent_events ───────────────────────────────
+    const historyFoundInDb = history.length > 0;
+    let fallbackUsed = false;
+    let selectedStream: any = null;
     let audienceData: any = null;
     let retentionCurve: Array<{ ts: string; count: number; minuteFromStart: number }> | null = null;
 
-    if (db && selectedStream) {
-      const streamTwitchId = selectedStream.stream_id || selectedStream.id;
+    if (!historyFoundInDb) {
+      const fallback = db ? await buildFallbackFromEvents(db, workspaceId) : null;
 
-      const [audienceRes, retentionRes] = await Promise.all([
-        db.from('ai_agent_events')
-          .select('metadata, created_at')
-          .eq('workspace_id', workspaceId)
-          .eq('event_type', 'AUDIENCE_SESSION_COMPLETE')
-          .filter('metadata->>stream_id', 'eq', streamTwitchId)
-          .order('created_at', { ascending: false })
-          .limit(1),
-
-        db.from('ai_agent_events')
-          .select('metadata, created_at')
-          .eq('workspace_id', workspaceId)
-          .eq('event_type', 'RETENTION_CURVE')
-          .filter('metadata->>stream_id', 'eq', streamTwitchId)
-          .order('created_at', { ascending: false })
-          .limit(1),
-      ]);
-
-      if (audienceRes.data && audienceRes.data.length > 0) {
-        const meta = audienceRes.data[0].metadata as any;
-        audienceData = {
-          viewers: (meta.viewers ?? []) as any[],
-          total: meta.total ?? 0,
-          newViewers: meta.new_viewers ?? 0,
-          returningViewers: meta.returning_viewers ?? 0,
-          subscribers: meta.subscribers ?? 0,
-          moderators: meta.moderators ?? 0,
-          vips: meta.vips ?? 0,
-          activeChattters: meta.active_chatters ?? 0,
-          topChattters: meta.top_chatters ?? [],
-        };
-        audienceData.lurkers = audienceData.total - audienceData.activeChattters;
+      if (!fallback) {
+        void db?.from('system_events').insert({
+          workspace_id: workspaceId, source: 'stream_coach', event_type: 'STREAM_COACH_NO_DATA_AVAILABLE',
+          title: 'Stream Coach: ingen stream_history og ingen audience-events siste 7 dager', severity: 'warning',
+          metadata: { workspaceId },
+        });
+        return NextResponse.json({
+          history: [], selectedStream: null, audience: null, retentionCurve: null,
+          streamScore: null, analyse: null, historiskAnalyse: null,
+          diagnostics: {
+            historyFound: false,
+            audienceEventsFound: false,
+            fallbackUsed: false,
+            reason: 'Ingen stream-data funnet for workspace',
+          },
+        });
       }
 
-      if (retentionRes.data && retentionRes.data.length > 0) {
-        const meta = retentionRes.data[0].metadata as any;
-        const snapshots: Array<{ ts: string; count: number }> = meta.snapshots ?? [];
-        const streamStart = selectedStream.started_at ? new Date(selectedStream.started_at).getTime() : 0;
+      void db?.from('system_events').insert({
+        workspace_id: workspaceId, source: 'stream_coach', event_type: 'STREAM_COACH_NO_HISTORY_BUT_EVENTS_FOUND',
+        title: 'Stream Coach: ingen stream_history, men fant audience-events siste 7 dager', severity: 'info',
+        metadata: { workspaceId, streamId: fallback.syntheticStream.stream_id },
+      });
 
-        retentionCurve = snapshots.map(s => ({
-          ts: s.ts,
-          count: s.count,
-          minuteFromStart: streamStart > 0 ? Math.round((new Date(s.ts).getTime() - streamStart) / 60_000) : 0,
-        })).filter(s => s.minuteFromStart >= 0);
+      selectedStream = fallback.syntheticStream;
+      audienceData = fallback.audienceData;
+      retentionCurve = fallback.retentionCurve;
+      history = [selectedStream];
+      fallbackUsed = true;
+      knownStreamId = selectedStream.stream_id;
+
+      void db?.from('system_events').insert({
+        workspace_id: workspaceId, source: 'stream_coach', event_type: 'STREAM_COACH_FALLBACK_USED',
+        title: 'Stream Coach: bruker fallback-rapport bygget fra ai_agent_events (stream_history mangler)', severity: 'info',
+        metadata: { workspaceId, streamId: selectedStream.stream_id },
+      });
+    } else {
+      // Velg stream å analysere
+      selectedStream = requestedStreamId
+        ? (history.find(s => s.id === requestedStreamId || s.stream_id === requestedStreamId) ?? history[0])
+        : history[0];
+      knownStreamId = selectedStream.stream_id || selectedStream.id;
+
+      // ── Hent publikumsdata fra ai_agent_events ───────────────────────────────
+      if (db && selectedStream) {
+        const streamTwitchId = selectedStream.stream_id || selectedStream.id;
+
+        const [audienceRes, retentionRes] = await Promise.all([
+          db.from('ai_agent_events')
+            .select('metadata, created_at')
+            .eq('workspace_id', workspaceId)
+            .eq('event_type', 'AUDIENCE_SESSION_COMPLETE')
+            .filter('metadata->>stream_id', 'eq', streamTwitchId)
+            .order('created_at', { ascending: false })
+            .limit(1),
+
+          db.from('ai_agent_events')
+            .select('metadata, created_at')
+            .eq('workspace_id', workspaceId)
+            .eq('event_type', 'RETENTION_CURVE')
+            .filter('metadata->>stream_id', 'eq', streamTwitchId)
+            .order('created_at', { ascending: false })
+            .limit(1),
+        ]);
+
+        if (audienceRes.data && audienceRes.data.length > 0) {
+          const meta = audienceRes.data[0].metadata as any;
+          audienceData = {
+            viewers: (meta.viewers ?? []) as any[],
+            total: meta.total ?? 0,
+            newViewers: meta.new_viewers ?? 0,
+            returningViewers: meta.returning_viewers ?? 0,
+            subscribers: meta.subscribers ?? 0,
+            moderators: meta.moderators ?? 0,
+            vips: meta.vips ?? 0,
+            activeChattters: meta.active_chatters ?? 0,
+            topChattters: meta.top_chatters ?? [],
+          };
+          audienceData.lurkers = audienceData.total - audienceData.activeChattters;
+        }
+
+        if (retentionRes.data && retentionRes.data.length > 0) {
+          const meta = retentionRes.data[0].metadata as any;
+          const snapshots: Array<{ ts: string; count: number }> = meta.snapshots ?? [];
+          const streamStart = selectedStream.started_at ? new Date(selectedStream.started_at).getTime() : 0;
+
+          retentionCurve = snapshots.map(s => ({
+            ts: s.ts,
+            count: s.count,
+            minuteFromStart: streamStart > 0 ? Math.round((new Date(s.ts).getTime() - streamStart) / 60_000) : 0,
+          })).filter(s => s.minuteFromStart >= 0);
+        }
       }
     }
 
@@ -148,7 +271,10 @@ export async function GET(req: NextRequest) {
 
     if (apiKey) {
       const openai = new OpenAI({ apiKey });
-      const ctx = await getCreatorContext({ limit: 15 }).catch(() => null);
+      const ctx = await getCreatorContext({ limit: 15 }).catch((err: any) => {
+        console.error('[stream-coach] getCreatorContext failed:', err?.message);
+        return null;
+      });
       const contextPrompt = ctx ? buildContextPrompt(ctx) : '';
 
       const audiencePart = audienceData
@@ -209,7 +335,8 @@ Krav: Bruk KUN data fra denne streamen. Ingen generiske råd. Vær spesifikk.`,
         });
 
         analyse = JSON.parse(res.choices[0]?.message?.content ?? '{}');
-      } catch {
+      } catch (err: any) {
+        console.error('[stream-coach] OpenAI stream-analyse failed:', err?.message);
         analyse = null;
       }
     }
@@ -240,7 +367,8 @@ Returner KUN gyldig JSON:
           response_format: { type: 'json_object' },
         });
         historiskAnalyse = JSON.parse(res.choices[0]?.message?.content ?? '{}');
-      } catch {
+      } catch (err: any) {
+        console.error('[stream-coach] OpenAI historisk-analyse failed:', err?.message);
         historiskAnalyse = null;
       }
     }
@@ -271,8 +399,9 @@ Returner KUN gyldig JSON:
         hasAudienceData: !!audienceData,
         hasRetentionData: !!retentionCurve,
         viewersObserved: audienceData?.total ?? 0,
+        fallbackUsed,
       },
-    }).catch(() => {});
+    }).catch((err: any) => console.error('[stream-coach] logSystemEvent COACH_REPORT_GENERATED failed:', err?.message));
 
     return NextResponse.json({
       history,
@@ -283,16 +412,38 @@ Returner KUN gyldig JSON:
       analyse,
       historiskAnalyse,
       diagnostics: {
-        hasAudienceData:    !!audienceData,
-        hasRetentionData:   !!retentionCurve,
-        hasHistory:         history.length > 0,
+        historyFound:        historyFoundInDb,
+        audienceEventsFound: !!audienceData,
+        fallbackUsed,
+        source:              fallbackUsed ? 'ai_agent_events_fallback' : 'stream_history',
+        hasAudienceData:     !!audienceData,
+        hasRetentionData:    !!retentionCurve,
+        hasHistory:          history.length > 0,
         noAudienceDataReason: !audienceData
           ? 'Ingen audience-data funnet. Boten var sannsynligvis ikke aktiv under streamen – AUDIENCE_SESSION_COMPLETE event mangler.'
           : null,
       },
     });
-  } catch {
-    return NextResponse.json({ history: [], analyse: null, audience: null, streamScore: null });
+  } catch (err: any) {
+    console.error('[stream-coach] GET failed:', err);
+    void db?.from('system_events').insert({
+      workspace_id: workspaceId,
+      source: 'stream_coach',
+      event_type: 'STREAM_COACH_FAILED',
+      title: `Stream Coach feilet: ${err?.message?.slice(0, 150) ?? 'ukjent feil'}`,
+      severity: 'error',
+      metadata: { workspaceId, streamId: knownStreamId, error: err?.message, stack: err?.stack?.slice(0, 2000) },
+    });
+    return NextResponse.json({
+      history: [], selectedStream: null, audience: null, retentionCurve: null,
+      streamScore: null, analyse: null, historiskAnalyse: null,
+      diagnostics: {
+        historyFound: false,
+        audienceEventsFound: false,
+        fallbackUsed: false,
+        error: err?.message ?? 'Ukjent feil i Stream Coach',
+      },
+    }, { status: 500 });
   }
 }
 
