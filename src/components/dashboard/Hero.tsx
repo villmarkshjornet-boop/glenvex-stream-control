@@ -1,18 +1,17 @@
 'use client';
 
 import Link from 'next/link';
+import { Eye, Users, MessageSquare, Clock, AlertTriangle, ArrowRight } from 'lucide-react';
 import { tidSiden } from './helpers';
 import type { HeroStream } from './types';
 
-const CHECKLIST_LABELS: { key: keyof HeroStream['checklist']; label: string }[] = [
-  { key: 'streamHistory',  label: 'Stream History' },
-  { key: 'audienceData',   label: 'Audience-data' },
-  { key: 'retentionCurve', label: 'Retention-kurve' },
-  { key: 'chatEvents',     label: 'Chat-events' },
-  { key: 'streamCoach',    label: 'Stream Coach' },
-  { key: 'vodDetected',    label: 'VOD' },
-  { key: 'aiLearning',     label: 'AI-læring' },
-];
+const GRADE_STYLE: Record<HeroStream['grade'], { text: string; ring: string; glow: string }> = {
+  S: { text: 'text-purple-400', ring: 'ring-purple-500/30', glow: 'shadow-purple-500/20' },
+  A: { text: 'text-g-green',    ring: 'ring-g-green/30',    glow: 'shadow-g-green/20' },
+  B: { text: 'text-blue-400',   ring: 'ring-blue-500/30',   glow: 'shadow-blue-500/20' },
+  C: { text: 'text-yellow-400', ring: 'ring-yellow-500/30', glow: 'shadow-yellow-500/20' },
+  D: { text: 'text-red-400',    ring: 'ring-red-500/30',    glow: 'shadow-red-500/20' },
+};
 
 function formatDuration(min: number): string {
   const h = Math.floor(min / 60), m = min % 60;
@@ -20,86 +19,66 @@ function formatDuration(min: number): string {
 }
 
 export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | undefined; loading: boolean }) {
-  if (loading) return <div className="h-56 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
 
   if (!heroStream) {
     return (
-      <div className="bg-g-card border border-g-border rounded-xl p-5">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-1">Siste stream</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
         <p className="text-sm text-g-muted">Ingen avsluttet stream registrert ennå.</p>
-        <Link href="/streamplan" className="text-[10px] text-g-green hover:underline mt-2 inline-block">Se streamplan →</Link>
+        <Link href="/streamplan" className="text-xs text-g-green hover:underline mt-2 inline-block">Se streamplan →</Link>
       </div>
     );
   }
 
-  const ok = heroStream.ok;
+  const grade = GRADE_STYLE[heroStream.grade];
+  const isEstimate = !heroStream.checklist.streamHistory;
+
+  const stats = [
+    { label: 'Peak seere', val: heroStream.peakViewers.toLocaleString(), icon: Eye },
+    { label: 'Snitt seere', val: heroStream.avgViewers.toLocaleString(), icon: Users },
+    { label: 'Unike chattere', val: heroStream.uniqueChatters.toLocaleString(), icon: Users },
+    { label: 'Meldinger', val: heroStream.chatMessages.toLocaleString(), icon: MessageSquare },
+    { label: 'Varighet', val: formatDuration(heroStream.durationMinutes), icon: Clock },
+  ];
 
   return (
-    <div className={`bg-g-card border rounded-xl p-5 ${ok ? 'border-g-green/30' : 'border-yellow-500/30'}`}>
-      <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`w-2 h-2 rounded-full ${ok ? 'bg-g-green' : 'bg-yellow-400 animate-pulse'}`} />
-            <p className={`text-xs font-black uppercase tracking-widest ${ok ? 'text-g-green' : 'text-yellow-400'}`}>
-              {ok ? 'Stream gjennomført' : 'Stream avsluttet med avvik'}
+    <div className="bg-g-card border border-g-border rounded-2xl p-8 shadow-lg shadow-black/30">
+      <div className="flex items-start justify-between flex-wrap gap-6">
+        <div className="min-w-0">
+          <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-2">Siste stream</p>
+          <h2 className="text-2xl font-black text-g-text truncate max-w-xl">{heroStream.title || heroStream.game}</h2>
+          <p className="text-sm text-g-muted mt-1">{heroStream.game} · avsluttet {tidSiden(heroStream.endedAt)}</p>
+          {isEstimate && (
+            <p className="flex items-center gap-1.5 text-xs text-yellow-400 mt-2">
+              <AlertTriangle size={13} /> Estimert fra hendelseslogg – Stream History-rad mangler
             </p>
-          </div>
-          <p className="text-lg font-black text-g-text">{heroStream.title || heroStream.game}</p>
-          <p className="text-[10px] text-g-muted">{heroStream.game} · avsluttet {tidSiden(heroStream.endedAt)}</p>
+          )}
         </div>
-        <div className="text-right">
-          <p className="text-[8px] text-g-muted uppercase tracking-widest">Stream Score</p>
-          <p className={`text-3xl font-black font-mono ${ok ? 'text-g-green' : 'text-yellow-400'}`}>{heroStream.streamScore}</p>
-          <p className="text-[8px] text-g-muted/60">retention {heroStream.scoreBreakdown.retention}% · chat {heroStream.scoreBreakdown.chatIntensity}%</p>
+
+        <div className={`flex flex-col items-center justify-center w-32 h-32 rounded-full ring-4 ${grade.ring} shadow-xl ${grade.glow} flex-shrink-0`}>
+          <p className={`text-5xl font-black leading-none ${grade.text}`}>{heroStream.streamScore}</p>
+          <p className={`text-xs font-bold mt-1 ${grade.text}`}>Grade {heroStream.grade}</p>
         </div>
       </div>
 
-      {!ok && heroStream.failureReasons.length > 0 && (
-        <div className="mb-4 p-2.5 border border-yellow-500/30 bg-yellow-500/5 rounded-lg">
-          <p className="text-[9px] text-yellow-400 font-bold uppercase tracking-widest mb-1">Mangler / avvik</p>
-          <ul className="space-y-0.5">
-            {heroStream.failureReasons.map((r, i) => (
-              <li key={i} className="text-[10px] text-yellow-300">⚠ {r}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="grid grid-cols-4 gap-2 mb-4">
-        {[
-          { label: 'Varighet', val: formatDuration(heroStream.durationMinutes) },
-          { label: 'Peak', val: heroStream.peakViewers.toLocaleString() },
-          { label: 'Snitt', val: heroStream.avgViewers.toLocaleString() },
-          { label: 'Chat', val: heroStream.chatMessages.toLocaleString() },
-        ].map(({ label, val }) => (
-          <div key={label} className="text-center border border-g-border/30 rounded-lg py-1.5 px-2">
-            <p className="text-sm font-black font-mono text-g-text">{val}</p>
-            <p className="text-[8px] text-g-muted uppercase tracking-widest">{label}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8">
+        {stats.map(({ label, val, icon: Icon }) => (
+          <div key={label} className="border border-g-border/40 rounded-xl py-3 px-3">
+            <Icon size={14} className="text-g-muted mb-2" />
+            <p className="text-lg font-black text-g-text">{val}</p>
+            <p className="text-[11px] text-g-muted">{label}</p>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1.5 mb-4">
-        {CHECKLIST_LABELS.map(({ key, label }) => {
-          const done = heroStream.checklist[key];
-          return (
-            <div key={key} className={`text-center border rounded-lg py-1.5 px-1 ${done ? 'border-g-green/20 bg-g-green/5' : 'border-red-500/20 bg-red-500/5'}`}
-              title={label}>
-              <p className={`text-[10px] font-black ${done ? 'text-g-green' : 'text-red-400'}`}>{done ? '✓' : '✕'}</p>
-              <p className="text-[7px] text-g-muted leading-tight mt-0.5 truncate">{label}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex gap-2">
+      <div className="flex gap-3 mt-6">
         <Link href={`/stream-coach?streamId=${encodeURIComponent(heroStream.streamId)}`}
-          className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-colors">
-          Åpne Stream Coach →
+          className="flex items-center gap-1.5 px-4 py-2 bg-g-green/10 border border-g-green/30 rounded-lg text-xs font-bold text-g-green hover:bg-g-green/20 transition-colors">
+          Åpne Stream Coach <ArrowRight size={13} />
         </Link>
         <Link href="/content-factory-admin"
-          className="px-3 py-1.5 border border-g-border rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-border transition-colors">
-          Åpne Content Factory →
+          className="px-4 py-2 border border-g-border rounded-lg text-xs font-bold text-g-muted hover:text-g-text hover:border-g-border transition-colors">
+          Åpne Content Factory
         </Link>
       </div>
     </div>

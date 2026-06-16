@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Calendar } from 'lucide-react';
 import { tidSiden } from './helpers';
 import type { LiveData } from './types';
 
@@ -38,41 +39,44 @@ export function NextStreamCard({ nesteStream, preHype, loading }: {
     return () => clearInterval(id);
   }, [nesteStream?.tidspunkt]);
 
-  if (loading) return <div className="h-24 bg-g-card border border-g-border rounded-xl animate-pulse" />;
+  if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
 
   if (!nesteStream) {
     return (
-      <div className="bg-g-card border border-g-border rounded-xl p-4">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-1">Neste stream</p>
-        <p className="text-[11px] text-g-muted">Ingen streamplan satt opp ennå.</p>
-        <Link href="/streamplan" className="text-[10px] text-g-green hover:underline mt-1 inline-block">Rediger streamplan →</Link>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 h-full">
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-2">Neste stream</p>
+        <p className="text-sm text-g-muted">Ingen streamplan satt opp ennå.</p>
+        <Link href="/streamplan" className="text-xs text-g-green hover:underline mt-2 inline-block">Rediger streamplan →</Link>
       </div>
     );
   }
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Neste stream</p>
-        <Link href="/streamplan" className="text-[9px] text-g-muted hover:text-g-green transition-colors">Rediger streamplan →</Link>
+    <div className="bg-g-card border border-g-border rounded-2xl p-6 h-full">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Neste stream</p>
+        <Link href="/streamplan" className="text-xs text-g-muted hover:text-g-green transition-colors">Rediger streamplan →</Link>
       </div>
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <p className="text-sm font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid} · {nesteStream.spill}</p>
-          {nesteStream.tittel && <p className="text-[10px] text-g-muted">{nesteStream.tittel}</p>}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-start gap-3">
+          <Calendar size={18} className="text-g-green flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-base font-black text-g-text">{nesteStream.dag} kl. {nesteStream.tid} · {nesteStream.spill}</p>
+            {nesteStream.tittel && <p className="text-xs text-g-muted mt-0.5">{nesteStream.tittel}</p>}
+          </div>
         </div>
-        {nedtelling && <span className="font-mono font-black text-g-green text-lg">{nedtelling}</span>}
+        {nedtelling && <span className="font-black text-g-green text-2xl">{nedtelling}</span>}
       </div>
       {preHype && preHype.status !== 'ikke_planlagt' && (
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-g-border/30">
-          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${PRE_HYPE_COLOR[preHype.status] ?? 'text-g-muted'}`}>
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-g-border/40">
+          <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${PRE_HYPE_COLOR[preHype.status] ?? 'text-g-muted'}`}>
             {PRE_HYPE_LABEL[preHype.status]}
           </span>
           {preHype.status === 'planlagt' && preHype.tidTilUtsending && (
-            <span className="text-[9px] text-g-muted">Om {preHype.tidTilUtsending}</span>
+            <span className="text-xs text-g-muted">Om {preHype.tidTilUtsending}</span>
           )}
           {preHype.status === 'sendt' && preHype.sendtAt && (
-            <span className="text-[9px] text-g-muted">{tidSiden(preHype.sendtAt)}</span>
+            <span className="text-xs text-g-muted">{tidSiden(preHype.sendtAt)}</span>
           )}
         </div>
       )}

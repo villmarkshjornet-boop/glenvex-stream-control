@@ -6,6 +6,9 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { calcStreamScore, buildFallbackFromEvents } from '@/lib/streamScore';
+import { getPartners } from '@/lib/partners';
+import { tidSiden } from '@/components/dashboard/helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
@@ -83,7 +86,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -145,10 +148,13 @@ export async function GET() {
 
     // Siste 6 avsluttede streams (kilde for Hero + "Siste streams")
     db.from('stream_history')
-      .select('stream_id,title,game,started_at,ended_at,duration_minutes,peak_viewers,avg_viewers,chat_messages')
+      .select('stream_id,title,game,started_at,ended_at,duration_minutes,peak_viewers,avg_viewers,chat_messages,followers_gained,subs_gained,raids_during')
       .eq('workspace_id', ws)
       .order('ended_at', { ascending: false })
       .limit(6),
+
+    // Partnere – for "Fremhev partner"-handling i Action Center
+    getPartners(),
   ]);
 
   const vods: any[]       = vodsRes.data ?? [];
@@ -230,7 +236,20 @@ export async function GET() {
   }
 
   // ── Hero: siste avsluttede stream + datastatus-sjekkliste ────────────────
-  const sisteStream = recentStreamsRaw[0] ?? null;
+  // Hvis stream_history mangler raden, fall tilbake til ai_agent_events (samme logikk som Stream Coach)
+  // slik at vi aldri viser "ingen stream" når det faktisk finnes ekte data om streamen.
+  let sisteStream: any = recentStreamsRaw[0] ?? null;
+  let heroFallbackUsed = false;
+  let fallbackAudience: any = null;
+  if (!sisteStream) {
+    const fallback = await buildFallbackFromEvents(db, ws);
+    if (fallback) {
+      sisteStream = fallback.syntheticStream;
+      fallbackAudience = fallback.audienceData;
+      heroFallbackUsed = true;
+    }
+  }
+
   let heroStreamEventsRes: any = { data: [] };
   let heroAgentEventsRes: any = { data: [] };
   if (sisteStream?.stream_id) {
@@ -243,7 +262,7 @@ export async function GET() {
         .order('created_at', { ascending: false })
         .limit(5),
       db.from('ai_agent_events')
-        .select('event_type,created_at')
+        .select('event_type,metadata,created_at')
         .eq('workspace_id', ws)
         .in('event_type', ['AUDIENCE_SESSION_COMPLETE', 'RETENTION_CURVE'])
         .contains('metadata', { stream_id: sisteStream.stream_id })
@@ -257,7 +276,9 @@ export async function GET() {
     const heroEvents: any[] = heroStreamEventsRes.data ?? [];
     const agentEvents: any[] = heroAgentEventsRes.data ?? [];
 
-    const hasAudienceData = agentEvents.some(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
+    const audienceEvent = agentEvents.find(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
+    const audienceMeta: any = heroFallbackUsed ? fallbackAudience : (audienceEvent?.metadata ?? null);
+    const hasAudienceData = heroFallbackUsed ? !!fallbackAudience : !!audienceEvent;
     const hasRetentionCurve = agentEvents.some(e => e.event_type === 'RETENTION_CURVE');
     const hasChatEvents = (sisteStream.chat_messages ?? 0) > 0;
     const coachFailed = heroEvents.some(e => e.event_type === 'STREAM_COACH_FAILED');
@@ -271,14 +292,11 @@ export async function GET() {
     });
     const aiLearningUpdated = nyesteInnsikter.some((i: any) => new Date(i.created_at).getTime() > endedAtMs);
 
-    const peak = sisteStream.peak_viewers ?? 0;
-    const avg = sisteStream.avg_viewers ?? 0;
-    const duration = Math.max(sisteStream.duration_minutes ?? 0, 1);
-    const retention = peak > 0 ? Math.min(avg / peak, 1) : 0;
-    const chatIntensity = Math.min((sisteStream.chat_messages ?? 0) / duration / 5, 1);
-    const streamScore = Math.round(retention * 60 + chatIntensity * 40);
+    const score = calcStreamScore(sisteStream, audienceMeta);
+    const uniqueChatters = audienceMeta?.total ?? 0;
 
     const failureReasons: string[] = [];
+    if (heroFallbackUsed) failureReasons.push('Stream History-rad mangler – viser estimat fra ai_agent_events');
     if (!hasAudienceData) failureReasons.push('Audience-data mangler');
     if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler');
     if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
@@ -293,13 +311,15 @@ export async function GET() {
       startedAt: sisteStream.started_at,
       endedAt: sisteStream.ended_at,
       durationMinutes: sisteStream.duration_minutes ?? 0,
-      peakViewers: peak,
-      avgViewers: avg,
+      peakViewers: sisteStream.peak_viewers ?? 0,
+      avgViewers: sisteStream.avg_viewers ?? 0,
       chatMessages: sisteStream.chat_messages ?? 0,
-      streamScore,
-      scoreBreakdown: { retention: Math.round(retention * 100), chatIntensity: Math.round(chatIntensity * 100) },
+      uniqueChatters,
+      streamScore: score.total,
+      grade: score.grade,
+      scoreBreakdown: score.breakdown,
       checklist: {
-        streamHistory: true,
+        streamHistory: !heroFallbackUsed,
         audienceData: hasAudienceData,
         retentionCurve: hasRetentionCurve,
         chatEvents: hasChatEvents,
@@ -313,16 +333,24 @@ export async function GET() {
   }
 
   // ── Siste streams (for "Siste streams"-widget) ────────────────────────────
-  const recentStreams = recentStreamsRaw.map((s: any) => ({
-    streamId: s.stream_id,
-    title: s.title,
-    game: s.game,
-    startedAt: s.started_at,
-    endedAt: s.ended_at,
-    durationMinutes: s.duration_minutes ?? 0,
-    peakViewers: s.peak_viewers ?? 0,
-    avgViewers: s.avg_viewers ?? 0,
-  }));
+  const recentStreams = recentStreamsRaw.map((s: any) => {
+    const score = calcStreamScore(s, null);
+    const peak = s.peak_viewers ?? 0;
+    const avg = s.avg_viewers ?? 0;
+    return {
+      streamId: s.stream_id,
+      title: s.title,
+      game: s.game,
+      startedAt: s.started_at,
+      endedAt: s.ended_at,
+      durationMinutes: s.duration_minutes ?? 0,
+      peakViewers: peak,
+      avgViewers: avg,
+      streamScore: score.total,
+      grade: score.grade,
+      retentionPct: peak > 0 ? Math.round((avg / peak) * 100) : 0,
+    };
+  });
 
   // Er vi i post-stream-fase?
   // Ja hvis: stream startet siste 48t ELLER aktiv VOD-jobb eksisterer
@@ -459,6 +487,62 @@ export async function GET() {
   }
   needsAttention.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  // ── Action Center: én rangert handlingsliste basert på ekte data ─────────
+  const readyToPublish = highlights.filter(h => h.clip_status === 'CLIPPED' && h.thumbnail_status === 'DONE');
+  const activePartners = (partners as any[]).filter(p => p.aktiv);
+  const stalestPartner = activePartners.length > 0
+    ? [...activePartners].sort((a, b) => {
+        const aT = a.sistePromotert ? new Date(a.sistePromotert).getTime() : 0;
+        const bT = b.sistePromotert ? new Date(b.sistePromotert).getTime() : 0;
+        return aT - bT;
+      })[0]
+    : null;
+
+  const actionCenter: { type: string; priority: 'error' | 'warning' | 'action'; title: string; detail?: string; href: string; createdAt: string }[] = [];
+
+  for (const item of needsAttention) {
+    actionCenter.push({ type: item.type, priority: item.severity, title: item.title, detail: item.detail, href: item.href, createdAt: item.createdAt });
+  }
+
+  if (readyToPublish.length > 0) {
+    const sortedReady = [...readyToPublish].sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
+    const newest = sortedReady[0];
+    const titler = sortedReady.slice(0, 2).map(h => h.title ?? `#${h.id.slice(0, 6)}`).join(', ');
+    actionCenter.push({
+      type: 'publish_clips',
+      priority: 'action',
+      title: `${readyToPublish.length} klipp klare for publisering`,
+      detail: `${titler}${readyToPublish.length > 2 ? ' m.fl.' : ''} · sist klippet ${tidSiden(newest.updated_at ?? newest.created_at)}`,
+      href: '/content-factory-admin/highlights',
+      createdAt: newest.updated_at ?? newest.created_at,
+    });
+  }
+
+  if (stalestPartner) {
+    actionCenter.push({
+      type: 'promote_partner',
+      priority: 'action',
+      title: `Fremhev partner: ${stalestPartner.navn}`,
+      detail: stalestPartner.sistePromotert ? `Sist promotert ${tidSiden(stalestPartner.sistePromotert)}` : 'Aldri promotert ennå',
+      href: '/partnere',
+      createdAt: stalestPartner.sistePromotert ?? stalestPartner.opprettet,
+    });
+  }
+
+  if (msTilNeste != null && msTilNeste > 0) {
+    actionCenter.push({
+      type: 'next_stream',
+      priority: 'action',
+      title: 'Forbered neste stream',
+      detail: `${nesteStream.dag} kl. ${nesteStream.tid} – om ${formaterNedtelling(msTilNeste)}`,
+      href: '/streamplan',
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const ACTION_PRIORITY_ORDER: Record<string, number> = { error: 0, warning: 1, action: 2 };
+  actionCenter.sort((a, b) => ACTION_PRIORITY_ORDER[a.priority] - ACTION_PRIORITY_ORDER[b.priority]);
+
   // ── Debug data ────────────────────────────────────────────────────────────
   const debug = {
     sisteVodId:       sisteVod?.id ?? null,
@@ -581,26 +665,6 @@ export async function GET() {
     sisteInnsikt,
   };
 
-  // ── Kommende handlinger: kun reelle, beregnbare hendelser ─────────────────
-  const upcomingActions: { type: string; label: string; etaMs: number; eta: string; href: string }[] = [];
-  if (msTilNeste != null && msTilNeste > 0) {
-    upcomingActions.push({ type: 'next_stream', label: `Neste stream: ${nesteStream.dag} kl. ${nesteStream.tid}`, etaMs: msTilNeste, eta: formaterNedtelling(msTilNeste), href: '/streamplan' });
-  }
-  if (preHypeStatus === 'planlagt' && nextPreHypeMs != null && nextPreHypeMs > 0) {
-    upcomingActions.push({ type: 'pre_hype', label: 'Pre-hype sendes til Discord', etaMs: nextPreHypeMs, eta: formaterNedtelling(nextPreHypeMs), href: '/streamplan' });
-  }
-  const AGGREGATION_INTERVAL_MS = 15 * 60_000;
-  if (lastAggregation?.created_at) {
-    const etaMs = new Date(lastAggregation.created_at).getTime() + AGGREGATION_INTERVAL_MS - Date.now();
-    if (etaMs > 0) upcomingActions.push({ type: 'ai_aggregation', label: 'Neste AI-aggregering', etaMs, eta: formaterNedtelling(etaMs), href: '/ai-memory' });
-  }
-  const FEEDBACK_INTERVAL_MS = 2 * 3600_000;
-  if (lastFeedbackRun?.created_at) {
-    const etaMs = new Date(lastFeedbackRun.created_at).getTime() + FEEDBACK_INTERVAL_MS - Date.now();
-    if (etaMs > 0) upcomingActions.push({ type: 'feedback_run', label: 'Neste feedback-analyse', etaMs, eta: formaterNedtelling(etaMs), href: '/ai-memory' });
-  }
-  upcomingActions.sort((a, b) => a.etaMs - b.etaMs);
-
   // ── Event Coverage (per kilde, basert på siste 24t system_events) ────────
   const COVERAGE_DEFS = [
     { key: 'twitch',     label: 'Twitch Bot',      sources: ['twitch_bot'],          windowH: 12, passive: false },
@@ -657,10 +721,9 @@ export async function GET() {
     kontrollsenter,
     lærdom,
     aiLearning,
-    upcomingActions,
     coverage,
     heroStream,
-    needsAttention,
+    actionCenter,
     recentStreams,
     debug,
     ts: new Date().toISOString(),

@@ -70,8 +70,10 @@ export interface HeroStream {
   peakViewers: number;
   avgViewers: number;
   chatMessages: number;
+  uniqueChatters: number;
   streamScore: number;
-  scoreBreakdown: { retention: number; chatIntensity: number };
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  scoreBreakdown: { viewers: number; retention: number; chat: number; growth: number; community: number };
   checklist: {
     streamHistory: boolean;
     audienceData: boolean;
@@ -85,21 +87,13 @@ export interface HeroStream {
   failureReasons: string[];
 }
 
-export interface NeedsAttentionItem {
+export interface ActionCenterItem {
   type: string;
-  severity: 'warning' | 'error';
+  priority: 'error' | 'warning' | 'action';
   title: string;
   detail?: string;
   href: string;
   createdAt: string;
-}
-
-export interface UpcomingAction {
-  type: string;
-  label: string;
-  etaMs: number;
-  eta: string;
-  href: string;
 }
 
 export interface RecentStream {
@@ -111,6 +105,9 @@ export interface RecentStream {
   durationMinutes: number;
   peakViewers: number;
   avgViewers: number;
+  streamScore: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  retentionPct: number;
 }
 
 export interface CoverageEntry {
@@ -133,9 +130,8 @@ export interface LiveData {
   coverage?: CoverageEntry[];
   lærdom?: Lærdom;
   aiLearning?: AiLearning;
-  upcomingActions?: UpcomingAction[];
   heroStream?: HeroStream | null;
-  needsAttention?: NeedsAttentionItem[];
+  actionCenter?: ActionCenterItem[];
   recentStreams?: RecentStream[];
   debug?: Record<string, any>;
   ts: string;

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { PlayCircle, MessageCircle, Scissors, Sparkles } from 'lucide-react';
 
 export function QuickActions() {
   const [testing, setTesting] = useState(false);
@@ -21,25 +22,25 @@ export function QuickActions() {
   }
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Hurtighandlinger</p>
+    <div className="bg-g-card border border-g-border rounded-2xl p-6 h-full">
+      <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Hurtighandlinger</p>
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={runStreamTest} disabled={testing}
-          className={`px-3 py-1.5 border rounded-lg text-[10px] font-bold transition-colors ${
+          className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-lg text-xs font-bold transition-colors ${
             testing ? 'border-g-green/30 text-g-green animate-pulse cursor-not-allowed' : 'border-g-border text-g-muted hover:text-g-green hover:border-g-green/30'
           }`}>
-          {testing ? '↻ Tester...' : '▶ Start stream test'}
+          <PlayCircle size={14} /> {testing ? 'Tester...' : 'Start stream test'}
         </button>
-        <Link href="/stream-coach" className="px-3 py-1.5 border border-g-border rounded-lg text-[10px] font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
-          Åpne Stream Coach
+        <Link href="/stream-coach" className="flex items-center gap-1.5 px-3.5 py-2 border border-g-border rounded-lg text-xs font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+          <MessageCircle size={14} /> Åpne Stream Coach
         </Link>
-        <Link href="/content-factory-admin/highlights" className="px-3 py-1.5 border border-g-border rounded-lg text-[10px] font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
-          Lag highlight
+        <Link href="/content-factory-admin/highlights" className="flex items-center gap-1.5 px-3.5 py-2 border border-g-border rounded-lg text-xs font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+          <Scissors size={14} /> Lag highlight
         </Link>
-        <Link href="/ai-producer" className="px-3 py-1.5 border border-g-border rounded-lg text-[10px] font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
-          Kjør AI-analyse
+        <Link href="/ai-producer" className="flex items-center gap-1.5 px-3.5 py-2 border border-g-border rounded-lg text-xs font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+          <Sparkles size={14} /> Kjør AI-analyse
         </Link>
-        {testResult && <span className="text-[9px] text-g-muted ml-1">{testResult}</span>}
+        {testResult && <span className="text-xs text-g-muted ml-1">{testResult}</span>}
       </div>
     </div>
   );
