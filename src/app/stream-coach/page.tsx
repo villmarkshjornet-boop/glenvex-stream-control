@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 interface StreamSummary {
   id: string;
@@ -269,10 +270,13 @@ function ViewerRoster({ viewers, topChattters }: { viewers: ViewerEntry[]; topCh
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function StreamCoachPage() {
+function StreamCoachInner() {
+  const searchParams = useSearchParams();
+  const initialStreamId = searchParams.get('streamId');
+
   const [data, setData] = useState<CoachReport | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialStreamId);
   const [activeTab, setActiveTab] = useState<'audience' | 'retention' | 'coach' | 'historical'>('coach');
 
   function load(streamId?: string) {
@@ -284,7 +288,7 @@ export default function StreamCoachPage() {
     }).catch(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(initialStreamId ?? undefined); }, [initialStreamId]);
 
   function selectStream(streamId: string) {
     setSelectedId(streamId);
@@ -731,5 +735,13 @@ export default function StreamCoachPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function StreamCoachPage() {
+  return (
+    <Suspense fallback={null}>
+      <StreamCoachInner />
+    </Suspense>
   );
 }

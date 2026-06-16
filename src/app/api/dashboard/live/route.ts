@@ -83,7 +83,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -91,7 +91,7 @@ export async function GET() {
       .limit(20),
 
     db.from('content_highlights')
-      .select('id,vod_id,title,clip_status,clip_url,vertical_clip_url,thumbnail_status,updated_at,created_at')
+      .select('id,vod_id,title,clip_status,clip_url,vertical_clip_url,thumbnail_status,thumbnail_reject_count,thumbnail_error,thumbnail_ctr_score,updated_at,created_at')
       .gt('created_at', cutoff7d)
       .order('created_at', { ascending: false })
       .limit(300),
@@ -142,6 +142,13 @@ export async function GET() {
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', ws)
       .gte('created_at', cutoff1h),
+
+    // Siste 6 avsluttede streams (kilde for Hero + "Siste streams")
+    db.from('stream_history')
+      .select('stream_id,title,game,started_at,ended_at,duration_minutes,peak_viewers,avg_viewers,chat_messages')
+      .eq('workspace_id', ws)
+      .order('ended_at', { ascending: false })
+      .limit(6),
   ]);
 
   const vods: any[]       = vodsRes.data ?? [];
@@ -154,6 +161,7 @@ export async function GET() {
   const decisions: any[] = decisionsRes.data ?? [];
   const lastMemoryUpdate: string | null = aiMemoryRes.data?.[0]?.updated_at ?? null;
   const eventsLast60min: number = aiEventsCountRes.count ?? 0;
+  const recentStreamsRaw: any[] = streamHistoryRes.data ?? [];
 
   // ── Aktive VOD-jobber ─────────────────────────────────────────────────────
   const aktiveVods = vods.filter(v =>
@@ -220,6 +228,101 @@ export async function GET() {
       .eq('vod_id', sisteVod.id);
     transcriptCount = count ?? 0;
   }
+
+  // ── Hero: siste avsluttede stream + datastatus-sjekkliste ────────────────
+  const sisteStream = recentStreamsRaw[0] ?? null;
+  let heroStreamEventsRes: any = { data: [] };
+  let heroAgentEventsRes: any = { data: [] };
+  if (sisteStream?.stream_id) {
+    [heroStreamEventsRes, heroAgentEventsRes] = await Promise.all([
+      db.from('system_events')
+        .select('event_type,metadata,created_at')
+        .eq('workspace_id', ws)
+        .in('event_type', ['COACH_REPORT_GENERATED', 'STREAM_COACH_FAILED', 'STREAM_HISTORY_UPSERT_FAILED'])
+        .contains('metadata', { streamId: sisteStream.stream_id })
+        .order('created_at', { ascending: false })
+        .limit(5),
+      db.from('ai_agent_events')
+        .select('event_type,created_at')
+        .eq('workspace_id', ws)
+        .in('event_type', ['AUDIENCE_SESSION_COMPLETE', 'RETENTION_CURVE'])
+        .contains('metadata', { stream_id: sisteStream.stream_id })
+        .order('created_at', { ascending: false })
+        .limit(5),
+    ]);
+  }
+
+  let heroStream: any = null;
+  if (sisteStream) {
+    const heroEvents: any[] = heroStreamEventsRes.data ?? [];
+    const agentEvents: any[] = heroAgentEventsRes.data ?? [];
+
+    const hasAudienceData = agentEvents.some(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
+    const hasRetentionCurve = agentEvents.some(e => e.event_type === 'RETENTION_CURVE');
+    const hasChatEvents = (sisteStream.chat_messages ?? 0) > 0;
+    const coachFailed = heroEvents.some(e => e.event_type === 'STREAM_COACH_FAILED');
+    const historyUpsertFailed = heroEvents.some(e => e.event_type === 'STREAM_HISTORY_UPSERT_FAILED');
+    const hasStreamCoach = heroEvents.some(e => e.event_type === 'COACH_REPORT_GENERATED') && !coachFailed;
+
+    const endedAtMs = new Date(sisteStream.ended_at).getTime();
+    const vodDetected = vods.some(v => {
+      const t = new Date(v.created_at).getTime();
+      return t >= endedAtMs - 2 * 3600_000 && t <= endedAtMs + 48 * 3600_000;
+    });
+    const aiLearningUpdated = nyesteInnsikter.some((i: any) => new Date(i.created_at).getTime() > endedAtMs);
+
+    const peak = sisteStream.peak_viewers ?? 0;
+    const avg = sisteStream.avg_viewers ?? 0;
+    const duration = Math.max(sisteStream.duration_minutes ?? 0, 1);
+    const retention = peak > 0 ? Math.min(avg / peak, 1) : 0;
+    const chatIntensity = Math.min((sisteStream.chat_messages ?? 0) / duration / 5, 1);
+    const streamScore = Math.round(retention * 60 + chatIntensity * 40);
+
+    const failureReasons: string[] = [];
+    if (!hasAudienceData) failureReasons.push('Audience-data mangler');
+    if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler');
+    if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
+    if (coachFailed) failureReasons.push('Stream Coach feilet');
+    if (historyUpsertFailed) failureReasons.push('Stream History-lagring feilet (delvis)');
+    if (!vodDetected) failureReasons.push('VOD ikke funnet');
+
+    heroStream = {
+      streamId: sisteStream.stream_id,
+      title: sisteStream.title,
+      game: sisteStream.game,
+      startedAt: sisteStream.started_at,
+      endedAt: sisteStream.ended_at,
+      durationMinutes: sisteStream.duration_minutes ?? 0,
+      peakViewers: peak,
+      avgViewers: avg,
+      chatMessages: sisteStream.chat_messages ?? 0,
+      streamScore,
+      scoreBreakdown: { retention: Math.round(retention * 100), chatIntensity: Math.round(chatIntensity * 100) },
+      checklist: {
+        streamHistory: true,
+        audienceData: hasAudienceData,
+        retentionCurve: hasRetentionCurve,
+        chatEvents: hasChatEvents,
+        streamCoach: hasStreamCoach,
+        vodDetected,
+        aiLearning: aiLearningUpdated,
+      },
+      ok: failureReasons.length === 0,
+      failureReasons,
+    };
+  }
+
+  // ── Siste streams (for "Siste streams"-widget) ────────────────────────────
+  const recentStreams = recentStreamsRaw.map((s: any) => ({
+    streamId: s.stream_id,
+    title: s.title,
+    game: s.game,
+    startedAt: s.started_at,
+    endedAt: s.ended_at,
+    durationMinutes: s.duration_minutes ?? 0,
+    peakViewers: s.peak_viewers ?? 0,
+    avgViewers: s.avg_viewers ?? 0,
+  }));
 
   // Er vi i post-stream-fase?
   // Ja hvis: stream startet siste 48t ELLER aktiv VOD-jobb eksisterer
@@ -309,6 +412,52 @@ export async function GET() {
     });
 
   const clipStatus = { clipping: clippingNå, readyForClip, sisteKlippede };
+
+  // ── Trenger oppmerksomhet: ting som faktisk krever handling ──────────────
+  const needsAttention: { type: string; severity: 'warning' | 'error'; title: string; detail?: string; href: string; createdAt: string }[] = [];
+
+  for (const h of highlights.filter(h => h.thumbnail_status === 'NEEDS_MANUAL_REVIEW')) {
+    needsAttention.push({
+      type: 'thumbnail_review',
+      severity: 'warning',
+      title: `Thumbnail krever manuell gjennomgang: ${h.title ?? h.id.slice(0, 8)}`,
+      detail: h.thumbnail_error ?? `${h.thumbnail_reject_count ?? 3} CTR-avvisninger`,
+      href: '/content-factory-admin/highlights',
+      createdAt: h.updated_at ?? h.created_at,
+    });
+  }
+
+  for (const v of vods.filter(v => v.status === 'ERROR')) {
+    needsAttention.push({
+      type: 'vod_failed',
+      severity: 'error',
+      title: `VOD feilet: ${v.title}`,
+      detail: v.error_message ?? undefined,
+      href: '/content-factory-admin',
+      createdAt: v.updated_at ?? v.created_at,
+    });
+  }
+
+  const ATTENTION_EVENT_TYPES: Record<string, { severity: 'warning' | 'error'; label: string; href: string }> = {
+    VOD_NOT_FOUND:                 { severity: 'warning', label: 'VOD ikke funnet etter stream',           href: '/content-factory-admin' },
+    DISCORD_ADMIN_CHANNEL_MISSING: { severity: 'warning', label: 'Discord admin-kanal mangler',             href: '/discord' },
+    TWITCH_AUTH_ERROR:             { severity: 'error',   label: 'Twitch-autentisering feilet',             href: '/innstillinger' },
+    STREAM_COACH_FAILED:           { severity: 'error',   label: 'Stream Coach feilet',                     href: '/stream-coach' },
+    STREAM_HISTORY_UPSERT_FAILED:  { severity: 'error',   label: 'Stream History-lagring feilet',           href: '/stream-coach' },
+  };
+  for (const [eventType, def] of Object.entries(ATTENTION_EVENT_TYPES)) {
+    const e = systemEvents.find((e: any) => e.event_type === eventType);
+    if (!e) continue;
+    needsAttention.push({
+      type: eventType.toLowerCase(),
+      severity: def.severity,
+      title: def.label,
+      detail: e.title,
+      href: def.href,
+      createdAt: e.created_at,
+    });
+  }
+  needsAttention.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   // ── Debug data ────────────────────────────────────────────────────────────
   const debug = {
@@ -432,6 +581,26 @@ export async function GET() {
     sisteInnsikt,
   };
 
+  // ── Kommende handlinger: kun reelle, beregnbare hendelser ─────────────────
+  const upcomingActions: { type: string; label: string; etaMs: number; eta: string; href: string }[] = [];
+  if (msTilNeste != null && msTilNeste > 0) {
+    upcomingActions.push({ type: 'next_stream', label: `Neste stream: ${nesteStream.dag} kl. ${nesteStream.tid}`, etaMs: msTilNeste, eta: formaterNedtelling(msTilNeste), href: '/streamplan' });
+  }
+  if (preHypeStatus === 'planlagt' && nextPreHypeMs != null && nextPreHypeMs > 0) {
+    upcomingActions.push({ type: 'pre_hype', label: 'Pre-hype sendes til Discord', etaMs: nextPreHypeMs, eta: formaterNedtelling(nextPreHypeMs), href: '/streamplan' });
+  }
+  const AGGREGATION_INTERVAL_MS = 15 * 60_000;
+  if (lastAggregation?.created_at) {
+    const etaMs = new Date(lastAggregation.created_at).getTime() + AGGREGATION_INTERVAL_MS - Date.now();
+    if (etaMs > 0) upcomingActions.push({ type: 'ai_aggregation', label: 'Neste AI-aggregering', etaMs, eta: formaterNedtelling(etaMs), href: '/ai-memory' });
+  }
+  const FEEDBACK_INTERVAL_MS = 2 * 3600_000;
+  if (lastFeedbackRun?.created_at) {
+    const etaMs = new Date(lastFeedbackRun.created_at).getTime() + FEEDBACK_INTERVAL_MS - Date.now();
+    if (etaMs > 0) upcomingActions.push({ type: 'feedback_run', label: 'Neste feedback-analyse', etaMs, eta: formaterNedtelling(etaMs), href: '/ai-memory' });
+  }
+  upcomingActions.sort((a, b) => a.etaMs - b.etaMs);
+
   // ── Event Coverage (per kilde, basert på siste 24t system_events) ────────
   const COVERAGE_DEFS = [
     { key: 'twitch',     label: 'Twitch Bot',      sources: ['twitch_bot'],          windowH: 12, passive: false },
@@ -456,8 +625,12 @@ export async function GET() {
       cs.passive && !lastSeen ? 'passive' :
       ageH <= cs.windowH      ? 'active'  :
       ageH <= cs.windowH * 3  ? 'stale'   : 'offline';
-    return { key: cs.key, label: cs.label, lastSeen, status, count24h: events.length, passive: cs.passive };
+    const errors24h = events.filter((e: any) => e.severity === 'error' || e.severity === 'critical').length;
+    return { key: cs.key, label: cs.label, lastSeen, status, count24h: events.length, passive: cs.passive, errors24h };
   });
+
+  // ── Aktivitetsfeed uten heartbeat-spam ─────────────────────────────────────
+  const visibleSystemEvents = systemEvents.filter((e: any) => !/HEARTBEAT/i.test(e.event_type));
 
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
@@ -479,12 +652,16 @@ export async function GET() {
     sjekkliste,
     sisteResultater,
     clipStatus,
-    systemEvents,
+    systemEvents: visibleSystemEvents,
     liveEvents,
     kontrollsenter,
     lærdom,
     aiLearning,
+    upcomingActions,
     coverage,
+    heroStream,
+    needsAttention,
+    recentStreams,
     debug,
     ts: new Date().toISOString(),
   });
