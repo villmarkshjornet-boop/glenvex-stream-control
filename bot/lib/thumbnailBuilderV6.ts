@@ -474,15 +474,41 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
 
     // ── 1. Load data ──────────────────────────────────────────────────────────
     const { data: h } = await db.from('content_highlights')
-      .select('id,vod_id,title,category,begrunnelse,clip_url,vertical_clip_url,thumbnail_reject_count')
+      .select('id,vod_id,title,category,begrunnelse,clip_url,vertical_clip_url,thumbnail_reject_count,start_time,end_time')
       .eq('id', highlightId).single();
     if (!h) throw new Error('Highlight ikke funnet');
 
     const videoUrl = h.clip_url ?? h.vertical_clip_url;
     if (!videoUrl) throw new Error('Ingen clip_url — kan ikke generere thumbnail');
 
-    const { data: vod } = await db.from('content_vods')
-      .select('id,title,category').eq('id', h.vod_id).single();
+    const [vodRes, transcriptRes] = await Promise.all([
+      db.from('content_vods').select('id,title,category').eq('id', h.vod_id).single(),
+      // Transcript segments overlapping this highlight's time window
+      (h.start_time != null && h.end_time != null && h.vod_id)
+        ? db.from('content_transcripts')
+            .select('start_time,end_time,text')
+            .eq('vod_id', h.vod_id)
+            .gte('end_time', h.start_time)
+            .lte('start_time', h.end_time)
+            .order('start_time', { ascending: true })
+            .limit(80)
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const vod = vodRes.data;
+
+    // Build clip-relative transcript (Gemini sees same time axis as frames)
+    const highlightStart = (h.start_time as number) ?? 0;
+    const transcriptText = (transcriptRes.data as any[] | null)?.length
+      ? (transcriptRes.data as any[])
+          .map(s => `[${Math.max(0, s.start_time - highlightStart).toFixed(1)}s] ${s.text}`)
+          .join(' ')
+          .slice(0, 1200)
+      : undefined;
+
+    if (transcriptText) {
+      wLog('INFO', 'TRANSCRIPT_LOADED', { highlightId, chars: transcriptText.length });
+    }
 
     // ── 2. Font + video download ──────────────────────────────────────────────
     const [fontPath] = await Promise.all([prepareFont()]);
@@ -505,7 +531,7 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
     // ── 5. Gemini Director ────────────────────────────────────────────────────
     const { strategy, context: geminiContext } = await runGeminiDirector(
       contextFrames,
-      { title: h.title, category: h.category, begrunnelse: h.begrunnelse },
+      { title: h.title, category: h.category, begrunnelse: h.begrunnelse, transcript: transcriptText },
       vod,
       highlightId,
       durationSec

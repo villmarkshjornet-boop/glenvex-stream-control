@@ -24,7 +24,7 @@ export async function transkriber(vodId: string, audioUrl: string): Promise<Cont
     if (!audioRes.ok) throw new Error('Kunne ikke hente lydfil');
 
     const audioBuffer = await audioRes.arrayBuffer();
-    const audioFile = new File([audioBuffer], 'audio.mp4', { type: 'audio/mp4' });
+    const audioFile = new File([Buffer.from(audioBuffer)], 'audio.mp4', { type: 'audio/mp4' });
 
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,

@@ -32,6 +32,8 @@ export interface GeminiContext {
   frameTimestamps: number[];
   model: string;
   durationSeconds: number;
+  hasTranscript: boolean;
+  transcriptChars: number;
 }
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
@@ -195,15 +197,17 @@ export async function runGeminiDirector(
     frameTimestamps: frames.map(f => parseFloat(f.t.toFixed(1))),
     model: GEMINI_MODEL,
     durationSeconds,
+    hasTranscript: !!(highlight.transcript?.length),
+    transcriptChars: highlight.transcript?.length ?? 0,
   };
 
   if (!apiKey) {
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'GEMINI_DIRECTOR_SKIPPED',
-      title: `Gemini Director hoppet over — GEMINI_API_KEY mangler`,
+      title: `Gemini Director hoppet over — GEMINI_API_KEY mangler — bruker fallback-strategi`,
       severity: 'warning',
-      metadata: { highlightId },
+      metadata: { highlightId, hasTranscript: context.hasTranscript },
     });
     return { strategy: buildFallbackStrategy(highlight, durationSeconds), context };
   }
@@ -262,6 +266,8 @@ export async function runGeminiDirector(
         arrowRequired: strategy.arrowRequired,
         ctrScore: strategy.ctrScore,
         headlineCount: strategy.headlines.length,
+        hasTranscript: context.hasTranscript,
+        transcriptChars: context.transcriptChars,
       },
     });
 
