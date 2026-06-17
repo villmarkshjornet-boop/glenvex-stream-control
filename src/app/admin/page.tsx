@@ -152,8 +152,23 @@ function DetailSidebar({
   const [evLoading, setEvLoading] = useState(true);
   const [repairResult, setRepairResult] = useState<any>(null);
   const [repairing, setRepairing] = useState(false);
+  const [liveCheckResult, setLiveCheckResult] = useState<any>(null);
+  const [liveChecking, setLiveChecking] = useState(false);
   const dots = healthDots(ws);
   const live = isLiveNow(ws);
+
+  const handleLiveCheck = async () => {
+    setLiveChecking(true);
+    setLiveCheckResult(null);
+    try {
+      const res = await fetch(`/api/admin/workspaces/${ws.id}/live-check`, { method: 'POST' });
+      setLiveCheckResult(await res.json());
+    } catch (err: any) {
+      setLiveCheckResult({ ok: false, error: err?.message });
+    } finally {
+      setLiveChecking(false);
+    }
+  };
 
   const handleRepair = async (forceAlpha = false) => {
     setRepairing(true);
@@ -242,7 +257,24 @@ function DetailSidebar({
             className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
             CF Admin ↗
           </a>
+          <button
+            onClick={handleLiveCheck}
+            disabled={liveChecking}
+            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-purple-400 hover:border-purple-400/30 transition-colors disabled:opacity-50"
+          >
+            {liveChecking ? 'Sjekker…' : 'Test live check ↻'}
+          </button>
         </div>
+        {liveCheckResult && (
+          <div className={`mx-4 mt-2 mb-1 p-2 rounded text-[9px] border ${liveCheckResult.isLive ? 'border-red-500/30 bg-red-500/5 text-red-400' : liveCheckResult.error ? 'border-red-500/30 bg-red-500/5 text-red-400' : 'border-g-border bg-g-bg/50 text-g-muted'}`}>
+            {liveCheckResult.error
+              ? `Feil: ${liveCheckResult.error}`
+              : liveCheckResult.isLive
+                ? `🔴 LIVE — ${liveCheckResult.stream?.title?.slice(0, 50)} · ${liveCheckResult.stream?.viewerCount} seere · ${liveCheckResult.stream?.game}`
+                : `Offline — ${liveCheckResult.twitchLogin} · sjekket ${new Date(liveCheckResult.checkedAt).toLocaleTimeString('no-NO')}`
+            }
+          </div>
+        )}
 
         {/* Onboarding Diagnostics */}
         <Section title="Onboarding Diagnostics" />
