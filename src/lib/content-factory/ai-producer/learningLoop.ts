@@ -24,7 +24,16 @@ export async function kjørLearningLoop(vodId: string): Promise<void> {
     .order('score', { ascending: false })
     .limit(10);
 
-  if (!highlights || highlights.length === 0) return;
+  if (!highlights || highlights.length === 0) {
+    await logSystemEvent({
+      source: 'learning_loop',
+      event_type: 'LEARNING_LOOP_SKIPPED',
+      title: `Learning Loop hoppet over: ingen highlights for VOD ${vodId}`,
+      severity: 'warning',
+      metadata: { vodId, reason: 'no_highlights' },
+    }).catch(() => {});
+    return;
+  }
 
   const { data: vod } = await db
     .from('content_vods')

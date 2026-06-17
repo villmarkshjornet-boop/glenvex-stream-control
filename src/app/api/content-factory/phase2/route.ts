@@ -161,15 +161,16 @@ export async function POST(req: NextRequest) {
     metadata: { vodId, vodTitle: vod.title, highlightCount: antallHighlightsForEvent, copyCount: antallCopy, steg },
   });
 
-  // Fire-and-forget: læringsloop oppdaterer AI Producer-kunnskap i bakgrunnen
-  setImmediate(async () => {
-    try {
-      const { kjørLearningLoop } = await import('@/lib/content-factory/ai-producer/learningLoop');
-      await kjørLearningLoop(vodId);
-    } catch (err) {
-      console.error('[Phase2] LearningLoop feil:', (err as Error).message?.slice(0, 200));
-    }
-  });
+  // Kjør læringsloopen synkront innen Phase 2-requestet (maxDuration = 300).
+  // setImmediate ble tidligere brukt, men Vercel fryser containeren etter HTTP-response
+  // er sendt — dermed ble læringsloopen aldri kjørt og ai_agent_memory fikk aldri
+  // stream_pattern-rader, som er kilden til "Streams analysert: 0" i AI Memory.
+  try {
+    const { kjørLearningLoop } = await import('@/lib/content-factory/ai-producer/learningLoop');
+    await kjørLearningLoop(vodId);
+  } catch (err) {
+    console.error('[Phase2] LearningLoop feil:', (err as Error).message?.slice(0, 200));
+  }
 
   return NextResponse.json({
     ok: true,
