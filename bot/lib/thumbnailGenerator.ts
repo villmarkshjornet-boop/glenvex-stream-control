@@ -635,8 +635,8 @@ async function kjørThumbnailSyklus(): Promise<void> {
 
     wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
 
-    const { buildThumbnailV7 } = require('./thumbnailBuilderV7');
-    buildThumbnailV7(h.id, 'auto_after_clip')
+    const { buildThumbnailV75 } = require('./thumbnailBuilderV75');
+    buildThumbnailV75(h.id, 'auto_after_clip')
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -675,7 +675,7 @@ export async function startThumbnailWorker(): Promise<void> {
   const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
-    versjon: 'V7 (Pango direct text + IMPACT_DRAMA + Gemini REST hook)',
+    versjon: 'V7.5 (frame scorer + hook engine + 3 variants + CTR scoring)',
     filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
   });
   await kjørThumbnailSyklus();
@@ -703,10 +703,10 @@ export async function forceThumbnail(highlightId: string, source?: string): Prom
   if (!h.clip_url && !h.vertical_clip_url) return { ok: false, melding: 'Ingen video-URL' };
 
   generererNå.add(highlightId);
-  const { buildThumbnailV7 } = require('./thumbnailBuilderV7');
-  buildThumbnailV7(highlightId, source)
+  const { buildThumbnailV75 } = require('./thumbnailBuilderV75');
+  buildThumbnailV75(highlightId, source)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail V7 startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V7.5 startet for ${highlightId}` };
 }

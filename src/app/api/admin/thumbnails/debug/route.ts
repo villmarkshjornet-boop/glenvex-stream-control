@@ -31,17 +31,19 @@ export async function GET(req: NextRequest) {
     .in('event_type', [
       'THUMBNAIL_V7_START', 'THUMBNAIL_V7_RENDER_COMPLETE', 'THUMBNAIL_V7_FAILED',
       'THUMBNAIL_V7_TEXT_TEST', 'THUMBNAIL_V7_HOOK_SELECTED',
+      'THUMBNAIL_V75_START', 'THUMBNAIL_V75_RENDER_COMPLETE', 'THUMBNAIL_V75_FAILED',
+      'THUMBNAIL_FRAME_SELECTED', 'THUMBNAIL_HOOK_SELECTED', 'THUMBNAIL_CTR_SCORE', 'THUMBNAIL_VARIANT_CHOSEN',
     ])
     .order('created_at', { ascending: false })
     .limit(10);
 
   const latestV7Event = events?.[0] ?? null;
-  const doneEvent = events?.find(e => e.event_type === 'THUMBNAIL_V7_RENDER_COMPLETE');
+  const doneEvent = events?.find(e => e.event_type === 'THUMBNAIL_V75_RENDER_COMPLETE' || e.event_type === 'THUMBNAIL_V7_RENDER_COMPLETE');
   const latestDoneUrl = (doneEvent?.metadata as any)?.thumbnailUrl ?? null;
 
   // 3. Derive version and source from thumbnail_ctr_reason (format: "V7 · hook:xxx · font:xxx")
   const ctrReason: string = row.thumbnail_ctr_reason ?? '';
-  const thumbnailVersion = ctrReason.startsWith('V7') ? 'V7' : (ctrReason.startsWith('V6') ? 'V6' : null);
+  const thumbnailVersion = ctrReason.startsWith('V7.5') ? 'V7.5' : ctrReason.startsWith('V7') ? 'V7' : (ctrReason.startsWith('V6') ? 'V6' : null);
   const thumbnailSource  = (latestV7Event?.metadata as any)?.source ?? null;
 
   // 4. Check if public URL is reachable and get image bytes
