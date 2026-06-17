@@ -25,14 +25,14 @@ import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
-import { startSession, endSession, updateSession, incrementChatMessages, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
+import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle, tildeltRolleKonfigurert } from './lib/roleManager';
 import { startDataApi } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
 import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
-import { getRandomActivePartner, logPartnerPromoResult } from './lib/partnerHelper';
+import { getRandomActivePartner, logPartnerPromoResult, trackPartnerExposure } from './lib/partnerHelper';
 import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId, getCommunityKanalId, getCommunitySettings } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
@@ -444,7 +444,7 @@ async function checkLive() {
       updateSession(stream.viewerCount ?? 0);
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
-      endSession(0);
+      await endSession(0);
       logBotEvent('stream_offline', {});
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
       logSystemEvent({
@@ -1123,7 +1123,6 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
   }
 
   await discordSend(kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
-  const msg: any = null; // message id not needed after discordSend
 
   logPartnerPromoResult({
     partnerName: partner.navn,
@@ -1133,7 +1132,14 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
     hadAffiliateUrl: partner.affiliateUrl !== null,
     missingAffiliate: partner.missedAffiliate,
     copyText: tekst,
-    discordMessageId: msg?.id,
+  }).catch(() => {});
+
+  trackPartnerExposure({
+    partnerId: partner.id,
+    partnerName: partner.navn,
+    platform: 'discord',
+    channelId: kanal.id,
+    source: 'discord_rotation',
   }).catch(() => {});
 
   addToMemory({ type: 'proaktiv', innhold: `partner: ${partner.navn}` });

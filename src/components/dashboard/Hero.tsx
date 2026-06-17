@@ -50,7 +50,7 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
           <p className="text-sm text-g-muted mt-1">{heroStream.game} · avsluttet {tidSiden(heroStream.endedAt)}</p>
           {isEstimate && (
             <p className="flex items-center gap-1.5 text-xs text-yellow-400 mt-2">
-              <AlertTriangle size={13} /> Estimert fra hendelseslogg – Stream History-rad mangler
+              <AlertTriangle size={13} /> {heroStream.historyMissingReason ?? 'Estimert fra hendelseslogg – Stream History-rad mangler'}
             </p>
           )}
         </div>

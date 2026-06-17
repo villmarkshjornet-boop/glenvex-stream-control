@@ -147,6 +147,92 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── Metrikk-berikelse: fyll 0-felt fra råeventer når stream_history mangler data ─────
+    // Bakgrunn:
+    //   chat_messages i stream_history teller Discord-meldinger (incrementChatMessages() kalles
+    //   fra Discord-handler, ikke Twitch-handler). Twitch-chat telles i audienceTracker og
+    //   ligger i AUDIENCE_SESSION_COMPLETE.metadata.viewers[].messagesSent.
+    //
+    //   followers_gained er alltid 0 fordi endSession(0) kalles med hardkodet 0.
+    //   Ekte follower-data er bare i system_events (FOLLOW_RECEIVED, metadata.antallNye).
+    const metrics: Record<string, { value: number; source: string; confidence: 'high' | 'medium' | 'low' }> = {
+      peakViewers:    { value: selectedStream?.peak_viewers    ?? 0, source: 'stream_history', confidence: 'high' },
+      avgViewers:     { value: selectedStream?.avg_viewers     ?? 0, source: 'stream_history', confidence: 'high' },
+      durationMinutes:{ value: selectedStream?.duration_minutes ?? 0, source: 'stream_history', confidence: 'high' },
+      subsGained:     { value: selectedStream?.subs_gained     ?? 0, source: 'stream_history', confidence: 'high' },
+      chatMessages:   { value: selectedStream?.chat_messages   ?? 0, source: 'stream_history', confidence: selectedStream?.chat_messages > 0 ? 'high' : 'low' },
+      followersGained:{ value: selectedStream?.followers_gained ?? 0, source: 'stream_history', confidence: selectedStream?.followers_gained > 0 ? 'high' : 'low' },
+    };
+
+    if (selectedStream && db) {
+      // ── Chat: bruk AUDIENCE_SESSION_COMPLETE som primærkilde (Twitch chat telles her) ──
+      if (metrics.chatMessages.value === 0 && audienceData) {
+        const chatFromAudience = (audienceData.viewers as any[]).reduce(
+          (sum: number, v: any) => sum + (v.messagesSent ?? v.messages_sent ?? 0), 0
+        );
+        if (chatFromAudience > 0) {
+          void db.from('system_events').insert({
+            workspace_id: workspaceId, source: 'stream_coach',
+            event_type: 'STREAM_COACH_METRIC_MISMATCH',
+            title: `Stream Coach: chat_messages=0 i stream_history, men ${chatFromAudience} Twitch-meldinger i audience-data`,
+            severity: 'warning',
+            metadata: {
+              workspaceId, streamId: knownStreamId, metric: 'chatMessages',
+              displayedValue: 0, rawEventCount: chatFromAudience,
+              sourceUsed: 'audience_session_complete',
+              streamWindowStart: selectedStream.started_at, streamWindowEnd: selectedStream.ended_at,
+            },
+          });
+          metrics.chatMessages = { value: chatFromAudience, source: 'audience_session_complete', confidence: 'high' };
+        }
+      }
+
+      // ── Følgere: tell FOLLOW_RECEIVED-events innen streamens tidsvindu ───────────────
+      if (metrics.followersGained.value === 0 && selectedStream.started_at) {
+        const streamWindowEnd = selectedStream.ended_at
+          ? new Date(new Date(selectedStream.ended_at).getTime() + 60 * 60_000).toISOString()
+          : new Date(new Date(selectedStream.started_at).getTime() + 12 * 3600_000).toISOString();
+
+        const { data: followEvents } = await db
+          .from('system_events')
+          .select('metadata, created_at')
+          .eq('workspace_id', workspaceId)
+          .eq('event_type', 'FOLLOW_RECEIVED')
+          .gte('created_at', selectedStream.started_at)
+          .lte('created_at', streamWindowEnd)
+          .limit(500);
+
+        const rawFollowCount = (followEvents ?? []).reduce(
+          (sum: number, e: any) => sum + ((e.metadata?.antallNye as number) ?? 1), 0
+        );
+
+        if (rawFollowCount > 0) {
+          void db.from('system_events').insert({
+            workspace_id: workspaceId, source: 'stream_coach',
+            event_type: 'STREAM_COACH_METRIC_MISMATCH',
+            title: `Stream Coach: followers_gained=0 i stream_history, men ${rawFollowCount} følger-events i system_events`,
+            severity: 'warning',
+            metadata: {
+              workspaceId, streamId: knownStreamId, metric: 'followersGained',
+              displayedValue: 0, rawEventCount: rawFollowCount,
+              sourceUsed: 'system_events_FOLLOW_RECEIVED',
+              streamWindowStart: selectedStream.started_at, streamWindowEnd,
+            },
+          });
+          metrics.followersGained = { value: rawFollowCount, source: 'system_events', confidence: 'medium' };
+        }
+      }
+
+      // ── Oppdater selectedStream med berikede verdier (påvirker både KPI-display og AI-tekst) ─
+      if (metrics.chatMessages.source !== 'stream_history' || metrics.followersGained.source !== 'stream_history') {
+        selectedStream = {
+          ...selectedStream,
+          chat_messages: metrics.chatMessages.value,
+          followers_gained: metrics.followersGained.value,
+        };
+      }
+    }
+
     // ── Stream score ─────────────────────────────────────────────────────────
     const streamScore = calcStreamScore(selectedStream, audienceData);
 
@@ -296,6 +382,7 @@ Returner KUN gyldig JSON:
       streamScore,
       analyse,
       historiskAnalyse,
+      metrics,
       diagnostics: {
         historyFound:        historyFoundInDb,
         audienceEventsFound: !!audienceData,
@@ -304,6 +391,10 @@ Returner KUN gyldig JSON:
         hasAudienceData:     !!audienceData,
         hasRetentionData:    !!retentionCurve,
         hasHistory:          history.length > 0,
+        metricSources: {
+          chatMessages:    metrics.chatMessages.source,
+          followersGained: metrics.followersGained.source,
+        },
         noAudienceDataReason: !audienceData
           ? 'Ingen audience-data funnet. Boten var sannsynligvis ikke aktiv under streamen – AUDIENCE_SESSION_COMPLETE event mangler.'
           : null,

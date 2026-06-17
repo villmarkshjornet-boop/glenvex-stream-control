@@ -74,6 +74,71 @@ function stepLabel(vod: any): string {
   return vod.current_step ?? vod.status;
 }
 
+/**
+ * Finner ut HVORFOR stream_history-raden mangler for denne workspacen, i stedet for
+ * å vise én generisk "mangler"-melding uansett årsak. Søker bredt (alle workspace_id)
+ * for å fange opp workspace_id-mismatch mellom bot-skriving og dashboard-lesing.
+ */
+async function diagnoseStreamHistoryMissing(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  ws: string,
+  anchorEndedAt: string
+): Promise<string> {
+  const windowStart = new Date(new Date(anchorEndedAt).getTime() - 2 * 3600_000).toISOString();
+  const windowEnd = new Date(new Date(anchorEndedAt).getTime() + 6 * 3600_000).toISOString();
+
+  const { data } = await db
+    .from('system_events')
+    .select('event_type, workspace_id, metadata, created_at')
+    .in('event_type', ['STREAM_HISTORY_UPSERTED', 'STREAM_HISTORY_UPSERT_FAILED'])
+    .gte('created_at', windowStart)
+    .lte('created_at', windowEnd)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  const events = data ?? [];
+
+  const ownFailed = events.find(e => e.workspace_id === ws && e.event_type === 'STREAM_HISTORY_UPSERT_FAILED');
+  if (ownFailed) {
+    const err = (ownFailed.metadata as any)?.error?.slice(0, 80) ?? 'ukjent feil';
+    return `Stream History-lagring feilet: ${err}`;
+  }
+
+  const mismatchedSuccess = events.find(e => e.workspace_id !== ws && e.event_type === 'STREAM_HISTORY_UPSERTED');
+  if (mismatchedSuccess) {
+    return `Stream History ble lagret med feil workspace_id (${mismatchedSuccess.workspace_id}) – sjekk WORKSPACE_ID i bot-miljøet`;
+  }
+
+  if (events.length === 0) {
+    return 'Boten logget ingen lagringsforsøk for denne streamen – Stream History-rad mangler';
+  }
+
+  return 'Estimert fra hendelseslogg – Stream History-rad mangler (årsak ukjent)';
+}
+
+/** Logger DASHBOARD_STREAM_HISTORY_MISSING maks én gang per time per workspace, for å unngå spam fra 5s-pollen. */
+async function logHistoryMissingOnce(db: NonNullable<ReturnType<typeof getDb>>, ws: string, reason: string, streamId: string | null) {
+  const cutoff1h = new Date(Date.now() - 60 * 60_000).toISOString();
+  const { data: recent } = await db
+    .from('system_events')
+    .select('id')
+    .eq('workspace_id', ws)
+    .eq('event_type', 'DASHBOARD_STREAM_HISTORY_MISSING')
+    .gte('created_at', cutoff1h)
+    .limit(1);
+  if (recent && recent.length > 0) return;
+
+  await db.from('system_events').insert({
+    workspace_id: ws,
+    source: 'dashboard',
+    event_type: 'DASHBOARD_STREAM_HISTORY_MISSING',
+    title: 'Dashboard viser estimat – stream_history-rad mangler',
+    description: reason,
+    severity: 'warning',
+    metadata: { streamId, reason },
+  });
+}
+
 export async function GET() {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
@@ -86,7 +151,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners] = await Promise.all([
+  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -94,14 +159,24 @@ export async function GET() {
       .limit(20),
 
     db.from('content_highlights')
-      .select('id,vod_id,title,clip_status,clip_url,vertical_clip_url,thumbnail_status,thumbnail_reject_count,thumbnail_error,thumbnail_ctr_score,updated_at,created_at')
+      .select('id,vod_id,title,clip_status,clip_url,vertical_clip_url,thumbnail_status,thumbnail_reject_count,thumbnail_error,thumbnail_ctr_score,published_at,updated_at,created_at')
       .gt('created_at', cutoff7d)
       .order('created_at', { ascending: false })
       .limit(300),
 
+    // Copy/caption-tekst for klippene over – brukes til å sjekke at det faktisk finnes en
+    // ekte caption før et klipp regnes som "klart for publisering" (BUG 5).
+    db.from('content_copy')
+      .select('highlight_id,discord_post,tittel,caption')
+      .gt('created_at', cutoff7d)
+      .limit(500),
+
     db.from('ai_agent_insights')
       .select('title,summary,confidence_score,created_at')
       .eq('workspace_id', ws)
+      // Defensiv filtrering: tekniske akseptanserate-rader (decision_feedback) skal aldri
+      // vises i den praktiske innsikt-feeden, selv om gamle rader skulle ligge igjen i tabellen.
+      .or('source_data->>type.is.null,source_data->>type.neq.decision_feedback')
       .order('created_at', { ascending: false })
       .limit(5),
 
@@ -159,6 +234,12 @@ export async function GET() {
 
   const vods: any[]       = vodsRes.data ?? [];
   const highlights: any[] = highlightsRes.data ?? [];
+  const contentCopy: any[] = contentCopyRes.data ?? [];
+  const captionByHighlight = new Set<string>(
+    contentCopy
+      .filter(c => c.discord_post?.trim() || c.tittel?.trim() || c.caption?.trim())
+      .map(c => c.highlight_id)
+  );
   const nyesteInnsikter   = insightsRes.data ?? [];
   const streamplan: any[] = workspaceRes.data?.settings_json?.streamplan ?? [];
   const syklus: any       = workspaceRes.data?.settings_json?.stream_syklus ?? {};
@@ -218,6 +299,16 @@ export async function GET() {
   const nesteTidspunkt = nesteStreamTidspunkt(nesteStream);
   const msTilNeste = nesteTidspunkt ? nesteTidspunkt.getTime() - Date.now() : null;
 
+  // Kryss-sjekk mot ekte stream_history: hvis en avsluttet stream faktisk overlapper med
+  // den beregnede "neste stream"-tiden, har streamplanen drevet fra virkeligheten – vis det
+  // som usikkert i Action Center i stedet for en (potensielt feil) handling (BUG 5).
+  const nextSlotAlreadyHappened = !!(nesteTidspunkt && recentStreamsRaw.some((s: any) => {
+    if (!s.started_at || !s.ended_at) return false;
+    const start = new Date(s.started_at).getTime();
+    const end = new Date(s.ended_at).getTime();
+    return nesteTidspunkt.getTime() >= start && nesteTidspunkt.getTime() <= end;
+  }));
+
   // ── Sistestreams og syklus-kontekst ───────────────────────────────────────
   // siste VOD registrert (72t)
   const cutoff72t = new Date(Date.now() - 72 * 3600_000).toISOString();
@@ -241,12 +332,15 @@ export async function GET() {
   let sisteStream: any = recentStreamsRaw[0] ?? null;
   let heroFallbackUsed = false;
   let fallbackAudience: any = null;
+  let historyMissingReason: string | null = null;
   if (!sisteStream) {
     const fallback = await buildFallbackFromEvents(db, ws);
     if (fallback) {
       sisteStream = fallback.syntheticStream;
       fallbackAudience = fallback.audienceData;
       heroFallbackUsed = true;
+      historyMissingReason = await diagnoseStreamHistoryMissing(db, ws, sisteStream.ended_at);
+      await logHistoryMissingOnce(db, ws, historyMissingReason, sisteStream.stream_id ?? null);
     }
   }
 
@@ -280,7 +374,17 @@ export async function GET() {
     const audienceMeta: any = heroFallbackUsed ? fallbackAudience : (audienceEvent?.metadata ?? null);
     const hasAudienceData = heroFallbackUsed ? !!fallbackAudience : !!audienceEvent;
     const hasRetentionCurve = agentEvents.some(e => e.event_type === 'RETENTION_CURVE');
-    const hasChatEvents = (sisteStream.chat_messages ?? 0) > 0;
+
+    // Berik chat-telling fra AUDIENCE_SESSION_COMPLETE hvis stream_history.chat_messages = 0.
+    // stream_history teller Discord-meldinger (feil kilde); Twitch-chat er i viewers[].messagesSent.
+    const chatFromAudience = Array.isArray(audienceMeta?.viewers)
+      ? (audienceMeta.viewers as any[]).reduce((s: number, v: any) => s + (v.messagesSent ?? v.messages_sent ?? 0), 0)
+      : 0;
+    const enrichedChatMessages = (sisteStream.chat_messages ?? 0) > 0
+      ? (sisteStream.chat_messages as number)
+      : chatFromAudience;
+
+    const hasChatEvents = enrichedChatMessages > 0;
     const coachFailed = heroEvents.some(e => e.event_type === 'STREAM_COACH_FAILED');
     const historyUpsertFailed = heroEvents.some(e => e.event_type === 'STREAM_HISTORY_UPSERT_FAILED');
     const hasStreamCoach = heroEvents.some(e => e.event_type === 'COACH_REPORT_GENERATED') && !coachFailed;
@@ -292,11 +396,11 @@ export async function GET() {
     });
     const aiLearningUpdated = nyesteInnsikter.some((i: any) => new Date(i.created_at).getTime() > endedAtMs);
 
-    const score = calcStreamScore(sisteStream, audienceMeta);
+    const score = calcStreamScore({ ...sisteStream, chat_messages: enrichedChatMessages }, audienceMeta);
     const uniqueChatters = audienceMeta?.total ?? 0;
 
     const failureReasons: string[] = [];
-    if (heroFallbackUsed) failureReasons.push('Stream History-rad mangler – viser estimat fra ai_agent_events');
+    if (heroFallbackUsed) failureReasons.push(historyMissingReason ?? 'Stream History-rad mangler – viser estimat fra ai_agent_events');
     if (!hasAudienceData) failureReasons.push('Audience-data mangler');
     if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler');
     if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
@@ -313,7 +417,7 @@ export async function GET() {
       durationMinutes: sisteStream.duration_minutes ?? 0,
       peakViewers: sisteStream.peak_viewers ?? 0,
       avgViewers: sisteStream.avg_viewers ?? 0,
-      chatMessages: sisteStream.chat_messages ?? 0,
+      chatMessages: enrichedChatMessages,
       uniqueChatters,
       streamScore: score.total,
       grade: score.grade,
@@ -329,6 +433,7 @@ export async function GET() {
       },
       ok: failureReasons.length === 0,
       failureReasons,
+      historyMissingReason: heroFallbackUsed ? historyMissingReason : null,
     };
   }
 
@@ -488,10 +593,22 @@ export async function GET() {
   needsAttention.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   // ── Action Center: én rangert handlingsliste basert på ekte data ─────────
-  const readyToPublish = highlights.filter(h => h.clip_status === 'CLIPPED' && h.thumbnail_status === 'DONE');
+  // Klar for publisering krever: klippet, thumbnail klar, ekte caption-tekst finnes,
+  // og ikke allerede postet til Discord tidligere (BUG 5).
+  const readyToPublish = highlights.filter(h =>
+    h.clip_status === 'CLIPPED' &&
+    h.thumbnail_status === 'DONE' &&
+    !h.published_at &&
+    captionByHighlight.has(h.id)
+  );
   const activePartners = (partners as any[]).filter(p => p.aktiv);
-  const stalestPartner = activePartners.length > 0
-    ? [...activePartners].sort((a, b) => {
+  // Minimum-staleness: ikke anbefal en partner som faktisk er promotert nylig (ekte trackPartnerExposure-data).
+  const PARTNER_STALENESS_MS = 48 * 3600_000;
+  const notRecentlyPromoted = activePartners.filter(p =>
+    !p.sistePromotert || (Date.now() - new Date(p.sistePromotert).getTime()) > PARTNER_STALENESS_MS
+  );
+  const stalestPartner = notRecentlyPromoted.length > 0
+    ? [...notRecentlyPromoted].sort((a, b) => {
         const aT = a.sistePromotert ? new Date(a.sistePromotert).getTime() : 0;
         const bT = b.sistePromotert ? new Date(b.sistePromotert).getTime() : 0;
         return aT - bT;
@@ -532,9 +649,11 @@ export async function GET() {
   if (msTilNeste != null && msTilNeste > 0) {
     actionCenter.push({
       type: 'next_stream',
-      priority: 'action',
-      title: 'Forbered neste stream',
-      detail: `${nesteStream.dag} kl. ${nesteStream.tid} – om ${formaterNedtelling(msTilNeste)}`,
+      priority: nextSlotAlreadyHappened ? 'warning' : 'action',
+      title: nextSlotAlreadyHappened ? 'Streamplan kan være utdatert' : 'Forbered neste stream',
+      detail: nextSlotAlreadyHappened
+        ? `Planen sier ${nesteStream.dag} kl. ${nesteStream.tid}, men en stream er allerede registrert i dette tidsrommet – sjekk streamplanen`
+        : `${nesteStream.dag} kl. ${nesteStream.tid} – om ${formaterNedtelling(msTilNeste)}`,
       href: '/streamplan',
       createdAt: new Date().toISOString(),
     });

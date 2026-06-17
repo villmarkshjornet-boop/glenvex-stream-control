@@ -130,16 +130,9 @@ Maks 2 setninger, faktuell og konkret.` }],
         });
         insightText = res.choices[0]?.message?.content?.trim() ?? '';
         if (insightText) {
-          try {
-            await sb.from('ai_agent_insights').insert({
-              workspace_id: WORKSPACE_ID,
-              title: `Feedback-analyse: ${acceptanceRate}% av ${decisions.length} anbefalinger utført`,
-              summary: insightText,
-              confidence_score: Math.min(0.9, 0.6 + decisions.length * 0.01),
-              source_data: { type: 'decision_feedback', total: decisions.length, acceptanceRate },
-            });
-          } catch {}
-
+          // Bevisst IKKE skrevet til ai_agent_insights – teknisk akseptansedata hører til
+          // Systemhelse/AI Memory (ai_agent_memory via upsertBotMemory ovenfor), ikke den
+          // praktiske streamer-innsikt-feeden på dashboardet (Dashboard V4 BUG 4).
           logSystemEvent({
             source: 'learning_aggregator',
             event_type: 'DECISION_FEEDBACK_LEARNED',

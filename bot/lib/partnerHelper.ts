@@ -23,6 +23,7 @@ function getSb(): SupabaseClient | null {
 }
 
 export interface PartnerInfo {
+  id: string;
   navn: string;
   beskrivelse: string | null;
   affiliateUrl: string | null;
@@ -39,7 +40,7 @@ export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
   try {
     const { data } = await sb
       .from('partners')
-      .select('navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
+      .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
       .eq('aktiv', true)
       .gte('prioritet', 100) // featured = prioritet >= 100
       .order('prioritet', { ascending: false })
@@ -50,7 +51,7 @@ export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
     const fallbackUrl: string | null = raw.nettadresse?.trim() || null;
     const finalUrl = affiliateUrl ?? fallbackUrl;
     if (!finalUrl) return null;
-    return { navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost: true, missedAffiliate: !affiliateUrl && !!fallbackUrl };
+    return { id: raw.id, navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost: true, missedAffiliate: !affiliateUrl && !!fallbackUrl };
   } catch { return null; }
 }
 
@@ -61,7 +62,7 @@ export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
   try {
     const { data } = await sb
       .from('partners')
-      .select('navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
+      .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
       .eq('aktiv', true)
       .order('prioritet', { ascending: false })
       .limit(10);
@@ -93,8 +94,64 @@ export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
       return null;
     }
 
-    return { navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost, missedAffiliate };
+    return { id: raw.id, navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost, missedAffiliate };
   } catch { return null; }
+}
+
+/**
+ * Eneste sted i kodebasen som skriver partners.siste_promotert/eksponering.
+ * Kalles ETTER en bekreftet, vellykket send – aldri før, aldri ved feilet send.
+ * Svelger alle feil (logger PARTNER_PROMOTION_TRACKING_FAILED) – skal aldri krasje kalleren.
+ */
+export async function trackPartnerExposure(opts: {
+  workspaceId?: string;
+  partnerId?: string | null;
+  partnerName: string;
+  platform: 'discord' | 'twitch';
+  channelId?: string | null;
+  messageId?: string | null;
+  source: string;
+}): Promise<void> {
+  const sb = getSb();
+  if (!sb) return;
+  const ws = opts.workspaceId ?? WORKSPACE_ID;
+
+  try {
+    let query = sb.from('partners').select('id,eksponering').eq('workspace_id', ws);
+    query = opts.partnerId ? query.eq('id', opts.partnerId) : query.eq('navn', opts.partnerName);
+    const { data: rows, error: selErr } = await query.limit(1);
+    if (selErr) throw selErr;
+    if (!rows || rows.length === 0) throw new Error(`partner ikke funnet: ${opts.partnerName}`);
+
+    const row = rows[0];
+    const nyEksponering = (row.eksponering ?? 0) + 1;
+
+    const { error: updErr } = await sb
+      .from('partners')
+      .update({ siste_promotert: new Date().toISOString(), eksponering: nyEksponering })
+      .eq('id', row.id);
+    if (updErr) throw updErr;
+
+    await sb.from('system_events').insert({
+      workspace_id: ws,
+      source: opts.platform === 'discord' ? 'discord_bot' : 'twitch_bot',
+      event_type: opts.platform === 'discord' ? 'PARTNER_PROMOTION_SENT_DISCORD' : 'PARTNER_PROMOTION_SENT_TWITCH',
+      title: `Partner promotert: ${opts.partnerName}`,
+      severity: 'info',
+      metadata: { partnerId: row.id, partnerName: opts.partnerName, platform: opts.platform, channelId: opts.channelId ?? null, messageId: opts.messageId ?? null, source: opts.source, eksponering: nyEksponering },
+    });
+  } catch (err: any) {
+    try {
+      await sb.from('system_events').insert({
+        workspace_id: ws,
+        source: 'partner_tracking',
+        event_type: 'PARTNER_PROMOTION_TRACKING_FAILED',
+        title: `Kunne ikke spore promo for ${opts.partnerName}`,
+        severity: 'warning',
+        metadata: { partnerName: opts.partnerName, platform: opts.platform, source: opts.source, error: err?.message?.slice(0, 200) ?? 'ukjent feil' },
+      });
+    } catch {}
+  }
 }
 
 export async function logPartnerPromoResult(opts: {

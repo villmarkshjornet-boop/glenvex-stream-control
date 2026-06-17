@@ -85,6 +85,7 @@ export interface HeroStream {
   };
   ok: boolean;
   failureReasons: string[];
+  historyMissingReason: string | null;
 }
 
 export interface ActionCenterItem {

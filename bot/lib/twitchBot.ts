@@ -5,7 +5,8 @@ import { getSettings } from '@/lib/settings';
 import { getBroadcasterId } from '@/lib/twitch';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger';
 import { recordViewerActivity } from './audienceTracker';
-import { getRandomActivePartner, logPartnerPromoResult } from './partnerHelper';
+import { incrementChatMessages, incrementFollowerGain } from './streamHistory';
+import { getRandomActivePartner, logPartnerPromoResult, trackPartnerExposure } from './partnerHelper';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
 import { logApiError } from './observability';
@@ -222,6 +223,7 @@ async function sjekkNyeFollowers() {
 
     const antallNye = nyAntall - forrigeFollowerAntall;
     forrigeFollowerAntall = nyAntall;
+    incrementFollowerGain(antallNye);
 
     // Log til dashboard
     const navnListe = (data.data ?? []).slice(0, antallNye).map((f: any) => f.user_name).filter(Boolean);
@@ -334,6 +336,14 @@ async function sendTwitchPartnerPromo(): Promise<void> {
     hadAffiliateUrl: partner.affiliateUrl !== null,
     missingAffiliate: partner.missedAffiliate,
     copyText: tekst,
+  }).catch(() => {});
+
+  trackPartnerExposure({
+    partnerId: partner.id,
+    partnerName: partner.navn,
+    platform: 'twitch',
+    channelId: KANAL,
+    source: 'twitch_timer',
   }).catch(() => {});
 }
 
@@ -524,6 +534,7 @@ export function startTwitchBot() {
     // Spor chat-aktivitet (billig – bare telle)
     chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
     recordViewerActivity(tags.username, tags);
+    incrementChatMessages();
 
     const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
 
@@ -594,41 +605,9 @@ export function startTwitchBot() {
     await chatSend(`#${KANAL}`, melding, { trigger: 'discord_promo' });
   }, 5 * 60 * 1000);
 
-  // ─── Partner-promotering via Supabase ─────────────────────────────────────
-
-  const PARTNER_INTERVAL_MS = 60 * 60 * 1000; // 1 time mellom hver partner-promo
-  let sistePartnerPromo = 0;
-
-  setInterval(async () => {
-    const [pauseTwitch, pausePartnerPromo] = await Promise.all([
-      getPauseTwitch().catch(() => false),
-      getPausePartnerPromo().catch(() => false),
-    ]);
-    if (pauseTwitch || pausePartnerPromo) return;
-
-    if (Date.now() - sistePartnerPromo < PARTNER_INTERVAL_MS) return;
-    sistePartnerPromo = Date.now();
-
-    const partner = await getRandomActivePartner();
-    if (!partner) return; // ingen URL eller ingen aktive partnere
-
-    const kode = partner.rabattkode ? ` – Bruk kode: ${partner.rabattkode}` : '';
-    const ai = await aiSvar(
-      `Lag en naturlig, kort Twitch-chat-reklame for partneren vår "${partner.navn}": ${partner.beskrivelse}. Lenke: ${partner.finalUrl}${kode}. Maks 200 tegn. Norsk, avslappet tone.`
-    );
-    const melding = ai || `🤝 ${partner.navn}: ${partner.beskrivelse}${kode} ${partner.finalUrl}`;
-    await chatSend(`#${KANAL}`, melding.slice(0, 500), { trigger: 'partner_promo', partner: partner.navn });
-
-    logPartnerPromoResult({
-      partnerName: partner.navn,
-      platform: 'twitch',
-      channel: `#${KANAL}`,
-      affiliateUrlUsed: partner.finalUrl,
-      hadAffiliateUrl: partner.affiliateUrl !== null,
-      missingAffiliate: partner.missedAffiliate,
-      copyText: melding,
-    }).catch(() => {});
-  }, 15 * 60 * 1000);
+  // Partner-promotering via Supabase håndteres av sendTwitchPartnerPromo() (se startTwitchBot-timeren over).
+  // Tidligere fantes en duplikat 15/60-min poller her som promoterte uavhengig av live-status –
+  // fjernet for å unngå dobbel kadens og fordi den ikke sjekket lastNotifiedStreamId.
 }
 
 export function stopTwitchBot() {

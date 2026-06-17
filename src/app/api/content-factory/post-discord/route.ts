@@ -56,5 +56,10 @@ export async function POST(req: NextRequest) {
   }
 
   const discordMsg = await res.json() as any;
+
+  await db.from('content_highlights')
+    .update({ published_at: new Date().toISOString(), discord_message_id: discordMsg.id })
+    .eq('id', highlightId);
+
   return NextResponse.json({ ok: true, msgId: discordMsg.id });
 }

@@ -21,12 +21,12 @@ export function AiInsightFeed({ innsikter, lærdom, loading }: { innsikter: AiIn
         <Link href="/ai-memory" className="text-xs text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
       </div>
 
-      {!harNokData ? (
+      {!siste && !harNokData ? (
         <p className="text-sm text-g-muted">
           AI trenger flere datapunkter ({totalDatapunkter}/{MIN_DATAPUNKTER}) før den kan gi spesifikke innsikter.
         </p>
       ) : !siste ? (
-        <p className="text-sm text-g-muted">Ingen innsikter generert ennå.</p>
+        <p className="text-sm text-g-muted">AI har samlet data, men har ikke nok stream-relevant innsikt ennå.</p>
       ) : (
         <>
           <div className="flex gap-3 p-4 bg-g-green/5 border border-g-green/20 rounded-xl">

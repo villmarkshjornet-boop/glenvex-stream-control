@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { getPartners, updatePartner, type Partner } from '@/lib/partners';
+import { getPartners, trackPartnerExposure, type Partner } from '@/lib/partners';
 import { getPartnerKanalId } from '@/lib/discordChannel';
 import { postOgOppdater } from '@/lib/discordMessages';
 
@@ -85,9 +85,12 @@ export async function POST(req: NextRequest) {
   const result = await postOgOppdater(`partner_${partner.id}`, kanalId, { embeds: [embed] });
 
   if (result.ok) {
-    await updatePartner(partner.id, {
-      sistePromotert: new Date().toISOString(),
-      eksponering: (partner.eksponering ?? 0) + 1,
+    await trackPartnerExposure({
+      partnerId: partner.id,
+      partnerName: partner.navn,
+      platform: 'discord',
+      channelId: kanalId,
+      source: 'manual_promote_button',
     });
   }
 

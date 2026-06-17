@@ -193,3 +193,57 @@ export async function getFeaturedPartner(): Promise<Partner | null> {
   const all = await dbGetAll();
   return all.find(p => p.featured && p.aktiv) ?? null;
 }
+
+/**
+ * Eneste sted i app-koden som skriver partners.siste_promotert/eksponering.
+ * Speiler bot/lib/partnerHelper.ts sin trackPartnerExposure – samme DB-skjema, samme regel:
+ * kalles ETTER en bekreftet, vellykket send, svelger alle feil (logger PARTNER_PROMOTION_TRACKING_FAILED).
+ */
+export async function trackPartnerExposure(opts: {
+  partnerId: string;
+  partnerName: string;
+  platform: 'discord' | 'twitch';
+  channelId?: string | null;
+  messageId?: string | null;
+  source: string;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const ws = getWorkspaceId();
+
+  try {
+    const { data: row, error: selErr } = await db
+      .from('partners')
+      .select('id,eksponering')
+      .eq('id', opts.partnerId)
+      .single();
+    if (selErr) throw selErr;
+
+    const nyEksponering = (row.eksponering ?? 0) + 1;
+    const { error: updErr } = await db
+      .from('partners')
+      .update({ siste_promotert: new Date().toISOString(), eksponering: nyEksponering })
+      .eq('id', row.id);
+    if (updErr) throw updErr;
+
+    await db.from('system_events').insert({
+      workspace_id: ws,
+      source: opts.platform === 'discord' ? 'discord_bot' : 'twitch_bot',
+      event_type: opts.platform === 'discord' ? 'PARTNER_PROMOTION_SENT_DISCORD' : 'PARTNER_PROMOTION_SENT_TWITCH',
+      title: `Partner promotert: ${opts.partnerName}`,
+      severity: 'info',
+      metadata: { partnerId: row.id, partnerName: opts.partnerName, platform: opts.platform, channelId: opts.channelId ?? null, messageId: opts.messageId ?? null, source: opts.source, eksponering: nyEksponering },
+    });
+  } catch (err: any) {
+    try {
+      await db.from('system_events').insert({
+        workspace_id: ws,
+        source: 'partner_tracking',
+        event_type: 'PARTNER_PROMOTION_TRACKING_FAILED',
+        title: `Kunne ikke spore promo for ${opts.partnerName}`,
+        severity: 'warning',
+        metadata: { partnerName: opts.partnerName, platform: opts.platform, source: opts.source, error: err?.message?.slice(0, 200) ?? 'ukjent feil' },
+      });
+    } catch {}
+  }
+}

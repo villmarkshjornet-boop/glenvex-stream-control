@@ -47,6 +47,7 @@ function save(data: StreamSession[]) {
 
 let activeSession: Partial<StreamSession> | null = null;
 let chatMessageCount = 0;
+let sessionFollowerGain = 0;
 
 export function startSession(stream: { id: string; title: string; game: string; startedAt: string; viewerCount?: number }) {
   activeSession = {
@@ -63,6 +64,7 @@ export function startSession(stream: { id: string; title: string; game: string; 
     durationMinutes: 0,
   };
   chatMessageCount = 0;
+  sessionFollowerGain = 0;
   startAudienceTracking(stream.id, stream.game, stream.title);
 }
 
@@ -77,10 +79,17 @@ export function incrementChatMessages() {
   if (activeSession) chatMessageCount++;
 }
 
-export function endSession(followerGain = 0) {
+export function incrementFollowerGain(n: number) {
+  if (activeSession) sessionFollowerGain += n;
+}
+
+export async function endSession(followerGainOverride = 0) {
   if (!activeSession?.id || !activeSession.startedAt) return;
   const started = new Date(activeSession.startedAt).getTime();
   const duration = Math.round((Date.now() - started) / 60_000);
+
+  // Bruk eksplisitt override hvis kaller sender ikke-null verdi, ellers den akkumulerte tellingen.
+  const followerGain = followerGainOverride > 0 ? followerGainOverride : sessionFollowerGain;
 
   const session: StreamSession = {
     id: activeSession.id,
@@ -130,53 +139,52 @@ export function endSession(followerGain = 0) {
     return;
   }
 
-  sb.from('stream_history').upsert({
-    workspace_id: WORKSPACE_ID,
-    stream_id: session.id,
-    title: session.title,
-    game: session.game,
-    started_at: session.startedAt,
-    ended_at: session.endedAt,
-    peak_viewers: session.peakViewers,
-    avg_viewers: session.avgViewers,
-    duration_minutes: session.durationMinutes,
-    followers_gained: session.followerGain,
-    chat_messages: session.chatMessages,
-    raids_during: session.raidsDuring,
-    subs_gained: session.subsGained,
-  }, { onConflict: 'stream_id' }).then(
-    ({ error }: { error: any }) => {
-      if (error) {
-        logSystemEvent({
-          workspaceId: WORKSPACE_ID,
-          source: 'twitch_bot',
-          event_type: 'STREAM_HISTORY_UPSERT_FAILED',
-          title: `stream_history upsert feilet: ${error.message?.slice(0, 100) ?? 'ukjent'}`,
-          severity: 'error',
-          metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: error.message, code: error.code },
-        });
-      } else {
-        logSystemEvent({
-          workspaceId: WORKSPACE_ID,
-          source: 'twitch_bot',
-          event_type: 'STREAM_HISTORY_UPSERTED',
-          title: `stream_history skrevet: ${session.title || session.game || session.id}`,
-          severity: 'info',
-          metadata: { streamId: session.id, workspaceId: WORKSPACE_ID },
-        });
-      }
-    },
-    (err: any) => {
+  try {
+    const { error } = await sb.from('stream_history').upsert({
+      workspace_id: WORKSPACE_ID,
+      stream_id: session.id,
+      title: session.title,
+      game: session.game,
+      started_at: session.startedAt,
+      ended_at: session.endedAt,
+      peak_viewers: session.peakViewers,
+      avg_viewers: session.avgViewers,
+      duration_minutes: session.durationMinutes,
+      followers_gained: session.followerGain,
+      chat_messages: session.chatMessages,
+      raids_during: session.raidsDuring,
+      subs_gained: session.subsGained,
+    }, { onConflict: 'stream_id' });
+
+    if (error) {
       logSystemEvent({
         workspaceId: WORKSPACE_ID,
         source: 'twitch_bot',
         event_type: 'STREAM_HISTORY_UPSERT_FAILED',
-        title: `stream_history upsert kastet exception: ${err?.message?.slice(0, 100) ?? 'ukjent'}`,
+        title: `stream_history upsert feilet: ${error.message?.slice(0, 100) ?? 'ukjent'}`,
         severity: 'error',
-        metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: err?.message },
+        metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: error.message, code: error.code },
+      });
+    } else {
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'STREAM_HISTORY_UPSERTED',
+        title: `stream_history skrevet: ${session.title || session.game || session.id}`,
+        severity: 'info',
+        metadata: { streamId: session.id, workspaceId: WORKSPACE_ID },
       });
     }
-  );
+  } catch (err: any) {
+    logSystemEvent({
+      workspaceId: WORKSPACE_ID,
+      source: 'twitch_bot',
+      event_type: 'STREAM_HISTORY_UPSERT_FAILED',
+      title: `stream_history upsert kastet exception: ${err?.message?.slice(0, 100) ?? 'ukjent'}`,
+      severity: 'error',
+      metadata: { streamId: session.id, workspaceId: WORKSPACE_ID, error: err?.message },
+    });
+  }
 }
 
 export function getHistory(): StreamSession[] {
