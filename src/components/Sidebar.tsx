@@ -68,9 +68,10 @@ const NAV: NavSeksjon[] = [
     href: '/partnere',
     icon: '◇',
     items: [
-      { label: 'Partner Hub',     href: '/partner-hub' },
-      { label: 'Sponsor Manager', href: '/sponsor-manager' },
-      { label: 'Affiliate',       href: '/partner-hub' },
+      { label: 'Partner Hub',      href: '/partner-hub' },
+      { label: 'Sponsor Manager',  href: '/sponsor-manager' },
+      { label: 'Sales Bot',        href: '/innstillinger/partner-bot' },
+      { label: 'Twitter Utkast',   href: '/publisering/twitter-drafts' },
     ],
   },
   {
@@ -104,6 +105,7 @@ function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
   if (pathname === seksjon.href) return true;
   if (seksjon.items?.some(i => pathname.startsWith(i.href) && i.href !== '/')) return true;
   if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
+  if (seksjon.id === 'partnere' && (pathname.startsWith('/innstillinger/partner-bot') || pathname.startsWith('/publisering/twitter-drafts'))) return true;
   if (seksjon.id === 'dashboard' && pathname === '/') return true;
   if (seksjon.id === 'twitch' && pathname.startsWith('/stream-briefing')) return true;
   if (seksjon.id === 'ai' && (pathname.startsWith('/ai-memory') || pathname.startsWith('/ai-producer'))) return true;

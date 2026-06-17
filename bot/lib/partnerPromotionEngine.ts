@@ -1,0 +1,429 @@
+/**
+ * Partner Promotion Engine — context-aware, anti-spam scoring engine.
+ *
+ * Decision flow:
+ *   1. Check global killswitch + cooldowns → skip if triggered
+ *   2. Score each active partner: relevance + historical + context - cooldown penalty
+ *   3. Pick highest scorer above threshold
+ *   4. If requireApproval: write partner_proposals row, return shouldPromote=false
+ *   5. Else: return shouldPromote=true with message ready to send
+ */
+
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import OpenAI from 'openai';
+import { getRandomActivePartner, getFeaturedPartner, PartnerInfo } from './partnerHelper';
+
+const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const MIN_CONFIDENCE = 0.35; // minimum score to fire a promo
+const MAX_POSTS_PER_STREAM_DEFAULT = 3;
+const COOLDOWN_MINUTES_DEFAULT = 45;
+
+// ── Supabase singleton ────────────────────────────────────────────────────────
+
+let _sb: SupabaseClient | null = null;
+function getSb(): SupabaseClient | null {
+  if (_sb) return _sb;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  const ws = require('ws');
+  _sb = createClient(url, key, { realtime: { transport: ws } });
+  return _sb;
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface PartnerBotSettings {
+  enabled: boolean;
+  twitchEnabled: boolean;
+  discordEnabled: boolean;
+  pollsEnabled: boolean;
+  affiliateDisclosure: string;       // e.g. "#ad" or "partnerkode:"
+  maxPostsPerStream: number;
+  cooldownMinutes: number;
+  pollCooldownMinutes: number;
+  viewerPeakMultiplier: number;      // fire at peak if viewers > avg * multiplier
+  chatSilenceMinutes: number;        // trigger after N quiet minutes
+  allowBothChannels: boolean;        // post to both Twitch + Discord simultaneously
+  requireApproval: boolean;          // store proposal instead of posting directly
+  tone: 'natural' | 'energetic' | 'minimal';
+}
+
+export const DEFAULT_SETTINGS: PartnerBotSettings = {
+  enabled: true,
+  twitchEnabled: true,
+  discordEnabled: true,
+  pollsEnabled: false,
+  affiliateDisclosure: '',
+  maxPostsPerStream: MAX_POSTS_PER_STREAM_DEFAULT,
+  cooldownMinutes: COOLDOWN_MINUTES_DEFAULT,
+  pollCooldownMinutes: 120,
+  viewerPeakMultiplier: 1.5,
+  chatSilenceMinutes: 8,
+  allowBothChannels: false,
+  requireApproval: true,  // alpha default: require manual approval
+  tone: 'natural',
+};
+
+export interface PromotionContext {
+  workspaceId: string;
+  streamId?: string | null;
+  game: string;
+  viewerCount: number;
+  historicalAvgViewers: number;
+  chatMessagesLastMinute: number;
+  recentChatLines: string[];         // last ~20 lines for context matching
+  minutesSinceLastPost: number;
+  postsThisStream: number;
+  settings: PartnerBotSettings;
+}
+
+export interface PromotionDecision {
+  shouldPromote: boolean;
+  reason: string;
+  skipReason?: string;
+  partnerId: string | null;
+  partnerName: string | null;
+  channel: 'twitch' | 'discord' | 'both' | null;
+  messageTwitch: string | null;
+  messageDiscord: string | null;
+  affiliateUrl: string | null;
+  disclosureText: string;
+  confidence: number;
+  cooldownApplied: boolean;
+  triggerType: 'chat_silence' | 'viewer_peak' | 'context_match' | 'timer' | 'none';
+  proposalId?: string | null;        // set when requireApproval=true and proposal was stored
+}
+
+interface ScoredPartner {
+  partner: PartnerInfo;
+  score: number;
+  relevanceScore: number;
+  historicalScore: number;
+  contextScore: number;
+  cooldownPenalty: number;
+  triggerType: 'chat_silence' | 'viewer_peak' | 'context_match' | 'timer';
+}
+
+// ── Settings loader ───────────────────────────────────────────────────────────
+
+export async function loadPartnerBotSettings(workspaceId?: string): Promise<PartnerBotSettings> {
+  const sb = getSb();
+  if (!sb) return DEFAULT_SETTINGS;
+  const ws = workspaceId ?? WORKSPACE_ID;
+
+  try {
+    const { data } = await sb
+      .from('workspaces')
+      .select('settings_json')
+      .eq('id', ws)
+      .single();
+
+    const stored = (data?.settings_json as any)?.partnerBot;
+    if (!stored) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...stored };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+// ── Trigger detection ─────────────────────────────────────────────────────────
+
+function detectTrigger(ctx: PromotionContext): 'chat_silence' | 'viewer_peak' | 'context_match' | 'timer' {
+  // Chat silence: very few messages last minute
+  if (ctx.chatMessagesLastMinute <= 2 && ctx.minutesSinceLastPost > ctx.settings.chatSilenceMinutes) {
+    return 'chat_silence';
+  }
+
+  // Viewer peak: currently above average by multiplier
+  if (ctx.historicalAvgViewers > 0 && ctx.viewerCount >= ctx.historicalAvgViewers * ctx.settings.viewerPeakMultiplier) {
+    return 'viewer_peak';
+  }
+
+  // Context match: game or chat keywords match partner category
+  // (scored separately; fallback to timer here)
+  return 'timer';
+}
+
+function chatContextScore(recentLines: string[], partnerInfo: PartnerInfo): number {
+  if (recentLines.length === 0) return 0;
+  const keywords = [
+    partnerInfo.navn.toLowerCase(),
+    ...(partnerInfo.beskrivelse?.toLowerCase().split(/\s+/).filter(w => w.length > 4) ?? []),
+  ];
+  const lineText = recentLines.join(' ').toLowerCase();
+  const hits = keywords.filter(k => lineText.includes(k)).length;
+  return Math.min(hits / Math.max(keywords.length, 1), 1);
+}
+
+// ── Historical performance score ──────────────────────────────────────────────
+
+async function getHistoricalScore(partnerId: string, workspaceId: string): Promise<number> {
+  const sb = getSb();
+  if (!sb) return 0.5;
+
+  try {
+    // Prefer partners with higher engagement (audience_preferences.interest_score)
+    const { data } = await sb
+      .from('partner_audience_preferences')
+      .select('interest_score, total_poll_votes, positive_votes')
+      .eq('workspace_id', workspaceId)
+      .eq('partner_id', partnerId)
+      .single();
+
+    if (!data) return 0.5; // neutral for unknown partners
+    const { interest_score, total_poll_votes, positive_votes } = data;
+
+    // Weighted: interest_score (from polls) is more reliable than raw vote counts
+    if (total_poll_votes >= 5) {
+      const pollRatio = positive_votes / total_poll_votes;
+      return 0.4 * (interest_score ?? 0.5) + 0.6 * pollRatio;
+    }
+    return interest_score ?? 0.5;
+  } catch {
+    return 0.5;
+  }
+}
+
+// ── Cooldown check ────────────────────────────────────────────────────────────
+
+async function getPartnerCooldownPenalty(partnerId: string, workspaceId: string, cooldownMinutes: number): Promise<number> {
+  const sb = getSb();
+  if (!sb) return 0;
+
+  try {
+    const { data } = await sb
+      .from('partners')
+      .select('siste_promotert')
+      .eq('workspace_id', workspaceId)
+      .eq('id', partnerId)
+      .single();
+
+    if (!data?.siste_promotert) return 0;
+
+    const minutesSince = (Date.now() - new Date(data.siste_promotert).getTime()) / 60_000;
+    if (minutesSince >= cooldownMinutes) return 0;
+
+    // Linear penalty: full cooldown remaining = penalty 1.0
+    return 1 - minutesSince / cooldownMinutes;
+  } catch {
+    return 0;
+  }
+}
+
+// ── Message generation ────────────────────────────────────────────────────────
+
+async function generateMessage(partner: PartnerInfo, platform: 'twitch' | 'discord', ctx: PromotionContext, tone: string): Promise<string> {
+  const kode = partner.rabattkode ? ` (kode: ${partner.rabattkode})` : '';
+  const fallback = platform === 'twitch'
+    ? `🤝 Sjekk ut ${partner.navn}! ${partner.finalUrl}${kode}`
+    : `🤝 **${partner.navn}** – ${partner.beskrivelse ?? ''}\n${partner.finalUrl}${kode}`;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return fallback;
+
+  try {
+    const openai = new OpenAI({ apiKey });
+    const toneHint = tone === 'energetic' ? 'Energisk og entusiastisk.' : tone === 'minimal' ? 'Kort og nøktern. Ikke emojis.' : 'Naturlig og uformell.';
+    const gameHint = ctx.game ? ` Vi spiller ${ctx.game} nå.` : '';
+    const platformHint = platform === 'twitch'
+      ? 'Twitch chat-melding, maks 15 ord, ingen markdown.'
+      : 'Discord-melding, maks 2 setninger, kan bruke bold.';
+
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Skriv en norsk partner-promo for ${partner.navn}${partner.beskrivelse ? ` – ${partner.beskrivelse}` : ''}.${partner.rabattkode ? ` Rabattkode: ${partner.rabattkode}.` : ''} Lenke: ${partner.finalUrl}. ${toneHint}${gameHint} Format: ${platformHint}`,
+      }],
+      max_tokens: platform === 'twitch' ? 40 : 120,
+      temperature: 0.8,
+    });
+
+    const ai = res.choices[0]?.message?.content?.trim() ?? '';
+    if (!ai) return fallback;
+
+    if (platform === 'twitch') {
+      return ai.includes(partner.finalUrl ?? '') ? ai : `${ai} → ${partner.finalUrl}${kode}`;
+    }
+    return ai.includes(partner.finalUrl ?? '') ? ai : `${ai}\n${partner.finalUrl}${kode}`;
+  } catch {
+    return fallback;
+  }
+}
+
+// ── Store proposal in DB ──────────────────────────────────────────────────────
+
+async function storeProposal(opts: {
+  workspaceId: string;
+  partner: PartnerInfo;
+  scored: ScoredPartner;
+  messageTwitch: string | null;
+  messageDiscord: string | null;
+  platform: 'twitch' | 'discord' | 'both';
+}): Promise<string | null> {
+  const sb = getSb();
+  if (!sb) return null;
+
+  try {
+    const { data, error } = await sb
+      .from('partner_proposals')
+      .insert({
+        workspace_id: opts.workspaceId,
+        partner_id: opts.partner.id ?? null,
+        partner_name: opts.partner.navn,
+        platform: opts.platform,
+        trigger_type: opts.scored.triggerType,
+        message_twitch: opts.messageTwitch,
+        message_discord: opts.messageDiscord,
+        affiliate_url: opts.partner.finalUrl,
+        discount_code: opts.partner.rabattkode ?? null,
+        confidence: opts.scored.score,
+        scoring_detail: {
+          relevance: opts.scored.relevanceScore,
+          historical: opts.scored.historicalScore,
+          context: opts.scored.contextScore,
+          cooldown: opts.scored.cooldownPenalty,
+        },
+        status: 'pending',
+        expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return data?.id ?? null;
+  } catch (err: any) {
+    console.error('[partnerPromotionEngine] storeProposal feilet:', err?.message);
+    return null;
+  }
+}
+
+// ── Log system event ──────────────────────────────────────────────────────────
+
+async function logEvent(workspaceId: string, eventType: string, title: string, metadata: Record<string, unknown>): Promise<void> {
+  const sb = getSb();
+  if (!sb) return;
+  try {
+    await sb.from('system_events').insert({
+      workspace_id: workspaceId,
+      source: 'partner_bot',
+      event_type: eventType,
+      title,
+      severity: 'info',
+      metadata,
+    });
+  } catch {}
+}
+
+// ── Main decision function ────────────────────────────────────────────────────
+
+export async function decidePromotion(ctx: PromotionContext): Promise<PromotionDecision> {
+  const skip = (reason: string): PromotionDecision => ({
+    shouldPromote: false, reason, skipReason: reason,
+    partnerId: null, partnerName: null, channel: null,
+    messageTwitch: null, messageDiscord: null, affiliateUrl: null,
+    disclosureText: '', confidence: 0, cooldownApplied: false,
+    triggerType: 'none', proposalId: null,
+  });
+
+  const { settings, workspaceId } = ctx;
+
+  if (!settings.enabled) return skip('Partner bot er deaktivert');
+  if (!settings.twitchEnabled && !settings.discordEnabled) return skip('Verken Twitch- eller Discord-promo er aktivert');
+  if (ctx.postsThisStream >= settings.maxPostsPerStream) return skip(`Maks antall promoer (${settings.maxPostsPerStream}) nådd denne streamen`);
+  if (ctx.minutesSinceLastPost < settings.cooldownMinutes) return skip(`Cooldown aktiv: ${Math.round(settings.cooldownMinutes - ctx.minutesSinceLastPost)} min igjen`);
+
+  // Fetch candidates (featured + random to get variety)
+  const [featured, random] = await Promise.all([
+    getFeaturedPartner(),
+    getRandomActivePartner(),
+  ]);
+
+  const candidates = [featured, random].filter((p): p is PartnerInfo => p !== null && p.canPost);
+  const seen = new Set<string>();
+  const unique = candidates.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+
+  if (unique.length === 0) return skip('Ingen aktive partnere med gyldig URL');
+
+  const triggerType = detectTrigger(ctx);
+
+  // Score all candidates
+  const scored: ScoredPartner[] = await Promise.all(
+    unique.map(async (partner) => {
+      const relevanceScore = partner.affiliateUrl !== null ? 0.8 : 0.5;
+      const historicalScore = await getHistoricalScore(partner.id, workspaceId);
+      const contextScore = chatContextScore(ctx.recentChatLines, partner);
+      const cooldownPenalty = await getPartnerCooldownPenalty(partner.id, workspaceId, settings.cooldownMinutes);
+
+      // Trigger bonuses
+      let triggerBonus = 0;
+      if (triggerType === 'viewer_peak') triggerBonus = 0.2;
+      if (triggerType === 'chat_silence') triggerBonus = 0.1;
+      if (triggerType === 'context_match' || contextScore > 0.3) triggerBonus = 0.3;
+
+      const score = Math.max(0, relevanceScore * 0.3 + historicalScore * 0.3 + contextScore * 0.2 + triggerBonus * 0.2 - cooldownPenalty * 0.5);
+
+      return { partner, score, relevanceScore, historicalScore, contextScore, cooldownPenalty, triggerType };
+    })
+  );
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+
+  if (best.score < MIN_CONFIDENCE) {
+    await logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Partner promo skippet: lav score (${best.score.toFixed(2)})`, {
+      partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType,
+    });
+    return skip(`Score for lav (${best.score.toFixed(2)} < ${MIN_CONFIDENCE})`);
+  }
+
+  // Determine channel
+  const channel: 'twitch' | 'discord' | 'both' =
+    settings.allowBothChannels && settings.twitchEnabled && settings.discordEnabled ? 'both' :
+    settings.twitchEnabled ? 'twitch' : 'discord';
+
+  // Generate messages
+  const [msgTwitch, msgDiscord] = await Promise.all([
+    (channel === 'twitch' || channel === 'both') ? generateMessage(best.partner, 'twitch', ctx, settings.tone) : Promise.resolve(null),
+    (channel === 'discord' || channel === 'both') ? generateMessage(best.partner, 'discord', ctx, settings.tone) : Promise.resolve(null),
+  ]);
+
+  const disclosure = settings.affiliateDisclosure
+    ? ` ${settings.affiliateDisclosure}`
+    : (best.partner.missedAffiliate ? '' : '');
+
+  await logEvent(workspaceId, 'PARTNER_PROMOTION_CONSIDERED', `Promo vurdert: ${best.partner.navn} (score: ${best.score.toFixed(2)})`, {
+    partnerId: best.partner.id, partnerName: best.partner.navn,
+    score: best.score, triggerType, channel, requireApproval: settings.requireApproval,
+  });
+
+  // requireApproval: store proposal, do not send yet
+  if (settings.requireApproval) {
+    const proposalId = await storeProposal({
+      workspaceId, partner: best.partner, scored: best,
+      messageTwitch: msgTwitch, messageDiscord: msgDiscord, platform: channel,
+    });
+
+    return {
+      shouldPromote: false,
+      reason: `Forslag lagret for godkjenning (${best.partner.navn}, score ${best.score.toFixed(2)})`,
+      partnerId: best.partner.id, partnerName: best.partner.navn, channel,
+      messageTwitch: msgTwitch, messageDiscord: msgDiscord,
+      affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
+      confidence: best.score, cooldownApplied: best.cooldownPenalty > 0,
+      triggerType, proposalId,
+    };
+  }
+
+  // Auto-send
+  return {
+    shouldPromote: true,
+    reason: `Auto-promo: ${best.partner.navn} (trigger: ${triggerType}, score: ${best.score.toFixed(2)})`,
+    partnerId: best.partner.id, partnerName: best.partner.navn, channel,
+    messageTwitch: msgTwitch, messageDiscord: msgDiscord,
+    affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
+    confidence: best.score, cooldownApplied: best.cooldownPenalty > 0,
+    triggerType, proposalId: null,
+  };
+}

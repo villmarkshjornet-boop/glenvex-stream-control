@@ -33,6 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult, trackPartnerExposure } from './lib/partnerHelper';
+import { decidePromotion, loadPartnerBotSettings } from './lib/partnerPromotionEngine';
 import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId, getCommunityKanalId, getCommunitySettings } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
@@ -1067,6 +1068,8 @@ async function delSocialsSubtilt() {
 
 // Roterer mellom: partner → stream → community → partner → ...
 let proaktivRunde = 0;
+let _discordPromoerDenneStream = 0;
+let _discordSistePartnerPromo = 0;
 
 async function hentBotContext(): Promise<{ jokes: string[]; topics: string[] }> {
   const sbUrl = process.env.SUPABASE_URL;
@@ -1205,9 +1208,50 @@ async function sendProaktivMelding() {
 
   try {
     if (runde === 0) {
-      // Partner-promo → partner-kanal (konfigurert i kanal-innstillinger)
+      // Partner-promo → sjekk via promotionEngine først
       const partnerKanal = await finnPartnerKanal();
       if (!partnerKanal) return;
+
+      const pbSettings = await loadPartnerBotSettings().catch(() => null);
+      const minutesSinceLast = (Date.now() - _discordSistePartnerPromo) / 60_000;
+
+      if (pbSettings?.enabled && pbSettings.discordEnabled) {
+        const decision = await decidePromotion({
+          workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+          game: '',
+          viewerCount: 0,
+          historicalAvgViewers: 0,
+          chatMessagesLastMinute: 0,
+          recentChatLines: [],
+          minutesSinceLastPost: minutesSinceLast,
+          postsThisStream: _discordPromoerDenneStream,
+          settings: pbSettings,
+        }).catch(() => null);
+
+        if (decision && decision.shouldPromote && decision.messageDiscord) {
+          // Engine-generert melding — send direkte
+          await discordSend(partnerKanal, decision.messageDiscord, { trigger: 'partner_promotion_engine', partner: decision.partnerName });
+          _discordSistePartnerPromo = Date.now();
+          _discordPromoerDenneStream++;
+          if (decision.partnerName) {
+            await trackPartnerExposure({
+              partnerId: decision.partnerId ?? undefined,
+              partnerName: decision.partnerName,
+              platform: 'discord',
+              channelId: partnerKanal.id,
+              source: `engine_${decision.triggerType}`,
+            }).catch(() => {});
+          }
+          return;
+        }
+
+        if (decision && decision.proposalId) {
+          // requireApproval=true → proposal stored, skip send this round
+          return;
+        }
+      }
+
+      // Fallback: bruk eksisterende sendPartnerPromoMelding hvis engine er deaktivert
       await sendPartnerPromoMelding(partnerKanal);
     } else if (runde === 1) {
       // Stream-info → chat (greit som det er)

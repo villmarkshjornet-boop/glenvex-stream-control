@@ -7,6 +7,7 @@ import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './agentLogger
 import { recordViewerActivity } from './audienceTracker';
 import { incrementChatMessages, incrementFollowerGain } from './streamHistory';
 import { getRandomActivePartner, logPartnerPromoResult, trackPartnerExposure } from './partnerHelper';
+import { decidePromotion, loadPartnerBotSettings } from './partnerPromotionEngine';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
 import { logApiError } from './observability';
@@ -62,6 +63,12 @@ Regler:
 let client: tmi.Client | null = null;
 let sisteDiscordMelding = 0;
 const DISCORD_INTERVAL_MS = 25 * 60 * 1000;
+
+// ─── Promotion engine state ───────────────────────────────────────────────────
+let _chatMsgsLastMinute = 0;
+let _recentChatLines: string[] = [];
+let _sistePartnerPromo = 0;
+let _promoerDenneStream = 0;
 
 // ─── Multi-tenant ekstern kanal-ruting ────────────────────────────────────────
 
@@ -374,11 +381,68 @@ export function startTwitchBot() {
       setInterval(sjekkNyeFollowers, 2 * 60 * 1000);
     }, 30_000);
 
-    // Partner-promo i Twitch chat: featured partner → 45 min, vanlig → 90 min
+    // Partner-promo via promotionEngine: context-aware, anti-spam
+    // Resetter per-minutt-telleren hvert minutt
+    setInterval(() => { _chatMsgsLastMinute = 0; }, 60_000);
+
+    // Sjekk for promo-muligheter hvert 5. minutt (engine bestemmer om den faktisk sender)
     setTimeout(() => {
-      sendTwitchPartnerPromo().catch(() => {});
-      setInterval(() => sendTwitchPartnerPromo().catch(() => {}), 45 * 60 * 1000);
-    }, 20 * 60_000); // første promo etter 20 min (la stream komme i gang)
+      const runPromoCheck = async () => {
+        const settings = await loadPartnerBotSettings().catch(() => null);
+        if (!settings?.enabled || !settings.twitchEnabled) return;
+
+        const streamSettings = getSettings();
+        if (!streamSettings.lastNotifiedStreamId) return; // bare når live
+        if (await getPausePartnerPromo().catch(() => false)) return;
+
+        const minutesSinceLastPromo = (Date.now() - _sistePartnerPromo) / 60_000;
+
+        const decision = await decidePromotion({
+          workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+          game: '',
+          viewerCount: 0,
+          historicalAvgViewers: 0,
+          chatMessagesLastMinute: _chatMsgsLastMinute,
+          recentChatLines: [..._recentChatLines],
+          minutesSinceLastPost: minutesSinceLastPromo,
+          postsThisStream: _promoerDenneStream,
+          settings,
+        }).catch(() => null);
+
+        if (!decision) return;
+
+        // requireApproval=true: proposal stored, nothing to send yet
+        if (!decision.shouldPromote) return;
+
+        const msg = decision.messageTwitch;
+        if (!msg) return;
+
+        await chatSend(`#${KANAL}`, msg, { trigger: 'partner_promotion_engine', partner: decision.partnerName, triggerType: decision.triggerType });
+
+        _sistePartnerPromo = Date.now();
+        _promoerDenneStream++;
+
+        if (decision.partnerName) {
+          await trackPartnerExposure({
+            partnerId: decision.partnerId ?? undefined,
+            partnerName: decision.partnerName,
+            platform: 'twitch',
+            channelId: KANAL,
+            source: `engine_${decision.triggerType}`,
+          }).catch(() => {});
+        }
+      };
+
+      runPromoCheck().catch(() => {});
+      setInterval(() => runPromoCheck().catch(() => {}), 5 * 60_000);
+    }, 20 * 60_000); // første sjekk etter 20 min (la stream komme i gang)
+
+    // Reset promo-teller ved ny stream (lastNotifiedStreamId endres)
+    let _prevStreamId = getSettings().lastNotifiedStreamId;
+    setInterval(() => {
+      const cur = getSettings().lastNotifiedStreamId;
+      if (cur !== _prevStreamId) { _promoerDenneStream = 0; _sistePartnerPromo = 0; _prevStreamId = cur; }
+    }, 60_000);
   }).catch((err: Error) => {
     console.error('  ✗ Twitch chat feil:', err.message);
   });
@@ -535,6 +599,11 @@ export function startTwitchBot() {
     chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
     recordViewerActivity(tags.username, tags);
     incrementChatMessages();
+
+    // Promotion engine: per-minutt teller + rullende buffer
+    _chatMsgsLastMinute++;
+    _recentChatLines.push(`${tags.username}: ${tekst}`);
+    if (_recentChatLines.length > 30) _recentChatLines = _recentChatLines.slice(-30);
 
     const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
 
