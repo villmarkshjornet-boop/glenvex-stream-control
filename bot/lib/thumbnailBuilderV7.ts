@@ -173,7 +173,8 @@ async function runFontTest(fontPath: string | null): Promise<{ passed: boolean; 
 
 async function downloadVideo(url: string, dest: string): Promise<boolean> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+    // 90s cap — leaves budget for frames (45s) + Gemini (25s) + upload (45s) within 5-min watchdog
+    const res = await fetch(url, { signal: AbortSignal.timeout(90_000) });
     if (!res.ok) return false;
     fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
     return fs.existsSync(dest) && fs.statSync(dest).size > 10_000;
@@ -255,9 +256,15 @@ async function getHook(
         'Svar KUN med hook-teksten. Ingenting annet.',
       ].filter(Boolean).join('\n');
 
-      const result = await model.generateContent([
-        { text: prompt },
-        { inlineData: { mimeType: 'image/jpeg', data: frameBuf.toString('base64') } },
+      // Hard 25s cap — Gemini can hang; fallback handles gracefully
+      const result = await Promise.race([
+        model.generateContent([
+          { text: prompt },
+          { inlineData: { mimeType: 'image/jpeg', data: frameBuf.toString('base64') } },
+        ]),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini timeout (25s)')), 25_000)
+        ),
       ]);
 
       const raw  = result.response.text().trim();
@@ -307,9 +314,13 @@ async function renderPangoText(
 
 async function uploadBuffer(db: any, buf: Buffer, storagePath: string): Promise<string | null> {
   try {
-    const { error } = await db.storage.from(STORAGE_BUCKET).upload(storagePath, buf, {
-      contentType: 'image/png', upsert: true,
-    });
+    // 45s cap — Supabase storage can hang on large uploads
+    const { error } = await Promise.race([
+      db.storage.from(STORAGE_BUCKET).upload(storagePath, buf, { contentType: 'image/png', upsert: true }),
+      new Promise<{ error: Error }>((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout (45s)')), 45_000)
+      ),
+    ]);
     if (error) throw error;
     const { data } = db.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
     return (data as any)?.publicUrl ?? null;
@@ -405,6 +416,7 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
 
   try {
     // ── 1. Load highlight ─────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_LOAD_START', { highlightId });
     const { data: h } = await db.from('content_highlights')
       .select('id,vod_id,title,category,begrunnelse,clip_url,vertical_clip_url,start_time,end_time')
       .eq('id', highlightId).single();
@@ -412,11 +424,14 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
 
     const videoUrl = h.clip_url ?? h.vertical_clip_url;
     if (!videoUrl) throw new Error('Ingen clip_url — kan ikke generere thumbnail');
+    wLog('INFO', 'STEP_LOAD_DONE', { highlightId, title: h.title, category: h.category });
 
     // ── 2. Font + text test ───────────────────────────────────────────────────
+    wLog('INFO', 'STEP_FONT_START', { highlightId });
     const rawFontPath = await prepareFont();
     const { passed: fontTestPassed, fontPath } = await runFontTest(rawFontPath);
     const fontUsed = fontPath ? 'Anton' : 'system';
+    wLog('INFO', 'STEP_FONT_DONE', { highlightId, fontTestPassed, fontUsed });
 
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_V7_TEXT_TEST',
@@ -436,7 +451,8 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
       throw new Error('Font test feilet for alle fonter — kan ikke garantere lesbar tekst');
     }
 
-    // ── 3. Transcript (optional, for hook engine) ─────────────────────────────
+    // ── 3. Transcript (optional) ──────────────────────────────────────────────
+    wLog('INFO', 'STEP_TRANSCRIPT_START', { highlightId });
     const highlightStart = (h.start_time as number) ?? 0;
     const highlightEnd   = (h.end_time   as number) ?? highlightStart + 60;
     const { data: transcriptRows } = h.vod_id
@@ -452,16 +468,26 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
     const transcript = (transcriptRows as any[] | null)?.length
       ? (transcriptRows as any[]).map((s: any) => s.text).join(' ').slice(0, 400)
       : null;
+    wLog('INFO', 'STEP_TRANSCRIPT_DONE', { highlightId, chars: transcript?.length ?? 0 });
 
-    // ── 4. Download video + extract best frame ────────────────────────────────
+    // ── 4. Download video ─────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_DOWNLOAD_START', { highlightId, url: videoUrl.slice(0, 80) });
     if (!await downloadVideo(videoUrl, videoPath)) {
-      throw new Error('Videofil kunne ikke lastes ned');
+      throw new Error('Videofil kunne ikke lastes ned (timeout 90s eller HTTP feil)');
     }
+    const videoBytes = fs.statSync(videoPath).size;
+    wLog('INFO', 'STEP_DOWNLOAD_DONE', { highlightId, bytes: videoBytes });
+
+    // ── 5. Extract best frame ─────────────────────────────────────────────────
+    wLog('INFO', 'STEP_FRAMES_START', { highlightId });
     const durationSec = await getVideoDuration(videoPath);
     const bestFrame   = await extractBestFrame(videoPath, highlightId, durationSec);
+    wLog('INFO', 'STEP_FRAMES_DONE', { highlightId, durationSec, frameBytes: bestFrame.length });
 
-    // ── 5. Hook engine ────────────────────────────────────────────────────────
+    // ── 6. Hook engine ────────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_HOOK_START', { highlightId });
     const { headline, hookSource } = await getHook(bestFrame, h.title ?? '', h.category ?? '', transcript);
+    wLog('INFO', 'STEP_HOOK_DONE', { highlightId, headline, hookSource });
 
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_V7_HOOK_SELECTED',
@@ -476,7 +502,8 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
       },
     });
 
-    // ── 6. Render ─────────────────────────────────────────────────────────────
+    // ── 7. Render ─────────────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_RENDER_START', { highlightId, headline, fontUsed });
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_V7_RENDER_START',
       title: `Thumbnail V7 render starter — "${headline}" · ${fontUsed}`,
@@ -493,17 +520,21 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
     });
 
     const ytBuf = await buildCompositeV7(bestFrame, headline, h.category ?? '', fontPath);
+    wLog('INFO', 'STEP_RENDER_DONE', { highlightId, bytes: ytBuf.length });
 
     // Debug: always write last thumbnail to /tmp so we can inspect it
     try { fs.writeFileSync('/tmp/v7-last-thumbnail.png', ytBuf); } catch {}
 
-    // ── 7. Upload ─────────────────────────────────────────────────────────────
+    // ── 8. Upload ─────────────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_UPLOAD_START', { highlightId, bytes: ytBuf.length });
     const vodId       = h.vod_id ?? 'unknown';
     const storagePath = `content-factory/thumbnails/${vodId}/${highlightId}_v7_yt.png`;
     const thumbnailUrl = await uploadBuffer(db, ytBuf, storagePath);
-    if (!thumbnailUrl) throw new Error('Opplasting til storage feilet');
+    if (!thumbnailUrl) throw new Error('Opplasting til storage feilet (timeout 45s eller Supabase feil)');
+    wLog('INFO', 'STEP_UPLOAD_DONE', { highlightId, url: thumbnailUrl.slice(-40) });
 
-    // ── 8. DB update ──────────────────────────────────────────────────────────
+    // ── 9. DB update ──────────────────────────────────────────────────────────
+    wLog('INFO', 'STEP_DB_UPDATE_START', { highlightId });
     await db.from('content_highlights').update({
       thumbnail_status:          'DONE',
       thumbnail_youtube_url:     thumbnailUrl,
@@ -536,6 +567,7 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
       },
     });
 
+    wLog('INFO', 'STEP_DB_UPDATE_DONE', { highlightId });
     wLog('INFO', 'DONE', { highlightId, url: thumbnailUrl, bytes: ytBuf.length, fontUsed });
 
   } catch (e: any) {
