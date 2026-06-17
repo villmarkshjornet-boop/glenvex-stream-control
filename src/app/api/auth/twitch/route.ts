@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { encodeState } from '@/lib/oauthState';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +11,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const h = headers();
-  const userId      = h.get('x-user-id');
-  const workspaceId = h.get('x-workspace-id');
+  const userId              = h.get('x-user-id');
+  const metadataWorkspaceId = h.get('x-workspace-id'); // JWT user_metadata.workspace_id
 
   const clientId    = process.env.TWITCH_CLIENT_ID;
   const stateSecret = process.env.OAUTH_STATE_SECRET;
@@ -22,19 +23,72 @@ export async function GET(req: NextRequest) {
   if (!stateSecret) return NextResponse.json({ error: 'OAUTH_STATE_SECRET ikke satt' }, { status: 500 });
   if (!centralBase) return NextResponse.json({ error: 'GLENVEX_OAUTH_BASE ikke satt' }, { status: 500 });
 
-  let wsId = workspaceId;
-  if (!wsId && userId) {
-    const db = getDb();
-    if (db) {
-      const { data } = await db.from('workspaces').select('id').eq('owner_user_id', userId).limit(1).single();
-      wsId = data?.id ?? null;
+  const db = getDb();
+  const hasMetadataWorkspaceId = !!metadataWorkspaceId;
+  let wsId: string | null = null;
+  let dbWorkspaceFound = false;
+  let syncedMetadata = false;
+
+  // Step 1: JWT workspace_id — verify it exists AND belongs to this user
+  if (metadataWorkspaceId && userId && db) {
+    const { data } = await db
+      .from('workspaces')
+      .select('id, owner_user_id')
+      .eq('id', metadataWorkspaceId)
+      .single();
+
+    if (data?.owner_user_id === userId) {
+      wsId = data.id;
+      dbWorkspaceFound = true;
+    }
+    // If null or owner mismatch: fall through to step 2
+  }
+
+  // Step 2: Fallback — look up workspace by owner_user_id
+  if (!wsId && userId && db) {
+    const { data } = await db
+      .from('workspaces')
+      .select('id, owner_user_id')
+      .eq('owner_user_id', userId)
+      .limit(1)
+      .single();
+
+    if (data) {
+      wsId = data.id;
+      dbWorkspaceFound = true;
+
+      // Self-heal: JWT had wrong or missing workspace_id — sync it back so next request is fast
+      if (wsId !== metadataWorkspaceId) {
+        const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+        const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+        if (sbUrl && sbKey) {
+          const admin = createClient(sbUrl, sbKey, { auth: { autoRefreshToken: false, persistSession: false } });
+          void admin.auth.admin.updateUserById(userId, {
+            user_metadata: { workspace_id: wsId },
+          }).catch(() => {});
+          syncedMetadata = true;
+        }
+      }
     }
   }
+
   if (!wsId) {
     const url = req.nextUrl.clone();
     url.pathname = '/onboarding';
     url.searchParams.set('step', '1');
     url.searchParams.set('error', 'workspace_ikke_funnet');
+    url.searchParams.set('source', 'auth_twitch_start');
+    if (userId) url.searchParams.set('userId', userId);
+    url.searchParams.set('hasMetadataWorkspaceId', String(hasMetadataWorkspaceId));
+    url.searchParams.set('dbWorkspaceFound', 'false');
+    void db?.from('system_events').insert({
+      workspace_id: null,
+      source:       'onboarding',
+      event_type:   'OAUTH_TWITCH_WORKSPACE_MISSING',
+      title:        `Twitch OAuth stoppet — ingen workspace funnet for bruker`,
+      severity:     'warning',
+      metadata:     { userId, hasMetadataWorkspaceId, metadataWorkspaceId },
+    });
     return NextResponse.redirect(url);
   }
 
@@ -50,13 +104,13 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('state', encoded);
   url.searchParams.set('force_verify', 'true');
 
-  void getDb()?.from('system_events').insert({
+  void db?.from('system_events').insert({
     workspace_id: wsId,
     source:       'onboarding',
     event_type:   'OAUTH_TWITCH_STARTED',
     title:        'Twitch OAuth påbegynt',
     severity:     'info',
-    metadata:     { redirectUri, returnUrl },
+    metadata:     { redirectUri, returnUrl, hasMetadataWorkspaceId, syncedMetadata },
   });
 
   const response = NextResponse.redirect(url.toString());

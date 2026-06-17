@@ -107,7 +107,16 @@ export async function GET(req: NextRequest) {
 
   if (!db) return NextResponse.redirect(`${fallbackUrl}?error=db_unavailable`);
 
-  const { error: dbErr } = await db.from('workspaces').update({
+  // Verify workspace exists before updating — Supabase .update().eq() returns error:null even on 0-row matches
+  const { data: wsCheck } = await db.from('workspaces').select('id').eq('id', wsId).single();
+  if (!wsCheck) {
+    logFailed('workspace_not_found', { wsId });
+    return NextResponse.redirect(
+      `${fallbackUrl}?step=1&error=workspace_ikke_funnet&source=twitch_callback&wsId=${encodeURIComponent(wsId)}&hasMetadataWorkspaceId=unknown&dbWorkspaceFound=false`
+    );
+  }
+
+  const { data: updatedRows, error: dbErr } = await db.from('workspaces').update({
     twitch_user_id:       twitchUser.id,
     twitch_login:         twitchUser.login,
     twitch_display_name:  twitchUser.display_name,
@@ -119,11 +128,11 @@ export async function GET(req: NextRequest) {
     twitch_channel_name:  twitchUser.login,
     onboarding_step:      2,
     updated_at:           new Date().toISOString(),
-  }).eq('id', wsId);
+  }).eq('id', wsId).select('id');
 
-  if (dbErr) {
-    console.error('[twitch/callback] db update failed:', dbErr.message);
-    logFailed('db_save_failed', { dbMessage: dbErr.message });
+  if (dbErr || !updatedRows?.length) {
+    console.error('[twitch/callback] db update failed:', dbErr?.message ?? `0 rows updated for wsId=${wsId}`);
+    logFailed('db_save_failed', { dbMessage: dbErr?.message ?? 'update matched 0 rows', wsId });
     return NextResponse.redirect(`${fallbackUrl}?error=db_save_failed`);
   }
 

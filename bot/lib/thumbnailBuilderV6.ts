@@ -112,9 +112,10 @@ async function prepareFont(): Promise<string | null> {
 
 function fontDeclaration(fontPath: string | null): { decl: string; fontFamily: string } {
   if (fontPath && fs.existsSync(fontPath)) {
-    const b64 = fs.readFileSync(fontPath).toString('base64');
+    // librsvg (used by Sharp) forbids data: URIs for @font-face — only file: is allowed.
+    // Using file:// lets librsvg load the font directly from disk.
     return {
-      decl: `@font-face { font-family: 'Anton'; src: url('data:font/truetype;base64,${b64}'); font-weight: normal; font-style: normal; }`,
+      decl: `@font-face { font-family: 'Anton'; src: url('file://${fontPath}'); font-weight: normal; font-style: normal; }`,
       fontFamily: "'Anton', 'Impact', 'DejaVu Sans Bold', sans-serif",
     };
   }
@@ -467,9 +468,18 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
   try {
     wLog('INFO', 'THUMBNAIL_V6_STARTED', { highlightId });
     logSystemEvent({
-      source: 'thumbnail_worker', event_type: 'THUMBNAIL_V6_STARTED',
-      title: `Thumbnail V6 (Gemini Director) startet for ${highlightId}`,
-      severity: 'info', metadata: { highlightId },
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_PIPELINE_START',
+      title: `Thumbnail V6 pipeline startet for ${highlightId}`,
+      severity: 'info',
+      metadata: {
+        thumbnailVersion: 'V6-Gemini-Director',
+        highlightId,
+        hasGeminiKey: !!process.env.GEMINI_API_KEY,
+        hasOpenAiKey: !!process.env.OPENAI_API_KEY,
+        fontPath: FONT_ANTON_PATH,
+        fontExists: fs.existsSync(FONT_ANTON_PATH),
+        ctrThreshold: CTR_THRESHOLD_V6,
+      },
     });
 
     // ── 1. Load data ──────────────────────────────────────────────────────────
@@ -512,7 +522,14 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
 
     // ── 2. Font + video download ──────────────────────────────────────────────
     const [fontPath] = await Promise.all([prepareFont()]);
-    wLog('INFO', fontPath ? 'FONT_READY' : 'FONT_FALLBACK', { font: fontPath ? 'Anton' : 'system' });
+    const fontOk = !!fontPath && fs.existsSync(fontPath);
+    wLog('INFO', fontOk ? 'FONT_READY' : 'FONT_FALLBACK', {
+      font: fontOk ? 'Anton' : 'system',
+      path: fontPath ?? 'null',
+      exists: fontOk,
+      sizeBytes: fontOk ? fs.statSync(fontPath!).size : 0,
+      method: 'file-url-in-svg-face', // librsvg supports file:// but NOT data: URLs for @font-face
+    });
 
     if (!await lastNedFil(videoUrl, videoPath)) {
       throw new Error('Videofil kunne ikke lastes ned');
@@ -545,6 +562,25 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
       arrowRequired: strategy.arrowRequired,
       ctrScore: strategy.ctrScore,
       headlineCount: strategy.headlines.length,
+    });
+    logSystemEvent({
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_GEMINI_ANALYSIS_COMPLETE',
+      title: `Gemini analyse ferdig — "${strategy.headline}" · ${strategy.emotion} · CTR ${strategy.ctrScore}/100`,
+      severity: 'info',
+      metadata: {
+        thumbnailVersion: 'V6-Gemini-Director',
+        highlightId,
+        hook: strategy.hook,
+        headline: strategy.headline,
+        emotion: strategy.emotion,
+        ctrScore: strategy.ctrScore,
+        focusTimestamp: strategy.focusTimestamp,
+        arrowRequired: strategy.arrowRequired,
+        thumbnailType: strategy.thumbnailType,
+        subheadline: strategy.subheadline,
+        headlineOptions: strategy.headlines.slice(0, 5),
+        isFallback: strategy.explanation?.includes('Fallback') ?? false,
+      },
     });
 
     // Save strategy early (best-effort) so it's visible even if build fails later
@@ -581,6 +617,29 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
     const headlineC = hl[2] ?? hl[0] ?? strategy.headline;
 
     // ── 7. Build YT composites for A/B/C ─────────────────────────────────────
+    const fontFileExists = !!fontPath && fs.existsSync(fontPath);
+    const fontSizeBytes  = fontFileExists ? fs.statSync(fontPath!).size : 0;
+    logSystemEvent({
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_RENDER_START',
+      title: `Thumbnail render starter — variant A: "${headlineA}" · font: ${fontFileExists ? 'Anton (file://)' : 'system fallback'}`,
+      severity: 'info',
+      metadata: {
+        thumbnailVersion: 'V6-Gemini-Director',
+        highlightId,
+        templateUsed: 'V6-Sharp-SVG-file-font',
+        selectedFrameTimestamp: tA,
+        frameBTimestamp: tB,
+        frameCTimestamp: tC,
+        headlines: [headlineA, headlineB, headlineC],
+        subheadline: strategy.subheadline,
+        category: h.category,
+        fontPath: fontPath ?? 'null',
+        fontFileExists,
+        fontSizeBytes,
+        fontMethod: fontFileExists ? 'file-url-in-svg-face' : 'system-fallback',
+      },
+    });
+
     const [ytA, ytB, ytC] = await Promise.all([
       buildCompositeV6(frameA, YT_W, YT_H, headlineA, strategy.subheadline, h.category, fontPath, 'youtube', strategy.arrowRequired, 'entropy'),
       buildCompositeV6(frameB, YT_W, YT_H, headlineB, strategy.subheadline, h.category, fontPath, 'youtube', strategy.arrowRequired, 'attention'),
@@ -588,6 +647,23 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
     ]);
 
     wLog('INFO', 'VARIANTS_BUILT', { highlightId, headlines: [headlineA, headlineB, headlineC] });
+    logSystemEvent({
+      source: 'thumbnail_worker', event_type: 'THUMBNAIL_RENDER_COMPLETE',
+      title: `Thumbnail render ferdig — 3 varianter bygget — A: "${headlineA}"`,
+      severity: 'info',
+      metadata: {
+        thumbnailVersion: 'V6-Gemini-Director',
+        highlightId,
+        templateUsed: 'V6-Sharp-SVG-file-font',
+        variantA: { headline: headlineA, crop: 'entropy', frameSec: tA },
+        variantB: { headline: headlineB, crop: 'attention', frameSec: tB },
+        variantC: { headline: headlineC, crop: 'centre', frameSec: tC },
+        fontUsed: fontFileExists ? 'Anton' : 'system',
+        ytABytes: ytA.length,
+        ytBBytes: ytB.length,
+        ytCBytes: ytC.length,
+      },
+    });
 
     // ── 8. CTR Gate on each variant ───────────────────────────────────────────
     const [gateA, gateB, gateC] = await Promise.all([

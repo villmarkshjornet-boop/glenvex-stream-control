@@ -112,10 +112,10 @@ async function prepareFont(): Promise<string | null> {
 
 function fontDeclaration(fontPath: string | null): { decl: string; fontFamily: string } {
   if (fontPath && fs.existsSync(fontPath)) {
-    // Embed font as base64 — file:// URLs are unreliable in librsvg on Railway
-    const b64 = fs.readFileSync(fontPath).toString('base64');
+    // librsvg explicitly blocks data: URIs for @font-face but allows file:// references.
+    // The previous data:base64 approach caused □□□□ because librsvg silently ignores those.
     return {
-      decl: `@font-face { font-family: 'Anton'; src: url('data:font/truetype;base64,${b64}'); font-weight: normal; font-style: normal; }`,
+      decl: `@font-face { font-family: 'Anton'; src: url('file://${fontPath}'); font-weight: normal; font-style: normal; }`,
       fontFamily: "'Anton', 'Impact', 'DejaVu Sans Bold', sans-serif",
     };
   }
