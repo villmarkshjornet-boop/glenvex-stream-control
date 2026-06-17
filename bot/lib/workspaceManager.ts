@@ -86,13 +86,22 @@ export async function loadActiveWorkspaces(): Promise<WorkspaceConfig[]> {
         });
       };
 
-      if (!row.twitch_login || !row.twitch_connected_at) { skip('missing_twitch_connection'); continue; }
-      if (!row.discord_guild_id || !row.discord_connected_at) { skip('missing_discord_connection'); continue; }
+      if (!row.twitch_login || !row.twitch_connected_at) {
+        skip(`missing_twitch_connection (twitch_login=${row.twitch_login ?? 'null'}, connected_at=${row.twitch_connected_at ?? 'null'})`);
+        continue;
+      }
+      if (!row.discord_guild_id || !row.discord_connected_at) {
+        skip(`missing_discord_connection (guild_id=${row.discord_guild_id ?? 'null'}, connected_at=${row.discord_connected_at ?? 'null'})`);
+        continue;
+      }
 
       const kanalPrefs = row.settings_json?.kanalPreferanser ?? {};
       const liveChannelId = kanalPrefs.live ?? row.live_channel_id ?? '';
 
-      if (!liveChannelId) { skip('missing_live_channel'); continue; }
+      if (!liveChannelId) {
+        skip('missing_live_channel (ingen kanalPreferanser.live og ingen live_channel_id)');
+        continue;
+      }
 
       configs.push({
         workspaceId:     row.id,
@@ -116,6 +125,14 @@ export async function loadActiveWorkspaces(): Promise<WorkspaceConfig[]> {
 // ── Sync: start nye, stopp deaktiverte, oppdater endrede ─────────────────────
 
 async function syncWorkspaces(discordClient: Client): Promise<void> {
+  logSystemEvent({
+    source: 'workspace_manager',
+    event_type: 'WORKSPACE_RUNTIME_LOADING',
+    title: 'WorkspaceManager: laster aktive workspaces fra Supabase',
+    severity: 'info',
+    metadata: { currentRuntimes: runtimes.size, timestamp: new Date().toISOString() },
+  });
+
   const configs = await loadActiveWorkspaces();
   const incoming = new Map(configs.map(c => [c.workspaceId, c]));
 

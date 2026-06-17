@@ -37,11 +37,12 @@ interface LiveState {
   isLive: boolean;
   lastStreamId: string;
   lastChecked: number;
+  lastCheckLogged: number;
 }
 
 export class WorkspaceRuntime {
   readonly config: WorkspaceConfig;
-  private liveState: LiveState = { isLive: false, lastStreamId: '', lastChecked: 0 };
+  private liveState: LiveState = { isLive: false, lastStreamId: '', lastChecked: 0, lastCheckLogged: 0 };
   private accessToken: string | null = null;
   private tokenExpiry = 0;
   private channelCleanup: (() => void) | null = null;
@@ -79,6 +80,20 @@ export class WorkspaceRuntime {
     const clientId = process.env.TWITCH_CLIENT_ID;
     const token = await this.getAccessToken();
     if (!token || !clientId) return;
+
+    // Logg live-sjekk-heartbeat én gang per 30 min for å unngå hendelsestøy
+    const LOG_INTERVAL_MS = 30 * 60_000;
+    if (Date.now() - this.liveState.lastCheckLogged > LOG_INTERVAL_MS) {
+      this.liveState.lastCheckLogged = Date.now();
+      logSystemEvent({
+        workspaceId: this.workspaceId,
+        source: 'twitch_bot',
+        event_type: 'TWITCH_LIVE_CHECK_STARTED',
+        title: `Live-sjekk aktiv: ${this.config.twitchLogin} (${this.config.brandName})`,
+        severity: 'info',
+        metadata: { workspaceId: this.workspaceId, twitchLogin: this.config.twitchLogin, brandName: this.config.brandName, isLive: this.liveState.isLive },
+      });
+    }
 
     try {
       const res = await fetch(

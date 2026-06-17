@@ -150,8 +150,28 @@ function DetailSidebar({
 }) {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [evLoading, setEvLoading] = useState(true);
+  const [repairResult, setRepairResult] = useState<any>(null);
+  const [repairing, setRepairing] = useState(false);
   const dots = healthDots(ws);
   const live = isLiveNow(ws);
+
+  const handleRepair = async (forceAlpha = false) => {
+    setRepairing(true);
+    setRepairResult(null);
+    try {
+      const res = await fetch(`/api/admin/workspaces/${ws.id}/repair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceAlpha }),
+      });
+      const data = await res.json();
+      setRepairResult(data);
+    } catch (err: any) {
+      setRepairResult({ ok: false, error: err?.message });
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   useEffect(() => {
     setEvLoading(true);
@@ -223,6 +243,52 @@ function DetailSidebar({
             CF Admin ↗
           </a>
         </div>
+
+        {/* Onboarding Diagnostics */}
+        <Section title="Onboarding Diagnostics" />
+        {(() => {
+          const hasTwitch    = !!ws.twitchConnectedAt && !!ws.twitchLogin;
+          const hasDiscord   = !!ws.discordConnectedAt && !!ws.discordGuildId;
+          const hasChannel   = !!(ws.kanalPrefs?.live || ws.liveChannelId);
+          const hasOnboarding = ws.onboardingComplete;
+          const hasAlpha     = ws.alphaEnabled;
+          const runtimeReady = hasTwitch && hasDiscord && hasChannel && hasOnboarding && hasAlpha;
+          return (
+            <>
+              <Row label="Twitch koblet"   value={hasTwitch   ? '✓ ' + ws.twitchLogin : '✗ Mangler'}  color={hasTwitch   ? 'text-g-green' : 'text-red-400'} />
+              <Row label="Discord koblet"  value={hasDiscord  ? '✓ ' + (ws.discordGuildName ?? ws.discordGuildId) : '✗ Mangler'} color={hasDiscord  ? 'text-g-green' : 'text-red-400'} />
+              <Row label="Live-kanal"      value={hasChannel  ? '✓ ' + (ws.kanalPrefs?.live ?? ws.liveChannelId) : '✗ Mangler'}  color={hasChannel  ? 'text-g-green' : 'text-red-400'} />
+              <Row label="Onboarding"      value={hasOnboarding ? '✓ Steg 5/5' : `✗ Steg ${ws.onboardingStep}/5`} color={hasOnboarding ? 'text-g-green' : 'text-yellow-400'} />
+              <Row label="Alpha"           value={hasAlpha    ? '✓ Aktivert' : '✗ Ikke aktivert'} color={hasAlpha    ? 'text-g-green' : 'text-g-muted'} />
+              <Row label="Runtime klar"    value={runtimeReady ? '✓ Klart' : '✗ Ikke klar'} color={runtimeReady ? 'text-g-green' : 'text-red-400'} />
+              <div className="px-4 py-2 flex gap-2">
+                <button
+                  onClick={() => handleRepair(false)}
+                  disabled={repairing}
+                  className="flex-1 py-1.5 text-[9px] bg-g-green/10 border border-g-green/30 rounded text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-50"
+                >
+                  {repairing ? 'Reparerer…' : 'Kjør Repair'}
+                </button>
+                {!hasAlpha && (
+                  <button
+                    onClick={() => handleRepair(true)}
+                    disabled={repairing}
+                    className="flex-1 py-1.5 text-[9px] bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 hover:bg-yellow-500/20 transition-colors disabled:opacity-50"
+                  >
+                    Repair + Alpha
+                  </button>
+                )}
+              </div>
+              {repairResult && (
+                <div className={`mx-4 mb-2 p-2 rounded text-[9px] border ${repairResult.ok ? 'border-g-green/30 bg-g-green/5 text-g-green' : 'border-red-500/30 bg-red-500/5 text-red-400'}`}>
+                  {repairResult.repairActions?.length > 0
+                    ? repairResult.repairActions.join(' · ')
+                    : repairResult.nextStep ?? repairResult.error ?? 'Ingen endringer'}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Workspace Info */}
         <Section title="Workspace" />
