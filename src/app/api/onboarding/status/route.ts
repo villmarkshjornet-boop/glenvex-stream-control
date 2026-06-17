@@ -39,10 +39,12 @@ export async function GET() {
   const channelsSaved    = !!(ws.settings_json?.kanalPreferanser?.live || ws.live_channel_id);
   const onboardingComplete = !!ws.onboarding_completed_at;
 
-  let currentStep = 1;
-  if (twitchConnected)   currentStep = 3;
-  if (discordConnected)  currentStep = 4;
-  if (channelsSaved)     currentStep = 5;
+  // Workspace eksisterer → brukeren er forbi steg 1 selv om Twitch/Discord mangler.
+  // Uten dette viser onboarding-siden steg 1 på nytt og brukeren havner i en loop.
+  let currentStep = ws ? 2 : 1;
+  if (twitchConnected)    currentStep = 3;
+  if (discordConnected)   currentStep = 4;
+  if (channelsSaved)      currentStep = 5;
   if (onboardingComplete) currentStep = 5;
 
   return NextResponse.json({
