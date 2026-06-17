@@ -113,16 +113,36 @@ ALTER TABLE partner_audience_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE twitter_drafts            ENABLE ROW LEVEL SECURITY;
 
 -- Service role bypasses RLS (Railway bot uses service role key)
--- Auth'd users can only see their own workspace
+-- Auth'd users can only see their own workspace (workspace_id from JWT user_metadata)
 
-CREATE POLICY "partner_proposals_workspace" ON partner_proposals
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM user_workspaces WHERE user_id = auth.uid() LIMIT 1));
+-- partner_proposals
+CREATE POLICY "service_role_all_partner_proposals" ON partner_proposals
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-CREATE POLICY "partner_polls_workspace" ON partner_polls
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM user_workspaces WHERE user_id = auth.uid() LIMIT 1));
+CREATE POLICY "user_own_workspace_partner_proposals" ON partner_proposals
+  FOR ALL USING      (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'))
+             WITH CHECK (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'));
 
-CREATE POLICY "partner_audience_preferences_workspace" ON partner_audience_preferences
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM user_workspaces WHERE user_id = auth.uid() LIMIT 1));
+-- partner_polls
+CREATE POLICY "service_role_all_partner_polls" ON partner_polls
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-CREATE POLICY "twitter_drafts_workspace" ON twitter_drafts
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM user_workspaces WHERE user_id = auth.uid() LIMIT 1));
+CREATE POLICY "user_own_workspace_partner_polls" ON partner_polls
+  FOR ALL USING      (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'))
+             WITH CHECK (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'));
+
+-- partner_audience_preferences
+CREATE POLICY "service_role_all_partner_audience_preferences" ON partner_audience_preferences
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "user_own_workspace_partner_audience_preferences" ON partner_audience_preferences
+  FOR ALL USING      (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'))
+             WITH CHECK (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'));
+
+-- twitter_drafts
+CREATE POLICY "service_role_all_twitter_drafts" ON twitter_drafts
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "user_own_workspace_twitter_drafts" ON twitter_drafts
+  FOR ALL USING      (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'))
+             WITH CHECK (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'));
