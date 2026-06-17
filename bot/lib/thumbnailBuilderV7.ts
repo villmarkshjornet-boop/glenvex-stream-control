@@ -230,6 +230,9 @@ async function extractBestFrame(videoPath: string, highlightId: string, duration
 
 // ── Hook Engine ───────────────────────────────────────────────────────────────
 
+const GEMINI_API_URL   = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_MODEL_V7  = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+
 async function getHook(
   frameBuf: Buffer,
   title: string,
@@ -240,10 +243,6 @@ async function getHook(
 
   if (geminiKey) {
     try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
       const prompt = [
         'Du er YouTube gaming thumbnail-ekspert. Gi ÉN hook (2-4 ORD) på norsk for dette klippet.',
         `Tittel: ${title}`,
@@ -256,18 +255,29 @@ async function getHook(
         'Svar KUN med hook-teksten. Ingenting annet.',
       ].filter(Boolean).join('\n');
 
-      // Hard 25s cap — Gemini can hang; fallback handles gracefully
-      const result = await Promise.race([
-        model.generateContent([
-          { text: prompt },
-          { inlineData: { mimeType: 'image/jpeg', data: frameBuf.toString('base64') } },
-        ]),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Gemini timeout (25s)')), 25_000)
-        ),
-      ]);
+      // Same REST API pattern as geminiDirector.ts — no npm package needed
+      const res = await fetch(
+        `${GEMINI_API_URL}/${GEMINI_MODEL_V7}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(25_000),
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: 'image/jpeg', data: frameBuf.toString('base64') } },
+              ],
+            }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 50 },
+          }),
+        }
+      );
 
-      const raw  = result.response.text().trim();
+      if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text().catch(() => '')).slice(0, 100)}`);
+
+      const json = await res.json() as any;
+      const raw  = (json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim();
       const hook = raw.toUpperCase().replace(/[^A-ZÆØÅ0-9!? ]/g, '').trim();
       const words = hook.split(/\s+/).filter(Boolean).length;
 

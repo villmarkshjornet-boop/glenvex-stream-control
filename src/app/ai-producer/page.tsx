@@ -20,6 +20,15 @@ interface Tiltak {
 
 type TipStatus = 'suggested' | 'done' | 'dismissed';
 
+interface StandbyData {
+  twitchBotOk:     boolean;
+  discordBotOk:    boolean;
+  nesteStream:     { dag: string; tid: string } | null;
+  preHypeSendtAt:  string | null;
+  sisteStreamScore: { spill: string; seere: number; startetAt: string } | null;
+  sisteAiLaering:  { title: string; summary: string } | null;
+}
+
 interface ProducerData {
   isLive: boolean;
   stream: { title: string; game: string; viewerCount: number; thumbnailUrl?: string } | null;
@@ -27,6 +36,7 @@ interface ProducerData {
   tiltak: Tiltak[];
   metrics: { viewers: number; activeDiscord: number; raidsToday: number; giftSubsToday: number; engagementScore: number };
   harHistorikk?: boolean;
+  standby?: StandbyData;
 }
 
 interface DiagData {
@@ -275,6 +285,109 @@ function TiltakKort({ tiltak, streamGame, streamViewers }: { tiltak: Tiltak; str
   );
 }
 
+// ─── Standby-visning (ingen aktiv stream) ─────────────────────────────────────
+
+function StatusKort({ label, ok, melding, href }: { label: string; ok: boolean; melding: string; href?: string }) {
+  const inner = (
+    <div className="bg-g-card border border-g-border rounded-lg p-3 flex items-center gap-3">
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ok ? 'bg-g-green' : 'bg-yellow-400'}`} />
+      <div className="min-w-0">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest">{label}</p>
+        <p className={`text-[10px] font-bold truncate ${ok ? 'text-g-text' : 'text-yellow-400'}`}>{melding}</p>
+      </div>
+    </div>
+  );
+  if (href) return <a href={href} className="hover:opacity-80 transition-opacity block">{inner}</a>;
+  return inner;
+}
+
+function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | undefined; onRefresh: () => void }) {
+  return (
+    <div className="space-y-4">
+      {/* Hoveds-statuskort */}
+      <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+        <div className="flex items-center justify-center gap-2 mb-4">
+          <span className="w-2.5 h-2.5 rounded-full bg-g-muted" />
+          <p className="text-xs font-black text-g-muted uppercase tracking-widest">NO_ACTIVE_STREAM</p>
+        </div>
+        <h2 className="text-base font-black text-g-text">Venter på at du skal gå live</h2>
+        <p className="text-xs text-g-muted mt-2 max-w-sm mx-auto leading-relaxed">
+          AI Producer aktiveres automatisk når Twitch registrerer at du er live.
+        </p>
+        {standby?.nesteStream && (
+          <a href="/streamplan" className="mt-5 inline-flex items-center gap-2.5 px-4 py-2 bg-g-bg border border-g-border rounded-lg hover:border-g-green/40 transition-colors">
+            <span className="text-[9px] text-g-muted uppercase tracking-widest">Neste stream</span>
+            <span className="text-xs font-black text-g-text">{standby.nesteStream.dag} kl. {standby.nesteStream.tid}</span>
+          </a>
+        )}
+      </div>
+
+      {/* Systemstatus */}
+      <div>
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Systemstatus</p>
+        <div className="grid grid-cols-2 gap-2">
+          <StatusKort
+            label="AI Producer"
+            ok={true}
+            melding="Klar og venter på live-signal"
+          />
+          <StatusKort
+            label="Pre-Hype"
+            ok={!!standby?.preHypeSendtAt}
+            melding={standby?.preHypeSendtAt ? 'Sendt' : 'Ikke sendt ennå'}
+            href="/streamplan"
+          />
+          <StatusKort
+            label="Twitch Bot"
+            ok={!!standby?.twitchBotOk}
+            melding={standby?.twitchBotOk ? 'Klar' : 'Mangler credentials'}
+          />
+          <StatusKort
+            label="Discord Bot"
+            ok={!!standby?.discordBotOk}
+            melding={standby?.discordBotOk ? 'Klar' : 'Mangler token'}
+          />
+        </div>
+      </div>
+
+      {/* Siste stream-score */}
+      {standby?.sisteStreamScore && (
+        <div className="bg-g-card border border-g-border rounded-xl p-4">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Siste stream-score</p>
+          <div className="flex items-end gap-4">
+            <div>
+              <p className="text-3xl font-black text-g-green font-mono">{standby.sisteStreamScore.seere}</p>
+              <p className="text-[9px] text-g-muted mt-0.5">peak seere</p>
+            </div>
+            <div className="pb-1">
+              <p className="text-xs font-bold text-g-text">{standby.sisteStreamScore.spill}</p>
+              <p className="text-[9px] text-g-muted">
+                {new Date(standby.sisteStreamScore.startetAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Siste AI-læring */}
+      {standby?.sisteAiLaering && (
+        <div className="bg-g-card border border-g-border rounded-xl p-4">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Siste AI-læring</p>
+          <p className="text-xs font-bold text-g-text">{standby.sisteAiLaering.title}</p>
+          <p className="text-xs text-g-muted mt-1 leading-relaxed">{standby.sisteAiLaering.summary}</p>
+        </div>
+      )}
+
+      <button
+        onClick={onRefresh}
+        className="w-full py-2 text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg hover:border-g-green/30 transition-all uppercase tracking-widest"
+      >
+        ↻ Sjekk om du er live nå
+      </button>
+    </div>
+  );
+}
+
 // ─── Hoved-komponent ───────────────────────────────────────────────────────────
 
 export default function AIProducerPage() {
@@ -322,7 +435,7 @@ export default function AIProducerPage() {
           <span className="w-8 h-8 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
         </div>
       ) : !data?.isLive ? (
-        <LiveNødpanel onRefresh={hent} />
+        <StandbyPage standby={data?.standby} onRefresh={hent} />
       ) : (
         <>
           {/* Live banner */}

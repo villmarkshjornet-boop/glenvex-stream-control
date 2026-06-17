@@ -613,7 +613,7 @@ export default function HighlightViewerPage() {
                             onClick={async () => {
                               setRegenerererThumb(h.id);
                               setHighlights(prev => prev.map(x =>
-                                x.id === h.id ? { ...x, thumbnail_status: 'GENERATING' } : x
+                                x.id === h.id ? { ...x, thumbnail_status: 'GENERATING', thumbnail_error: null, thumbnail_youtube_url: null } : x
                               ));
                               const res = await fetch('/api/content-factory/thumbnails/generate-v2', {
                                 method: 'POST',

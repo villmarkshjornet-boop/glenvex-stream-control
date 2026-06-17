@@ -16,7 +16,64 @@ export async function GET() {
     const stream = await getStreamInfo();
 
     if (!stream.isLive) {
-      return NextResponse.json({ isLive: false, stream: null, analyse: null, tiltak: [] });
+      const db = getDb();
+      const wsId = getWorkspaceId();
+      const standby: Record<string, any> = {
+        twitchBotOk:    !!process.env.TWITCH_CLIENT_ID && !!process.env.TWITCH_CLIENT_SECRET,
+        discordBotOk:   !!process.env.DISCORD_BOT_TOKEN,
+        nesteStream:     null,
+        preHypeSendtAt:  null,
+        sisteStreamScore: null,
+        sisteAiLaering:  null,
+      };
+
+      if (db) {
+        const [wsRes, histRes, insightRes] = await Promise.all([
+          db.from('workspaces').select('settings_json').eq('id', wsId).single(),
+          db.from('stream_history')
+            .select('title,game,peak_viewers,started_at')
+            .eq('workspace_id', wsId)
+            .order('started_at', { ascending: false })
+            .limit(1),
+          db.from('ai_agent_insights')
+            .select('title,summary,source_data')
+            .eq('workspace_id', wsId)
+            .order('created_at', { ascending: false })
+            .limit(5),
+        ]).catch(() => [null, null, null]);
+
+        const settings = (wsRes as any)?.data?.settings_json ?? {};
+        const streamplan: any[] = settings.streamplan ?? [];
+        const syklus = settings.stream_syklus ?? {};
+        standby.preHypeSendtAt = syklus.pre_hype_sendt_at ?? null;
+
+        const DAGNAVN = ['mandag','tirsdag','onsdag','torsdag','fredag','lørdag','søndag'];
+        const dagIdx = (new Date().getDay() + 6) % 7; // Mon=0…Sun=6
+        const aktive = streamplan.filter((d: any) => d.aktiv);
+        standby.nesteStream = aktive.find((d: any) => DAGNAVN.indexOf(d.dag) >= dagIdx) ?? aktive[0] ?? null;
+
+        const hist = (histRes as any)?.data?.[0];
+        if (hist) {
+          standby.sisteStreamScore = {
+            spill:    hist.game ?? hist.title ?? 'Ukjent',
+            seere:    hist.peak_viewers ?? 0,
+            startetAt: hist.started_at,
+          };
+        }
+
+        const insights: any[] = (insightRes as any)?.data ?? [];
+        const bestInsight = insights.find(
+          (r: any) => r.source_data?.type !== 'decision_feedback'
+        ) ?? null;
+        if (bestInsight) {
+          standby.sisteAiLaering = {
+            title:   bestInsight.title,
+            summary: bestInsight.summary,
+          };
+        }
+      }
+
+      return NextResponse.json({ isLive: false, stream: null, analyse: null, tiltak: [], standby });
     }
 
     const [eventsRaw, membersRaw, ctx] = await Promise.all([
