@@ -41,6 +41,9 @@ const SHADOW_OFFSET = 4;   // drop shadow offset in px
 // Per-process font test cache — avoids re-testing on every thumbnail
 let fontTestCache: { passed: boolean; fontPath: string | null } | null = null;
 
+// Per-process hook cache — prevents re-calling Gemini for the same highlight
+const hookCache = new Map<string, { headline: string; hookSource: string }>();
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 function getDb() {
@@ -234,11 +237,19 @@ const GEMINI_API_URL   = 'https://generativelanguage.googleapis.com/v1beta/model
 const GEMINI_MODEL_V7  = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
 
 async function getHook(
+  highlightId: string,
   frameBuf: Buffer,
   title: string,
   category: string,
   transcript: string | null,
 ): Promise<{ headline: string; hookSource: string }> {
+  // Return cached hook — prevents double-billing Gemini on retries
+  const cached = hookCache.get(highlightId);
+  if (cached) {
+    wLog('INFO', 'HOOK_CACHED', { highlightId, headline: cached.headline });
+    return { headline: cached.headline, hookSource: 'cached' };
+  }
+
   const geminiKey = process.env.GEMINI_API_KEY;
 
   if (geminiKey) {
@@ -255,7 +266,6 @@ async function getHook(
         'Svar KUN med hook-teksten. Ingenting annet.',
       ].filter(Boolean).join('\n');
 
-      // Same REST API pattern as geminiDirector.ts — no npm package needed
       const res = await fetch(
         `${GEMINI_API_URL}/${GEMINI_MODEL_V7}:generateContent?key=${geminiKey}`,
         {
@@ -274,6 +284,13 @@ async function getHook(
         }
       );
 
+      // 429 = quota exhausted — don't retry, fall back immediately
+      if (res.status === 429) {
+        wLog('WARN', 'HOOK_GEMINI_RATE_LIMITED', { highlightId });
+        const headline = categoryFallbackHook(category, title);
+        return { headline, hookSource: 'rate_limited_fallback' };
+      }
+
       if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text().catch(() => '')).slice(0, 100)}`);
 
       const json = await res.json() as any;
@@ -283,7 +300,9 @@ async function getHook(
 
       if (hook.length >= 3 && hook.length <= 35 && words >= 2 && words <= 5) {
         wLog('INFO', 'HOOK_GEMINI', { hook, words });
-        return { headline: hook, hookSource: 'gemini' };
+        const result = { headline: hook, hookSource: 'gemini' };
+        hookCache.set(highlightId, result);
+        return result;
       }
       wLog('WARN', 'HOOK_GEMINI_INVALID', { raw: raw.slice(0, 60), hook });
     } catch (e: any) {
@@ -436,6 +455,13 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
     if (!videoUrl) throw new Error('Ingen clip_url — kan ikke generere thumbnail');
     wLog('INFO', 'STEP_LOAD_DONE', { highlightId, title: h.title, category: h.category });
 
+    // Mark GENERATING so watchdog tracks this job and auto-poller won't double-claim
+    await db.from('content_highlights').update({
+      thumbnail_status:    'GENERATING',
+      thumbnail_started_at: new Date().toISOString(),
+      thumbnail_error:     null,
+    }).eq('id', highlightId);
+
     // ── 2. Font + text test ───────────────────────────────────────────────────
     wLog('INFO', 'STEP_FONT_START', { highlightId });
     const rawFontPath = await prepareFont();
@@ -496,7 +522,7 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
 
     // ── 6. Hook engine ────────────────────────────────────────────────────────
     wLog('INFO', 'STEP_HOOK_START', { highlightId });
-    const { headline, hookSource } = await getHook(bestFrame, h.title ?? '', h.category ?? '', transcript);
+    const { headline, hookSource } = await getHook(highlightId, bestFrame, h.title ?? '', h.category ?? '', transcript);
     wLog('INFO', 'STEP_HOOK_DONE', { highlightId, headline, hookSource });
 
     logSystemEvent({
@@ -545,19 +571,22 @@ export async function buildThumbnailV7(highlightId: string, source?: string): Pr
 
     // ── 9. DB update ──────────────────────────────────────────────────────────
     wLog('INFO', 'STEP_DB_UPDATE_START', { highlightId });
-    await db.from('content_highlights').update({
+    const { error: dbErr } = await db.from('content_highlights').update({
       thumbnail_status:          'DONE',
       thumbnail_youtube_url:     thumbnailUrl,
       thumbnail_headline:        headline,
       thumbnail_error:           null,
       thumbnail_ctr_reason:      `V7 · hook:${hookSource} · font:${fontUsed}`,
       thumbnail_reject_count:    0,
-      // Clear old V5/V6 fields so UI shows fresh V7 output
+      thumbnail_generated_at:    new Date().toISOString(),
+      // Clear old variant fields so UI shows V7 output only
       thumbnail_tiktok_url:      null,
       thumbnail_variant_b_url:   null,
       thumbnail_variant_c_url:   null,
-      updated_at:                new Date().toISOString(),
+      // NOTE: content_highlights has no updated_at column — do NOT include it
     }).eq('id', highlightId);
+
+    if (dbErr) throw new Error(`DB update feilet: ${dbErr.message}`);
 
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_V7_RENDER_COMPLETE',

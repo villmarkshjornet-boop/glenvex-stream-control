@@ -675,7 +675,7 @@ export async function startThumbnailWorker(): Promise<void> {
   const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
-    versjon: 'V6 (Gemini Director + Sharp/SVG + CTR Gate 75)',
+    versjon: 'V7 (Pango direct text + IMPACT_DRAMA + Gemini REST hook)',
     filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
   });
   await kjørThumbnailSyklus();
@@ -708,5 +708,5 @@ export async function forceThumbnail(highlightId: string, source?: string): Prom
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail V6 (Gemini Director) startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V7 startet for ${highlightId}` };
 }

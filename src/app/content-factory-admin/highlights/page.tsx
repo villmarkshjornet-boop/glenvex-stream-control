@@ -143,7 +143,8 @@ export default function HighlightViewerPage() {
     if (!pollerStartRef.current) pollerStartRef.current = Date.now();
     const harAktiv = highlights.some(h =>
       h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP' ||
-      h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING'
+      // Stop thumbnail polling the moment the URL arrives, regardless of status
+      ((h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING') && !h.thumbnail_youtube_url)
     );
     const timeoutNådd = Date.now() - pollerStartRef.current > 15 * 60 * 1000;
     if (!harAktiv || timeoutNådd) {
@@ -470,7 +471,7 @@ export default function HighlightViewerPage() {
                             h.thumbnail_status === 'NEEDS_MANUAL_REVIEW'? 'text-orange-400 border-orange-400/30 bg-orange-400/5' :
                             'text-g-muted border-g-border'
                           }`}>
-                            {h.thumbnail_status ?? 'IKKE GENERERT'}
+                            {h.thumbnail_status === 'DONE' ? 'COMPLETE' : (h.thumbnail_status ?? 'IKKE GENERERT')}
                           </span>
                         </div>
 
