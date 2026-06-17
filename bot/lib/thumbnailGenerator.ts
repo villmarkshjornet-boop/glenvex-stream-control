@@ -635,8 +635,8 @@ async function kjørThumbnailSyklus(): Promise<void> {
 
     wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
 
-    const { buildThumbnailV5 } = require('./thumbnailBuilderV5');
-    buildThumbnailV5(h.id)
+    const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
+    buildThumbnailV6(h.id)
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -675,7 +675,7 @@ export async function startThumbnailWorker(): Promise<void> {
   const POLL_MS = 20_000; // 20 sekunder
   wLog('INFO', 'THUMBNAIL_POLL_STARTED', {
     intervallMs: POLL_MS,
-    versjon: 'V5.5 (Sharp + SVG 7-lag + CTR Gate)',
+    versjon: 'V6 (Gemini Director + Sharp/SVG + CTR Gate 75)',
     filter: 'clip_status=CLIPPED AND thumbnail_status=PENDING AND clip_url IS NOT NULL',
   });
   await kjørThumbnailSyklus();
@@ -703,10 +703,10 @@ export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean
   if (!h.clip_url && !h.vertical_clip_url) return { ok: false, melding: 'Ingen video-URL' };
 
   generererNå.add(highlightId);
-  const { buildThumbnailV5 } = require('./thumbnailBuilderV5');
-  buildThumbnailV5(highlightId)
+  const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
+  buildThumbnailV6(highlightId)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 
-  return { ok: true, melding: `Thumbnail V5.5 (Sharp/SVG CTR) startet for ${highlightId}` };
+  return { ok: true, melding: `Thumbnail V6 (Gemini Director) startet for ${highlightId}` };
 }

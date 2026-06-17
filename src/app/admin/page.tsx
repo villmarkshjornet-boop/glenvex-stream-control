@@ -466,6 +466,9 @@ export default function AdminPage() {
   const [selected, setSelected]       = useState<WorkspaceRow | null>(null);
   const [search, setSearch]           = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [diagnoseEmail, setDiagnoseEmail] = useState('');
+  const [diagnoseResult, setDiagnoseResult] = useState<any>(null);
+  const [diagnosing, setDiagnosing]   = useState(false);
   const [filters, setFilters]         = useState({
     alphaOnly: false,
     liveOnly: false,
@@ -548,6 +551,20 @@ export default function AdminPage() {
   const toggleFilter = (key: keyof typeof filters) =>
     setFilters(prev => ({ ...prev, [key]: !prev[key] }));
 
+  async function diagnoseUser() {
+    if (!diagnoseEmail.trim()) return;
+    setDiagnosing(true);
+    setDiagnoseResult(null);
+    try {
+      const res = await fetch(`/api/admin/diagnose-user?email=${encodeURIComponent(diagnoseEmail.trim())}`);
+      setDiagnoseResult(await res.json());
+    } catch (err: any) {
+      setDiagnoseResult({ error: err?.message });
+    } finally {
+      setDiagnosing(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-g-bg text-g-text">
       {/* Header */}
@@ -589,6 +606,71 @@ export default function AdminPage() {
             <StatCard label="Twitch tilkoblet" value={stats.twitchConn} />
           </div>
         )}
+
+        {/* Diagnose User */}
+        <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+          <p className="text-[9px] font-bold text-g-muted uppercase tracking-widest">Diagnose Bruker</p>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={diagnoseEmail}
+              onChange={e => setDiagnoseEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && diagnoseUser()}
+              placeholder="E-post til brukeren (f.eks. jacob@...)"
+              className="flex-1 bg-g-bg border border-g-border rounded-lg px-3 py-1.5 text-[11px] text-g-text placeholder:text-g-muted/50 focus:outline-none focus:border-g-green/30"
+            />
+            <button
+              onClick={diagnoseUser}
+              disabled={diagnosing || !diagnoseEmail.trim()}
+              className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-40"
+            >
+              {diagnosing ? 'Sjekker…' : 'Diagnose →'}
+            </button>
+          </div>
+          {diagnoseResult && (
+            <div className="space-y-1.5">
+              <div className={`p-2.5 rounded-lg border text-[10px] font-semibold ${
+                diagnoseResult.error ? 'border-red-500/30 bg-red-500/5 text-red-400' :
+                !diagnoseResult.authUser && diagnoseResult.diagnosis ? 'border-red-500/30 bg-red-500/5 text-red-400' :
+                diagnoseResult.workspace ? 'border-g-border bg-g-bg text-g-text' : 'border-yellow-500/30 bg-yellow-500/5 text-yellow-400'
+              }`}>
+                {diagnoseResult.error ?? diagnoseResult.diagnosis ?? 'Ingen diagnose'}
+              </div>
+              {diagnoseResult.authUid && (
+                <div className="grid grid-cols-2 gap-1.5 text-[9px]">
+                  <div className="bg-g-bg border border-g-border/50 rounded p-2">
+                    <p className="text-g-muted mb-1 font-bold uppercase">Auth</p>
+                    <p className="font-mono text-g-text">{diagnoseResult.authUid?.slice(0, 20)}…</p>
+                    <p className="text-g-muted mt-0.5">meta.workspace_id: <span className={`font-mono ${diagnoseResult.authUserMeta?.workspace_id ? 'text-g-green' : 'text-red-400'}`}>{diagnoseResult.authUserMeta?.workspace_id ?? '(ingen)'}</span></p>
+                    <p className="text-g-muted">meta.alpha_enabled: <span className={diagnoseResult.authUserMeta?.alpha_enabled ? 'text-g-green' : 'text-g-muted'}>{String(diagnoseResult.authUserMeta?.alpha_enabled ?? '(ikke satt)')}</span></p>
+                  </div>
+                  <div className="bg-g-bg border border-g-border/50 rounded p-2">
+                    <p className="text-g-muted mb-1 font-bold uppercase">Workspace</p>
+                    {diagnoseResult.workspace ? (
+                      <>
+                        <p className="font-mono text-g-text">{diagnoseResult.workspace.id}</p>
+                        <p className="text-g-muted">owner_uid: <span className={`font-mono ${diagnoseResult.checks?.ownerIdMatches ? 'text-g-green' : 'text-red-400'}`}>{diagnoseResult.workspace.owner_user_id?.slice(0, 12)}…</span></p>
+                        <p className="text-g-muted">Twitch: <span className={diagnoseResult.checks?.twitchConnected ? 'text-g-green' : 'text-red-400'}>{diagnoseResult.checks?.twitchConnected ? '✓' : '✗'}</span></p>
+                        <p className="text-g-muted">Discord: <span className={diagnoseResult.checks?.discordConnected ? 'text-g-green' : 'text-red-400'}>{diagnoseResult.checks?.discordConnected ? '✓' : '✗'}</span></p>
+                        <p className="text-g-muted">Alpha: <span className={diagnoseResult.checks?.alphaEnabled ? 'text-g-green' : 'text-red-400'}>{diagnoseResult.checks?.alphaEnabled ? '✓' : '✗'}</span></p>
+                      </>
+                    ) : (
+                      <p className="text-red-400 font-bold">INGEN WORKSPACE FUNNET</p>
+                    )}
+                  </div>
+                </div>
+              )}
+              {diagnoseResult.recentEvents?.length > 0 && (
+                <div className="bg-g-bg border border-g-border/50 rounded p-2 space-y-0.5">
+                  <p className="text-[8px] font-bold text-g-muted uppercase mb-1">Siste hendelser</p>
+                  {(diagnoseResult.recentEvents as any[]).slice(0, 5).map((e: any, i: number) => (
+                    <p key={i} className="text-[9px] text-g-muted"><span className="text-g-text">{e.type}</span> — {e.title?.slice(0, 60)}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Search + Filters */}
         <div className="flex flex-wrap items-center gap-2">

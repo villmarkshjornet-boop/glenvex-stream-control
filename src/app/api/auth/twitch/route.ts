@@ -30,7 +30,13 @@ export async function GET(req: NextRequest) {
       wsId = data?.id ?? null;
     }
   }
-  if (!wsId) return NextResponse.json({ error: 'Workspace ikke funnet — fullfør steg 1 først' }, { status: 400 });
+  if (!wsId) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/onboarding';
+    url.searchParams.set('step', '1');
+    url.searchParams.set('error', 'workspace_ikke_funnet');
+    return NextResponse.redirect(url);
+  }
 
   const returnUrl   = req.nextUrl.searchParams.get('returnUrl') ?? '/onboarding?step=3';
   const { encoded, nonce } = encodeState(wsId, returnUrl, stateSecret);

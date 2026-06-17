@@ -90,11 +90,25 @@ export async function POST(
         if (sbUrl && sbKey) {
           const admin = createClient(sbUrl, sbKey, { auth: { autoRefreshToken: false, persistSession: false } });
           await admin.auth.admin.updateUserById(ws.owner_user_id as string, {
-            user_metadata: { alpha_enabled: true },
+            user_metadata: { alpha_enabled: true, workspace_id: workspaceId, brand_name: ws.brand_name ?? workspaceId },
           }).catch((err: any) => errors.push(`user_metadata sync: ${err?.message?.slice(0, 80)}`));
-          repairActions.push('user_metadata synkronisert (alpha_enabled)');
+          repairActions.push('user_metadata synkronisert (alpha_enabled + workspace_id)');
         }
       }
+    }
+  }
+
+  // Always sync workspace_id in user_metadata — covers the case where workspace
+  // exists and alpha is already on, but JWT user_metadata.workspace_id was never set
+  if (checks.alphaEnabled && ws.owner_user_id && !repairActions.some(a => a.includes('user_metadata'))) {
+    const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    if (sbUrl && sbKey) {
+      const admin = createClient(sbUrl, sbKey, { auth: { autoRefreshToken: false, persistSession: false } });
+      await admin.auth.admin.updateUserById(ws.owner_user_id as string, {
+        user_metadata: { workspace_id: workspaceId, brand_name: ws.brand_name ?? workspaceId, alpha_enabled: true },
+      }).catch((err: any) => errors.push(`user_metadata workspace_id sync: ${err?.message?.slice(0, 80)}`));
+      repairActions.push('user_metadata workspace_id synkronisert');
     }
   }
 
