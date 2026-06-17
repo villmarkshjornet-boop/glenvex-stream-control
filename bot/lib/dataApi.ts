@@ -596,9 +596,9 @@ export function startDataApi(port = 4242) {
         res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
       }
       res.writeHead(202);
-      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V6 (Gemini Director) startet for ${highlightId}` }));
+      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V7 startet for ${highlightId}` }));
       forceThumbnail(highlightId, 'highlight_regenerate').catch((e: any) =>
-        console.error('[DataApi] thumbnailV6 feil:', e.message)
+        console.error('[DataApi] thumbnailV7 feil:', e.message)
       );
       return;
     }

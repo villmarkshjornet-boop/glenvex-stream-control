@@ -635,8 +635,8 @@ async function kjørThumbnailSyklus(): Promise<void> {
 
     wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
 
-    const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
-    buildThumbnailV6(h.id, 'auto_after_clip')
+    const { buildThumbnailV7 } = require('./thumbnailBuilderV7');
+    buildThumbnailV7(h.id, 'auto_after_clip')
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -703,8 +703,8 @@ export async function forceThumbnail(highlightId: string, source?: string): Prom
   if (!h.clip_url && !h.vertical_clip_url) return { ok: false, melding: 'Ingen video-URL' };
 
   generererNå.add(highlightId);
-  const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
-  buildThumbnailV6(highlightId, source)
+  const { buildThumbnailV7 } = require('./thumbnailBuilderV7');
+  buildThumbnailV7(highlightId, source)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 

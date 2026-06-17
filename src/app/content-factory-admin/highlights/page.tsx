@@ -514,7 +514,7 @@ export default function HighlightViewerPage() {
                           <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
                             <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
                             {h.thumbnail_status === 'GENERATING'
-                              ? 'Genererer V6 (Gemini Director + CTR Gate) – ca 60s...'
+                              ? 'Genererer V7 (Pango + IMPACT_DRAMA) – ca 60s...'
                               : 'Thumbnail i kø – plukkes opp automatisk...'}
                           </div>
                         )}
@@ -635,7 +635,7 @@ export default function HighlightViewerPage() {
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-g-bg border border-purple-400/30 text-purple-400 text-[10px] font-black rounded hover:bg-purple-400/10 transition-all disabled:opacity-40"
                           >
                             {regenerererThumb === h.id ? (
-                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Genererer V6 (~60s)...</>
+                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Genererer V7 (~60s)...</>
                             ) : (
                               <>↻ {h.thumbnail_status === 'DONE' ? 'Regenerer thumbnail' : 'Generer thumbnail'}</>
                             )}
