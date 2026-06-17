@@ -596,9 +596,9 @@ export function startDataApi(port = 4242) {
         res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
       }
       res.writeHead(202);
-      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V5.5 startet for ${highlightId}` }));
-      forceThumbnail(highlightId).catch((e: any) =>
-        console.error('[DataApi] thumbnailV55 feil:', e.message)
+      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V6 (Gemini Director) startet for ${highlightId}` }));
+      forceThumbnail(highlightId, 'highlight_regenerate').catch((e: any) =>
+        console.error('[DataApi] thumbnailV6 feil:', e.message)
       );
       return;
     }
@@ -611,7 +611,7 @@ export function startDataApi(port = 4242) {
       }
       res.writeHead(202);
       res.end(JSON.stringify({ ok: true, melding: `Thumbnail-generering startet for ${highlightId}` }));
-      forceThumbnail(highlightId).catch(console.error);
+      forceThumbnail(highlightId, 'cf_admin_force').catch(console.error);
       return;
     }
 

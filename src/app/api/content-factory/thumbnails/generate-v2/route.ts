@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     thumbnail_status:        'PENDING',
     thumbnail_error:         null,
     thumbnail_reject_count:  0,
-    // Rydd alle gamle thumbnails — V5.5 skriver nye felt ved DONE
+    // Rydd alle gamle thumbnails — V6 skriver nye felt ved DONE
     thumbnail_youtube_url:   null,
     thumbnail_tiktok_url:    null,
     thumbnail_variant_b_url: null,

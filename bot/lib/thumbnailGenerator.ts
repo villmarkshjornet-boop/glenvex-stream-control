@@ -636,7 +636,7 @@ async function kjørThumbnailSyklus(): Promise<void> {
     wLog('INFO', 'THUMBNAIL_JOB_CLAIMED', { id: h.id });
 
     const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
-    buildThumbnailV6(h.id)
+    buildThumbnailV6(h.id, 'auto_after_clip')
       .catch((err: any) => {
         wLog('ERROR', 'THUMBNAIL_CRASH', { id: h.id, err: err.message?.slice(0, 200) });
         getDb()?.from('content_highlights').update({
@@ -684,7 +684,7 @@ export async function startThumbnailWorker(): Promise<void> {
 
 // ── Manuell force-trigger (fra dataApi.ts) ────────────────────────────────────
 
-export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean; melding: string }> {
+export async function forceThumbnail(highlightId: string, source?: string): Promise<{ ok: boolean; melding: string }> {
   if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
     return { ok: false, melding: 'CONTENT_FACTORY_ENABLED er ikke true' };
   }
@@ -704,7 +704,7 @@ export async function forceThumbnail(highlightId: string): Promise<{ ok: boolean
 
   generererNå.add(highlightId);
   const { buildThumbnailV6 } = require('./thumbnailBuilderV6');
-  buildThumbnailV6(highlightId)
+  buildThumbnailV6(highlightId, source)
     .catch(() => {})
     .finally(() => { generererNå.delete(highlightId); });
 

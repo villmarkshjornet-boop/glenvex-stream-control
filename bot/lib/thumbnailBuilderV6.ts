@@ -112,8 +112,8 @@ async function prepareFont(): Promise<string | null> {
 
 function fontDeclaration(fontPath: string | null): { decl: string; fontFamily: string } {
   if (fontPath && fs.existsSync(fontPath)) {
-    // librsvg (used by Sharp) forbids data: URIs for @font-face — only file: is allowed.
-    // Using file:// lets librsvg load the font directly from disk.
+    // librsvg blocks url() in @font-face when SVG is loaded as Buffer (no document base URI).
+    // Fix: write SVG to a temp file → Sharp loads by path → librsvg resolves file:// correctly.
     return {
       decl: `@font-face { font-family: 'Anton'; src: url('file://${fontPath}'); font-weight: normal; font-style: normal; }`,
       fontFamily: "'Anton', 'Impact', 'DejaVu Sans Bold', sans-serif",
@@ -367,10 +367,19 @@ async function buildCompositeV6(
   <rect x="0" y="${H - 5}" width="${W}" height="5" fill="${primary}" opacity="0.88"/>
 </svg>`;
 
-  return sharp(enhanced)
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .png({ compressionLevel: 7 })
-    .toBuffer();
+  // librsvg cannot resolve file:// @font-face when SVG is passed as a Buffer (no document base URI).
+  // Writing the SVG to a temp file gives librsvg a path-based base URI so font loading works.
+  const os = require('os');
+  const tmpSvgPath = path.join(os.tmpdir(), `glenvex-overlay-${Date.now()}-${Math.random().toString(36).slice(2)}.svg`);
+  fs.writeFileSync(tmpSvgPath, svg, 'utf8');
+  try {
+    return await sharp(enhanced)
+      .composite([{ input: tmpSvgPath, top: 0, left: 0 }])
+      .png({ compressionLevel: 7 })
+      .toBuffer();
+  } finally {
+    try { fs.unlinkSync(tmpSvgPath); } catch {}
+  }
 }
 
 // ── CTR Gate V6 (threshold 75) ────────────────────────────────────────────────
@@ -449,7 +458,7 @@ Svar KUN med JSON:
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function buildThumbnailV6(highlightId: string): Promise<void> {
+export async function buildThumbnailV6(highlightId: string, source?: string): Promise<void> {
   const db = getDb();
   if (!db) throw new Error('Ingen DB-tilkobling');
 
@@ -472,8 +481,9 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
       title: `Thumbnail V6 pipeline startet for ${highlightId}`,
       severity: 'info',
       metadata: {
-        thumbnailVersion: 'V6-Gemini-Director',
+        thumbnailVersion: 'V6',
         highlightId,
+        source: source ?? 'unknown',
         hasGeminiKey: !!process.env.GEMINI_API_KEY,
         hasOpenAiKey: !!process.env.OPENAI_API_KEY,
         fontPath: FONT_ANTON_PATH,
@@ -528,7 +538,7 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
       path: fontPath ?? 'null',
       exists: fontOk,
       sizeBytes: fontOk ? fs.statSync(fontPath!).size : 0,
-      method: 'file-url-in-svg-face', // librsvg supports file:// but NOT data: URLs for @font-face
+      method: fontOk ? 'file-url-via-temp-svg' : 'system-fallback',
     });
 
     if (!await lastNedFil(videoUrl, videoPath)) {
@@ -621,12 +631,12 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
     const fontSizeBytes  = fontFileExists ? fs.statSync(fontPath!).size : 0;
     logSystemEvent({
       source: 'thumbnail_worker', event_type: 'THUMBNAIL_RENDER_START',
-      title: `Thumbnail render starter — variant A: "${headlineA}" · font: ${fontFileExists ? 'Anton (file://)' : 'system fallback'}`,
+      title: `Thumbnail render starter — variant A: "${headlineA}" · font: ${fontFileExists ? 'Anton (temp-svg)' : 'system fallback'}`,
       severity: 'info',
       metadata: {
-        thumbnailVersion: 'V6-Gemini-Director',
+        thumbnailVersion: 'V6',
         highlightId,
-        templateUsed: 'V6-Sharp-SVG-file-font',
+        templateUsed: 'V6-Sharp-SVG-temp-file',
         selectedFrameTimestamp: tA,
         frameBTimestamp: tB,
         frameCTimestamp: tC,
@@ -636,7 +646,7 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
         fontPath: fontPath ?? 'null',
         fontFileExists,
         fontSizeBytes,
-        fontMethod: fontFileExists ? 'file-url-in-svg-face' : 'system-fallback',
+        fontMethod: fontFileExists ? 'file-url-via-temp-svg' : 'system-fallback',
       },
     });
 
@@ -652,9 +662,9 @@ export async function buildThumbnailV6(highlightId: string): Promise<void> {
       title: `Thumbnail render ferdig — 3 varianter bygget — A: "${headlineA}"`,
       severity: 'info',
       metadata: {
-        thumbnailVersion: 'V6-Gemini-Director',
+        thumbnailVersion: 'V6',
         highlightId,
-        templateUsed: 'V6-Sharp-SVG-file-font',
+        templateUsed: 'V6-Sharp-SVG-temp-file',
         variantA: { headline: headlineA, crop: 'entropy', frameSec: tA },
         variantB: { headline: headlineB, crop: 'attention', frameSec: tB },
         variantC: { headline: headlineC, crop: 'centre', frameSec: tC },
