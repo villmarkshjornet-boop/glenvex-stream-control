@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,10 +12,10 @@ export async function GET(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'DB not connected' }, { status: 500 });
 
+  // Query param wins (explicit override for admins). Falls back to auth header → env var.
   const workspaceId =
     req.nextUrl.searchParams.get('workspaceId') ??
-    process.env.WORKSPACE_ID ??
-    'glenvex-default';
+    getWorkspaceId();
 
   const [workspaceRes, eventsRes, memoryRes, decisionsRes, initEventRes] = await Promise.all([
     db.from('workspaces')
