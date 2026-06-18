@@ -42,6 +42,7 @@ import { scanForDuplicates, dupReports } from './lib/duplicateDetector';
 import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
+import { initCreatorBrain } from './lib/creatorBrain';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
@@ -1699,6 +1700,21 @@ async function logWorkspaceIdDiagnose(): Promise<void> {
           console.log(`     Supabase har:    "${ws.id}" (${ws.brand_name ?? ws.twitch_channel_name})`);
           console.log(`     FIX: Sett WORKSPACE_ID="${ws.id}" i Railway environment variables`);
           console.log(`     Åpne: /api/debug/workspace for full diagnose\n`);
+          // Emit med korrekt workspace_id slik at Dashboard kan se varselet,
+          // ikke bare Railway-konsollen.
+          logSystemEvent({
+            workspaceId: ws.id,
+            source: 'bot_startup',
+            event_type: 'WORKSPACE_ID_MISMATCH',
+            title: `WORKSPACE_ID mismatch: bot bruker "${currentId}", Supabase har "${ws.id}"`,
+            severity: 'error',
+            metadata: {
+              botWorkspaceId: currentId,
+              correctWorkspaceId: ws.id,
+              brandName: ws.brand_name ?? ws.twitch_channel_name,
+              fix: `Sett WORKSPACE_ID="${ws.id}" i Railway environment variables`,
+            },
+          });
         } else {
           console.log(`  ✅ WORKSPACE_ID er korrekt: "${ws.id}" (${ws.brand_name ?? ws.twitch_channel_name})\n`);
         }
@@ -1766,6 +1782,7 @@ client.once('clientReady', () => {
   startLearningAggregator();
   startRecoveryEngine();
   startSystemEventsFlusher();
+  initCreatorBrain().catch(() => {});
   startWorkspaceManager(client);
   // Discord historikk bootstrap: kjøres én gang per kanal, 5 min etter oppstart
   setTimeout(() => startDiscordHistoryBootstrap(client).catch(() => {}), 5 * 60_000);
