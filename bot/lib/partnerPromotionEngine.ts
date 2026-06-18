@@ -359,8 +359,8 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
 
   // Fetch candidates (featured + random to get variety)
   const [featured, random] = await Promise.all([
-    getFeaturedPartner(),
-    getRandomActivePartner(),
+    getFeaturedPartner(workspaceId),
+    getRandomActivePartner(workspaceId),
   ]);
 
   const candidates = [featured, random].filter((p): p is PartnerInfo => p !== null && p.canPost);

@@ -308,7 +308,7 @@ async function sendTwitchPartnerPromo(): Promise<void> {
   if (!settings.lastNotifiedStreamId) return; // bare når live
   if (await getPausePartnerPromo().catch(() => false)) return;
 
-  const partner = await getRandomActivePartner();
+  const partner = await getRandomActivePartner(process.env.WORKSPACE_ID);
   if (!partner) return;
 
   const kode = partner.rabattkode ? ` (kode: ${partner.rabattkode})` : '';

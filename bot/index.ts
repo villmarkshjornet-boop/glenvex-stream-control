@@ -1100,7 +1100,7 @@ async function hentBotContext(): Promise<{ jokes: string[]; topics: string[] }> 
 }
 
 async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
-  const partner = await getRandomActivePartner();
+  const partner = await getRandomActivePartner(process.env.WORKSPACE_ID);
   if (!partner) return; // mangler URL eller ingen aktive partnere
 
   const apiKey = process.env.OPENAI_API_KEY;

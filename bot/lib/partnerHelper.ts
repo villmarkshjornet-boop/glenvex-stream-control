@@ -56,17 +56,18 @@ function mapCached(raw: CachedPartner): PartnerInfo | null {
   };
 }
 
-// Phase 7: reads from Creator State (populated at startup + stream start by Creator Brain).
+// Phase 7+8: reads from Creator State (populated at startup + stream start by Creator Brain).
 // Returns null if partner cache is empty (bot just started, cache not yet ready).
-export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
-  const partners = getCreatorState(WORKSPACE_ID).partners.activePartners;
+// workspaceId defaults to bot-level env var — explicit param required for multi-workspace.
+export async function getFeaturedPartner(workspaceId?: string): Promise<PartnerInfo | null> {
+  const partners = getCreatorState(workspaceId ?? WORKSPACE_ID).partners.activePartners;
   const raw = partners.find(p => p.prioritet >= 100) ?? null;
   return raw ? mapCached(raw) : null;
 }
 
-// Phase 7: reads from Creator State. Selection logic (90% featured) unchanged.
-export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
-  const partners = getCreatorState(WORKSPACE_ID).partners.activePartners;
+// Phase 7+8: reads from Creator State. Selection logic (90% featured) unchanged.
+export async function getRandomActivePartner(workspaceId?: string): Promise<PartnerInfo | null> {
+  const partners = getCreatorState(workspaceId ?? WORKSPACE_ID).partners.activePartners;
   if (partners.length === 0) return null;
 
   // Featured partner (prioritet >= 100) gets 90% of all promo slots
