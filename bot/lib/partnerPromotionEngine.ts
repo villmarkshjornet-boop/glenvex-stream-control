@@ -12,6 +12,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { getRandomActivePartner, getFeaturedPartner, PartnerInfo } from './partnerHelper';
+import { logDecision } from './decisionEngine';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
 const MIN_CONFIDENCE = 0.35; // minimum score to fire a promo
@@ -446,6 +447,27 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       triggerType, proposalId, scoringDetail,
     };
   }
+
+  // Phase 9: log decision to Decision Engine before auto-send.
+  // Fire-and-forget — failure never blocks the promotion.
+  // outcome stays 'pending' until recordOutcome() is wired in a future phase.
+  void logDecision({
+    workspaceId,
+    agentType: 'partner_promotion',
+    decisionType: 'promotion_candidate',
+    decisionSummary: `${best.partner.navn} — score: ${best.score.toFixed(2)}, trigger: ${triggerType}`,
+    confidence: best.score,
+    metadata: {
+      partnerId: best.partner.id,
+      partnerName: best.partner.navn,
+      score: best.score,
+      triggerType,
+      channel,
+      viewerCount: ctx.viewerCount,
+      game: ctx.game,
+      requireApproval: settings.requireApproval,
+    },
+  });
 
   // Auto-send
   return {
