@@ -80,9 +80,22 @@ export interface PromotionContext {
   recentRaidAt?: number | null;      // epoch ms of last raid; null/undefined = no raid
 }
 
+export type PromotionReasonCode =
+  | 'BOT_DISABLED'
+  | 'NO_CHANNELS_ENABLED'
+  | 'MAX_POSTS_REACHED'
+  | 'COOLDOWN_ACTIVE'
+  | 'CHAT_TOO_ACTIVE'
+  | 'RAID_COOLDOWN'
+  | 'NO_ACTIVE_PARTNERS'
+  | 'LOW_SCORE'
+  | 'PROPOSAL_CREATED'
+  | 'AUTO_SENT';
+
 export interface PromotionDecision {
   shouldPromote: boolean;
   reason: string;
+  reasonCode: PromotionReasonCode;
   skipReason?: string;
   partnerId: string | null;
   partnerName: string | null;
@@ -329,8 +342,8 @@ async function logEvent(workspaceId: string, eventType: string, title: string, m
 // ── Main decision function ────────────────────────────────────────────────────
 
 export async function decidePromotion(ctx: PromotionContext): Promise<PromotionDecision> {
-  const skip = (reason: string): PromotionDecision => ({
-    shouldPromote: false, reason, skipReason: reason,
+  const skip = (reason: string, reasonCode: PromotionReasonCode): PromotionDecision => ({
+    shouldPromote: false, reason, reasonCode, skipReason: reason,
     partnerId: null, partnerName: null, channel: null,
     messageTwitch: null, messageDiscord: null, affiliateUrl: null,
     disclosureText: '', confidence: 0, cooldownApplied: false,
@@ -339,15 +352,29 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
 
   const { settings, workspaceId } = ctx;
 
-  if (!settings.enabled) return skip('Partner bot er deaktivert');
-  if (!settings.twitchEnabled && !settings.discordEnabled) return skip('Verken Twitch- eller Discord-promo er aktivert');
-  if (ctx.postsThisStream >= settings.maxPostsPerStream) return skip(`Maks antall promoer (${settings.maxPostsPerStream}) nådd denne streamen`);
-  if (ctx.minutesSinceLastPost < settings.cooldownMinutes) return skip(`Cooldown aktiv: ${Math.round(settings.cooldownMinutes - ctx.minutesSinceLastPost)} min igjen`);
+  if (!settings.enabled) {
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', 'Partner bot er deaktivert', { reasonCode: 'BOT_DISABLED' });
+    return skip('Partner bot er deaktivert', 'BOT_DISABLED');
+  }
+  if (!settings.twitchEnabled && !settings.discordEnabled) {
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', 'Ingen aktive kanaler for promo', { reasonCode: 'NO_CHANNELS_ENABLED' });
+    return skip('Verken Twitch- eller Discord-promo er aktivert', 'NO_CHANNELS_ENABLED');
+  }
+  if (ctx.postsThisStream >= settings.maxPostsPerStream) {
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Maks antall promoer nådd (${ctx.postsThisStream}/${settings.maxPostsPerStream})`, { reasonCode: 'MAX_POSTS_REACHED', postsThisStream: ctx.postsThisStream, maxPostsPerStream: settings.maxPostsPerStream });
+    return skip(`Maks antall promoer (${settings.maxPostsPerStream}) nådd denne streamen`, 'MAX_POSTS_REACHED');
+  }
+  if (ctx.minutesSinceLastPost < settings.cooldownMinutes) {
+    const minsLeft = Math.round(settings.cooldownMinutes - ctx.minutesSinceLastPost);
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Cooldown aktiv: ${minsLeft} min igjen`, { reasonCode: 'COOLDOWN_ACTIVE', minsLeft, cooldownMinutes: settings.cooldownMinutes });
+    return skip(`Cooldown aktiv: ${minsLeft} min igjen`, 'COOLDOWN_ACTIVE');
+  }
 
   // V2 gate: high chat activity → block promo (not the right moment)
   // Threshold: >15 msgs/min = active conversation, promo would feel intrusive
   if (ctx.chatMessagesLastMinute > 15) {
-    return skip(`Chat for aktiv (${ctx.chatMessagesLastMinute} msgs/min > 15 — ikke riktig øyeblikk for promo)`);
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Chat for aktiv (${ctx.chatMessagesLastMinute} msgs/min)`, { reasonCode: 'CHAT_TOO_ACTIVE', chatMessagesLastMinute: ctx.chatMessagesLastMinute });
+    return skip(`Chat for aktiv (${ctx.chatMessagesLastMinute} msgs/min > 15 — ikke riktig øyeblikk for promo)`, 'CHAT_TOO_ACTIVE');
   }
 
   // V2 gate: raid recently happened → block promo for 10 min
@@ -355,7 +382,8 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
   const RAID_COOLDOWN_MS = 10 * 60 * 1000;
   if (ctx.recentRaidAt && Date.now() - ctx.recentRaidAt < RAID_COOLDOWN_MS) {
     const minsLeft = Math.ceil((RAID_COOLDOWN_MS - (Date.now() - ctx.recentRaidAt)) / 60_000);
-    return skip(`Raid akkurat skjedd — venter ${minsLeft} min før promo`);
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Raid-cooldown: ${minsLeft} min igjen`, { reasonCode: 'RAID_COOLDOWN', minsLeft });
+    return skip(`Raid akkurat skjedd — venter ${minsLeft} min før promo`, 'RAID_COOLDOWN');
   }
 
   // Fetch candidates (featured + random to get variety)
@@ -368,7 +396,10 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
   const seen = new Set<string>();
   const unique = candidates.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
 
-  if (unique.length === 0) return skip('Ingen aktive partnere med gyldig URL');
+  if (unique.length === 0) {
+    void logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', 'Ingen aktive partnere med gyldig URL', { reasonCode: 'NO_ACTIVE_PARTNERS', candidateCount: candidates.length });
+    return skip('Ingen aktive partnere med gyldig URL', 'NO_ACTIVE_PARTNERS');
+  }
 
   const triggerType = detectTrigger(ctx);
 
@@ -397,9 +428,9 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
 
   if (best.score < MIN_CONFIDENCE) {
     await logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Partner promo skippet: lav score (${best.score.toFixed(2)})`, {
-      partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType,
+      reasonCode: 'LOW_SCORE', partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType,
     });
-    return skip(`Score for lav (${best.score.toFixed(2)} < ${MIN_CONFIDENCE})`);
+    return skip(`Score for lav (${best.score.toFixed(2)} < ${MIN_CONFIDENCE})`, 'LOW_SCORE');
   }
 
   // Determine channel
@@ -418,6 +449,7 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     : (best.partner.missedAffiliate ? '' : '');
 
   await logEvent(workspaceId, 'PARTNER_PROMOTION_CONSIDERED', `Promo vurdert: ${best.partner.navn} (score: ${best.score.toFixed(2)})`, {
+    reasonCode: settings.requireApproval ? 'PROPOSAL_CREATED' : 'AUTO_SENT',
     partnerId: best.partner.id, partnerName: best.partner.navn,
     score: best.score, triggerType, channel, requireApproval: settings.requireApproval,
   });
@@ -437,9 +469,14 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       messageTwitch: msgTwitch, messageDiscord: msgDiscord, platform: channel,
     });
 
+    void logEvent(workspaceId, 'PARTNER_PROPOSAL_CREATED',
+      `Partnerforslag opprettet: ${best.partner.navn} (score: ${best.score.toFixed(2)})`,
+      { reasonCode: 'PROPOSAL_CREATED', proposalId, partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType, channel });
+
     return {
       shouldPromote: false,
       reason: `Forslag lagret for godkjenning (${best.partner.navn}, score ${best.score.toFixed(2)})`,
+      reasonCode: 'PROPOSAL_CREATED',
       partnerId: best.partner.id, partnerName: best.partner.navn, channel,
       messageTwitch: msgTwitch, messageDiscord: msgDiscord,
       affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
@@ -448,16 +485,15 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     };
   }
 
-  // Phase 9: log decision to Decision Engine before auto-send.
-  // Fire-and-forget — failure never blocks the promotion.
-  // outcome stays 'pending' until recordOutcome() is wired in a future phase.
+  // Phase 9 (fixed): inputContext is the correct field — maps to ai_agent_decisions.input_context JSONB.
+  // The original call used 'metadata' (wrong field, silently dropped) and top-level 'confidence' (not in schema).
   void logDecision({
     workspaceId,
     agentType: 'partner_promotion',
     decisionType: 'promotion_candidate',
     decisionSummary: `${best.partner.navn} — score: ${best.score.toFixed(2)}, trigger: ${triggerType}`,
-    confidence: best.score,
-    metadata: {
+    inputContext: {
+      reasonCode: 'AUTO_SENT',
       partnerId: best.partner.id,
       partnerName: best.partner.navn,
       score: best.score,
@@ -465,7 +501,6 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       channel,
       viewerCount: ctx.viewerCount,
       game: ctx.game,
-      requireApproval: settings.requireApproval,
     },
   });
 
@@ -473,6 +508,7 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
   return {
     shouldPromote: true,
     reason: `Auto-promo: ${best.partner.navn} (trigger: ${triggerType}, score: ${best.score.toFixed(2)})`,
+    reasonCode: 'AUTO_SENT',
     partnerId: best.partner.id, partnerName: best.partner.navn, channel,
     messageTwitch: msgTwitch, messageDiscord: msgDiscord,
     affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
