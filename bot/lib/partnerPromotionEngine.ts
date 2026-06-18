@@ -473,11 +473,9 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       `Partnerforslag opprettet: ${best.partner.navn} (score: ${best.score.toFixed(2)})`,
       { reasonCode: 'PROPOSAL_CREATED', proposalId, partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType, channel });
 
-    // Phase 10: log proposal decision to Decision Engine.
-    // decisionType 'proposal_created' distinguishes from 'promotion_candidate' (auto-send path).
-    // proposalId in inputContext links ai_agent_decisions ↔ partner_proposals.
-    // outcome stays 'pending' until recordOutcome() is wired (requires approval endpoint).
-    void logDecision({
+    // Phase 10 + 10.1: log to Decision Engine, then emit trace with result.
+    // Trace captures decisionId (or null) so we know exactly if the DB write succeeded.
+    logDecision({
       workspaceId,
       agentType: 'partner_promotion',
       decisionType: 'proposal_created',
@@ -493,6 +491,30 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
         viewerCount: ctx.viewerCount,
         game: ctx.game,
       },
+    }).then(decisionId => {
+      void logEvent(workspaceId, 'PARTNER_DECISION_TRACE',
+        decisionId
+          ? `Beslutningskjede OK: ${best.partner.navn} → ${decisionId.slice(0, 8)}`
+          : `Beslutningskjede brutt: logDecision returnerte null`,
+        {
+          steps: ['PARTNERS_LOADED', 'SCORING_DONE', 'WINNER_FOUND', 'MESSAGES_GENERATED',
+                  'PROPOSAL_STORED', 'LOG_DECISION_CALLED',
+                  decisionId ? 'LOG_DECISION_SUCCESS' : 'LOG_DECISION_FAILED'],
+          decisionId: decisionId ?? null,
+          proposalId,
+          partnerName: best.partner.navn,
+          score: best.score,
+          triggerType,
+        });
+    }).catch(() => {
+      void logEvent(workspaceId, 'PARTNER_DECISION_TRACE',
+        `Beslutningskjede: logDecision kastet feil`,
+        {
+          steps: ['PARTNERS_LOADED', 'SCORING_DONE', 'WINNER_FOUND', 'MESSAGES_GENERATED',
+                  'PROPOSAL_STORED', 'LOG_DECISION_CALLED', 'LOG_DECISION_THREW'],
+          proposalId,
+          partnerName: best.partner.navn,
+        });
     });
 
     return {
@@ -507,9 +529,8 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     };
   }
 
-  // Phase 9 (fixed): inputContext is the correct field — maps to ai_agent_decisions.input_context JSONB.
-  // The original call used 'metadata' (wrong field, silently dropped) and top-level 'confidence' (not in schema).
-  void logDecision({
+  // Phase 9 (fixed) + 10.1: log to Decision Engine, then emit trace with result.
+  logDecision({
     workspaceId,
     agentType: 'partner_promotion',
     decisionType: 'promotion_candidate',
@@ -524,6 +545,28 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       viewerCount: ctx.viewerCount,
       game: ctx.game,
     },
+  }).then(decisionId => {
+    void logEvent(workspaceId, 'PARTNER_DECISION_TRACE',
+      decisionId
+        ? `Beslutningskjede OK (auto-sent): ${best.partner.navn} → ${decisionId.slice(0, 8)}`
+        : `Beslutningskjede brutt (auto-sent): logDecision returnerte null`,
+      {
+        steps: ['PARTNERS_LOADED', 'SCORING_DONE', 'WINNER_FOUND', 'MESSAGES_GENERATED',
+                'LOG_DECISION_CALLED',
+                decisionId ? 'LOG_DECISION_SUCCESS' : 'LOG_DECISION_FAILED', 'AUTO_SENT'],
+        decisionId: decisionId ?? null,
+        partnerName: best.partner.navn,
+        score: best.score,
+        triggerType,
+      });
+  }).catch(() => {
+    void logEvent(workspaceId, 'PARTNER_DECISION_TRACE',
+      `Beslutningskjede (auto-sent): logDecision kastet feil`,
+      {
+        steps: ['PARTNERS_LOADED', 'SCORING_DONE', 'WINNER_FOUND', 'MESSAGES_GENERATED',
+                'LOG_DECISION_CALLED', 'LOG_DECISION_THREW'],
+        partnerName: best.partner.navn,
+      });
   });
 
   // Auto-send
