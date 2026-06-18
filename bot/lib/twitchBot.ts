@@ -11,6 +11,7 @@ import { decidePromotion, loadPartnerBotSettings } from './partnerPromotionEngin
 import { getRecentCrossPlatformContext, summarizeRecentActivity, isCommandCooldown, setCommandCooldown } from './crossPlatformContext';
 import { logSystemEvent } from './systemEvents';
 import { logApiError } from './observability';
+import { getBrainState } from './creatorBrain';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -398,10 +399,12 @@ export function startTwitchBot() {
 
         const minutesSinceLastPromo = (Date.now() - _sistePartnerPromo) / 60_000;
 
+        // Phase 4: read real-time stream context from Creator State
+        const _brainStream = getBrainState().stream;
         const decision = await decidePromotion({
           workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
-          game: '',
-          viewerCount: 0,
+          game: _brainStream.game ?? '',
+          viewerCount: _brainStream.viewerCount ?? 0,
           historicalAvgViewers: 0,
           chatMessagesLastMinute: _chatMsgsLastMinute,
           recentChatLines: [..._recentChatLines],

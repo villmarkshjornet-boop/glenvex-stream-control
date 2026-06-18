@@ -42,7 +42,7 @@ import { scanForDuplicates, dupReports } from './lib/duplicateDetector';
 import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
-import { initCreatorBrain } from './lib/creatorBrain';
+import { initCreatorBrain, getBrainState } from './lib/creatorBrain';
 import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate } from './lib/streamStateSync';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
@@ -1226,10 +1226,12 @@ async function sendProaktivMelding() {
       const minutesSinceLast = (Date.now() - _discordSistePartnerPromo) / 60_000;
 
       if (pbSettings?.enabled && pbSettings.discordEnabled) {
+        // Phase 4: read real-time stream context from Creator State
+        const _brainStream = getBrainState().stream;
         const decision = await decidePromotion({
           workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
-          game: '',
-          viewerCount: 0,
+          game: _brainStream.game ?? '',
+          viewerCount: _brainStream.viewerCount ?? 0,
           historicalAvgViewers: 0,
           chatMessagesLastMinute: 0,
           recentChatLines: [],
