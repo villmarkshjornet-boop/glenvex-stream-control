@@ -1,16 +1,21 @@
 /**
  * Thumbnail Builder V7.5 — CTR-optimized pipeline
  *
- * Over V7:
- *   • FRAME_SCORER: 18 candidate frames → multi-signal Sharp analysis → top 3
- *   • HOOK ENGINE: 10 Gemini candidates → anti-generic filter → top 3
- *   • CROP ENGINE: 3 modes (attention / face-zone / center-tight)
- *   • COLOR: more aggressive vibrance, contrast, adaptive sharpen
- *   • FOCUS MASK: subject glow + layered gradient behind text
- *   • 3 VARIANTS: frame × hook × crop → Gemini CTR scoring → pick best
+ * Pipeline:
+ *  1. Font test
+ *  2. Transcript fetch
+ *  3. Download video
+ *  4. FRAME_SCORER V2: 18 Sharp candidates → top 6 → Gemini vision (face/emotion/action/ctr)
+ *  5. HOOK ENGINE V2: Gemini 10 candidates with per-hook scores (spes/emos/kurv/konf)
+ *  6. Build 3 variants (frame × hook × crop × text position)
+ *  7. AI CTR SCORING: all 3 variants → Gemini scores → pick best
+ *  8. Upload winner + alternates async
+ *  9. DB update
  *
- * Acceptance: highlight 45f4a21d-63f4-46a5-8f7c-805f472edb88
- * Target:     AI CTR score ≥ 80, hook from transcript, face fills 30–60%
+ * Events logged (with WHY, not just WHAT):
+ *   THUMBNAIL_FRAME_SELECTED, THUMBNAIL_HOOK_SELECTED,
+ *   THUMBNAIL_CROP_SELECTED, THUMBNAIL_VARIANT_GENERATED,
+ *   THUMBNAIL_CTR_SCORE, THUMBNAIL_VARIANT_CHOSEN, THUMBNAIL_V75_RENDER_COMPLETE
  */
 
 import fs from 'fs';
@@ -28,21 +33,32 @@ const FONT_DIR        = '/tmp/glenvex-fonts';
 const FONT_ANTON_PATH = path.join(FONT_DIR, 'Anton-Regular.ttf');
 const FONT_ANTON_URL  = 'https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf';
 
-const YT_W = 1280;
-const YT_H = 720;
-const GEMINI_API_URL  = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GEMINI_MODEL    = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+const YT_W         = 1280;
+const YT_H         = 720;
+const GEMINI_URL   = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
 
-// Text layout constants
-const TEXT_MARGIN     = 60;
-const HEADLINE_PT     = 108;
-const HEADLINE_DPI    = 72;
-const SHADOW_OFFSET   = 5;
-const TEXT_ZONE_W     = 700;
+const TEXT_MARGIN  = 60;
+const HEADLINE_PT  = 108;
+const HEADLINE_DPI = 72;
+const SHADOW_OFFSET = 5;
+const TEXT_ZONE_W  = 700;
 
-// Per-process caches
+// ── Caches ────────────────────────────────────────────────────────────────────
+
 let _fontTestCache: { passed: boolean; fontPath: string | null } | null = null;
-const _hookCache = new Map<string, string[]>(); // highlightId → top-3 hooks
+
+interface HookWithScores {
+  text: string;
+  specificityScore: number;
+  emotionScore: number;
+  curiosityScore: number;
+  conflictScore: number;
+  totalScore: number;
+  source: 'gemini' | 'fallback';
+}
+
+const _hookCache = new Map<string, HookWithScores[]>(); // highlightId → top-3
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -108,7 +124,7 @@ async function runFontTest(fp: string | null): Promise<{ passed: boolean; fontPa
   return _fontTestCache;
 }
 
-// ── Video download + duration ─────────────────────────────────────────────────
+// ── Video ─────────────────────────────────────────────────────────────────────
 
 async function downloadVideo(url: string, dest: string): Promise<boolean> {
   try {
@@ -126,87 +142,189 @@ async function getVideoDuration(videoPath: string): Promise<number> {
   } catch { return 30; }
 }
 
-// ── FRAME_SCORER ──────────────────────────────────────────────────────────────
+// ── FRAME_SCORER V2 ───────────────────────────────────────────────────────────
 //
-// Extracts 18 candidate frames, scores each on 6 signals via Sharp pixel analysis,
-// returns the top 3 buffers with their scores for use in variant generation.
+// Step A: extract 18 frames → Sharp pixel scoring (brightness/contrast/edges/sat)
+// Step B: top 6 → Gemini vision (face_detected, face_pct, emotion, action, ctr_score)
+// Step C: final_score = 0.30 * sharp_score + 0.70 * gemini_ctr_score
+//         + emotion_bonus (shock/anger/surprise = +10, laugh = +8)
+//         + face_size_bonus (face_pct > 30 = +5)
 
-interface ScoredFrame {
+interface SharpFrameScore {
   buf: Buffer;
-  score: number;
   pct: number;
+  sharpScore: number;
   brightness: number;
   contrast: number;
   edgeDensity: number;
   saturation: number;
-  quadrantScore: number;
 }
 
-async function scoreFrame(buf: Buffer): Promise<Omit<ScoredFrame, 'buf' | 'pct' | 'score'>> {
+interface GeminiFrameScore {
+  faceDetected: boolean;
+  facePct: number;
+  emotion: string;
+  hasAction: boolean;
+  ctrScore: number;
+}
+
+export interface ScoredFrame {
+  buf: Buffer;
+  pct: number;
+  finalScore: number;
+  sharpScore: number;
+  geminiCtrScore: number | null;
+  faceDetected: boolean;
+  facePct: number;
+  emotion: string;
+  hasAction: boolean;
+  scoringReason: string;
+}
+
+async function sharpScoreFrame(buf: Buffer): Promise<Omit<SharpFrameScore, 'buf' | 'pct'>> {
   const sharp = require('sharp');
 
-  // 8×8 greyscale → brightness + contrast
   const { data: grey } = await sharp(buf).resize(8, 8).greyscale().raw().toBuffer({ resolveWithObject: true });
   const greyArr = Array.from(grey as Buffer) as number[];
   const brightness = greyArr.reduce((a, b) => a + b, 0) / greyArr.length;
-  const mean = brightness;
-  const variance = greyArr.reduce((a, b) => a + (b - mean) ** 2, 0) / greyArr.length;
-  const contrast = Math.sqrt(variance);
+  const contrast   = Math.sqrt(greyArr.reduce((a, b) => a + (b - brightness) ** 2, 0) / greyArr.length);
 
-  // Edge density: apply Laplacian-like kernel via convolve, measure mean response
   let edgeDensity = 0;
   try {
     const { data: edges } = await sharp(buf)
-      .resize(64, 36)
-      .greyscale()
+      .resize(64, 36).greyscale()
       .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
+      .raw().toBuffer({ resolveWithObject: true });
     const edgeArr = Array.from(edges as Buffer) as number[];
     edgeDensity = edgeArr.reduce((a, b) => a + Math.abs(b), 0) / edgeArr.length;
   } catch {}
 
-  // Saturation: RGB variance per pixel sample (16×9 grid)
   let saturation = 0;
   try {
     const { data: rgb } = await sharp(buf).resize(16, 9).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const rgbArr = Array.from(rgb as Buffer) as number[];
     let sat = 0;
     for (let i = 0; i < rgbArr.length; i += 3) {
-      const r = rgbArr[i], g = rgbArr[i + 1], b = rgbArr[i + 2];
-      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      const mx = Math.max(rgbArr[i], rgbArr[i+1], rgbArr[i+2]);
+      const mn = Math.min(rgbArr[i], rgbArr[i+1], rgbArr[i+2]);
       sat += mx > 0 ? (mx - mn) / mx : 0;
     }
     saturation = sat / (rgbArr.length / 3);
   } catch {}
 
-  // Quadrant scoring: upper-center quadrant is most likely to have faces/action
-  // Compare brightness of upper-center vs overall — if it's brighter, more interesting
-  let quadrantScore = 0;
-  try {
-    const { data: qData } = await sharp(buf)
-      .extract({ left: Math.round(YT_W * 0.25), top: 0, width: Math.round(YT_W * 0.5), height: Math.round(YT_H * 0.6) })
-      .resize(8, 8).greyscale().raw().toBuffer({ resolveWithObject: true });
-    const qArr = Array.from(qData as Buffer) as number[];
-    const qBrightness = qArr.reduce((a, b) => a + b, 0) / qArr.length;
-    // Positive if center is brighter than overall (suggests subject in center)
-    quadrantScore = Math.max(0, qBrightness - brightness);
-  } catch {}
+  const b = Math.min(100, brightness / 2.55);
+  const c = Math.min(100, contrast * 1.5);
+  const e = Math.min(100, edgeDensity * 2.5);
+  const s = Math.min(100, saturation * 120);
+  const exposurePenalty = (b < 15 || b > 95) ? 20 : 0;
 
-  return { brightness, contrast, edgeDensity, saturation, quadrantScore };
+  const sharpScore = Math.max(0, b * 0.15 + c * 0.20 + e * 0.40 + s * 0.25 - exposurePenalty);
+  return { sharpScore, brightness, contrast, edgeDensity, saturation };
+}
+
+async function reScoreFramesWithGemini(frames: SharpFrameScore[]): Promise<GeminiFrameScore[]> {
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey || frames.length === 0) return frames.map(() => ({ faceDetected: false, facePct: 0, emotion: 'ukjent', hasAction: false, ctrScore: 50 }));
+
+  const sharp = require('sharp');
+
+  try {
+    // Resize each frame to 640×360 JPEG for cost efficiency (vision quality preserved)
+    const thumbs = await Promise.all(
+      frames.map(f => sharp(f.buf).resize(640, 360).jpeg({ quality: 80 }).toBuffer())
+    );
+
+    const N = frames.length;
+    const frameTags = Array.from({ length: N }, (_, i) => `F${i + 1}`).join(', ');
+
+    const parts: any[] = [
+      {
+        text: [
+          `Du analyserer ${N} kandidat-frames fra et gaming-klipp for YouTube thumbnail-valg.`,
+          '',
+          `For hvert bilde (${frameTags}), svar med NØYAKTIG én linje i dette formatet:`,
+          'F1: ansikt=ja pst=45 emosjon=sjokk handling=ja ctr=88',
+          '',
+          'Verdier:',
+          '- ansikt: ja/nei (er det et synlig ansikt i bildet?)',
+          '- pst: 0-100 (prosent av bildet ansiktet dekker; 0 hvis ingen ansikt)',
+          '- emosjon: ingen/nøytral/smil/latter/sjokk/sinne/frykt/overraskelse',
+          '- handling: ja/nei (skjer det noe aktivt — bevegelse, konflikt, dramatisk øyeblikk?)',
+          '- ctr: 0-100 (CTR-potensial som YouTube gaming thumbnail)',
+          '',
+          'Faktorer for høy CTR: ansikt med sterk emosjon, action, bevegelse, konflikt, kontrast.',
+          'Lav CTR: folk som bare sitter stille, mørke frames, generisk bakgrunn.',
+          '',
+          'Svar KUN med score-linjene. Ingen forklaring.',
+        ].join('\n'),
+      },
+      ...thumbs.map((t) => ({
+        inline_data: { mime_type: 'image/jpeg', data: t.toString('base64') },
+      })),
+    ];
+
+    const res = await fetch(
+      `${GEMINI_URL}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(25_000),
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 150 },
+        }),
+      }
+    );
+
+    if (res.status === 429) { wLog('WARN', 'GEMINI_FRAME_RATE_LIMITED', {}); throw new Error('429'); }
+    if (!res.ok) throw new Error(`Gemini ${res.status}`);
+
+    const json = await res.json() as any;
+    const text = (json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim();
+    const lines = text.split('\n').map((l: string) => l.trim()).filter((l: string) => /^F\d+:/.test(l));
+
+    const results: GeminiFrameScore[] = frames.map(() => ({ faceDetected: false, facePct: 0, emotion: 'ingen', hasAction: false, ctrScore: 50 }));
+
+    for (const line of lines) {
+      const idxMatch = line.match(/^F(\d+):/);
+      if (!idxMatch) continue;
+      const idx = parseInt(idxMatch[1], 10) - 1;
+      if (idx < 0 || idx >= N) continue;
+
+      const get = (key: string): string => {
+        const m = line.match(new RegExp(`${key}=([^\\s]+)`));
+        return m ? m[1] : '';
+      };
+
+      results[idx] = {
+        faceDetected: get('ansikt') === 'ja',
+        facePct:      parseInt(get('pst'), 10) || 0,
+        emotion:      get('emosjon') || 'ingen',
+        hasAction:    get('handling') === 'ja',
+        ctrScore:     parseInt(get('ctr'), 10) || 50,
+      };
+    }
+
+    wLog('INFO', 'GEMINI_FRAME_SCORES', { scores: results.map((r, i) => ({ frame: `F${i+1}`, ctr: r.ctrScore, face: r.faceDetected, emotion: r.emotion })) });
+    return results;
+
+  } catch (e: any) {
+    wLog('WARN', 'GEMINI_FRAME_SCORE_FAIL', { err: e.message?.slice(0, 100) });
+    return frames.map(() => ({ faceDetected: false, facePct: 0, emotion: 'ukjent', hasAction: false, ctrScore: 50 }));
+  }
 }
 
 async function extractScoredFrames(videoPath: string, highlightId: string, durationSec: number): Promise<ScoredFrame[]> {
   const frameDir = path.join(THUMB_BASE, highlightId, 'v75_frames');
   sikreDir(frameDir);
 
-  // 18 candidate positions — denser in middle 20-80% where action typically is
+  // 18 candidate positions — denser in 20–80% where action typically peaks
   const percentages = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90];
   const MIN_BRIGHTNESS = 25;
 
   const extracted: Array<{ buf: Buffer; pct: number }> = [];
 
-  // Extract in batches of 6 to avoid overwhelming ffmpeg
+  // Extract in batches of 6 to avoid overloading ffmpeg
   const batches: number[][] = [];
   for (let i = 0; i < percentages.length; i += 6) batches.push(percentages.slice(i, i + 6));
 
@@ -225,138 +343,206 @@ async function extractScoredFrames(videoPath: string, highlightId: string, durat
     }));
   }
 
-  if (extracted.length === 0) throw new Error('FRAME_SCORER: ffmpeg kon ikke hente noen frames');
+  if (extracted.length === 0) throw new Error('FRAME_SCORER: ffmpeg feilet, ingen frames hentet');
 
-  // Score each frame
-  const scored: ScoredFrame[] = await Promise.all(
+  // Step A: Sharp scoring
+  const sharpScored: SharpFrameScore[] = await Promise.all(
     extracted.map(async ({ buf, pct }) => {
-      const signals = await scoreFrame(buf);
-      // Composite CTR score — edge density and saturation are strong CTR signals
-      // Normalise each signal to 0-100 scale then weight
-      const b   = Math.min(100, signals.brightness / 2.55);         // 0-255 → 0-100
-      const c   = Math.min(100, signals.contrast * 1.5);            // empirical scale
-      const e   = Math.min(100, signals.edgeDensity * 2.5);         // edge density
-      const s   = Math.min(100, signals.saturation * 120);          // saturation
-      const q   = Math.min(20, signals.quadrantScore / 2.55 * 0.5); // quadrant bonus (0-20)
-
-      // Penalise nearly-dark or blown-out frames
-      const exposurePenalty = (b < 15 || b > 95) ? 20 : 0;
-
-      const score = Math.max(0,
-        b * 0.15 +    // brightness (some brightness is good)
-        c * 0.20 +    // contrast (high contrast = more visual pop)
-        e * 0.35 +    // edge density (action, movement, subjects)
-        s * 0.20 +    // saturation (vivid = eye-catching)
-        q * 0.10 -    // subject-in-center bonus
-        exposurePenalty
-      );
-
-      return { buf, pct, score, ...signals };
+      const scores = await sharpScoreFrame(buf);
+      return { buf, pct, ...scores };
     })
   );
 
-  // Filter extremely dark frames, sort by score
-  const usable = scored.filter(f => f.brightness >= MIN_BRIGHTNESS);
-  const sorted = (usable.length > 0 ? usable : scored).sort((a, b) => b.score - a.score);
+  // Filter very dark frames, sort by Sharp score, take top 6 for Gemini
+  const usable = sharpScored.filter(f => f.brightness >= MIN_BRIGHTNESS);
+  const sharpTop6 = (usable.length > 0 ? usable : sharpScored)
+    .sort((a, b) => b.sharpScore - a.sharpScore)
+    .slice(0, 6);
 
-  wLog('INFO', 'FRAME_SCORER_DONE', {
-    total: extracted.length, usable: usable.length,
-    top3: sorted.slice(0, 3).map(f => ({ pct: f.pct, score: f.score.toFixed(1) })),
+  wLog('INFO', 'SHARP_TOP6', { pcts: sharpTop6.map(f => f.pct), scores: sharpTop6.map(f => f.sharpScore.toFixed(1)) });
+
+  // Step B: Gemini vision scoring for top 6
+  const geminiScores = await reScoreFramesWithGemini(sharpTop6);
+
+  // Step C: Combine scores
+  const EMOTION_BONUS: Record<string, number> = {
+    sjokk: 10, sinne: 10, overraskelse: 10, frykt: 8, latter: 8, smil: 4,
+  };
+
+  const finalScored: ScoredFrame[] = sharpTop6.map((sf, i) => {
+    const g = geminiScores[i];
+    const emotionBonus = EMOTION_BONUS[g.emotion] ?? 0;
+    const faceSizeBonus = g.facePct >= 30 ? 5 : g.facePct >= 15 ? 2 : 0;
+    const actionBonus = g.hasAction ? 5 : 0;
+
+    const finalScore = Math.min(100,
+      sf.sharpScore * 0.30 +
+      g.ctrScore    * 0.70 +
+      emotionBonus  +
+      faceSizeBonus +
+      actionBonus
+    );
+
+    const reasons: string[] = [];
+    if (g.faceDetected) reasons.push(`ansikt(${g.facePct}%)`);
+    if (g.emotion !== 'ingen') reasons.push(`emosjon:${g.emotion}`);
+    if (g.hasAction) reasons.push('handling');
+    if (emotionBonus > 0) reasons.push(`emosjonskraft:+${emotionBonus}`);
+    const scoringReason = reasons.length > 0 ? reasons.join(', ') : 'høy visuell kompleksitet';
+
+    return {
+      buf: sf.buf,
+      pct: sf.pct,
+      finalScore,
+      sharpScore: sf.sharpScore,
+      geminiCtrScore: g.ctrScore,
+      faceDetected: g.faceDetected,
+      facePct: g.facePct,
+      emotion: g.emotion,
+      hasAction: g.hasAction,
+      scoringReason,
+    };
   });
 
-  // Return top 3
-  return sorted.slice(0, 3);
+  finalScored.sort((a, b) => b.finalScore - a.finalScore);
+
+  wLog('INFO', 'FRAME_SCORER_DONE', {
+    total: extracted.length,
+    geminiScored: sharpTop6.length,
+    winner: { pct: finalScored[0].pct, finalScore: finalScored[0].finalScore.toFixed(1), emotion: finalScored[0].emotion, face: finalScored[0].faceDetected },
+  });
+
+  return finalScored;
 }
 
-// ── HOOK ENGINE ───────────────────────────────────────────────────────────────
+// ── HOOK ENGINE V2 ────────────────────────────────────────────────────────────
 //
-// Sends ONE Gemini request asking for 10 hook candidates.
-// Filters out generic fallbacks. Returns top 3 scored hooks.
+// ONE Gemini call → 10 hooks with per-hook scores (spes/emos/kurv/konf).
+// Forbidden generics are filtered UNLESS transcript explicitly contains the
+// keyword that makes them specific (e.g. "gikk galt" in transcript → allows "ALT GIKK GALT!").
+// Returns top-3 HookWithScores sorted by totalScore.
 
-const FORBIDDEN_GENERIC = new Set([
-  'DET GIKK GALT', 'SYKT', 'WOW', 'LOL', 'EPISK ØYEBLIKK',
-  'SE DETTE', 'UTROLIG', 'SJEKK DETTE', 'KULT', 'VENT',
-]);
+const FORBIDDEN_GENERICS: Record<string, string[]> = {
+  'DET GIKK GALT': ['gikk galt', 'feilet', 'ødela', 'krasjet', 'mistet'],
+  'SYKT':          ['sykt', 'vanvittig', 'utrolig'],
+  'WOW':           [],   // always forbidden — pure filler
+  'LOL':           [],   // always forbidden
+  'EPISK':         ['episk', 'episke'],
+  'UTROLIG':       ['utrolig', 'ufattelig'],
+};
 
-function scoreHook(hook: string, title: string, transcript: string | null): number {
-  const words = hook.trim().split(/\s+/).filter(Boolean);
-  const wordCount = words.length;
-
-  // Hard requirements
-  if (wordCount < 2 || wordCount > 4) return 0;
-  if (hook.length < 3 || hook.length > 30) return 0;
-
-  // Forbidden generics penalty
+function isForbiddenHook(hook: string, transcript: string | null): boolean {
   const base = hook.replace(/[!?]/g, '').trim();
-  if (FORBIDDEN_GENERIC.has(base)) return 5; // not 0 — still usable in extremis
-
-  let score = 50; // base
-
-  // Bonus: ends with ! or ? (urgency)
-  if (hook.endsWith('!') || hook.endsWith('?') || hook.endsWith('?!')) score += 15;
-
-  // Bonus: references something specific from title/transcript
-  const contextWords = [
-    ...(title.toLowerCase().split(/\s+/)),
-    ...(transcript?.toLowerCase().split(/\s+/) ?? []),
-  ].filter(w => w.length > 3);
-
-  const hookLower = hook.toLowerCase();
-  const contextHits = contextWords.filter(w => hookLower.includes(w)).length;
-  score += Math.min(contextHits * 8, 25);
-
-  // Bonus: proper word count (2-3 is ideal for mobile readability)
-  if (wordCount <= 3) score += 10;
-
-  // Bonus: contains emotionally loaded words
-  const emotional = ['LØY', 'TATT', 'ARRESTERT', 'VANT', 'TAPTE', 'ANGRER', 'LURT', 'SCAM', 'FEIL', 'UMULIG', 'SJOKK'];
-  if (emotional.some(e => hook.includes(e))) score += 15;
-
-  return Math.min(score, 100);
+  for (const [forbidden, exceptions] of Object.entries(FORBIDDEN_GENERICS)) {
+    if (!base.startsWith(forbidden) && base !== forbidden) continue;
+    if (exceptions.length === 0) return true; // always forbidden
+    const t = (transcript ?? '').toLowerCase();
+    // Allow if transcript explicitly contains one of the exception keywords
+    if (exceptions.some(e => t.includes(e))) return false;
+    return true;
+  }
+  return false;
 }
 
-async function getHooksMulti(
+function parsePipedHookLine(line: string): HookWithScores | null {
+  const parts = line.split('|').map(s => s.trim());
+  if (parts.length < 5) return null;
+
+  const text = parts[0].toUpperCase().replace(/[^A-ZÆØÅ0-9!? ]/g, '').trim();
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words < 2 || words > 4 || text.length < 3) return null;
+
+  const parseScore = (s: string): number => {
+    const m = s.match(/\d+/);
+    return m ? Math.max(0, Math.min(100, parseInt(m[0], 10))) : 50;
+  };
+
+  const specificityScore = parseScore(parts[1]);
+  const emotionScore     = parseScore(parts[2]);
+  const curiosityScore   = parseScore(parts[3]);
+  const conflictScore    = parseScore(parts[4]);
+
+  const totalScore = specificityScore * 0.30 + emotionScore * 0.25 + curiosityScore * 0.25 + conflictScore * 0.20;
+
+  return { text, specificityScore, emotionScore, curiosityScore, conflictScore, totalScore, source: 'gemini' };
+}
+
+function makeFallbackHook(title: string, category: string, transcript: string | null): HookWithScores {
+  const t = `${title} ${transcript ?? ''}`.toLowerCase();
+  let text = 'SE HVA SOM SKJEDDE!';
+
+  if      (t.includes('løy') || t.includes('løgn'))              text = 'HUN LØY!';
+  else if (t.includes('scam') || t.includes('lurt') || t.includes('svindel')) text = 'VI BLE LURT!';
+  else if (t.includes('politi') || t.includes('arrestert'))      text = 'POLITIET KOM!';
+  else if (t.includes('vant') || t.includes('vinner') || t.includes('seier')) text = 'VI VANT!';
+  else if (t.includes('angrer') || t.includes('beklager'))       text = 'JEG ANGRER!';
+  else {
+    const categoryMap: Record<string, string> = {
+      RAGE: 'JEG ANGRER!', CLUTCH: 'I SISTE SEKUND!', FUNNY: 'INGEN FORVENTET DETTE!',
+      RP_MOMENT: 'POLITIET KOM!', FAIL: 'JEG ANGRER!', TACTICAL: 'PERFEKT PLAN!',
+    };
+    text = categoryMap[category] ?? 'SE HVA SOM SKJEDDE!';
+  }
+
+  return { text, specificityScore: 60, emotionScore: 60, curiosityScore: 55, conflictScore: 55, totalScore: 57.5, source: 'fallback' };
+}
+
+async function getHooksV2(
   highlightId: string,
   frameBuf: Buffer,
   title: string,
   category: string,
   transcript: string | null,
-): Promise<string[]> {
-  // Return cached hooks (prevents Gemini double-billing on retry)
+): Promise<HookWithScores[]> {
   const cached = _hookCache.get(highlightId);
   if (cached) {
-    wLog('INFO', 'HOOKS_CACHED', { highlightId, count: cached.length });
+    wLog('INFO', 'HOOKS_CACHED', { highlightId, hooks: cached.map(h => h.text) });
     return cached;
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
-  let candidates: string[] = [];
+  const candidates: HookWithScores[] = [];
 
   if (geminiKey) {
     try {
       const transcriptHint = transcript
-        ? `Transkripsjon: "${transcript.slice(0, 300)}"`
-        : '(ingen transkripsjon tilgjengelig)';
+        ? `Transkripsjon: "${transcript.slice(0, 400)}"`
+        : '(ingen transkripsjon)';
 
       const prompt = [
-        'Du er YouTube-thumbnail-ekspert med fokus på CTR.',
+        'Du er YouTube CTR-ekspert for gaming-innhold. Oppgave: generer 10 norske hooks.',
+        '',
         `Tittel: ${title}`,
         `Kategori: ${category}`,
         transcriptHint,
         '',
-        'Generer 10 ULIKE norske hooks for dette gaming-klippet.',
-        'Hvert hook: 2-4 ORD, VERSALER, norsk, avslutt med ! eller ?!',
+        'Instruksjoner:',
+        '• Hvert hook: 2-4 ORD, VERSALER, norsk, avslutt med ! eller ?!',
+        '• Hook MÅ referere noe spesifikt fra klippet — IKKE generiske fraser',
+        '• FORBUDT: DET GIKK GALT / SYKT / WOW / LOL / EPISK / UTROLIG (med mindre transcript sier det eksplisitt)',
+        '• Finn: løgn, svindel, overraskelse, konflikt, feil, seier, sjokk fra transkriptet',
         '',
-        'Finn den VIRKELIGE konflikten, overraskelsen eller reaksjonen i klippet.',
-        'IKKE bruk: DET GIKK GALT / SYKT / WOW / EPISK ØYEBLIKK (for generisk)',
+        'Score hvert hook på fire dimensjoner (0-100 hver):',
+        '  spes = spesifisitet (er det spesifikt til DETTE klippet?)',
+        '  emos = emosjonskraft (skaper det følelse?)',
+        '  kurv = nysgjerrighet (vil folk klikke?)',
+        '  konf = konflikt/drama (antyder det noe dramatisk?)',
         '',
-        'Eksempler på GOD hooks: HUN LØY! / JEG BLE LURT! / POLITIET KOM! / HVEM KOM FØRST?! / ALT FORSVANT!',
+        'Svar i NØYAKTIG dette formatet (én linje per hook, ingen annen tekst):',
+        'HOOK TEKST HER! | spes=85 | emos=90 | kurv=80 | konf=75',
         '',
-        'Svar med KUN de 10 hookene, én per linje. Ingen numre, ingen forklaring.',
+        'Eksempler:',
+        'HUN LØY! | spes=90 | emos=85 | kurv=80 | konf=90',
+        'JEG BLE LURT! | spes=80 | emos=75 | kurv=85 | konf=80',
+        'HVEM HAR RETT?! | spes=75 | emos=70 | kurv=90 | konf=85',
       ].join('\n');
 
+      // Resize frame to 640×360 for cost efficiency
+      const sharp = require('sharp');
+      const thumbBuf = await sharp(frameBuf).resize(640, 360).jpeg({ quality: 80 }).toBuffer().catch(() => frameBuf);
+
       const res = await fetch(
-        `${GEMINI_API_URL}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
+        `${GEMINI_URL}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -365,77 +551,59 @@ async function getHooksMulti(
             contents: [{
               parts: [
                 { text: prompt },
-                { inline_data: { mime_type: 'image/jpeg', data: frameBuf.toString('base64') } },
+                { inline_data: { mime_type: 'image/jpeg', data: thumbBuf.toString('base64') } },
               ],
             }],
-            generationConfig: { temperature: 0.85, maxOutputTokens: 200 },
+            generationConfig: { temperature: 0.8, maxOutputTokens: 400 },
           }),
         }
       );
 
-      if (res.status === 429) {
-        wLog('WARN', 'HOOKS_RATE_LIMITED', { highlightId });
-      } else if (res.ok) {
+      if (res.status === 429) { wLog('WARN', 'HOOKS_RATE_LIMITED', { highlightId }); }
+      else if (res.ok) {
         const json = await res.json() as any;
         const rawText = (json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim();
-        const lines = rawText.split('\n').map((l: string) => l.trim().replace(/^\d+[.)]\s*/, '').toUpperCase().replace(/[^A-ZÆØÅ0-9!? ]/g, '').trim()).filter((h: string) => h.length >= 3);
-        candidates = lines;
-        wLog('INFO', 'HOOKS_GEMINI_RAW', { highlightId, count: lines.length, examples: lines.slice(0, 3) });
+
+        for (const line of rawText.split('\n')) {
+          const parsed = parsePipedHookLine(line.trim());
+          if (!parsed) continue;
+          if (isForbiddenHook(parsed.text, transcript)) {
+            wLog('INFO', 'HOOK_FORBIDDEN_FILTERED', { hook: parsed.text });
+            continue;
+          }
+          candidates.push(parsed);
+        }
+
+        wLog('INFO', 'HOOKS_GEMINI_PARSED', { count: candidates.length, examples: candidates.slice(0, 3).map(h => `${h.text}(${h.totalScore.toFixed(0)})`) });
       }
     } catch (e: any) {
       wLog('WARN', 'HOOKS_GEMINI_FAIL', { err: e.message?.slice(0, 100) });
     }
   }
 
-  // Always add deterministic fallbacks so we have ≥3 options
-  const titleUp = title.toUpperCase();
-  const fallbacks: string[] = [];
-  if (titleUp.includes('POLITI') || titleUp.includes('ARRESTERT') || titleUp.includes('TATT')) fallbacks.push('POLITIET KOM!');
-  if (titleUp.includes('LØY')   || titleUp.includes('LØGN'))    fallbacks.push('HUN LØY!');
-  if (titleUp.includes('SCAM')  || titleUp.includes('LURT'))    fallbacks.push('VI BLE LURT!');
-  if (titleUp.includes('VANT')  || titleUp.includes('VINNER'))  fallbacks.push('VI VANT!');
-  if (titleUp.includes('TAPTE') || titleUp.includes('FAIL'))    fallbacks.push('JEG TAPTE!');
+  // Always add deterministic fallbacks (scored manually)
+  candidates.push(makeFallbackHook(title, category, transcript));
 
-  const categoryFallbacks: Record<string, string[]> = {
-    RAGE: ['JEG ANGRER!', 'FULLSTENDIG KAOS!', 'ALDRI MER!'],
-    CLUTCH: ['I SISTE SEKUND!', 'UMULIG REDNING!', 'INGEN TRODDE DET!'],
-    FUNNY: ['INGEN FORVENTET DETTE!', 'JEG DØR!', 'HVA SKJER?!'],
-    RP_MOMENT: ['POLITIET KOM!', 'VI BLE TATT!', 'HUN LØY!'],
-    FAIL: ['JEG ANGRER!', 'TOTALT FAIL!', 'ALDRI IGJEN!'],
-    EDUCATIONAL: ['SLIK GJØR DU DET!', 'INGEN VISSTE!', 'HEMMELIG METODE!'],
-    TACTICAL: ['PERFEKT PLAN!', 'SLIK VINNER DU!', 'INGEN VISSTE!'],
-  };
-
-  const catFallbacks = categoryFallbacks[category] ?? ['SE DETTE!', 'UMULIG!', 'JEG ANGRER!'];
-  candidates = [...candidates, ...fallbacks, ...catFallbacks];
-
-  // Score and sort
-  const scored = candidates
-    .map(h => ({ hook: h, score: scoreHook(h, title, transcript) }))
-    .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  // Deduplicate by first word (avoid: "JEG ANGRER!" and "JEG ANGRER NESTE GANG!")
+  // Deduplicate by first word, sort by totalScore
   const seen = new Set<string>();
-  const unique = scored.filter(x => {
-    const key = x.hook.split(' ')[0];
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  const top3 = unique.slice(0, 3).map(x => x.hook);
-  if (top3.length === 0) top3.push('SE HVA SOM SKJEDDE!');
+  const sorted = candidates
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .filter(h => {
+      const key = h.text.split(' ')[0];
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
   // Ensure exactly 3
-  while (top3.length < 3) top3.push(catFallbacks[top3.length] ?? 'INGEN VISSTE!');
+  const top3 = sorted.slice(0, 3);
+  while (top3.length < 3) top3.push(makeFallbackHook(title, category, transcript));
 
   _hookCache.set(highlightId, top3);
 
-  wLog('INFO', 'HOOKS_SELECTED', {
+  wLog('INFO', 'HOOKS_FINAL', {
     highlightId,
-    top3,
-    scored: unique.slice(0, 5).map(x => `${x.hook}(${x.score})`),
+    top3: top3.map(h => ({ text: h.text, score: h.totalScore.toFixed(1), spes: h.specificityScore, emos: h.emotionScore, source: h.source })),
   });
 
   return top3;
@@ -443,90 +611,61 @@ async function getHooksMulti(
 
 // ── CROP ENGINE ───────────────────────────────────────────────────────────────
 //
-// 3 crop modes for 3 variants:
-//   A: 'attention' — Sharp's built-in face/entropy gravity (best general-purpose)
-//   B: 'face-zone' — crops upper-center 60% then resizes (face zoom approximation)
-//   C: 'entropy'  — Sharp's entropy gravity (picks most complex region)
+// attention: Sharp built-in face/entropy gravity (best general-purpose)
+// face-zone: crops upper-center 80%×80% then re-resizes (face zoom approx)
+// entropy:   Sharp entropy gravity (picks most visually complex region)
 
 type CropMode = 'attention' | 'face-zone' | 'entropy';
 
 async function cropFrame(buf: Buffer, mode: CropMode): Promise<Buffer> {
   const sharp = require('sharp');
 
-  if (mode === 'attention') {
-    return sharp(buf)
-      .resize(YT_W, YT_H, { fit: 'cover', position: 'attention' })
-      .toBuffer();
-  }
-
   if (mode === 'face-zone') {
-    // Crop: center 70% horizontally, upper 80% vertically → resize to 1280×720
-    // This approximates "zoom into the person" in typical gaming clips
-    const srcW = YT_W;
-    const srcH = YT_H;
-    const meta = await sharp(buf).metadata();
-    const origW = meta.width ?? srcW;
-    const origH = meta.height ?? srcH;
-
-    // First resize to 1280×720 to normalise dimensions
-    const base = await sharp(buf).resize(origW, origH, { fit: 'cover' }).toBuffer();
-    const baseResized = await sharp(base).resize(YT_W, YT_H, { fit: 'cover', position: 'attention' }).toBuffer();
-
-    // Then crop a zoomed-in region (center 80% × upper 80%), re-resize to full
+    const base = await sharp(buf).resize(YT_W, YT_H, { fit: 'cover', position: 'attention' }).toBuffer();
     const cropW = Math.round(YT_W * 0.80);
     const cropH = Math.round(YT_H * 0.80);
     const cropLeft = Math.round((YT_W - cropW) / 2);
-    const cropTop  = 0; // start from top — faces tend to be higher in frame
-
-    return sharp(baseResized)
-      .extract({ left: cropLeft, top: cropTop, width: cropW, height: cropH })
+    return sharp(base)
+      .extract({ left: cropLeft, top: 0, width: cropW, height: cropH })
       .resize(YT_W, YT_H, { fit: 'fill' })
       .toBuffer();
   }
 
-  // 'entropy': Sharp's entropy gravity
   return sharp(buf)
-    .resize(YT_W, YT_H, { fit: 'cover', position: 'entropy' })
+    .resize(YT_W, YT_H, { fit: 'cover', position: mode === 'entropy' ? 'entropy' : 'attention' })
     .toBuffer();
 }
 
-// ── COLOR GRADING ─────────────────────────────────────────────────────────────
+// ── COLOR ENGINE ──────────────────────────────────────────────────────────────
 //
-// V7.5 enhancement: more aggressive than V7.
-// +20 vibrance approx via double-modulate, +20 contrast via linear
+// 3-pass enhancement: base boost → adaptive sharpen → vibrance pass.
+// Not a cartoon or HDR effect — just "better than raw frame".
 
 async function gradeColors(buf: Buffer): Promise<Buffer> {
   const sharp = require('sharp');
-
   return sharp(buf)
-    // Pass 1: base enhancement
-    .modulate({ brightness: 1.1, saturation: 1.6 })
-    .linear(1.10, -8)
-    // Pass 2: adaptive sharpen — enhances edges without halos
-    .sharpen({ sigma: 1.2, m1: 0.8, m2: 4.0, x1: 2, y2: 12, y3: 16 })
-    // Pass 3: slight vibrance approximation — boost low-sat areas more
-    // (Sharp has no native vibrance; second saturation pass with lower multiplier on already-saturated mimics it)
-    .modulate({ saturation: 1.15 })
+    .modulate({ brightness: 1.10, saturation: 1.65 })
+    .linear(1.12, -10)
+    .sharpen({ sigma: 1.3, m1: 0.9, m2: 4.5, x1: 2, y2: 14, y3: 18 })
+    .modulate({ saturation: 1.12 })
     .toBuffer();
 }
 
 // ── FOCUS MASK ────────────────────────────────────────────────────────────────
-//
-// Composite two SVG layers over the graded frame:
-//   1. Layered gradient: heavy left-bottom shadow for text legibility
-//   2. Subtle center-top vignette to focus attention on subject
 
-function buildGradientSvg(textPosition: 'bottom-left' | 'top-left' | 'bottom-center'): string {
+type TextPosition = 'bottom-left' | 'top-left' | 'bottom-center';
+
+function buildGradientSvg(textPosition: TextPosition): string {
   if (textPosition === 'top-left') {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${YT_W}" height="${YT_H}">
   <defs>
     <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="black" stop-opacity="0.82"/>
-      <stop offset="40%"  stop-color="black" stop-opacity="0.40"/>
-      <stop offset="100%" stop-color="black" stop-opacity="0.10"/>
+      <stop offset="0%"   stop-color="black" stop-opacity="0.85"/>
+      <stop offset="40%"  stop-color="black" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.08"/>
     </linearGradient>
     <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="black" stop-opacity="0.60"/>
+      <stop offset="0%"   stop-color="black" stop-opacity="0.62"/>
       <stop offset="55%"  stop-color="black" stop-opacity="0.15"/>
       <stop offset="100%" stop-color="black" stop-opacity="0"/>
     </linearGradient>
@@ -542,29 +681,29 @@ function buildGradientSvg(textPosition: 'bottom-left' | 'top-left' | 'bottom-cen
     <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="black" stop-opacity="0"/>
       <stop offset="50%"  stop-color="black" stop-opacity="0.30"/>
-      <stop offset="100%" stop-color="black" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.94"/>
     </linearGradient>
   </defs>
   <rect x="0" y="0" width="${YT_W}" height="${YT_H}" fill="url(#gb)"/>
 </svg>`;
   }
 
-  // bottom-left (default — same as V7 but heavier)
+  // bottom-left (default)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${YT_W}" height="${YT_H}">
   <defs>
     <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="black" stop-opacity="0.88"/>
-      <stop offset="55%"  stop-color="black" stop-opacity="0.40"/>
+      <stop offset="0%"   stop-color="black" stop-opacity="0.90"/>
+      <stop offset="58%"  stop-color="black" stop-opacity="0.42"/>
       <stop offset="100%" stop-color="black" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="black" stop-opacity="0"/>
-      <stop offset="45%"  stop-color="black" stop-opacity="0.40"/>
-      <stop offset="100%" stop-color="black" stop-opacity="0.95"/>
+      <stop offset="42%"  stop-color="black" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.96"/>
     </linearGradient>
   </defs>
   <rect x="0" y="0" width="${YT_W}" height="${YT_H}" fill="url(#gl)"/>
-  <rect x="0" y="${Math.round(YT_H * 0.32)}" width="${YT_W}" height="${Math.round(YT_H * 0.68)}" fill="url(#gb)"/>
+  <rect x="0" y="${Math.round(YT_H * 0.30)}" width="${YT_W}" height="${Math.round(YT_H * 0.70)}" fill="url(#gb)"/>
 </svg>`;
 }
 
@@ -579,22 +718,37 @@ async function renderPangoText(text: string, fontPath: string | null, colorHex: 
 
 // ── BUILD SINGLE VARIANT ──────────────────────────────────────────────────────
 
-type TextPosition = 'bottom-left' | 'top-left' | 'bottom-center';
-
-async function buildVariant(opts: {
+interface VariantOpts {
+  highlightId: string;
+  variantLabel: 'A' | 'B' | 'C';
   rawFrame: Buffer;
-  hook: string;
+  hook: HookWithScores;
   cropMode: CropMode;
   textPosition: TextPosition;
   category: string;
   fontPath: string | null;
-}): Promise<Buffer> {
+}
+
+async function buildVariant(opts: VariantOpts): Promise<Buffer> {
   const sharp = require('sharp');
-  const { rawFrame, hook, cropMode, textPosition, category, fontPath } = opts;
+  const { highlightId, variantLabel, rawFrame, hook, cropMode, textPosition, category, fontPath } = opts;
   const primary = accentColor(category);
 
   // 1. Crop
   const cropped = await cropFrame(rawFrame, cropMode);
+
+  logSystemEvent({
+    source: 'thumbnail_worker',
+    event_type: 'THUMBNAIL_CROP_SELECTED',
+    title: `Crop variant ${variantLabel}: mode=${cropMode}`,
+    severity: 'info',
+    metadata: {
+      highlightId, variantLabel, cropMode, textPosition,
+      reason: cropMode === 'attention' ? 'Sharp attention gravity (best for subject focus)' :
+              cropMode === 'face-zone' ? 'Upper-center 80% crop (face zoom approximation)' :
+              'Entropy gravity (most visually complex region)',
+    },
+  });
 
   // 2. Color grade
   const graded = await gradeColors(cropped);
@@ -602,34 +756,30 @@ async function buildVariant(opts: {
   // 3. Gradient overlay
   const gradientSvg = buildGradientSvg(textPosition);
 
-  // 4. Text rendering
+  // 4. Text
   const [shadowBuf, mainBuf] = await Promise.all([
-    renderPangoText(hook, fontPath, '#000000', TEXT_ZONE_W, HEADLINE_PT),
-    renderPangoText(hook, fontPath, primary,   TEXT_ZONE_W, HEADLINE_PT),
+    renderPangoText(hook.text, fontPath, '#000000', TEXT_ZONE_W, HEADLINE_PT),
+    renderPangoText(hook.text, fontPath, primary,   TEXT_ZONE_W, HEADLINE_PT),
   ]);
   const { width: tw = 600, height: th = 120 } = await sharp(mainBuf).metadata();
 
   // 5. Text position
   let textX: number, textY: number;
   if (textPosition === 'bottom-left') {
-    textX = TEXT_MARGIN;
-    textY = Math.max(20, YT_H - 80 - th);
+    textX = TEXT_MARGIN; textY = Math.max(20, YT_H - 82 - th);
   } else if (textPosition === 'top-left') {
-    textX = TEXT_MARGIN;
-    textY = TEXT_MARGIN;
+    textX = TEXT_MARGIN; textY = TEXT_MARGIN;
   } else {
-    // bottom-center
     textX = Math.max(0, Math.round((YT_W - tw) / 2));
-    textY = Math.max(20, YT_H - 90 - th);
+    textY = Math.max(20, YT_H - 92 - th);
   }
 
   // 6. Accent stripe
   const stripeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${YT_W}" height="${YT_H}">
-  <rect x="0" y="${YT_H - 8}" width="${YT_W}" height="8" fill="${primary}" opacity="0.92"/>
+  <rect x="0" y="${YT_H - 8}" width="${YT_W}" height="8" fill="${primary}" opacity="0.93"/>
 </svg>`;
 
-  // 7. Composite: graded frame → gradient → shadow → headline → stripe
-  return sharp(graded)
+  const out = await sharp(graded)
     .composite([
       { input: Buffer.from(gradientSvg),  top: 0,                        left: 0 },
       { input: shadowBuf,                 top: textY + SHADOW_OFFSET,     left: textX + SHADOW_OFFSET },
@@ -638,60 +788,75 @@ async function buildVariant(opts: {
     ])
     .png({ compressionLevel: 7 })
     .toBuffer();
+
+  logSystemEvent({
+    source: 'thumbnail_worker',
+    event_type: 'THUMBNAIL_VARIANT_GENERATED',
+    title: `Variant ${variantLabel} generert: "${hook.text}" · ${cropMode} · ${textPosition}`,
+    severity: 'info',
+    metadata: {
+      highlightId, variantLabel,
+      hook: hook.text,
+      hookScore: hook.totalScore,
+      hookScores: { spes: hook.specificityScore, emos: hook.emotionScore, kurv: hook.curiosityScore, konf: hook.conflictScore },
+      hookSource: hook.source,
+      cropMode, textPosition,
+      outputBytes: out.length,
+    },
+  });
+
+  return out;
 }
 
 // ── AI CTR SCORING ────────────────────────────────────────────────────────────
 //
-// Sends all 3 variants to Gemini in ONE multimodal request.
-// Returns [scoreA, scoreB, scoreC] (0-100 each).
+// Single Gemini call with all 3 variants as images.
+// Returns [scoreA, scoreB, scoreC] (0-100).
 
-async function scoreCtrVariants(variants: Buffer[], hooks: string[]): Promise<number[]> {
+async function scoreCtrVariants(variants: Buffer[], hooks: HookWithScores[]): Promise<number[]> {
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey || variants.length === 0) return variants.map(() => 60);
 
   try {
-    // Resize to smaller JPEG for cost efficiency (scoring doesn't need full 1280×720)
     const sharp = require('sharp');
     const thumbs = await Promise.all(
       variants.map(v => sharp(v).resize(320, 180).jpeg({ quality: 75 }).toBuffer())
     );
 
+    const hookDescriptions = hooks.map((h, i) =>
+      `Variant ${String.fromCharCode(65 + i)}: hook="${h.text}" (spes=${h.specificityScore} emos=${h.emotionScore} kurv=${h.curiosityScore} konf=${h.conflictScore})`
+    ).join('\n');
+
     const parts: any[] = [
       {
         text: [
-          `Du er YouTube CTR-ekspert. Score disse ${variants.length} thumbnail-variantene (0-100).`,
+          `Du er YouTube CTR-ekspert. Score disse ${variants.length} thumbnail-varianter (0-100 totalt).`,
           '',
-          'Kriterier:',
-          '• Lesbarhet av tekst (0-20): er hooken lett å lese på mobil?',
-          '• Emosjon og fokus (0-20): ansikt, reaksjon, handling?',
-          '• Kontrast og visuell pop (0-20): skiller den seg ut i feed?',
-          '• Relevans og nysgjerrighet (0-20): sier den noe spesifikt?',
+          'Kriterier per variant:',
+          '• Lesbarhet (0-20): er teksten lesbar på mobil i 3 sekunder?',
+          '• Emosjon og ansikt (0-20): viser det sterk emosjon?',
+          '• Kontrast og pop (0-20): skiller den seg ut i YouTube-feed?',
+          '• Nysgjerrighet (0-20): vil en tilfeldig seer klikke?',
           '• Mobilvisning (0-20): fungerer den i lite format?',
           '',
-          ...hooks.map((h, i) => `Variant ${String.fromCharCode(65 + i)}: hook="${h}"`),
+          hookDescriptions,
           '',
-          'Svar KUN med tallene, én per linje: f.eks. 72\n68\n81',
-          'Ingen forklaring. Nøyaktig ett tall per variant.',
+          'Svar KUN med tallene — én per linje (ingen tekst, ingen forklaring):',
+          `${variants.length} tall totalt, ett per variant.`,
         ].join('\n'),
       },
-      ...thumbs.map((t, i) => ({
-        inline_data: {
-          mime_type: 'image/jpeg',
-          data: t.toString('base64'),
-          // Gemini doesn't support metadata per part, but we label them in the prompt
-        },
-      })),
+      ...thumbs.map(t => ({ inline_data: { mime_type: 'image/jpeg', data: t.toString('base64') } })),
     ];
 
     const res = await fetch(
-      `${GEMINI_API_URL}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
+      `${GEMINI_URL}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 30 },
+          generationConfig: { temperature: 0.1, maxOutputTokens: 30 },
         }),
       }
     );
@@ -704,10 +869,7 @@ async function scoreCtrVariants(variants: Buffer[], hooks: string[]): Promise<nu
       .map((l: string) => parseInt(l.trim(), 10))
       .filter((n: number) => !isNaN(n) && n >= 0 && n <= 100);
 
-    // Pad with 60 if Gemini returned fewer scores than variants
     while (scores.length < variants.length) scores.push(60);
-
-    wLog('INFO', 'CTR_SCORES', { scores, hooks });
     return scores.slice(0, variants.length);
   } catch (e: any) {
     wLog('WARN', 'CTR_SCORE_FAIL', { err: e.message?.slice(0, 100) });
@@ -755,17 +917,15 @@ export async function buildThumbnailV75(highlightId: string, source?: string): P
 
   try {
     // ── 1. Load highlight ─────────────────────────────────────────────────────
-    const { data: h } = await db
-      .from('content_highlights')
+    const { data: h } = await db.from('content_highlights')
       .select('id,vod_id,title,category,clip_url,vertical_clip_url,start_time,end_time')
-      .eq('id', highlightId)
-      .single();
+      .eq('id', highlightId).single();
 
     if (!h) throw new Error('Highlight ikke funnet i DB');
     const videoUrl = h.clip_url ?? h.vertical_clip_url;
-    if (!videoUrl) throw new Error('Ingen clip_url');
+    if (!videoUrl) throw new Error('Ingen clip_url eller vertical_clip_url');
 
-    wLog('INFO', 'LOADED', { highlightId, title: h.title, category: h.category });
+    wLog('INFO', 'LOADED', { title: h.title, category: h.category, videoUrl: videoUrl.slice(0, 80) });
 
     await db.from('content_highlights').update({
       thumbnail_status:     'GENERATING',
@@ -776,7 +936,7 @@ export async function buildThumbnailV75(highlightId: string, source?: string): P
     // ── 2. Font ───────────────────────────────────────────────────────────────
     const rawFontPath = await prepareFont();
     const { passed: fontOk, fontPath } = await runFontTest(rawFontPath);
-    if (!fontOk) throw new Error('Font test feilet — kan ikke garantere lesbar tekst');
+    if (!fontOk) throw new Error('Font test feilet — tekst kan ikke garanteres lesbar');
     wLog('INFO', 'FONT_READY', { fontPath: fontPath ?? 'system' });
 
     // ── 3. Transcript ─────────────────────────────────────────────────────────
@@ -793,146 +953,150 @@ export async function buildThumbnailV75(highlightId: string, source?: string): P
       : { data: null };
 
     const transcript = (transcriptRows as any[] | null)?.length
-      ? (transcriptRows as any[]).map((s: any) => s.text).join(' ').slice(0, 500)
+      ? (transcriptRows as any[]).map((s: any) => s.text).join(' ').slice(0, 600)
       : null;
 
-    wLog('INFO', 'TRANSCRIPT', { chars: transcript?.length ?? 0 });
+    wLog('INFO', 'TRANSCRIPT', { chars: transcript?.length ?? 0, preview: transcript?.slice(0, 100) ?? 'ingen' });
 
     // ── 4. Download video ─────────────────────────────────────────────────────
-    if (!await downloadVideo(videoUrl, videoPath)) {
-      throw new Error('Video nedlasting feilet (timeout 90s)');
-    }
+    if (!await downloadVideo(videoUrl, videoPath)) throw new Error('Video nedlasting feilet');
     const durationSec = await getVideoDuration(videoPath);
     wLog('INFO', 'VIDEO_READY', { bytes: fs.statSync(videoPath).size, durationSec });
 
-    // ── 5. FRAME_SCORER ───────────────────────────────────────────────────────
+    // ── 5. FRAME_SCORER V2 ────────────────────────────────────────────────────
     const scoredFrames = await extractScoredFrames(videoPath, highlightId, durationSec);
     const topFrame = scoredFrames[0];
 
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'THUMBNAIL_FRAME_SELECTED',
-      title: `Frame valgt: pct=${topFrame.pct}% score=${topFrame.score.toFixed(1)}`,
+      title: `Frame valgt: pct=${topFrame.pct}% finalScore=${topFrame.finalScore.toFixed(1)} — ${topFrame.scoringReason}`,
       severity: 'info',
       metadata: {
         highlightId,
-        frameScore: topFrame.score,
-        framePct: topFrame.pct,
-        brightness: topFrame.brightness,
-        contrast: topFrame.contrast,
-        edgeDensity: topFrame.edgeDensity,
-        saturation: topFrame.saturation,
-        totalFramesScored: scoredFrames.length,
+        framePct:        topFrame.pct,
+        finalScore:      topFrame.finalScore,
+        sharpScore:      topFrame.sharpScore,
+        geminiCtrScore:  topFrame.geminiCtrScore,
+        faceDetected:    topFrame.faceDetected,
+        facePct:         topFrame.facePct,
+        emotion:         topFrame.emotion,
+        hasAction:       topFrame.hasAction,
+        scoringReason:   topFrame.scoringReason,
+        allFrames:       scoredFrames.map(f => ({ pct: f.pct, score: f.finalScore.toFixed(1), face: f.faceDetected, emotion: f.emotion })),
       },
     });
 
-    // ── 6. HOOK ENGINE ────────────────────────────────────────────────────────
-    const hooks = await getHooksMulti(highlightId, topFrame.buf, h.title ?? '', h.category ?? '', transcript);
+    // ── 6. HOOK ENGINE V2 ─────────────────────────────────────────────────────
+    const hooks = await getHooksV2(highlightId, topFrame.buf, h.title ?? '', h.category ?? '', transcript);
 
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'THUMBNAIL_HOOK_SELECTED',
-      title: `Hook engine: "${hooks[0]}" valgt`,
+      title: `Hook valgt: "${hooks[0].text}" (score=${hooks[0].totalScore.toFixed(0)}, source=${hooks[0].source})`,
       severity: 'info',
       metadata: {
         highlightId,
-        hook: hooks[0],
-        hookAlts: hooks.slice(1),
-        hookReason: transcript ? 'transcript_analysis' : 'title_category',
+        winner:       { text: hooks[0].text, totalScore: hooks[0].totalScore, spes: hooks[0].specificityScore, emos: hooks[0].emotionScore, kurv: hooks[0].curiosityScore, konf: hooks[0].conflictScore, source: hooks[0].source },
+        alternatives: hooks.slice(1).map(h => ({ text: h.text, score: h.totalScore.toFixed(0) })),
         hasTranscript: !!transcript,
+        transcriptPreview: transcript?.slice(0, 100) ?? null,
+        forbiddenFilterActive: true,
       },
     });
 
     // ── 7. BUILD 3 VARIANTS ───────────────────────────────────────────────────
     //
-    // Variant A: best frame + hook[0] + attention crop + bottom-left text
-    // Variant B: 2nd frame  + hook[1] + face-zone crop + top-left text
-    // Variant C: best frame + hook[2] + entropy crop   + bottom-center text
+    // A: best frame  + hook[0] + attention crop  + bottom-left text
+    // B: 2nd frame   + hook[1] + face-zone crop  + top-left text
+    // C: best frame  + hook[2] + entropy crop    + bottom-center text
 
     const frameA = scoredFrames[0]?.buf ?? topFrame.buf;
     const frameB = scoredFrames[1]?.buf ?? topFrame.buf;
     const frameC = scoredFrames[0]?.buf ?? topFrame.buf;
 
-    wLog('INFO', 'VARIANTS_BUILD_START', { highlightId, hooks });
+    wLog('INFO', 'VARIANTS_BUILD_START', { hooks: hooks.map(h => h.text) });
 
     const [varA, varB, varC] = await Promise.all([
-      buildVariant({ rawFrame: frameA, hook: hooks[0], cropMode: 'attention',  textPosition: 'bottom-left',   category: h.category ?? '', fontPath }),
-      buildVariant({ rawFrame: frameB, hook: hooks[1], cropMode: 'face-zone',  textPosition: 'top-left',     category: h.category ?? '', fontPath }),
-      buildVariant({ rawFrame: frameC, hook: hooks[2], cropMode: 'entropy',    textPosition: 'bottom-center', category: h.category ?? '', fontPath }),
+      buildVariant({ highlightId, variantLabel: 'A', rawFrame: frameA, hook: hooks[0], cropMode: 'attention',  textPosition: 'bottom-left',   category: h.category ?? '', fontPath }),
+      buildVariant({ highlightId, variantLabel: 'B', rawFrame: frameB, hook: hooks[1], cropMode: 'face-zone',  textPosition: 'top-left',     category: h.category ?? '', fontPath }),
+      buildVariant({ highlightId, variantLabel: 'C', rawFrame: frameC, hook: hooks[2], cropMode: 'entropy',    textPosition: 'bottom-center', category: h.category ?? '', fontPath }),
     ]);
 
     wLog('INFO', 'VARIANTS_BUILT', { bytesA: varA.length, bytesB: varB.length, bytesC: varC.length });
 
     // ── 8. AI CTR SCORING ─────────────────────────────────────────────────────
-    const ctrScores = await scoreCtrVariants([varA, varB, varC], hooks);
-    const [scoreA, scoreB, scoreC] = ctrScores;
+    const [scoreA, scoreB, scoreC] = await scoreCtrVariants([varA, varB, varC], hooks);
 
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'THUMBNAIL_CTR_SCORE',
-      title: `CTR scores: A=${scoreA} B=${scoreB} C=${scoreC}`,
+      title: `CTR scorer: A=${scoreA} B=${scoreB} C=${scoreC}`,
       severity: 'info',
       metadata: {
         highlightId,
-        scoreA, scoreB, scoreC,
-        hookA: hooks[0], hookB: hooks[1], hookC: hooks[2],
+        scores: { A: scoreA, B: scoreB, C: scoreC },
+        hooks: { A: hooks[0].text, B: hooks[1].text, C: hooks[2].text },
+        allAbove80: [scoreA, scoreB, scoreC].filter(s => s >= 80).length,
       },
     });
 
-    // Pick best variant
     const variants = [
-      { buf: varA, score: scoreA, label: 'A', hook: hooks[0], cropMode: 'attention',  textPosition: 'bottom-left' },
-      { buf: varB, score: scoreB, label: 'B', hook: hooks[1], cropMode: 'face-zone',  textPosition: 'top-left' },
-      { buf: varC, score: scoreC, label: 'C', hook: hooks[2], cropMode: 'entropy',    textPosition: 'bottom-center' },
+      { buf: varA, score: scoreA, label: 'A' as const, hook: hooks[0], cropMode: 'attention',  textPosition: 'bottom-left' },
+      { buf: varB, score: scoreB, label: 'B' as const, hook: hooks[1], cropMode: 'face-zone',  textPosition: 'top-left' },
+      { buf: varC, score: scoreC, label: 'C' as const, hook: hooks[2], cropMode: 'entropy',    textPosition: 'bottom-center' },
     ];
     const best = variants.reduce((a, b) => a.score >= b.score ? a : b);
 
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'THUMBNAIL_VARIANT_CHOSEN',
-      title: `Variant ${best.label} valgt (score: ${best.score}, hook: "${best.hook}")`,
+      title: `Variant ${best.label} valgt — CTR score: ${best.score}, hook: "${best.hook.text}"`,
       severity: 'info',
       metadata: {
         highlightId,
-        chosenVariant: best.label,
-        ctrScore: best.score,
-        hook: best.hook,
-        cropMode: best.cropMode,
-        textPosition: best.textPosition,
-        allScores: { A: scoreA, B: scoreB, C: scoreC },
+        chosenVariant:  best.label,
+        ctrScore:       best.score,
+        hook:           best.hook.text,
+        hookScore:      best.hook.totalScore,
+        hookSource:     best.hook.source,
+        cropMode:       best.cropMode,
+        textPosition:   best.textPosition,
+        allScores:      { A: scoreA, B: scoreB, C: scoreC },
+        winner_reason:  `Høyeste CTR score (${best.score}) av tre varianter`,
       },
     });
 
-    wLog('INFO', 'VARIANT_CHOSEN', { variant: best.label, score: best.score, hook: best.hook });
+    wLog('INFO', 'VARIANT_CHOSEN', { variant: best.label, score: best.score, hook: best.hook.text });
 
-    // Debug: write best thumbnail to /tmp for inspection
+    // Debug: dump all variants to /tmp
     try { fs.writeFileSync('/tmp/v75-last-thumbnail.png', best.buf); } catch {}
     try { fs.writeFileSync('/tmp/v75-variantA.png', varA); } catch {}
     try { fs.writeFileSync('/tmp/v75-variantB.png', varB); } catch {}
     try { fs.writeFileSync('/tmp/v75-variantC.png', varC); } catch {}
 
-    // ── 9. Upload best variant ────────────────────────────────────────────────
-    const vodId       = h.vod_id ?? 'unknown';
-    const storagePath = `content-factory/thumbnails/${vodId}/${highlightId}_v75_yt.png`;
+    // ── 9. Upload ─────────────────────────────────────────────────────────────
+    const vodId        = h.vod_id ?? 'unknown';
+    const storagePath  = `content-factory/thumbnails/${vodId}/${highlightId}_v75_yt.png`;
     const thumbnailUrl = await uploadBuffer(db, best.buf, storagePath);
-    if (!thumbnailUrl) throw new Error('Upload feilet');
+    if (!thumbnailUrl) throw new Error('Upload til Supabase storage feilet');
 
-    // Also upload alternates so we can A/B test later
+    // Alt uploads (async, non-blocking)
     Promise.all([
       uploadBuffer(db, varA, `content-factory/thumbnails/${vodId}/${highlightId}_v75_A.png`),
       uploadBuffer(db, varB, `content-factory/thumbnails/${vodId}/${highlightId}_v75_B.png`),
       uploadBuffer(db, varC, `content-factory/thumbnails/${vodId}/${highlightId}_v75_C.png`),
-    ]).catch(() => {}); // don't block on alt uploads
+    ]).catch(() => {});
 
-    wLog('INFO', 'UPLOADED', { url: thumbnailUrl.slice(-50) });
+    wLog('INFO', 'UPLOADED', { url: thumbnailUrl.slice(-60) });
 
     // ── 10. DB update ─────────────────────────────────────────────────────────
     const { error: dbErr } = await db.from('content_highlights').update({
       thumbnail_status:        'DONE',
       thumbnail_youtube_url:   thumbnailUrl,
-      thumbnail_headline:      best.hook,
+      thumbnail_headline:      best.hook.text,
       thumbnail_error:         null,
-      thumbnail_ctr_reason:    `V7.5 · variant:${best.label} · score:${best.score} · crop:${best.cropMode} · hook:${best.hook}`,
+      thumbnail_ctr_reason:    `V7.5 · variant:${best.label} · ctr:${best.score} · crop:${best.cropMode} · hook:${best.hook.text} · hookScore:${best.hook.totalScore.toFixed(0)} · face:${topFrame.faceDetected ? `ja(${topFrame.facePct}%)` : 'nei'} · emosjon:${topFrame.emotion}`,
       thumbnail_reject_count:  0,
       thumbnail_generated_at:  new Date().toISOString(),
       thumbnail_tiktok_url:    null,
@@ -945,23 +1109,28 @@ export async function buildThumbnailV75(highlightId: string, source?: string): P
     logSystemEvent({
       source: 'thumbnail_worker',
       event_type: 'THUMBNAIL_V75_RENDER_COMPLETE',
-      title: `Thumbnail V7.5 ferdig — "${best.hook}" · score:${best.score} · ${best.buf.length} bytes`,
+      title: `Thumbnail V7.5 ferdig — "${best.hook.text}" · score:${best.score} · ${best.buf.length} bytes`,
       severity: 'info',
       metadata: {
         highlightId,
         thumbnailUrl,
-        chosenVariant: best.label,
-        ctrScore: best.score,
-        hook: best.hook,
-        cropMode: best.cropMode,
-        topFramePct: topFrame.pct,
-        topFrameScore: topFrame.score,
-        outputBytes: best.buf.length,
-        source: source ?? 'unknown',
+        chosenVariant:  best.label,
+        ctrScore:       best.score,
+        hook:           best.hook.text,
+        hookScores:     { spes: best.hook.specificityScore, emos: best.hook.emotionScore, kurv: best.hook.curiosityScore, konf: best.hook.conflictScore },
+        hookSource:     best.hook.source,
+        cropMode:       best.cropMode,
+        framePct:       topFrame.pct,
+        frameScore:     topFrame.finalScore,
+        faceDetected:   topFrame.faceDetected,
+        facePct:        topFrame.facePct,
+        emotion:        topFrame.emotion,
+        outputBytes:    best.buf.length,
+        source:         source ?? 'unknown',
       },
     });
 
-    wLog('INFO', 'DONE', { highlightId, url: thumbnailUrl, score: best.score, hook: best.hook });
+    wLog('INFO', 'DONE', { highlightId, url: thumbnailUrl, score: best.score, hook: best.hook.text, face: topFrame.faceDetected, emotion: topFrame.emotion });
 
   } catch (e: any) {
     const msg = e.message?.slice(0, 200) ?? 'Ukjent feil';
@@ -983,7 +1152,6 @@ export async function buildThumbnailV75(highlightId: string, source?: string): P
     } catch {}
 
     throw e;
-
   } finally {
     try { if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath); } catch {}
   }

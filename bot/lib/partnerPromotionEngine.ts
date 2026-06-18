@@ -76,6 +76,7 @@ export interface PromotionContext {
   minutesSinceLastPost: number;
   postsThisStream: number;
   settings: PartnerBotSettings;
+  recentRaidAt?: number | null;      // epoch ms of last raid; null/undefined = no raid
 }
 
 export interface PromotionDecision {
@@ -93,6 +94,14 @@ export interface PromotionDecision {
   cooldownApplied: boolean;
   triggerType: 'chat_silence' | 'viewer_peak' | 'context_match' | 'timer' | 'none';
   proposalId?: string | null;        // set when requireApproval=true and proposal was stored
+  // V2: per-dimension scoring breakdown
+  scoringDetail?: {
+    relevance: number;
+    historicalCtr: number;
+    audienceMatch: number;
+    timingScore: number;
+    cooldownPenalty: number;
+  } | null;
 }
 
 interface ScoredPartner {
@@ -334,6 +343,20 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
   if (ctx.postsThisStream >= settings.maxPostsPerStream) return skip(`Maks antall promoer (${settings.maxPostsPerStream}) nådd denne streamen`);
   if (ctx.minutesSinceLastPost < settings.cooldownMinutes) return skip(`Cooldown aktiv: ${Math.round(settings.cooldownMinutes - ctx.minutesSinceLastPost)} min igjen`);
 
+  // V2 gate: high chat activity → block promo (not the right moment)
+  // Threshold: >15 msgs/min = active conversation, promo would feel intrusive
+  if (ctx.chatMessagesLastMinute > 15) {
+    return skip(`Chat for aktiv (${ctx.chatMessagesLastMinute} msgs/min > 15 — ikke riktig øyeblikk for promo)`);
+  }
+
+  // V2 gate: raid recently happened → block promo for 10 min
+  // Reason: raid moments are high-energy social moments; promo breaks the community vibe
+  const RAID_COOLDOWN_MS = 10 * 60 * 1000;
+  if (ctx.recentRaidAt && Date.now() - ctx.recentRaidAt < RAID_COOLDOWN_MS) {
+    const minsLeft = Math.ceil((RAID_COOLDOWN_MS - (Date.now() - ctx.recentRaidAt)) / 60_000);
+    return skip(`Raid akkurat skjedd — venter ${minsLeft} min før promo`);
+  }
+
   // Fetch candidates (featured + random to get variety)
   const [featured, random] = await Promise.all([
     getFeaturedPartner(),
@@ -398,6 +421,14 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     score: best.score, triggerType, channel, requireApproval: settings.requireApproval,
   });
 
+  const scoringDetail = {
+    relevance:      best.relevanceScore,
+    historicalCtr:  best.historicalScore,
+    audienceMatch:  best.contextScore,
+    timingScore:    triggerType === 'viewer_peak' ? 0.9 : triggerType === 'chat_silence' ? 0.7 : triggerType === 'context_match' ? 0.8 : 0.5,
+    cooldownPenalty: best.cooldownPenalty,
+  };
+
   // requireApproval: store proposal, do not send yet
   if (settings.requireApproval) {
     const proposalId = await storeProposal({
@@ -412,7 +443,7 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       messageTwitch: msgTwitch, messageDiscord: msgDiscord,
       affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
       confidence: best.score, cooldownApplied: best.cooldownPenalty > 0,
-      triggerType, proposalId,
+      triggerType, proposalId, scoringDetail,
     };
   }
 
@@ -424,6 +455,6 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     messageTwitch: msgTwitch, messageDiscord: msgDiscord,
     affiliateUrl: best.partner.finalUrl, disclosureText: disclosure,
     confidence: best.score, cooldownApplied: best.cooldownPenalty > 0,
-    triggerType, proposalId: null,
+    triggerType, proposalId: null, scoringDetail,
   };
 }

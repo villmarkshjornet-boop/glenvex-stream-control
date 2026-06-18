@@ -69,6 +69,7 @@ let _chatMsgsLastMinute = 0;
 let _recentChatLines: string[] = [];
 let _sistePartnerPromo = 0;
 let _promoerDenneStream = 0;
+let _sisteRaidTidspunkt: number | null = null;
 
 // ─── Multi-tenant ekstern kanal-ruting ────────────────────────────────────────
 
@@ -407,6 +408,7 @@ export function startTwitchBot() {
           minutesSinceLastPost: minutesSinceLastPromo,
           postsThisStream: _promoerDenneStream,
           settings,
+          recentRaidAt: _sisteRaidTidspunkt,
         }).catch(() => null);
 
         if (!decision) return;
@@ -450,6 +452,7 @@ export function startTwitchBot() {
   // ─── RAID ──────────────────────────────────────────────────────────────────
 
   client.on('raided', async (channel, username, viewers) => {
+    _sisteRaidTidspunkt = Date.now();
     trackRaid(username, viewers);
     logBotAgentEvent({ source: 'twitch', event_type: 'raid', username, importance_score: Math.min(100, viewers / 2), metadata: { viewers } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_EVENT_RECEIVED', title: `Raid fra ${username}: ${viewers} seere`, severity: 'info', metadata: { type: 'raid', username, viewers } });
