@@ -22,6 +22,9 @@ export interface CreatorState {
     phase: StreamPhase;
     durationMin: number | null;
     energy: EnergyLevel;
+    // Historical 30-day viewer average — cached from stream_history at stream start.
+    // Avoids a DB round-trip on every promo check. Null until first stream in session.
+    avgViewers30d: number | null;
   };
 
   community: {
@@ -64,6 +67,7 @@ function makeDefaultState(workspaceId: string): CreatorState {
       phase: null,
       durationMin: null,
       energy: 'normal',
+      avgViewers30d: null,
     },
     community: {
       chatActivity: 'silent',

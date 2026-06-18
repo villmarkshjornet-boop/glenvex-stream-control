@@ -7,6 +7,7 @@
 import { WORKSPACE_ID } from './supabase';
 import { logSystemEvent } from './systemEvents';
 import { updateCreatorState, getCreatorState } from './creatorState';
+import { getCreatorContext } from './creatorContext';
 
 export interface StreamLivePayload {
   streamId: string;
@@ -33,6 +34,13 @@ export function onStreamLive(payload: StreamLivePayload, workspaceId?: string): 
     state.stream.durationMin = 0;
     state.stream.energy = 'high';
   });
+
+  // Phase 6: cache avgViewers30d at stream start — one DB call per session, not per promo check
+  getCreatorContext(ws, 'stream').then(ctx => {
+    if (ctx.avgViewers30d !== null) {
+      updateCreatorState(ws, s => { s.stream.avgViewers30d = ctx.avgViewers30d; });
+    }
+  }).catch(() => {});
 
   logSystemEvent({
     workspaceId: ws,
