@@ -43,7 +43,7 @@ import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
 import { initCreatorBrain } from './lib/creatorBrain';
-import { onStreamLive, onStreamOffline, onViewerUpdate } from './lib/streamStateSync';
+import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate } from './lib/streamStateSync';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
@@ -312,6 +312,8 @@ async function checkLive() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ streamId: twitchVodId, twitchVodUrl }),
           }).catch(console.error);
+          // Phase 3: double-write to Creator State (fetch above unchanged)
+          onContentPipelineUpdate({ status: 'VOD_STARTED', vodId: twitchVodId });
         });
       } catch {}
     }

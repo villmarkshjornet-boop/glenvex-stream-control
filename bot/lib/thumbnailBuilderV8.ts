@@ -26,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
+import { onContentPipelineUpdate } from './streamStateSync';
 
 const execAsync = require('util').promisify(require('child_process').exec);
 
@@ -1529,6 +1530,8 @@ export async function buildThumbnailV8(highlightId: string, source?: string): Pr
       faceDetected: best.frame.faceDetected, uiClutter: best.frame.uiClutter,
       totalVariants: variants.length, outputBytes: best.buf.length, source: source ?? 'unknown',
     });
+    // Phase 3: double-write to Creator State (logEv above unchanged)
+    onContentPipelineUpdate({ status: 'THUMBNAIL_DONE', highlightId });
 
     wLog('INFO', 'V8_DONE', { highlightId, url: url.slice(-60), score: best.selfReview?.total, hook: best.hook.text });
 
@@ -1537,6 +1540,8 @@ export async function buildThumbnailV8(highlightId: string, source?: string): Pr
     wLog('ERROR', 'V8_FAILED', { highlightId, err: msg });
 
     logEv('THUMBNAIL_V8_FAILED', `Thumbnail V8 feilet: ${msg}`, { highlightId, source: source ?? 'unknown', reason: msg });
+    // Phase 3: double-write to Creator State (logEv above unchanged)
+    onContentPipelineUpdate({ status: 'THUMBNAIL_FAILED', highlightId });
 
     try {
       await db?.from('content_highlights').update({ thumbnail_status: 'FAILED', thumbnail_error: `V8: ${msg}` }).eq('id', highlightId);
