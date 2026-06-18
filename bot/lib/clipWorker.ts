@@ -13,6 +13,7 @@ import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { logBotEvent } from './botEvents';
 import { logSystemEvent } from './systemEvents';
+import { onContentPipelineUpdate } from './streamStateSync';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'content-factory', 'clips');
@@ -177,6 +178,8 @@ async function lastOppOgFerdigstill(
         eksportformat: '16x9+9x16',
       },
     });
+    // Phase 2: double-write to Creator State (existing logSystemEvent above unchanged)
+    onContentPipelineUpdate({ status: 'CLIP_DONE', highlightId: hId, vodId });
     return true;
   }
 

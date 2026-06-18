@@ -43,6 +43,7 @@ import { withCron, logApiError } from './lib/observability';
 import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
 import { initCreatorBrain } from './lib/creatorBrain';
+import { onStreamLive, onStreamOffline, onViewerUpdate } from './lib/streamStateSync';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
@@ -437,16 +438,22 @@ async function checkLive() {
       updateStreamSyklus({ stream_start_at: new Date().toISOString(), sist_live_id: stream.id }).catch(() => {});
       logBotEvent('stream_live', { tittel: stream.title ?? '', spill: stream.game ?? '' });
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_live', importance_score: 100, metadata: { title: stream.title, game: stream.game, streamId: stream.id } });
+      // Phase 2: double-write to Creator State (existing streamHistory unchanged)
+      onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
         startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
         addLog('info', `Stream Coach: gjenopprettet session for pågående stream "${stream.title}"`, 'OK');
+        // Phase 2: restore Creator State on bot restart during live stream
+        onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
       }
       updateSession(stream.viewerCount ?? 0);
+      onViewerUpdate(stream.viewerCount ?? 0);
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
       saveSettings({ lastNotifiedStreamId: null });
       await endSession(0);
+      onStreamOffline();
       logBotEvent('stream_offline', {});
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
       logSystemEvent({
