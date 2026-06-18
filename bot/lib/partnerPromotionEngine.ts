@@ -473,6 +473,28 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
       `Partnerforslag opprettet: ${best.partner.navn} (score: ${best.score.toFixed(2)})`,
       { reasonCode: 'PROPOSAL_CREATED', proposalId, partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType, channel });
 
+    // Phase 10: log proposal decision to Decision Engine.
+    // decisionType 'proposal_created' distinguishes from 'promotion_candidate' (auto-send path).
+    // proposalId in inputContext links ai_agent_decisions ↔ partner_proposals.
+    // outcome stays 'pending' until recordOutcome() is wired (requires approval endpoint).
+    void logDecision({
+      workspaceId,
+      agentType: 'partner_promotion',
+      decisionType: 'proposal_created',
+      decisionSummary: `FORSLAG: ${best.partner.navn} — score: ${best.score.toFixed(2)}, trigger: ${triggerType}`,
+      inputContext: {
+        reasonCode: 'PROPOSAL_CREATED',
+        proposalId,
+        partnerId: best.partner.id,
+        partnerName: best.partner.navn,
+        score: best.score,
+        triggerType,
+        channel,
+        viewerCount: ctx.viewerCount,
+        game: ctx.game,
+      },
+    });
+
     return {
       shouldPromote: false,
       reason: `Forslag lagret for godkjenning (${best.partner.navn}, score ${best.score.toFixed(2)})`,
