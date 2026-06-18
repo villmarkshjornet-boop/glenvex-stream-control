@@ -2,6 +2,18 @@
 // Read < 5ms (always in-memory). Only Creator Brain kernel mutates this.
 // V3 Architecture: Section 5 — Creator State + Supplement A (kernel owns state)
 
+// Shared type for partner data cached from Creator Context.
+// Defined here (not partnerHelper) to avoid circular imports.
+export interface CachedPartner {
+  id: string;
+  navn: string;
+  beskrivelse: string | null;
+  affiliateUrl: string | null;
+  fallbackUrl: string | null;
+  rabattkode: string | null;
+  prioritet: number;
+}
+
 export type StreamPhase = 'pre' | 'opening' | 'mid' | 'closing' | 'post' | null;
 export type EnergyLevel = 'high' | 'normal' | 'low' | 'declining';
 export type ChatActivity = 'spike' | 'high' | 'normal' | 'low' | 'silent';
@@ -43,6 +55,13 @@ export interface CreatorState {
     pendingThumbnailIds: string[];
   };
 
+  // Active partner list cached from Creator Context at startup and stream-start.
+  // partnerHelper reads from here — no module queries the partners table directly for reads.
+  partners: {
+    activePartners: CachedPartner[];
+    cachedAt: Date | null;
+  };
+
   health: {
     botDiscord: ServiceStatus;
     botTwitch: ServiceStatus;
@@ -82,6 +101,10 @@ function makeDefaultState(workspaceId: string): CreatorState {
       vodStatus: null,
       activeClipIds: [],
       pendingThumbnailIds: [],
+    },
+    partners: {
+      activePartners: [],
+      cachedAt: null,
     },
     health: {
       botDiscord: 'ok',

@@ -8,6 +8,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getCreatorState, CachedPartner } from './creatorState';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
 
@@ -34,68 +35,56 @@ export interface PartnerInfo {
   missedAffiliate: boolean;
 }
 
-export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
-  const sb = getSb();
-  if (!sb) return null;
-  try {
-    const { data } = await sb
-      .from('partners')
-      .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
-      .eq('aktiv', true)
-      .gte('prioritet', 100) // featured = prioritet >= 100
-      .order('prioritet', { ascending: false })
-      .limit(1);
-    if (!data || data.length === 0) return null;
-    const raw = data[0];
-    const affiliateUrl: string | null = raw.affiliate_link?.trim() || null;
-    const fallbackUrl: string | null = raw.nettadresse?.trim() || null;
-    const finalUrl = affiliateUrl ?? fallbackUrl;
-    if (!finalUrl) return null;
-    return { id: raw.id, navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost: true, missedAffiliate: !affiliateUrl && !!fallbackUrl };
-  } catch { return null; }
+// Maps a CachedPartner from Creator State to the PartnerInfo shape used by callers.
+function mapCached(raw: CachedPartner): PartnerInfo | null {
+  const finalUrl = raw.affiliateUrl ?? raw.fallbackUrl;
+  if (!finalUrl) return null;
+  const missedAffiliate = !raw.affiliateUrl && !!raw.fallbackUrl;
+  if (missedAffiliate) {
+    console.warn(`[AFFILIATE_LINK_MISSING] Partner: "${raw.navn}" – mangler affiliate_link, bruker nettadresse som fallback`);
+  }
+  return {
+    id: raw.id,
+    navn: raw.navn,
+    beskrivelse: raw.beskrivelse,
+    affiliateUrl: raw.affiliateUrl,
+    fallbackUrl: raw.fallbackUrl,
+    finalUrl,
+    rabattkode: raw.rabattkode,
+    canPost: true,
+    missedAffiliate,
+  };
 }
 
+// Phase 7: reads from Creator State (populated at startup + stream start by Creator Brain).
+// Returns null if partner cache is empty (bot just started, cache not yet ready).
+export async function getFeaturedPartner(): Promise<PartnerInfo | null> {
+  const partners = getCreatorState(WORKSPACE_ID).partners.activePartners;
+  const raw = partners.find(p => p.prioritet >= 100) ?? null;
+  return raw ? mapCached(raw) : null;
+}
+
+// Phase 7: reads from Creator State. Selection logic (90% featured) unchanged.
 export async function getRandomActivePartner(): Promise<PartnerInfo | null> {
-  const sb = getSb();
-  if (!sb) return null;
+  const partners = getCreatorState(WORKSPACE_ID).partners.activePartners;
+  if (partners.length === 0) return null;
 
-  try {
-    const { data } = await sb
-      .from('partners')
-      .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
-      .eq('aktiv', true)
-      .order('prioritet', { ascending: false })
-      .limit(10);
+  // Featured partner (prioritet >= 100) gets 90% of all promo slots
+  const featured = partners.find(p => p.prioritet >= 100) ?? null;
+  let raw: CachedPartner;
+  if (featured && Math.random() < 0.90) {
+    raw = featured;
+  } else {
+    const pool = partners.filter(p => p.prioritet < 100).slice(0, 3);
+    const candidates = pool.length > 0 ? pool : partners.slice(0, 3);
+    raw = candidates[Math.floor(Math.random() * candidates.length)];
+  }
 
-    if (!data || data.length === 0) return null;
-
-    // Featured partner (prioritet >= 100) gets 90% of all promo slots
-    const featured = data.find(p => (p.prioritet ?? 0) >= 100);
-    let raw: any;
-    if (featured && Math.random() < 0.90) {
-      raw = featured;
-    } else {
-      const pool = data.filter(p => (p.prioritet ?? 0) < 100).slice(0, 3);
-      const candidates = pool.length > 0 ? pool : data.slice(0, 3);
-      raw = candidates[Math.floor(Math.random() * candidates.length)];
-    }
-
-    const affiliateUrl: string | null = raw.affiliate_link?.trim() || null;
-    const fallbackUrl: string | null = raw.nettadresse?.trim() || null;
-    const finalUrl = affiliateUrl ?? fallbackUrl;
-    const canPost = finalUrl !== null;
-    const missedAffiliate = !affiliateUrl && fallbackUrl !== null;
-
-    if (missedAffiliate) {
-      console.warn(`[AFFILIATE_LINK_MISSING] Partner: "${raw.navn}" – mangler affiliate_link, bruker nettadresse som fallback`);
-    }
-    if (!canPost) {
-      console.warn(`[AFFILIATE_LINK_MISSING] Partner: "${raw.navn}" – INGEN URL, skipper promo`);
-      return null;
-    }
-
-    return { id: raw.id, navn: raw.navn, beskrivelse: raw.beskrivelse ?? null, affiliateUrl, fallbackUrl, finalUrl, rabattkode: raw.rabattkode ?? null, canPost, missedAffiliate };
-  } catch { return null; }
+  if (!raw.affiliateUrl && !raw.fallbackUrl) {
+    console.warn(`[AFFILIATE_LINK_MISSING] Partner: "${raw.navn}" – INGEN URL, skipper promo`);
+    return null;
+  }
+  return mapCached(raw);
 }
 
 /**

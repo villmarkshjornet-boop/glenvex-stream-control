@@ -13,7 +13,7 @@ import { getCreatorContext } from './creatorContext';
 import { getMemory, upsertMemory } from './memoryEngine';
 import { logDecision, recordOutcome, getRecentDecisions } from './decisionEngine';
 
-export type { CreatorState, StreamPhase, EnergyLevel, ChatActivity, ServiceStatus } from './creatorState';
+export type { CreatorState, StreamPhase, EnergyLevel, ChatActivity, ServiceStatus, CachedPartner } from './creatorState';
 export type { ContextPurpose, CreatorContext, WorkspaceInfo, RecentEvent, RecentDecision } from './creatorContext';
 export type { MemoryRow, UpsertMemoryOpts } from './memoryEngine';
 export type { LogDecisionOpts, DecisionRecord } from './decisionEngine';
@@ -37,13 +37,23 @@ export async function initCreatorBrain(workspaceId?: string): Promise<void> {
     title: 'Creator Brain kjernen er aktiv',
     severity: 'info',
     metadata: {
-      phase: 'v3-phase1',
-      capabilities: ['state', 'context', 'memory', 'decision'],
+      phase: 'v3-phase7',
+      capabilities: ['state', 'context', 'memory', 'decision', 'partner_cache'],
       migrated: false,
     },
   });
 
-  console.log(`[CreatorBrain] Initialisert for workspace "${ws}" (Phase 1)`);
+  // Phase 7: cache active partners at startup — partnerHelper reads from Creator State
+  getCreatorContext(ws, 'partner').then(ctx => {
+    if (ctx.activePartners.length > 0) {
+      updateCreatorState(ws, s => {
+        s.partners.activePartners = ctx.activePartners;
+        s.partners.cachedAt = new Date();
+      });
+    }
+  }).catch(() => {});
+
+  console.log(`[CreatorBrain] Initialisert for workspace "${ws}" (Phase 7)`);
 }
 
 export function getBrainState(workspaceId?: string) {

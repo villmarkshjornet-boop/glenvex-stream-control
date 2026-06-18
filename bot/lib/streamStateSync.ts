@@ -35,11 +35,15 @@ export function onStreamLive(payload: StreamLivePayload, workspaceId?: string): 
     state.stream.energy = 'high';
   });
 
-  // Phase 6: cache avgViewers30d at stream start — one DB call per session, not per promo check
-  getCreatorContext(ws, 'stream').then(ctx => {
-    if (ctx.avgViewers30d !== null) {
-      updateCreatorState(ws, s => { s.stream.avgViewers30d = ctx.avgViewers30d; });
-    }
+  // Phase 6+7: refresh stream avg + partner cache on stream start (one round-trip via 'full')
+  getCreatorContext(ws, 'full').then(ctx => {
+    updateCreatorState(ws, s => {
+      if (ctx.avgViewers30d !== null) s.stream.avgViewers30d = ctx.avgViewers30d;
+      if (ctx.activePartners.length > 0) {
+        s.partners.activePartners = ctx.activePartners;
+        s.partners.cachedAt = new Date();
+      }
+    });
   }).catch(() => {});
 
   logSystemEvent({
