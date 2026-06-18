@@ -40,6 +40,9 @@ export interface CreatorContext {
   recentEvents: RecentEvent[];
   recentDecisions: RecentDecision[];
   recentMemoryKeys: string[];
+  // Historical average viewers over the last 30 days — null if no stream_history yet.
+  // Only populated when purpose is 'stream' or 'full'.
+  avgViewers30d: number | null;
 }
 
 export async function getCreatorContext(
@@ -57,13 +60,16 @@ export async function getCreatorContext(
     recentEvents: [],
     recentDecisions: [],
     recentMemoryKeys: [],
+    avgViewers30d: null,
   };
 
   if (!db) return ctx;
 
   const eventLimit = purpose === 'health' || purpose === 'full' ? 20 : 10;
+  const needsHistory = purpose === 'stream' || purpose === 'full';
+  const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
-  const [workspaceRes, eventsRes, decisionsRes, memoryRes] = await Promise.all([
+  const [workspaceRes, eventsRes, decisionsRes, memoryRes, historyRes] = await Promise.all([
     db.from('workspaces')
       .select('id,brand_name,twitch_channel_name,created_at')
       .eq('id', ws)
@@ -83,6 +89,14 @@ export async function getCreatorContext(
       .eq('workspace_id', ws)
       .order('occurrence_count', { ascending: false })
       .limit(10),
+    needsHistory
+      ? db.from('stream_history')
+          .select('avg_viewers')
+          .eq('workspace_id', ws)
+          .not('ended_at', 'is', null)
+          .gte('ended_at', cutoff30d)
+          .limit(30)
+      : Promise.resolve({ data: [] as Array<{ avg_viewers: number | null }> }),
   ]);
 
   const w = workspaceRes.data?.[0];
@@ -116,6 +130,12 @@ export async function getCreatorContext(
   ctx.recentMemoryKeys = (memoryRes.data ?? []).map(
     (m: Record<string, any>) => `${m.memory_type}:${m.key}`
   );
+
+  const histRows = (historyRes.data ?? []) as Array<{ avg_viewers: number | null }>;
+  if (histRows.length > 0) {
+    const sum = histRows.reduce((acc, r) => acc + (r.avg_viewers ?? 0), 0);
+    ctx.avgViewers30d = Math.round(sum / histRows.length);
+  }
 
   return ctx;
 }
