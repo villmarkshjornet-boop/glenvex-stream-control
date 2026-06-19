@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { tidSiden } from '@/components/dashboard/helpers';
+import { PageHeader } from '@/components/ui';
 
 interface PartnerStats {
   contentLog: {
@@ -79,14 +81,6 @@ const TOM_PARTNER: Partial<Partner> = {
   aktiv: true, featured: false, ownedBrand: false, prioritet: 5,
 };
 
-function tidSiden(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(ms / 60_000);
-  if (min < 60) return `${min}m`;
-  const t = Math.floor(min / 60);
-  if (t < 24) return `${t}t`;
-  return `${Math.floor(t / 24)}d`;
-}
 
 export default function PartnerHubPage() {
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -188,23 +182,16 @@ export default function PartnerHubPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Partner Hub</h1>
-          <p className="text-xs text-g-muted mt-0.5">Affiliate-avtaler, sponsorer og egne merker</p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader title="Partner Hub" subtitle="Affiliate-avtaler, sponsorer og egne merker">
           <button onClick={() => postTilDiscord()} disabled={promoterer}
-            className="px-3 py-2 bg-g-bg border border-g-border hover:border-g-green/30 text-g-muted hover:text-g-green text-xs font-bold rounded transition-all">
+            className="px-3 py-2 bg-g-bg border border-g-border hover:border-g-green/30 text-g-muted hover:text-g-green text-xs font-bold rounded-lg transition-all">
             {promoterer ? 'Poster...' : '▶ Auto-promoter'}
           </button>
           <button onClick={() => { setVisForm(true); setRedigerId(null); setForm(TOM_PARTNER); }}
-            className="px-3 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all">
+            className="px-3 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded-lg transition-all">
             + Ny partner
           </button>
-        </div>
-      </div>
+      </PageHeader>
 
       {promotertMsg && (
         <p className={`text-xs font-mono ${promotertMsg.startsWith('✓') ? 'text-g-green' : 'text-red-400'}`}>{promotertMsg}</p>

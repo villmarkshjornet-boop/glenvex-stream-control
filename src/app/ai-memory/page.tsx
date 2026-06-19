@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { tidSiden } from '@/components/dashboard/helpers';
+import { PageHeader } from '@/components/ui';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -53,14 +55,6 @@ interface MemoryData {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function tidSiden(iso: string): string {
-  const sek = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (sek < 60) return 'akkurat nå';
-  if (sek < 3600) return `${Math.floor(sek / 60)}m siden`;
-  if (sek < 86400) return `${Math.floor(sek / 3600)}t siden`;
-  return `${Math.floor(sek / 86400)}d siden`;
-}
 
 function pct(score: number): string {
   return `${Math.round(score * 100)}%`;
@@ -249,16 +243,11 @@ export default function AiMemoryPage() {
   return (
     <div className="max-w-5xl mx-auto space-y-4">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">AI Memory</h1>
-          <p className="text-[9px] text-g-muted mt-0.5">Delt intelligens · Alle agenter lærer sammen</p>
-        </div>
-        <button onClick={hent} className="px-2.5 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+      <PageHeader title="AI Memory" subtitle="Delt intelligens · Alle agenter lærer sammen">
+        <button onClick={hent} className="px-2.5 py-1.5 border border-g-border rounded-lg text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-bold">
           ↻ Refresh
         </button>
-      </div>
+      </PageHeader>
 
       {/* Sammendrag */}
       {data && (

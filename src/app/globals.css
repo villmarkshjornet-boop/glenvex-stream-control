@@ -4,55 +4,116 @@
 
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+
 :root {
   --g-green: #00ff41;
-  --g-bg: #050505;
-  --g-card: #0d1117;
+  --g-bg:    #050505;
+  --g-card:  #0d1117;
+
+  /* Spacing scale */
+  --space-card:   1.25rem;   /* 20px — standard card padding (p-5) */
+  --space-section: 0.75rem;  /* 12px — between elements within a card */
+
+  /* Animation speeds */
+  --transition-fast:   100ms;
+  --transition-base:   200ms;
+  --transition-slow:   300ms;
 }
 
-* {
-  box-sizing: border-box;
-}
+/* ── Base reset ─────────────────────────────────────────────────────────────── */
 
-html,
-body {
+* { box-sizing: border-box; }
+
+html, body {
   background-color: var(--g-bg);
   color: #c8f5c8;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-::-webkit-scrollbar-track {
-  background: #080c08;
-}
-::-webkit-scrollbar-thumb {
-  background: #1a2f1a;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #00ff4140;
+a { color: inherit; }
+
+/* ── Typography scale ───────────────────────────────────────────────────────── */
+/* Use these classes consistently across all pages.
+   Never use arbitrary font sizes without a reason. */
+
+@layer components {
+  /* Page title — used in PageHeader component */
+  .t-page { @apply text-xl font-black tracking-wider text-g-text uppercase; }
+
+  /* Section header / card title */
+  .t-section { @apply text-[10px] font-bold tracking-widest uppercase text-g-muted; }
+
+  /* Card sub-label / metadata */
+  .t-label { @apply text-[9px] font-bold tracking-widest uppercase text-g-muted/60; }
+
+  /* Body text */
+  .t-body { @apply text-sm text-g-text leading-relaxed; }
+
+  /* Small body / detail text */
+  .t-detail { @apply text-xs text-g-muted leading-snug; }
+
+  /* Caption / timestamp */
+  .t-caption { @apply text-[9px] text-g-muted/50; }
+
+  /* Mono numbers / data */
+  .t-mono { @apply font-mono text-g-green font-black; }
 }
 
-/* Neon glow utility */
-.glow-green {
-  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5), 0 0 20px rgba(0, 255, 65, 0.25);
-}
-.glow-green-box {
-  box-shadow: 0 0 16px rgba(0, 255, 65, 0.15);
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1a2f1a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 255, 65, 0.25); }
+
+/* ── Selection ──────────────────────────────────────────────────────────────── */
+
+::selection { background-color: rgba(0, 255, 65, 0.18); color: #00ff41; }
+
+/* ── Glow utilities ─────────────────────────────────────────────────────────── */
+
+.glow-green     { text-shadow: 0 0 10px rgba(0,255,65,0.5), 0 0 20px rgba(0,255,65,0.25); }
+.glow-green-box { box-shadow:  0 0 16px rgba(0,255,65,0.15); }
+
+/* ── Focus visible ──────────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid rgba(0, 255, 65, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-/* Selection */
-::selection {
-  background-color: rgba(0, 255, 65, 0.2);
-  color: #00ff41;
+/* ── Micro animations ───────────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Remove Next.js default styles */
-a {
-  color: inherit;
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: 1000px; }
+}
+
+.animate-fade-in { animation: fadeIn var(--transition-base) ease-out; }
+
+/* ── Card hover micro-interaction ─────────────────────────────────────────── */
+
+.card-hover {
+  transition: border-color var(--transition-base), background-color var(--transition-base);
+}
+.card-hover:hover {
+  border-color: rgba(26, 47, 26, 0.8);
+  background-color: rgba(255,255,255,0.01);
+}
+
+/* ── Print styles (for PDF export) ─────────────────────────────────────────── */
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; color: #111; }
 }

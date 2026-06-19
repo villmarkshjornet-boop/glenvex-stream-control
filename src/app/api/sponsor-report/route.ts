@@ -86,7 +86,343 @@ function periodMetrics(history: any[], dager: number) {
   return { streams, avgV, peakV, hoursStr, followersGained };
 }
 
-export async function GET() {
+// ── Per-partner report handler ────────────────────────────────────────────────
+
+async function handlePartnerReport(request: Request): Promise<Response> {
+  const { searchParams } = new URL(request.url);
+  const partnerName = searchParams.get('partner') ?? '';
+  const periodDays  = searchParams.get('period') === '7d' ? 7 : 30;
+  const wsId = getWorkspaceId();
+  const db   = getDb();
+
+  await logSystemEvent({
+    source: 'sponsor_manager',
+    event_type: 'SPONSOR_REPORT_STARTED',
+    title: `Partnerrapport startet: ${partnerName}`,
+    severity: 'info',
+    metadata: { partnerName, periodDays, workspaceId: wsId },
+  });
+
+  try {
+    const since90d   = new Date(Date.now() - 90 * 24 * 3600_000).toISOString();
+    const sinceP     = new Date(Date.now() - periodDays * 24 * 3600_000).toISOString();
+    const since7d    = new Date(Date.now() - 7  * 24 * 3600_000).toISOString();
+    const since30d   = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+
+    const [logsRes, proposalsRes, decisionsRes, streamsRes, knowledgeRes, allKnowledgeRes, eventsRes, highlightsRes, vodsRes, partnerRes] = await Promise.all([
+      db?.from('partner_content_log')
+        .select('id, partner_name, platform, channel, posted_at, affiliate_url_used, discord_message_id, clicks')
+        .eq('workspace_id', wsId).eq('partner_name', partnerName)
+        .gte('posted_at', since90d).order('posted_at', { ascending: false }).limit(500),
+      db?.from('partner_proposals')
+        .select('id, partner_name, platform, channel, status, confidence, created_at, approved_at, sent_at')
+        .eq('workspace_id', wsId).eq('partner_name', partnerName)
+        .order('created_at', { ascending: false }).limit(500),
+      db?.from('ai_agent_decisions')
+        .select('id, decision_summary, outcome, input_context, created_at')
+        .eq('workspace_id', wsId).eq('agent_type', 'partner_promotion')
+        .gte('created_at', since90d).order('created_at', { ascending: false }).limit(500),
+      db?.from('stream_history')
+        .select('id, stream_id, title, started_at, ended_at, peak_viewers, avg_viewers, duration_minutes, game')
+        .eq('workspace_id', wsId).gte('started_at', since90d)
+        .order('started_at', { ascending: false }).limit(200),
+      db?.from('creator_knowledge')
+        .select('knowledge_type, key, title, finding, confidence, evidence_count, evidence_summary')
+        .eq('workspace_id', wsId)
+        .in('key', [`partner:${partnerName}`, `partner_perf:${partnerName}`]),
+      db?.from('creator_knowledge')
+        .select('knowledge_type, key, title, finding, confidence, evidence_count, evidence_summary')
+        .eq('workspace_id', wsId)
+        .not('key', 'like', `partner:%`).limit(20),
+      db?.from('system_events')
+        .select('event_type, title, metadata, created_at')
+        .eq('workspace_id', wsId).gte('created_at', since90d)
+        .limit(500),
+      db?.from('content_highlights')
+        .select('id, title, clip_status, created_at')
+        .gte('created_at', since90d).order('created_at', { ascending: false }).limit(500),
+      db?.from('content_vods')
+        .select('id, title, status, created_at')
+        .eq('workspace_id', wsId).gte('created_at', since90d)
+        .order('created_at', { ascending: false }).limit(100),
+      db?.from('partners')
+        .select('navn, aktiv, siste_promotert, eksponering')
+        .eq('workspace_id', wsId).eq('navn', partnerName).maybeSingle(),
+    ]);
+
+    const logs       = logsRes?.data       ?? [];
+    const proposals  = proposalsRes?.data  ?? [];
+    const allDecisions = decisionsRes?.data ?? [];
+    const streams    = streamsRes?.data    ?? [];
+    const pKnowledge = knowledgeRes?.data  ?? [];
+    const genKnowledge = allKnowledgeRes?.data ?? [];
+    const events     = eventsRes?.data     ?? [];
+    const highlights = highlightsRes?.data ?? [];
+    const vods       = vodsRes?.data       ?? [];
+    const partnerRow = partnerRes?.data    ?? null;
+
+    // Filter decisions for this partner
+    const decisions = allDecisions.filter(d =>
+      (d.input_context as any)?.partnerName === partnerName ||
+      (d.input_context as any)?.partnerId   != null
+    );
+
+    // ── Streams where this partner was active ─────────────────────────────────
+    const promoTimestamps = [
+      ...logs.map(l => new Date(l.posted_at).getTime()),
+      ...proposals.filter(p => p.status === 'sent' || p.status === 'approved').map((p: any) => new Date(p.created_at).getTime()),
+    ];
+    const activeStreams = streams.filter(s => {
+      const start = new Date(s.started_at).getTime();
+      const end   = s.ended_at ? new Date(s.ended_at).getTime() : start + 6 * 60 * 60 * 1000;
+      return promoTimestamps.some(t => t >= start && t <= end);
+    });
+
+    // ── Highlights during active streams ─────────────────────────────────────
+    const partnerHighlights = highlights.filter(h => {
+      const t = new Date(h.created_at).getTime();
+      return activeStreams.some(s => {
+        const start = new Date(s.started_at).getTime();
+        const end   = s.ended_at ? new Date(s.ended_at).getTime() : start + 6 * 60 * 60 * 1000;
+        return t >= start && t <= end + 2 * 60 * 60 * 1000;
+      });
+    });
+
+    // ── Proposal stats ────────────────────────────────────────────────────────
+    const godkjent = proposals.filter(p => p.status === 'approved' || p.status === 'sent').length;
+    const avvist   = proposals.filter(p => p.status === 'rejected').length;
+    const venter   = proposals.filter(p => p.status === 'pending').length;
+    const decided  = godkjent + avvist;
+
+    // ── Platform breakdown ────────────────────────────────────────────────────
+    const discordLogs = logs.filter(l => l.platform === 'discord');
+    const twitchLogs  = logs.filter(l => l.platform === 'twitch');
+    const logsInP     = logs.filter(l => l.posted_at >= sinceP);
+    const logsIn7d    = logs.filter(l => l.posted_at >= since7d);
+    const logsIn30d   = logs.filter(l => l.posted_at >= since30d);
+    const logsIn90d   = logs;
+
+    const lastLog     = logs[0] ?? null;
+    const lastDec     = decisions[0] ?? null;
+    const lastCtx     = (lastDec?.input_context as any) ?? {};
+
+    // ── Section 4: Historisk utvikling ───────────────────────────────────────
+    const countApprInRange = (from: string) =>
+      proposals.filter(p => (p.status === 'approved' || p.status === 'sent') && p.created_at >= from).length;
+
+    const historisk = {
+      p7:  { promoer: logsIn7d.length,  godkjennelser: countApprInRange(since7d),  eksponering: discordLogs.filter(l => l.posted_at >= since7d).length  + twitchLogs.filter(l => l.posted_at >= since7d).length  },
+      p30: { promoer: logsIn30d.length, godkjennelser: countApprInRange(since30d), eksponering: discordLogs.filter(l => l.posted_at >= since30d).length + twitchLogs.filter(l => l.posted_at >= since30d).length },
+      p90: { promoer: logsIn90d.length, godkjennelser: countApprInRange(since90d), eksponering: logs.length },
+    };
+
+    // ── Section 5: Stream-historikk ───────────────────────────────────────────
+    const streamHistorikk = activeStreams.slice(0, 10).map(s => {
+      const start = new Date(s.started_at).getTime();
+      const end   = s.ended_at ? new Date(s.ended_at).getTime() : start + 6 * 60 * 60 * 1000;
+      const sLogs = logs.filter(l => { const t = new Date(l.posted_at).getTime(); return t >= start && t <= end; });
+      const sHL   = highlights.filter(h => { const t = new Date(h.created_at).getTime(); return t >= start && t <= end + 2 * 60 * 60 * 1000; });
+      return {
+        title:      s.title ?? s.stream_id ?? 'Stream',
+        startedAt:  s.started_at,
+        discord:    sLogs.filter(l => l.platform === 'discord').length,
+        twitch:     sLogs.filter(l => l.platform === 'twitch').length,
+        promoer:    sLogs.length,
+        highlights: sHL.length,
+        game:       s.game ?? null,
+        avgViewers: s.avg_viewers ?? null,
+      };
+    });
+
+    // ── Section 6: Highlights ─────────────────────────────────────────────────
+    const highlightSeksjon = partnerHighlights.slice(0, 8).map(h => {
+      const hTime = new Date(h.created_at).getTime();
+      const matchStream = activeStreams.find(s => {
+        const start = new Date(s.started_at).getTime();
+        const end   = s.ended_at ? new Date(s.ended_at).getTime() : start + 6 * 60 * 60 * 1000;
+        return hTime >= start && hTime <= end + 2 * 60 * 60 * 1000;
+      });
+      const matchVod = vods.find(v => {
+        const vTime = new Date(v.created_at).getTime();
+        return Math.abs(vTime - hTime) < 4 * 60 * 60 * 1000;
+      });
+      return {
+        id:         h.id,
+        title:      (h as any).title ?? null,
+        createdAt:  h.created_at,
+        streamTitle: matchStream?.title ?? null,
+        vodId:       matchVod?.id ?? null,
+        vodTitle:    matchVod?.title ?? null,
+      };
+    });
+
+    // ── Section 7: Creator Brain Learning ────────────────────────────────────
+    const promoPattern  = pKnowledge.find(k => k.knowledge_type === 'promotion_pattern');
+    const partnerPerf   = pKnowledge.find(k => k.knowledge_type === 'partner_performance');
+    const bestTiming    = genKnowledge.filter(k => k.knowledge_type === 'stream_behaviour')
+      .sort((a: any, b: any) => ((b.evidence_summary as any)?.approvalRate ?? 0) - ((a.evidence_summary as any)?.approvalRate ?? 0))[0] ?? null;
+    const bestPlatform  = genKnowledge.filter(k => k.knowledge_type === 'platform_preference')
+      .sort((a: any, b: any) => b.evidence_count - a.evidence_count)[0] ?? null;
+    const historiskeMonstre = genKnowledge.filter(k =>
+      k.knowledge_type === 'timing_pattern' || k.knowledge_type === 'creator_preference' || k.knowledge_type === 'decision_accuracy'
+    ).slice(0, 4).map(k => k.finding);
+
+    const creatorLearning = {
+      besteTidspunkt: bestTiming ? {
+        label:        (bestTiming.evidence_summary as any)?.label ?? bestTiming.key,
+        approvalRate: (bestTiming.evidence_summary as any)?.approvalRate ?? null,
+        evidenceCount: bestTiming.evidence_count,
+        confidence:   bestTiming.confidence,
+      } : null,
+      bestePlattform: bestPlatform ? {
+        platform:     (bestPlatform.evidence_summary as any)?.platform ?? bestPlatform.key.replace('platform:', ''),
+        percentage:   (bestPlatform.evidence_summary as any)?.percentage ?? null,
+        evidenceCount: bestPlatform.evidence_count,
+        confidence:   bestPlatform.confidence,
+      } : null,
+      approvalPattern: promoPattern ? {
+        approvalRate:  (promoPattern.evidence_summary as any)?.approvalRate ?? null,
+        evidenceCount: promoPattern.evidence_count,
+        confidence:    promoPattern.confidence,
+        finding:       promoPattern.finding,
+      } : null,
+      partnerPerformance: partnerPerf ? {
+        finding:       partnerPerf.finding,
+        confidence:    partnerPerf.confidence,
+        evidenceCount: partnerPerf.evidence_count,
+      } : null,
+      historiskeMonstre,
+    };
+
+    // ── Section 9: Datagrunnlag ───────────────────────────────────────────────
+    const totalDatapunkter = logs.length + proposals.length + decisions.length;
+    const dataStyrke: 'god' | 'moderat' | 'svak' = totalDatapunkter >= 10 ? 'god' : totalDatapunkter >= 3 ? 'moderat' : 'svak';
+    const datagrunnlag = {
+      styrke: dataStyrke,
+      forklaring: dataStyrke === 'god'
+        ? `Tilstrekkelig historikk for pålitelig analyse (${totalDatapunkter} datapunkter).`
+        : dataStyrke === 'moderat'
+        ? `Noe historikk tilgjengelig, men rapporten kan bli mer presis med flere streams (${totalDatapunkter} datapunkter).`
+        : 'Mangler tilstrekkelig historikk. Kjør flere streams for å bygge opp datagrunnlag.',
+      basertPa: {
+        streams:      activeStreams.length,
+        proposals:    proposals.length,
+        promoer:      logs.length,
+        systemEvents: events.filter(e => (e.metadata as any)?.partnerName === partnerName || (e.metadata as any)?.partner_name === partnerName).length,
+      },
+    };
+
+    // ── Section 8: AI-anbefaling ─────────────────────────────────────────────
+    let aiAnbefaling: string | null = null;
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (apiKey && totalDatapunkter >= 3) {
+      try {
+        const openai = new OpenAI({ apiKey });
+        const dataForAI = [
+          `Partner: ${partnerName}`,
+          `Periode: siste ${periodDays} dager`,
+          `Promoer totalt: ${logs.length} (Discord: ${discordLogs.length}, Twitch: ${twitchLogs.length})`,
+          `Promoer i valgt periode: ${logsInP.length}`,
+          `Forslag: ${proposals.length} totalt — ${godkjent} godkjent, ${avvist} avvist, ${venter} venter`,
+          decided > 0 ? `Godkjennelsesrate: ${Math.round((godkjent / decided) * 100)}%` : null,
+          decided > 0 ? `Avvisningsrate: ${Math.round((avvist / decided) * 100)}%` : null,
+          `Streams med partneren: ${activeStreams.length}`,
+          lastLog ? `Siste promo: ${new Date(lastLog.posted_at).toLocaleDateString('no-NO')} via ${lastLog.platform}` : 'Ingen promo registrert',
+          lastCtx.score != null ? `Siste AI-score: ${Math.round(lastCtx.score * 100)}%` : null,
+          lastCtx.reasonCode ? `Siste ReasonCode: ${lastCtx.reasonCode}` : null,
+          creatorLearning.approvalPattern?.finding ?? null,
+          creatorLearning.partnerPerformance?.finding ?? null,
+          creatorLearning.besteTidspunkt ? `Beste tidspunkt: ${creatorLearning.besteTidspunkt.label} (${creatorLearning.besteTidspunkt.approvalRate}% godkjenning)` : null,
+          creatorLearning.bestePlattform ? `Beste plattform: ${creatorLearning.bestePlattform.platform} (${creatorLearning.bestePlattform.percentage}% av promoer)` : null,
+          ...historiskeMonstre,
+        ].filter(Boolean).join('\n');
+
+        const res = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{
+            role: 'system',
+            content: 'Norsk partnerrapport-assistent. Du formulerer anbefalinger basert utelukkende på tall og mønstre du mottar. Du finner ikke på statistikk. Du estimerer ikke. Hvis grunnlaget er svakt, si det. Profesjonell og konkret tone.',
+          }, {
+            role: 'user',
+            content: `Basert på følgende dokumenterte historikk, skriv en kortfattet anbefaling (3-4 setninger) om denne partnerrelasjonen. Nevn kun tall som er gitt. Ikke legg til egne estimater.\n\n${dataForAI}`,
+          }],
+          max_tokens: 300,
+          temperature: 0.5,
+        });
+        aiAnbefaling = res.choices[0]?.message?.content?.trim() ?? null;
+      } catch { /* silent */ }
+    }
+
+    const report = {
+      generertAt:    new Date().toISOString(),
+      periode:       periodDays === 7 ? '7d' : '30d',
+      partnerName,
+      partnerAktiv:  partnerRow ? (partnerRow as any).aktiv : null,
+      sammendrag: {
+        totalePromoer:      logs.length,
+        discord:            discordLogs.length,
+        twitch:             twitchLogs.length,
+        totaleForslag:      proposals.length,
+        godkjent,
+        avvist,
+        venter,
+        streamerMedPartner: activeStreams.length,
+        sistePromo:         lastLog?.posted_at ?? null,
+        sisteAiVurdering:   lastDec?.created_at ?? null,
+      },
+      partneroversikt: {
+        dataStrength:   dataStyrke,
+        promoer7d:      logsIn7d.length,
+        promoer30d:     logsIn30d.length,
+        promoerTotalt:  logs.length,
+        discord:        discordLogs.length,
+        twitch:         twitchLogs.length,
+        sisteKanal:     lastLog?.channel ?? null,
+        sistePromotert: lastLog?.posted_at ?? null,
+        godkjentRate:   decided > 0 ? Math.round((godkjent / decided) * 100) : null,
+        avvisningsrate: decided > 0 ? Math.round((avvist  / decided) * 100) : null,
+        pending:        venter,
+        aiScore:        lastCtx.score != null ? Math.round(lastCtx.score * 100) : null,
+        sisteReasonCode: lastCtx.reasonCode ?? null,
+        sisteTriggerType: lastCtx.triggerType ?? null,
+        sisteOutcome:   lastDec?.outcome ?? null,
+      },
+      historisk,
+      streamHistorikk,
+      highlights: highlightSeksjon,
+      creatorLearning,
+      aiAnbefaling,
+      datagrunnlag,
+    };
+
+    await logSystemEvent({
+      source: 'sponsor_manager',
+      event_type: 'SPONSOR_REPORT_COMPLETED',
+      title: `Partnerrapport ferdig: ${partnerName}`,
+      severity: 'info',
+      metadata: { partnerName, periodDays, dataStyrke, totalDatapunkter, aiAnbefaling: !!aiAnbefaling },
+    });
+
+    return NextResponse.json(report) as unknown as Response;
+
+  } catch (err: unknown) {
+    await logSystemEvent({
+      source: 'sponsor_manager',
+      event_type: 'SPONSOR_REPORT_FAILED',
+      title: `Partnerrapport feilet: ${partnerName}`,
+      severity: 'warning',
+      metadata: { partnerName, error: String(err).slice(0, 200) },
+    });
+    return NextResponse.json({ error: 'Rapport kunne ikke genereres' }, { status: 500 }) as unknown as Response;
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get('partner')) {
+    return handlePartnerReport(request) as unknown as ReturnType<typeof NextResponse.json>;
+  }
+
   try {
     const db = getDb();
     const wsId = getWorkspaceId();

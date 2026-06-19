@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { tidSiden } from '@/components/dashboard/helpers';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -122,14 +123,6 @@ const PRIO_DOT: Record<string, string> = {
 
 function getRolle(level: number) { return LEVEL_ROLLER.find(r => level >= r.level) ?? null; }
 
-function tidSiden(iso: string): string {
-  if (!iso) return '—';
-  const sek = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (sek < 60) return 'nå';
-  if (sek < 3600) return `${Math.floor(sek / 60)}m`;
-  if (sek < 86400) return `${Math.floor(sek / 3600)}t`;
-  return `${Math.floor(sek / 86400)}d siden`;
-}
 
 function getMemberSegments(m: Member): { navn: string; farge: string }[] {
   const now = Date.now();

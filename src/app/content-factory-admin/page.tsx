@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, memo } from 'react';
+import { PageHeader } from '@/components/ui';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 interface Vod {
@@ -387,6 +388,8 @@ export default function ContentFactoryAdminPage() {
 
   return (
     <div className="space-y-6">
+
+      <PageHeader title="Content Factory" subtitle="VOD-pipeline — transkribering, highlights og klipp" />
 
       {/* ─── KPI-rad ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-4">

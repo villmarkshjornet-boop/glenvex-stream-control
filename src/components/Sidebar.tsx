@@ -3,186 +3,213 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import {
+  LayoutGrid,
+  Radio,
+  Calendar,
+  Mic,
+  Zap,
+  Target,
+  Sword,
+  TrendingUp,
+  Layers,
+  Video,
+  Sparkles,
+  Scissors,
+  Share2,
+  Users,
+  MessageSquare,
+  UserCog,
+  Shield,
+  Briefcase,
+  Store,
+  FileBarChart,
+  AtSign,
+  Terminal,
+  Brain,
+  Cpu,
+  Settings,
+  UserCheck,
+} from 'lucide-react';
 
-interface NavItem { label: string; href: string; }
-interface NavSeksjon {
-  id: string;
-  label: string;
-  href: string;
-  icon: string;
-  items?: NavItem[];
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface NavItem {
+  label:  string;
+  href:   string;
+  icon:   React.ElementType;
 }
 
-const NAV: NavSeksjon[] = [
+interface NavGroup {
+  id:    string;
+  label: string;
+  items: NavItem[];
+}
+
+// ── Navigation structure per spec ─────────────────────────────────────────────
+
+const GROUPS: NavGroup[] = [
   {
-    id: 'dashboard',
-    label: 'Dashboard',
-    href: '/',
-    icon: '⊞',
-  },
-  {
-    id: 'twitch',
-    label: 'Twitch',
-    href: '/twitch',
-    icon: '🟣',
+    id:    'live',
+    label: 'Live',
     items: [
-      { label: 'Oversikt',         href: '/twitch' },
-      { label: 'Streamplan',       href: '/streamplan' },
-      { label: 'Viewer Goals',     href: '/viewer-goals' },
-      { label: 'AI Producer',      href: '/ai-producer' },
-      { label: 'Stream Coach',     href: '/stream-coach' },
-      { label: 'Raid Manager',     href: '/raid-manager' },
-      { label: 'Vekstanalyse',     href: '/statistikk' },
-      { label: 'Stream Briefing',  href: '/stream-briefing' },
-      { label: 'Bot-innstillinger', href: '/innstillinger#twitch-bot' },
+      { label: 'Oversikt',        href: '/twitch',            icon: Radio       },
+      { label: 'Streamplan',      href: '/streamplan',        icon: Calendar    },
+      { label: 'AI Coach',        href: '/stream-briefing',   icon: Mic         },
+      { label: 'Stream Coach',    href: '/stream-coach',      icon: Zap         },
+      { label: 'Viewer Goals',    href: '/viewer-goals',      icon: Target      },
+      { label: 'Raid Manager',    href: '/raid-manager',      icon: Sword       },
+      { label: 'Vekstanalyse',    href: '/statistikk',        icon: TrendingUp  },
     ],
   },
   {
-    id: 'discord',
-    label: 'Discord',
-    href: '/discord',
-    icon: '🔵',
+    id:    'content',
+    label: 'Content',
     items: [
-      { label: 'Oversikt',              href: '/discord' },
-      { label: 'Community Manager',     href: '/community-manager' },
-      { label: 'Community Intelligence', href: '/community-intelligence' },
-      { label: 'Moderator',             href: '/moderation' },
-      { label: 'Bot-innstillinger',     href: '/innstillinger#discord-kanaler' },
+      { label: 'Content Factory', href: '/content-factory-admin',            icon: Video     },
+      { label: 'Highlights',      href: '/content-factory-admin/highlights', icon: Sparkles  },
+      { label: 'Klipp',           href: '/clip-factory',                     icon: Scissors  },
+      { label: 'Publisering',     href: '/innhold/publisering',              icon: Share2    },
     ],
   },
   {
-    id: 'innhold',
-    label: 'Innhold',
-    href: '/innhold',
-    icon: '▶',
+    id:    'community',
+    label: 'Community',
     items: [
-      { label: 'Content Factory', href: '/content-factory-admin' },
-      { label: 'Highlights',      href: '/content-factory-admin/highlights' },
-      { label: 'Klipp',           href: '/clip-factory' },
-      { label: 'Publisering',     href: '/innhold/publisering' },
+      { label: 'Discord',            href: '/discord',             icon: MessageSquare },
+      { label: 'Community Manager',  href: '/community-manager',  icon: UserCog       },
+      { label: 'Moderator',          href: '/moderation',          icon: Shield        },
     ],
   },
   {
-    id: 'partnere',
-    label: 'Partnere',
-    href: '/partnere',
-    icon: '◇',
+    id:    'partners',
+    label: 'Partners',
     items: [
-      { label: 'Partner Hub',      href: '/partner-hub' },
-      { label: 'Sponsor Manager',  href: '/sponsor-manager' },
-      { label: 'Sales Bot',        href: '/innstillinger/partner-bot' },
-      { label: 'Twitter Utkast',   href: '/publisering/twitter-drafts' },
+      { label: 'Partner Hub',    href: '/partner-hub',                icon: Store         },
+      { label: 'Sponsor Manager',href: '/sponsor-manager',            icon: FileBarChart  },
+      { label: 'Twitter Utkast', href: '/publisering/twitter-drafts', icon: AtSign        },
     ],
   },
   {
-    id: 'ai',
-    label: 'AI Intelligence',
-    href: '/ai-memory',
-    icon: '◆',
+    id:    'system',
+    label: 'System',
     items: [
-      { label: 'AI Memory',   href: '/ai-memory' },
-      { label: 'AI Producer', href: '/ai-producer' },
-    ],
-  },
-  {
-    id: 'innstillinger',
-    label: 'Innstillinger',
-    href: '/innstillinger',
-    icon: '⚙',
-    items: [
-      { label: 'Generelt',         href: '/innstillinger' },
-      { label: 'Twitch Bot',       href: '/innstillinger#twitch-bot' },
-      { label: 'Discord Bot',      href: '/innstillinger#discord-kanaler' },
-      { label: 'Passord',          href: '/innstillinger#passord' },
-      { label: 'Systemstatus',     href: '/innstillinger#helse' },
-      { label: 'Automatiseringer', href: '/innstillinger#automatiseringer' },
-      { label: 'AI-kollegaer',     href: '/team' },
+      { label: 'AI Memory',    href: '/ai-memory',    icon: Brain     },
+      { label: 'Creator Brain',href: '/ai-memory',    icon: Cpu       },
+      { label: 'Innstillinger',href: '/innstillinger', icon: Settings  },
+      { label: 'Team',         href: '/team',         icon: UserCheck  },
     ],
   },
 ];
 
-function seksjonEier(seksjon: NavSeksjon, pathname: string): boolean {
-  if (pathname === seksjon.href) return true;
-  if (seksjon.items?.some(i => pathname.startsWith(i.href) && i.href !== '/')) return true;
-  if (seksjon.id === 'innhold' && pathname.startsWith('/content-factory-admin')) return true;
-  if (seksjon.id === 'partnere' && (pathname.startsWith('/innstillinger/partner-bot') || pathname.startsWith('/publisering/twitter-drafts'))) return true;
-  if (seksjon.id === 'dashboard' && pathname === '/') return true;
-  if (seksjon.id === 'twitch' && pathname.startsWith('/stream-briefing')) return true;
-  if (seksjon.id === 'ai' && (pathname.startsWith('/ai-memory') || pathname.startsWith('/ai-producer'))) return true;
-  return false;
+// ── Active matching ───────────────────────────────────────────────────────────
+
+function isItemActive(href: string, pathname: string): boolean {
+  if (href === '/') return pathname === '/';
+  if (href.includes('#')) return pathname === href.split('#')[0];
+  return pathname === href || pathname.startsWith(href + '/');
 }
+
+function isGroupActive(group: NavGroup, pathname: string): boolean {
+  return group.items.some(i => isItemActive(i.href, pathname));
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const aktivSeksjon = NAV.find(s => seksjonEier(s, pathname));
 
-  const [åpne, setÅpne] = useState<Set<string>>(() => {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     const s = new Set<string>();
-    if (aktivSeksjon) s.add(aktivSeksjon.id);
+    GROUPS.forEach(g => {
+      if (!isGroupActive(g, pathname)) s.add(g.id);
+    });
     return s;
   });
 
   const toggle = (id: string) =>
-    setÅpne(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setCollapsed(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
+  const isDashboard = pathname === '/';
 
   return (
-    <aside className="w-48 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
+    <aside className="w-52 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
+
       {/* Logo */}
-      <Link href="/" className="px-4 py-4 border-b border-g-border block hover:bg-white/[0.02] transition-colors">
-        <div className="text-g-green font-black text-base tracking-[0.15em] uppercase"
-          style={{ textShadow: '0 0 12px rgba(0,255,65,0.4)' }}>
+      <Link
+        href="/"
+        className="px-4 py-4 border-b border-g-border block hover:bg-white/[0.02] transition-colors"
+      >
+        <div
+          className="text-g-green font-black text-base tracking-[0.15em] uppercase"
+          style={{ textShadow: '0 0 12px rgba(0,255,65,0.35)' }}
+        >
           GLENVEX
         </div>
         <div className="text-[8px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
       </Link>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
-        {NAV.map(seksjon => {
-          const erAktivSeksjon = seksjonEier(seksjon, pathname);
-          const erÅpen = åpne.has(seksjon.id);
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
 
-          if (!seksjon.items || seksjon.items.length === 0) {
-            const erAktiv = pathname === seksjon.href;
-            return (
-              <Link key={seksjon.id} href={seksjon.href}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
-                  erAktiv
-                    ? 'bg-g-green/10 text-g-green border-g-green/20'
-                    : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
-                }`}>
-                <span className="text-sm flex-shrink-0">{seksjon.icon}</span>
-                <span className="flex-1">{seksjon.label}</span>
-                {erAktiv && <span className="w-1.5 h-1.5 rounded-full bg-g-green" />}
-              </Link>
-            );
-          }
+        {/* Dashboard — top-level direct link */}
+        <Link
+          href="/"
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+            isDashboard
+              ? 'bg-g-green/10 text-g-green border border-g-green/20'
+              : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border border-transparent'
+          }`}
+        >
+          <LayoutGrid size={14} className="flex-shrink-0" />
+          <span className="flex-1">Dashboard</span>
+          {isDashboard && <span className="w-1.5 h-1.5 rounded-full bg-g-green flex-shrink-0" />}
+        </Link>
+
+        {/* Groups */}
+        {GROUPS.map(group => {
+          const isOpen   = !collapsed.has(group.id);
+          const isActive = isGroupActive(group, pathname);
 
           return (
-            <div key={seksjon.id}>
-              <button
-                onClick={() => toggle(seksjon.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
-                  erAktivSeksjon
-                    ? 'text-g-green border-g-green/10 bg-g-green/5'
-                    : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border-transparent'
-                }`}>
-                <span className="text-sm flex-shrink-0">{seksjon.icon}</span>
-                <span className="flex-1 text-left">{seksjon.label}</span>
-                <span className={`text-[10px] transition-transform duration-200 ${erÅpen ? 'rotate-90' : ''} text-g-muted`}>›</span>
-              </button>
+            <div key={group.id}>
 
-              {erÅpen && (
-                <div className="ml-4 mt-0.5 mb-1 space-y-0.5 border-l border-g-border/30 pl-2.5">
-                  {seksjon.items.map(item => {
-                    const erAktiv = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href) && !item.href.includes('#'));
+              {/* Group separator + toggle */}
+              <div className="mt-3 mb-0.5">
+                <button
+                  onClick={() => toggle(group.id)}
+                  className={`w-full flex items-center justify-between px-2 py-1 rounded transition-all group ${
+                    isActive ? 'text-g-green/70' : 'text-g-muted/50 hover:text-g-muted'
+                  }`}
+                >
+                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">{group.label}</span>
+                  <span className={`text-[10px] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                </button>
+              </div>
+
+              {/* Group items */}
+              {isOpen && (
+                <div className="space-y-0.5 ml-1">
+                  {group.items.map(item => {
+                    const active = isItemActive(item.href, pathname);
+                    const Icon   = item.icon;
                     return (
-                      <Link key={`${item.href}-${item.label}`} href={item.href}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-[11px] transition-all ${
-                          erAktiv ? 'text-g-green font-bold' : 'text-g-muted hover:text-g-text'
-                        }`}>
-                        {erAktiv && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
-                        <span>{item.label}</span>
+                      <Link
+                        key={`${item.href}-${item.label}`}
+                        href={item.href}
+                        className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[11px] transition-all ${
+                          active
+                            ? 'text-g-green font-bold bg-g-green/5'
+                            : 'text-g-muted hover:text-g-text hover:bg-white/[0.02] font-medium'
+                        }`}
+                      >
+                        <Icon size={13} className="flex-shrink-0" />
+                        <span className="flex-1 leading-none">{item.label}</span>
+                        {active && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
                       </Link>
                     );
                   })}
@@ -193,11 +220,13 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Status */}
+      {/* Footer status */}
       <div className="px-4 py-2.5 border-t border-g-border">
         <Link href="/innstillinger#helse" className="flex items-center gap-1.5 group">
           <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
-          <p className="text-[8px] text-g-muted/50 group-hover:text-g-muted transition-colors">System Online</p>
+          <p className="text-[8px] text-g-muted/40 group-hover:text-g-muted transition-colors tracking-widest uppercase">
+            System Online
+          </p>
         </Link>
       </div>
     </aside>

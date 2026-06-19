@@ -13,6 +13,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { getRandomActivePartner, getFeaturedPartner, PartnerInfo, trackPartnerExposure } from './partnerHelper';
 import { logDecision, recordOutcome } from './decisionEngine';
+import { getPartnerKnowledgeBoost } from './learningEngine';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
 const MIN_CONFIDENCE = 0.35; // minimum score to fire a promo
@@ -441,6 +442,12 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0];
 
+  // Phase 18: apply small historical knowledge adjustment (max ±0.06, requires conf ≥ 40%)
+  const knowledgeBoost = await getPartnerKnowledgeBoost(workspaceId, best.partner.navn).catch(() => 0);
+  if (knowledgeBoost !== 0) {
+    best.score = Math.max(0, Math.min(1, best.score + knowledgeBoost));
+  }
+
   if (best.score < MIN_CONFIDENCE) {
     await logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Partner promo skippet: lav score (${best.score.toFixed(2)})`, {
       reasonCode: 'LOW_SCORE', partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType,
@@ -475,6 +482,7 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     audienceMatch:  best.contextScore,
     timingScore:    triggerType === 'viewer_peak' ? 0.9 : triggerType === 'chat_silence' ? 0.7 : triggerType === 'context_match' ? 0.8 : 0.5,
     cooldownPenalty: best.cooldownPenalty,
+    knowledgeBoost,
   };
 
   // requireApproval: store proposal, do not send yet

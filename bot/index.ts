@@ -37,6 +37,7 @@ import { decidePromotion, loadPartnerBotSettings, dispatchApprovedProposals } fr
 import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId, getCommunityKanalId, getCommunitySettings } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
+import { runLearningEngine } from './lib/learningEngine';
 import { startSystemEventsFlusher, logSystemEvent } from './lib/systemEvents';
 import { scanForDuplicates, dupReports } from './lib/duplicateDetector';
 import { withCron, logApiError } from './lib/observability';
@@ -474,6 +475,8 @@ async function checkLive() {
       });
       // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
       setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
+      // Phase 18: run Learning Engine 5 min after stream ends so all data is written
+      setTimeout(() => runLearningEngine().catch(() => {}), 5 * 60 * 1000);
     }
   } catch (error) {
     const msg = (error as Error).message ?? '';
@@ -1872,6 +1875,9 @@ client.once('clientReady', () => {
   setTimeout(() => { writeHeartbeats(); setInterval(writeHeartbeats, 5 * 60_000); }, 60_000);
   setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
   setInterval(() => withCron('dispatch-approved-proposals', dispatchApprovedProposalsRunner), 2 * 60 * 1000);
+  // Phase 18: Learning Engine — nightly run + initial catch-up 10 min after startup
+  setTimeout(() => runLearningEngine().catch(() => {}), 10 * 60 * 1000);
+  setInterval(() => runLearningEngine().catch(() => {}), 24 * 60 * 60 * 1000);
   setTimeout(() => { withCron('send-proaktiv', sendProaktivMelding); setInterval(() => withCron('send-proaktiv', sendProaktivMelding), PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { withCron('post-top-clip', postTopClip); setInterval(() => withCron('post-top-clip', postTopClip), CLIP_INTERVAL); }, 60 * 60 * 1000);
   setTimeout(() => { withCron('del-socials', delSocialsSubtilt); setInterval(() => withCron('del-socials', delSocialsSubtilt), SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
