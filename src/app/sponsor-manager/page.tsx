@@ -6,6 +6,17 @@ interface ScoreKomponent { navn: string; maks: number; oppnådd: number; mangler
 interface Milestone { poeng: number; label: string; nådd: boolean; }
 interface PeriodeData { streams: number; avgV: number; peakV: number; hoursStr: number; followersGained: number; klipp: number; }
 
+interface PartnerHistorikkRad {
+  navn: string;
+  promoer30d: number;
+  promoerTotalt: number;
+  sisteSendt: string | null;
+  godkjentRate: number | null;
+  avvisninger: number;
+  dataStyrke: 'god' | 'moderat' | 'svak';
+  aktiv: boolean | null;
+}
+
 interface SponsorData {
   score: number;
   dataErSvak: boolean;
@@ -29,6 +40,8 @@ interface SponsorData {
   hvaRedusererScoren: string;
   trend: { followerGrowthLast30d: number; avgViewersLast30d: number; streamsLast30d: number; topSpill: string[] };
   contentStats: { ferdigeVods: number; totaleKlipp: number; aktivePartnere: number; streamsHistorikk: number; aiMemoryStreams: number };
+  partnerHistorikk: PartnerHistorikkRad[];
+  partnerTotaler: { totalePromoer: number; totaleForslag: number; promoer30d: number; godkjentRate: number | null; mestAktiv: string | null };
 }
 
 type Fane = '7d' | '30d' | '90d';
@@ -289,6 +302,85 @@ export default function SponsorManagerPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Partner-historikk */}
+          {data.partnerHistorikk?.length > 0 && (
+            <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-[10px] text-g-muted font-semibold tracking-widest uppercase">Partner-historikk (ekte data)</h2>
+                {data.partnerTotaler && (
+                  <span className="text-[10px] text-g-muted/60">
+                    {data.partnerTotaler.totalePromoer} promoer totalt
+                    {data.partnerTotaler.godkjentRate !== null && ` · ${data.partnerTotaler.godkjentRate}% godkjent`}
+                  </span>
+                )}
+              </div>
+
+              {/* Totaler */}
+              {data.partnerTotaler && (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Promoer siste 30d', value: data.partnerTotaler.promoer30d },
+                    { label: 'Totale forslag',    value: data.partnerTotaler.totaleForslag },
+                    { label: 'Mest aktiv',         value: data.partnerTotaler.mestAktiv ?? '–' },
+                  ].map(s => (
+                    <div key={s.label} className="bg-g-sidebar border border-g-border rounded p-3 text-center">
+                      <p className="text-[8px] text-g-muted uppercase tracking-wider">{s.label}</p>
+                      <p className="text-sm font-black text-g-green font-mono mt-0.5 truncate">{s.value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Per-partner tabell */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px]">
+                  <thead>
+                    <tr className="border-b border-g-border/40">
+                      {['Partner', 'Promoer 30d', 'Totalt', 'Siste sendt', 'Godkjent %', 'Avvisninger', 'Datagrunnlag'].map(h => (
+                        <th key={h} className="py-1.5 pr-3 text-left text-[9px] text-g-muted uppercase tracking-wider font-bold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-g-border/20">
+                    {data.partnerHistorikk
+                      .sort((a, b) => b.promoerTotalt - a.promoerTotalt)
+                      .map(p => {
+                        const daysSince = p.sisteSendt
+                          ? Math.floor((Date.now() - new Date(p.sisteSendt).getTime()) / 86_400_000)
+                          : null;
+                        return (
+                          <tr key={p.navn} className={`${!p.aktiv ? 'opacity-40' : ''}`}>
+                            <td className="py-2 pr-3 font-bold text-g-text">{p.navn}</td>
+                            <td className="py-2 pr-3 font-mono text-g-green">{p.promoer30d}</td>
+                            <td className="py-2 pr-3 font-mono text-g-muted">{p.promoerTotalt}</td>
+                            <td className="py-2 pr-3 text-g-muted">
+                              {daysSince !== null ? `${daysSince}d siden` : <span className="text-g-muted/40">aldri</span>}
+                            </td>
+                            <td className="py-2 pr-3">
+                              {p.godkjentRate !== null
+                                ? <span className={p.godkjentRate >= 70 ? 'text-g-green font-bold' : p.godkjentRate >= 40 ? 'text-yellow-400' : 'text-red-400'}>{p.godkjentRate}%</span>
+                                : <span className="text-g-muted/40">–</span>}
+                            </td>
+                            <td className="py-2 pr-3 text-g-muted">{p.avvisninger > 0 ? p.avvisninger : '–'}</td>
+                            <td className="py-2 pr-3">
+                              <span className={`px-1.5 py-0.5 border rounded text-[9px] font-bold ${
+                                p.dataStyrke === 'god'     ? 'text-g-green border-g-green/30 bg-g-green/10' :
+                                p.dataStyrke === 'moderat' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' :
+                                                             'text-g-muted/50 border-g-border/30'
+                              }`}>{p.dataStyrke}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[9px] text-g-muted/40">
+                Basert på partner_content_log og partner_proposals · siste 90 dager
+              </p>
             </div>
           )}
 

@@ -2,6 +2,36 @@
 
 import { useEffect, useState } from 'react';
 
+interface PartnerStats {
+  contentLog: {
+    total: number;
+    discord: number;
+    twitch: number;
+    recent7d: number;
+    recent30d: number;
+    lastPosted: string | null;
+    channels: string[];
+  };
+  proposals: {
+    total: number;
+    sent: number;
+    approved: number;
+    rejected: number;
+    pending: number;
+    approvalRate: number | null;
+  };
+  lastDecision: {
+    id: string;
+    score: number | null;
+    reasonCode: string | null;
+    triggerType: string | null;
+    outcome: string | null;
+    createdAt: string;
+  } | null;
+  dataStrength: 'god' | 'moderat' | 'svak';
+  recommendation: string;
+}
+
 interface Partner {
   id: string;
   navn: string;
@@ -49,9 +79,19 @@ const TOM_PARTNER: Partial<Partner> = {
   aktiv: true, featured: false, ownedBrand: false, prioritet: 5,
 };
 
+function tidSiden(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const t = Math.floor(min / 60);
+  if (t < 24) return `${t}t`;
+  return `${Math.floor(t / 24)}d`;
+}
+
 export default function PartnerHubPage() {
   const [partners, setPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<Record<string, PartnerStats>>({});
   const [visForm, setVisForm] = useState(false);
   const [form, setForm] = useState<Partial<Partner>>(TOM_PARTNER);
   const [redigerId, setRedigerId] = useState<string | null>(null);
@@ -71,6 +111,13 @@ export default function PartnerHubPage() {
   };
 
   useEffect(() => { hent(); }, []);
+
+  useEffect(() => {
+    fetch('/api/partner-hub/analytics')
+      .then(r => r.json())
+      .then(d => setAnalytics(d.byPartner ?? {}))
+      .catch(() => {});
+  }, []);
 
   async function lagre() {
     setLagreFeil('');
@@ -255,15 +302,23 @@ export default function PartnerHubPage() {
               {/* Partner-detaljer */}
               <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-start">
-                  <p className="text-sm font-black text-g-text">{valgt.navn}</p>
+                  <div>
+                    <p className="text-sm font-black text-g-text">{valgt.navn}</p>
+                    {(() => {
+                      const stats = analytics[valgt.navn];
+                      if (!stats) return null;
+                      const c = { god: 'text-g-green border-g-green/30 bg-g-green/10', moderat: 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10', svak: 'text-g-muted/50 border-g-border/30' }[stats.dataStrength];
+                      return <span className={`mt-0.5 inline-block px-1.5 py-0.5 border rounded text-[9px] font-bold ${c}`}>{stats.dataStrength} datagrunnlag</span>;
+                    })()}
+                  </div>
                   <button onClick={() => setValgt(null)} className="text-g-muted text-xs hover:text-g-text">✕</button>
                 </div>
+
+                {/* Avtale-info */}
                 <div className="space-y-1">
                   {[
                     ['Kode', valgt.rabattkode || '–'],
                     ['Provisjon', `${valgt.provisjon}${valgt.provisjonstype === 'prosent' ? '%' : ' kr'}`],
-                    ['Eksponering', valgt.eksponering],
-                    ['Klikk', valgt.klikk],
                   ].map(([l, v]) => (
                     <div key={l as string} className="flex justify-between text-xs">
                       <span className="text-g-muted">{l}</span>
@@ -271,6 +326,84 @@ export default function PartnerHubPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Historikk fra ekte data */}
+                {(() => {
+                  const stats = analytics[valgt.navn];
+                  if (!stats) return (
+                    <p className="text-[10px] text-g-muted/40 italic">Henter historikk...</p>
+                  );
+                  const { contentLog: cl, proposals: pr, lastDecision: ld } = stats;
+                  const hasData = cl.total > 0 || pr.total > 0;
+                  if (!hasData) return (
+                    <p className="text-[10px] text-g-muted/40 italic">Ingen historikk funnet ennå</p>
+                  );
+                  return (
+                    <div className="space-y-2 border-t border-g-border/30 pt-2">
+                      <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold">Promo-historikk</p>
+                      <div className="grid grid-cols-3 gap-1.5 text-center">
+                        {[
+                          { l: '7d', v: cl.recent7d },
+                          { l: '30d', v: cl.recent30d },
+                          { l: 'Totalt', v: cl.total },
+                        ].map(s => (
+                          <div key={s.l} className="bg-g-sidebar border border-g-border/40 rounded p-2">
+                            <p className="text-[8px] text-g-muted">{s.l}</p>
+                            <p className="text-sm font-black text-g-green font-mono">{s.v}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {(cl.discord > 0 || cl.twitch > 0) && (
+                        <div className="flex gap-2 text-[10px] text-g-muted">
+                          {cl.discord > 0 && <span>Discord: {cl.discord}</span>}
+                          {cl.twitch > 0  && <span>Twitch: {cl.twitch}</span>}
+                          {cl.channels.length > 0 && <span className="text-g-muted/50">· {cl.channels.slice(0, 2).join(', ')}</span>}
+                        </div>
+                      )}
+                      {cl.lastPosted && (
+                        <p className="text-[10px] text-g-muted">Sist sendt: <span className="text-g-text">{tidSiden(cl.lastPosted)} siden</span></p>
+                      )}
+
+                      {pr.total > 0 && (
+                        <>
+                          <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold pt-1">Forslag (AI)</p>
+                          <div className="flex gap-3 text-[10px]">
+                            <span className="text-g-green">{pr.approved + pr.sent} godkjent</span>
+                            {pr.rejected > 0 && <span className="text-red-400/70">{pr.rejected} avvist</span>}
+                            {pr.pending > 0 && <span className="text-yellow-400">{pr.pending} venter</span>}
+                            {pr.approvalRate !== null && (
+                              <span className="text-g-muted/60 ml-auto">{Math.round(pr.approvalRate * 100)}% rate</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {ld && (
+                        <>
+                          <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold pt-1">Siste AI-vurdering</p>
+                          <div className="flex gap-2 text-[10px] flex-wrap">
+                            {ld.score !== null && (
+                              <span className={`font-bold ${ld.score >= 0.7 ? 'text-g-green' : ld.score >= 0.4 ? 'text-yellow-400' : 'text-red-400/70'}`}>
+                                Score: {Math.round(ld.score * 100)}%
+                              </span>
+                            )}
+                            {ld.reasonCode && <span className="text-g-muted/60 font-mono">{ld.reasonCode}</span>}
+                            {ld.triggerType && <span className="text-g-muted/50">{ld.triggerType}</span>}
+                            <span className={`ml-auto font-bold ${ld.outcome === 'success' ? 'text-g-green' : ld.outcome === 'rejected' ? 'text-red-400' : 'text-g-muted/50'}`}>
+                              {ld.outcome ?? 'pending'}
+                            </span>
+                          </div>
+                        </>
+                      )}
+
+                      <div className="pt-1 border-t border-g-border/20">
+                        <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold mb-0.5">Anbefaling</p>
+                        <p className="text-[10px] text-g-text leading-relaxed">{stats.recommendation}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-2 gap-1.5">
                   <button onClick={() => { setRedigerId(valgt.id); setForm(valgt); setVisForm(true); }}
                     className="py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">

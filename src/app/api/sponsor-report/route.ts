@@ -107,7 +107,9 @@ export async function GET() {
 
     const cutoff90d = new Date(Date.now() - 90 * 24 * 3600_000).toISOString();
 
-    const [streamHistRes, vodsRes, highlightsRes, partnereRes, workspaceRes, followers] = await Promise.all([
+    const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+
+    const [streamHistRes, vodsRes, highlightsRes, partnereRes, workspaceRes, followers, contentLogRes, proposalsRes] = await Promise.all([
       db?.from('stream_history').select('*').eq('workspace_id', wsId)
         .gte('started_at', cutoff90d).order('started_at', { ascending: false }).limit(90),
       db?.from('content_vods').select('id,status,created_at').eq('workspace_id', wsId)
@@ -119,6 +121,17 @@ export async function GET() {
       broadcasterId
         ? getTwitchFollowers(broadcasterId).then(async f => f > 0 ? f : getCachedFollowers())
         : getCachedFollowers(),
+      db?.from('partner_content_log')
+        .select('partner_name, platform, posted_at')
+        .eq('workspace_id', wsId)
+        .gte('posted_at', cutoff90d)
+        .order('posted_at', { ascending: false })
+        .limit(300),
+      db?.from('partner_proposals')
+        .select('partner_name, status, created_at')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false })
+        .limit(300),
     ]);
 
     const history: any[] = streamHistRes?.data ?? [];
@@ -127,17 +140,60 @@ export async function GET() {
     const partnere: any[] = partnereRes?.data ?? [];
     const settingsJson = workspaceRes?.data?.settings_json ?? {};
     const discordMembers = guild?.approximate_member_count ?? 0;
+    const contentLogs: any[] = contentLogRes?.data ?? [];
+    const proposals: any[] = proposalsRes?.data ?? [];
+
+    // ── Per-partner historikk (fra ekte data) ────────────────────────────────
+    const cutoff30dStr = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    const partnerNames = Array.from(new Set([
+      ...partnere.map(p => p.navn),
+      ...contentLogs.map(l => l.partner_name).filter(Boolean),
+      ...proposals.map(p => p.partner_name).filter(Boolean),
+    ]));
+
+    const partnerHistorikk = partnerNames.map(navn => {
+      const logs     = contentLogs.filter(l => l.partner_name === navn);
+      const props    = proposals.filter(p => p.partner_name === navn);
+      const logs30d  = logs.filter(l => l.posted_at >= cutoff30dStr);
+      const approved = props.filter(p => p.status === 'approved' || p.status === 'sent').length;
+      const rejected = props.filter(p => p.status === 'rejected').length;
+      const decided  = approved + rejected;
+      const godkjentRate = decided > 0 ? Math.round((approved / decided) * 100) : null;
+      const total    = logs.length + props.length;
+      const dataStyrke: 'god' | 'moderat' | 'svak' = total >= 10 ? 'god' : total >= 3 ? 'moderat' : 'svak';
+      return {
+        navn,
+        promoer30d:   logs30d.length,
+        promoerTotalt: logs.length,
+        sisteSendt:   logs[0]?.posted_at ?? null,
+        godkjentRate,
+        avvisninger:  rejected,
+        dataStyrke,
+        aktiv:        partnere.find(p => p.navn === navn)?.aktiv ?? null,
+      };
+    }).filter(p => p.promoerTotalt > 0 || proposals.some(pr => pr.partner_name === p.navn));
+
+    const partnerTotaler = {
+      totalePromoer:  contentLogs.length,
+      totaleForslag:  proposals.length,
+      promoer30d:     contentLogs.filter(l => l.posted_at >= cutoff30dStr).length,
+      godkjentRate:   (() => {
+        const a = proposals.filter(p => p.status === 'approved' || p.status === 'sent').length;
+        const r = proposals.filter(p => p.status === 'rejected').length;
+        return (a + r) > 0 ? Math.round((a / (a + r)) * 100) : null;
+      })(),
+      mestAktiv: partnerHistorikk.sort((a, b) => b.promoerTotalt - a.promoerTotalt)[0]?.navn ?? null,
+    };
 
     // ── Periode-metrics ───────────────────────────────────────────────────────
     const p7  = periodMetrics(history, 7);
     const p30 = periodMetrics(history, 30);
     const p90 = periodMetrics(history, 90);
 
-    const cutoff7d  = new Date(Date.now() - 7  * 24 * 3600_000).toISOString();
-    const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 
     const klipp7d  = highlights.filter(h => h.clip_status === 'CLIPPED' && h.created_at >= cutoff7d).length;
-    const klipp30d = highlights.filter(h => h.clip_status === 'CLIPPED' && h.created_at >= cutoff30d).length;
+    const klipp30d = highlights.filter(h => h.clip_status === 'CLIPPED' && h.created_at >= cutoff30dStr).length;
     const klipp90d = highlights.filter(h => h.clip_status === 'CLIPPED').length;
 
     // ── Trends ───────────────────────────────────────────────────────────────
@@ -219,6 +275,9 @@ Norsk Twitch-streamer statistikk:
 - Topp spill: ${topSpill.join(', ') || 'GTA RP'}
 - Sponsor score: ${score}/100
 - Neste milestone: ${nesteMillestone?.label ?? 'Sponsor-klar'} (${nesteMillestone?.poeng ?? 100} poeng)
+- Partner-promoer sendt (90d): ${partnerTotaler.totalePromoer}, siste 30d: ${partnerTotaler.promoer30d}
+- Totale forslag behandlet: ${partnerTotaler.totaleForslag}${partnerTotaler.godkjentRate !== null ? `, godkjennelsesrate: ${partnerTotaler.godkjentRate}%` : ''}
+${partnerHistorikk.length > 0 ? `Partner-aktivitet:\n${partnerHistorikk.slice(0, 5).map(p => `  ${p.navn}: ${p.promoerTotalt} promoer totalt (${p.promoer30d} siste 30d)${p.godkjentRate !== null ? `, godkjent ${p.godkjentRate}%` : ''}`).join('\n')}` : ''}
 ${memoryKontekst}`;
 
       const res = await openai.chat.completions.create({
@@ -299,6 +358,8 @@ ${memoryKontekst}`;
         streamsLast30d,
         topSpill,
       },
+      partnerHistorikk,
+      partnerTotaler,
       contentStats: {
         ferdigeVods,
         totaleKlipp,
