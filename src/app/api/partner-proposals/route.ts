@@ -13,7 +13,7 @@ export async function GET() {
     .from('partner_proposals')
     .select('id, partner_name, platform, confidence, scoring_detail, message_twitch, message_discord, status, expires_at, approved_at, sent_at, created_at')
     .eq('workspace_id', wsId)
-    .in('status', ['pending', 'approved', 'sent'])
+    .in('status', ['pending', 'approved', 'sent', 'rejected'])
     .order('created_at', { ascending: false })
     .limit(20);
 

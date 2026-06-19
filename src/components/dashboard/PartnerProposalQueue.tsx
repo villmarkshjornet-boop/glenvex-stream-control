@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { CheckCircle, Clock, Send } from 'lucide-react';
+import { CheckCircle, Clock, Send, X, AlertCircle } from 'lucide-react';
 import { tidSiden } from './helpers';
 
 interface Proposal {
@@ -12,7 +12,7 @@ interface Proposal {
   scoring_detail: { relevance?: number; historical?: number; context?: number; cooldown?: number } | null;
   message_twitch: string | null;
   message_discord: string | null;
-  status: 'pending' | 'approved' | 'sent';
+  status: 'pending' | 'approved' | 'sent' | 'rejected';
   expires_at: string;
   approved_at: string | null;
   sent_at: string | null;
@@ -30,16 +30,18 @@ function utløperLabel(iso: string): string {
 function platformBadge(platform: string) {
   const map: Record<string, string> = {
     discord: 'text-indigo-400 border-indigo-400/30 bg-indigo-400/10',
-    twitch: 'text-purple-400 border-purple-400/30 bg-purple-400/10',
-    both: 'text-g-green border-g-green/30 bg-g-green/10',
+    twitch:  'text-purple-400 border-purple-400/30 bg-purple-400/10',
+    both:    'text-g-green border-g-green/30 bg-g-green/10',
   };
   return map[platform] ?? map.discord;
 }
 
 export function PartnerProposalQueue() {
-  const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [approving, setApproving] = useState<Set<string>>(new Set());
+  const [proposals, setProposals]     = useState<Proposal[]>([]);
+  const [approving, setApproving]     = useState<Set<string>>(new Set());
+  const [rejecting, setRejecting]     = useState<Set<string>>(new Set());
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({});
+  const [visUtløpt, setVisUtløpt]     = useState(false);
 
   const hent = useCallback(async () => {
     try {
@@ -63,7 +65,6 @@ export function PartnerProposalQueue() {
       const res = await fetch(`/api/partner-proposals/${id}/approve`, { method: 'POST' });
       if (res.ok) {
         setLocalStatus(prev => ({ ...prev, [id]: 'approved' }));
-        // Refresh to pick up updated status
         setTimeout(hent, 1000);
       } else {
         const body = await res.json().catch(() => ({}));
@@ -75,19 +76,39 @@ export function PartnerProposalQueue() {
     setApproving(prev => { const s = new Set(prev); s.delete(id); return s; });
   }
 
-  // Only show relevant proposals: pending + approved + sent last 24h
-  const visible = proposals.filter(p => {
-    if (p.status === 'sent') {
-      const age = Date.now() - new Date(p.sent_at ?? p.created_at).getTime();
-      return age < 24 * 60 * 60 * 1000;
+  async function avvis(id: string) {
+    setRejecting(prev => new Set(prev).add(id));
+    try {
+      const res = await fetch(`/api/partner-proposals/${id}/reject`, { method: 'POST' });
+      if (res.ok) {
+        setLocalStatus(prev => ({ ...prev, [id]: 'rejected' }));
+        setTimeout(hent, 1000);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setLocalStatus(prev => ({ ...prev, [id]: body.error ?? 'Feil' }));
+      }
+    } catch {
+      setLocalStatus(prev => ({ ...prev, [id]: 'Nettverksfeil' }));
     }
-    return true;
+    setRejecting(prev => { const s = new Set(prev); s.delete(id); return s; });
+  }
+
+  const now = Date.now();
+
+  // Classify pending into active vs expired
+  const activePending  = proposals.filter(p => p.status === 'pending' && new Date(p.expires_at).getTime() > now);
+  const expiredPending = proposals.filter(p => p.status === 'pending' && new Date(p.expires_at).getTime() <= now);
+
+  // Non-pending: approved + sent (last 24h) + rejected (last 1h, debugging only)
+  const others = proposals.filter(p => {
+    if (p.status === 'approved') return true;
+    if (p.status === 'sent') return now - new Date(p.sent_at ?? p.created_at).getTime() < 24 * 60 * 60 * 1000;
+    if (p.status === 'rejected') return now - new Date(p.created_at).getTime() < 60 * 60 * 1000;
+    return false;
   });
 
-  if (visible.length === 0) return null;
-
-  const pending = visible.filter(p => p.status === 'pending');
-  const others  = visible.filter(p => p.status !== 'pending');
+  const hasAnything = activePending.length > 0 || others.length > 0 || expiredPending.length > 0;
+  if (!hasAnything) return null;
 
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-6">
@@ -95,25 +116,29 @@ export function PartnerProposalQueue() {
         <p className="text-xs text-g-muted uppercase tracking-widest font-bold">
           Partner-forslag til godkjenning
         </p>
-        {pending.length > 0 && (
+        {activePending.length > 0 && (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-yellow-400/10 border border-yellow-400/30 text-yellow-400">
-            {pending.length} venter
+            {activePending.length} venter
           </span>
         )}
       </div>
 
       <div className="space-y-3">
-        {/* Pending — needs action */}
-        {pending.map(p => {
-          const override = localStatus[p.id];
-          const isApproving = approving.has(p.id);
+
+        {/* Active pending — needs action */}
+        {activePending.map(p => {
+          const override      = localStatus[p.id];
+          const isApproving   = approving.has(p.id);
+          const isRejecting   = rejecting.has(p.id);
+          const isBusy        = isApproving || isRejecting;
           const isJustApproved = override === 'approved';
-          const preview = (p.message_discord ?? p.message_twitch ?? '').slice(0, 140);
-          const score = p.scoring_detail;
+          const isJustRejected = override === 'rejected';
+          const hasError      = override && override !== 'approved' && override !== 'rejected';
+          const preview       = (p.message_discord ?? p.message_twitch ?? '').slice(0, 140);
+          const score         = p.scoring_detail;
 
           return (
             <div key={p.id} className="border border-yellow-400/20 bg-yellow-400/5 rounded-xl p-4 space-y-3">
-              {/* Header row */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-bold text-sm text-g-text truncate">{p.partner_name}</span>
@@ -129,7 +154,6 @@ export function PartnerProposalQueue() {
                 </div>
               </div>
 
-              {/* Score detail */}
               {score && (
                 <div className="flex gap-3 text-[10px] text-g-muted font-mono">
                   {score.relevance != null && <span>Rel: {Math.round(score.relevance * 100)}%</span>}
@@ -141,62 +165,109 @@ export function PartnerProposalQueue() {
                 </div>
               )}
 
-              {/* Message preview */}
               {preview && (
                 <p className="text-xs text-g-muted/80 leading-relaxed border-l-2 border-g-border pl-3 italic">
                   {preview}{preview.length === 140 ? '…' : ''}
                 </p>
               )}
 
-              {/* Approve button / status */}
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-g-muted/50">{tidSiden(p.created_at)}</span>
+
                 {isJustApproved ? (
                   <span className="flex items-center gap-1.5 text-xs text-g-green font-bold">
                     <CheckCircle size={13} /> Godkjent – sendes innen 2 min
                   </span>
-                ) : override && override !== 'approved' ? (
+                ) : isJustRejected ? (
+                  <span className="flex items-center gap-1.5 text-xs text-g-muted/60 font-bold">
+                    <X size={13} /> Avvist
+                  </span>
+                ) : hasError ? (
                   <span className="text-xs text-red-400">{override}</span>
                 ) : (
-                  <button
-                    onClick={() => godkjenn(p.id)}
-                    disabled={isApproving}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
-                      isApproving
-                        ? 'border-g-green/30 text-g-green animate-pulse cursor-not-allowed'
-                        : 'border-g-green/40 text-g-green hover:bg-g-green/10 hover:border-g-green'
-                    }`}
-                  >
-                    <CheckCircle size={13} />
-                    {isApproving ? 'Godkjenner...' : 'Godkjenn'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => avvis(p.id)}
+                      disabled={isBusy}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
+                        isRejecting
+                          ? 'border-red-400/30 text-red-400 animate-pulse cursor-not-allowed'
+                          : 'border-red-400/20 text-red-400/70 hover:text-red-400 hover:border-red-400/40 hover:bg-red-400/5'
+                      }`}
+                    >
+                      <X size={13} />
+                      {isRejecting ? 'Avviser...' : 'Avvis'}
+                    </button>
+                    <button
+                      onClick={() => godkjenn(p.id)}
+                      disabled={isBusy}
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
+                        isApproving
+                          ? 'border-g-green/30 text-g-green animate-pulse cursor-not-allowed'
+                          : 'border-g-green/40 text-g-green hover:bg-g-green/10 hover:border-g-green'
+                      }`}
+                    >
+                      <CheckCircle size={13} />
+                      {isApproving ? 'Godkjenner...' : 'Godkjenn'}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
           );
         })}
 
-        {/* Approved (waiting to send) + Sent (last 24h) */}
+        {/* Approved / Sent / Rejected — compact rows */}
         {others.map(p => (
           <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 border border-g-border/30 rounded-xl">
-            {p.status === 'approved' ? (
-              <Clock size={14} className="text-g-green animate-pulse flex-shrink-0" />
-            ) : (
-              <Send size={14} className="text-g-muted/50 flex-shrink-0" />
-            )}
+            {p.status === 'approved' && <Clock size={14} className="text-g-green animate-pulse flex-shrink-0" />}
+            {p.status === 'sent'     && <Send  size={14} className="text-g-muted/50 flex-shrink-0" />}
+            {p.status === 'rejected' && <X     size={14} className="text-g-muted/40 flex-shrink-0" />}
             <div className="flex-1 min-w-0">
-              <span className="text-sm text-g-text font-bold">{p.partner_name}</span>
+              <span className={`text-sm font-bold ${p.status === 'rejected' ? 'text-g-muted/50 line-through' : 'text-g-text'}`}>
+                {p.partner_name}
+              </span>
               <span className={`ml-2 px-1.5 py-0.5 border rounded text-[10px] font-bold ${platformBadge(p.platform)}`}>
                 {p.platform}
               </span>
             </div>
             <span className={`text-xs font-bold flex-shrink-0 ${
-              p.status === 'approved' ? 'text-g-green' : 'text-g-muted/60'
+              p.status === 'approved' ? 'text-g-green'
+              : p.status === 'rejected' ? 'text-g-muted/40'
+              : 'text-g-muted/60'
             }`}>
-              {p.status === 'approved' ? 'Sendes innen 2 min' : `Sendt ${tidSiden(p.sent_at ?? p.created_at)}`}
+              {p.status === 'approved'  ? 'Sendes innen 2 min'
+               : p.status === 'rejected' ? `Avvist ${tidSiden(p.created_at)}`
+               : `Sendt ${tidSiden(p.sent_at ?? p.created_at)}`}
             </span>
           </div>
         ))}
+
+        {/* Expired pending — collapsed, debugging only */}
+        {expiredPending.length > 0 && (
+          <div>
+            <button
+              onClick={() => setVisUtløpt(v => !v)}
+              className="flex items-center gap-1.5 text-[10px] text-g-muted/40 hover:text-g-muted/70 transition-colors mt-1"
+            >
+              <AlertCircle size={11} />
+              {expiredPending.length} utløpt forslag
+              <span>{visUtløpt ? '▲' : '▼'}</span>
+            </button>
+            {visUtløpt && (
+              <div className="mt-2 space-y-1.5">
+                {expiredPending.map(p => (
+                  <div key={p.id} className="flex items-center gap-3 px-3 py-2 border border-g-border/20 rounded-lg opacity-40">
+                    <AlertCircle size={12} className="text-g-muted flex-shrink-0" />
+                    <span className="text-xs text-g-muted line-through flex-1">{p.partner_name}</span>
+                    <span className="text-[10px] text-g-muted/60">Utløpt {tidSiden(p.expires_at)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );
