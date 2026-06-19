@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { PageHeader, Spinner, ErrorState } from '@/components/ui';
+import { tidSiden } from '@/components/dashboard/helpers';
 
 interface HealthData {
   total: number; aktive24h: number; aktive7d: number; aktive30d: number;
@@ -46,21 +48,12 @@ const PRIORITET_FARGE: Record<string, string> = {
 };
 
 const ANBEFALING_IKON: Record<string, string> = {
-  gi_vip: '⭐', følg_opp: '⚠', spotlight: '💎', takk: '🙏',
+  gi_vip: '★', følg_opp: '!', spotlight: '◆', takk: '◈',
 };
-
-function tidSiden(iso: string): string {
-  if (!iso) return '—';
-  const sek = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (sek < 60) return 'akkurat nå';
-  if (sek < 3600) return `${Math.floor(sek / 60)}m siden`;
-  if (sek < 86400) return `${Math.floor(sek / 3600)}t siden`;
-  return `${Math.floor(sek / 86400)}d siden`;
-}
 
 function StatCard({ label, value, sub, color = 'text-g-green' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="bg-g-card border border-g-border rounded-lg p-3 text-center">
+    <div className="bg-g-card border border-g-border rounded-xl p-3 text-center">
       <p className={`text-2xl font-black font-mono ${color}`}>{value}</p>
       <p className="text-[9px] text-g-muted uppercase tracking-widest mt-1">{label}</p>
       {sub && <p className="text-[9px] text-g-muted/60 mt-0.5">{sub}</p>}
@@ -108,14 +101,12 @@ export default function CommunityIntelligencePage() {
   }, []);
 
   if (loading) return (
-    <div className="max-w-5xl mx-auto">
-      <p className="text-g-muted text-sm animate-pulse">Laster community-data...</p>
-    </div>
+    <div className="max-w-5xl mx-auto flex justify-center py-16"><Spinner /></div>
   );
 
   if (error || !data) return (
     <div className="max-w-5xl mx-auto">
-      <p className="text-red-400 text-sm">Feil: {error ?? 'Ingen data'}</p>
+      <ErrorState message={error ?? 'Ingen community-data tilgjengelig'} />
     </div>
   );
 
@@ -124,15 +115,11 @@ export default function CommunityIntelligencePage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Community Intelligence</h1>
-          <p className="text-xs text-g-muted mt-0.5">Sist oppdatert kl. {data.generertKl}</p>
-        </div>
-        <Link href="/community-manager" className="text-[9px] text-g-muted hover:text-g-green transition-colors border border-g-border rounded px-2 py-1">
+      <PageHeader title="Community Intelligence" subtitle={`Sist oppdatert kl. ${data.generertKl}`}>
+        <Link href="/community-manager" className="text-[9px] text-g-muted hover:text-g-green transition-colors border border-g-border rounded-lg px-2 py-1">
           Alle membres →
         </Link>
-      </div>
+      </PageHeader>
 
       {/* ── Community Health ─────────────────────────────────────────────────── */}
       <div>
@@ -150,8 +137,8 @@ export default function CommunityIntelligencePage() {
 
       {/* ── AI Analyse ───────────────────────────────────────────────────────── */}
       {aiAnalyse && (
-        <div className="bg-g-card border border-g-green/20 rounded-xl p-4">
-          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold mb-2">◈ AI Community Analyse</p>
+        <div className="bg-g-card border border-g-green/20 rounded-2xl p-5">
+          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold mb-2">AI Community Analyse</p>
           <p className="text-xs text-g-text leading-relaxed whitespace-pre-wrap">{aiAnalyse}</p>
         </div>
       )}
@@ -177,7 +164,7 @@ export default function CommunityIntelligencePage() {
 
       {/* ── Segmenter ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-emerald-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-emerald-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-emerald-400 uppercase tracking-widest font-bold mb-3">Core Members ({coreMembers.length})</p>
           <p className="text-[8px] text-g-muted mb-2">≥5 streams · aktiv 7d · aktiv chatter</p>
           {coreMembers.length === 0
@@ -185,7 +172,7 @@ export default function CommunityIntelligencePage() {
             : coreMembers.map(m => <MemberRow key={m.id} m={m} showXP showStreams />)
           }
         </div>
-        <div className="bg-g-card border border-yellow-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-yellow-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold mb-3">Community Heroes ({communityHeroes.length})</p>
           <p className="text-[8px] text-g-muted mb-2">Lv≥30 eller support-score≥5</p>
           {communityHeroes.length === 0
@@ -196,7 +183,7 @@ export default function CommunityIntelligencePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-pink-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-pink-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-pink-400 uppercase tracking-widest font-bold mb-3">Streamer Supporters ({streamerSupportere.length})</p>
           <p className="text-[8px] text-g-muted mb-2">Support-score≥3 (subs/giftsubs/raids)</p>
           {streamerSupportere.length === 0
@@ -204,7 +191,7 @@ export default function CommunityIntelligencePage() {
             : streamerSupportere.map(m => <MemberRow key={m.id} m={m} showSupport />)
           }
         </div>
-        <div className="bg-g-card border border-purple-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-purple-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-purple-400 uppercase tracking-widest font-bold mb-3">Retention Leaders ({retentionLeaders.length})</p>
           <p className="text-[8px] text-g-muted mb-2">≥8 streams · aktiv siste 14d</p>
           {retentionLeaders.length === 0
@@ -216,22 +203,22 @@ export default function CommunityIntelligencePage() {
 
       {/* ── Leaders ──────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp XP</p>
           {leaders.toppXP.slice(0, 8).map(m => <MemberRow key={m.id} m={m} showXP />)}
         </div>
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp Chattere</p>
           {leaders.toppChattere.map(m => <MemberRow key={m.id} m={m} showMessages />)}
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp Støttespillere</p>
           {leaders.toppSupportere.map(m => <MemberRow key={m.id} m={m} showSupport />)}
         </div>
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Høyest Engasjement</p>
           {leaders.toppEngasjement.map(m => <MemberRow key={m.id} m={m} showScore />)}
         </div>
@@ -239,7 +226,7 @@ export default function CommunityIntelligencePage() {
 
       {/* ── AI Memory Kontekst ───────────────────────────────────────────────── */}
       {(aiMemoryKontekst.communitySignaler.length > 0 || aiMemoryKontekst.runningJokes.length > 0 || aiMemoryKontekst.kjenteMembres.length > 0) && (
-        <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Minne om Community</p>
             <span className={`text-[8px] px-2 py-0.5 rounded border font-bold ${
@@ -292,14 +279,14 @@ export default function CommunityIntelligencePage() {
 
       {/* ── At Risk + Hidden Gems ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-red-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-red-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-red-400 uppercase tracking-widest font-bold mb-3">At Risk ({atRisk.length})</p>
           {atRisk.length === 0
             ? <p className="text-xs text-g-muted">Ingen at-risk membres.</p>
             : atRisk.map(m => <MemberRow key={m.id} m={m} showXP showLastSeen />)
           }
         </div>
-        <div className="bg-g-card border border-blue-500/20 rounded-xl p-4">
+        <div className="bg-g-card border border-blue-500/20 rounded-2xl p-5">
           <p className="text-[9px] text-blue-400 uppercase tracking-widest font-bold mb-3">Hidden Gems ({hiddenGems.length})</p>
           {hiddenGems.length === 0
             ? <p className="text-xs text-g-muted">Ingen hidden gems ennå.</p>
@@ -310,7 +297,7 @@ export default function CommunityIntelligencePage() {
 
       {/* ── New Members ──────────────────────────────────────────────────────── */}
       {newMembers.length > 0 && (
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Nye Membres Siste 30 Dager</p>
           <div className="grid grid-cols-2 gap-x-6">
             {newMembers.map(m => (

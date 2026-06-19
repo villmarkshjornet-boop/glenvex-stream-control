@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface Highlight {
   id: string;
@@ -46,12 +47,9 @@ export default function PubliseringPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Publisering</h1>
-        <p className="text-[10px] text-g-muted mt-0.5">Klipp klare for publisering – ingen autopublisering</p>
-      </div>
+      <PageHeader title="Publisering" subtitle="Klipp klare for publisering — ingen autopublisering" />
 
-      <div className="bg-g-card border border-g-green/10 rounded-xl p-4">
+      <div className="bg-g-card border border-g-green/10 rounded-2xl p-4">
         <p className="text-xs text-g-green font-bold mb-1">Ingen autopublisering</p>
         <p className="text-[10px] text-g-muted leading-relaxed">
           Klipp publiseres aldri automatisk. Last ned eller åpne klippet, og publiser manuelt til ønsket plattform.
@@ -60,10 +58,10 @@ export default function PubliseringPage() {
 
       {loading ? (
         <div className="space-y-2">
-          {[1,2,3].map(i => <div key={i} className="h-20 bg-g-card border border-g-border rounded-xl animate-pulse" />)}
+          {[1,2,3].map(i => <div key={i} className="h-20 bg-g-card border border-g-border rounded-2xl animate-pulse" />)}
         </div>
       ) : klare.length === 0 ? (
-        <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
           <p className="text-g-muted text-xs">Ingen klipp klare for publisering ennå.</p>
           <p className="text-g-muted/60 text-[9px] mt-1">Klipp genereres automatisk etter at Content Factory er ferdig.</p>
           <Link href="/content-factory-admin/highlights" className="mt-4 inline-block px-4 py-2 bg-g-green/10 border border-g-green/20 rounded text-xs text-g-green font-bold hover:bg-g-green/20 transition-all">
@@ -74,7 +72,7 @@ export default function PubliseringPage() {
         <div className="space-y-3">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{klare.length} klipp klare</p>
           {klare.map(h => (
-            <div key={h.id} className="bg-g-card border border-g-green/10 rounded-xl p-4">
+            <div key={h.id} className="bg-g-card border border-g-green/10 rounded-2xl p-4">
               <div className="flex items-start gap-4">
                 <div className="flex-1 min-w-0">
                   <p className="text-[9px] text-g-muted">{vods[h.vod_id] ?? h.vod_id}</p>

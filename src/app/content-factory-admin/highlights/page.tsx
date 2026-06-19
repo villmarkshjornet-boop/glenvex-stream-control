@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 const BRAND_SLUG = process.env.NEXT_PUBLIC_BRAND_SLUG ?? 'streamer';
 
@@ -101,6 +102,8 @@ export default function HighlightViewerPage() {
   const [regenerererThumb, setRegenerererThumb] = useState<string | null>(null);
   const [posterDiscord, setPosterDiscord] = useState<string | null>(null);
   const [discordPostet, setDiscordPostet] = useState<string | null>(null);
+  const [discordFeil, setDiscordFeil] = useState<string | null>(null);
+  const [thumbFeil, setThumbFeil] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => {
@@ -198,14 +201,11 @@ export default function HighlightViewerPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Highlight Viewer</h1>
-        <p className="text-[10px] text-g-muted mt-0.5">Se alle highlights, captions og generer videoklipp</p>
-      </div>
+      <PageHeader title="Highlight Viewer" subtitle="Se alle highlights, captions og generer videoklipp" />
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* VOD-velger */}
-        <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-2">
+        <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-2">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">VODs ({vods.length})</p>
           {vods.length === 0 ? (
             <p className="text-[10px] text-g-muted">Ingen VODs. Start pipeline i Content Factory.</p>
@@ -228,13 +228,13 @@ export default function HighlightViewerPage() {
         {/* Highlight-liste */}
         <div className="lg:col-span-3 space-y-3">
           {loading && (
-            <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+            <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
               <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
             </div>
           )}
 
           {!loading && highlights.length === 0 && valgtVod && (
-            <div className="bg-g-card border border-g-border rounded-xl p-6 text-center space-y-3">
+            <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center space-y-3">
               <p className="text-xs text-g-muted">Ingen highlights for denne VOD-en.</p>
               <p className="text-[9px] text-g-muted">Railway må ha fullført Phase 1 (transkripsjon) før Phase 2 kan kjøres.</p>
               <button
@@ -267,7 +267,7 @@ export default function HighlightViewerPage() {
             const erValgt = valgtH?.id === h.id;
 
             return (
-              <div key={h.id} className={`bg-g-card border rounded-xl overflow-hidden transition-all ${erValgt ? 'border-g-green/30' : 'border-g-border'}`}>
+              <div key={h.id} className={`bg-g-card border rounded-2xl overflow-hidden transition-all ${erValgt ? 'border-g-green/30' : 'border-g-border'}`}>
                 {/* Highlight-header */}
                 <div className="p-4 cursor-pointer" onClick={() => setValgtH(erValgt ? null : h)}>
                   <div className="flex items-start gap-3">
@@ -439,9 +439,11 @@ export default function HighlightViewerPage() {
                             setPosterDiscord(null);
                             if (res.ok) {
                               setDiscordPostet(h.id);
+                              setDiscordFeil(null);
                               setTimeout(() => setDiscordPostet(null), 4000);
                             } else {
-                              alert(d.error ?? 'Discord-posting feilet');
+                              setDiscordFeil(d.error ?? 'Discord-posting feilet');
+                              setTimeout(() => setDiscordFeil(null), 6000);
                             }
                           }}
                           disabled={posterDiscord === h.id}
@@ -455,6 +457,7 @@ export default function HighlightViewerPage() {
                             <>◈ Post til Discord</>
                           )}
                         </button>
+                        {discordFeil && <p className="text-[9px] text-red-400 mt-1">{discordFeil}</p>}
                       </div>
                     )}
 
@@ -610,6 +613,7 @@ export default function HighlightViewerPage() {
 
                         {/* Generer/regenerer-knapp */}
                         {h.thumbnail_status !== 'GENERATING' && (
+                          <>
                           <button
                             onClick={async () => {
                               setRegenerererThumb(h.id);
@@ -624,7 +628,8 @@ export default function HighlightViewerPage() {
                               const d = await res.json().catch(() => ({}));
                               setRegenerererThumb(null);
                               if (!res.ok) {
-                                alert(`Thumbnail-feil: ${d.error ?? 'Ukjent feil'}`);
+                                setThumbFeil(d.error ?? 'Thumbnail-generering feilet');
+                                setTimeout(() => setThumbFeil(null), 8000);
                                 await hentHighlights(valgtVod);
                               } else {
                                 // Start polling — stopper automatisk når status er DONE/FAILED
@@ -641,6 +646,8 @@ export default function HighlightViewerPage() {
                               <>↻ {h.thumbnail_status === 'DONE' ? 'Regenerer thumbnail' : 'Generer thumbnail'}</>
                             )}
                           </button>
+                          {thumbFeil && <p className="text-[9px] text-red-400 mt-1">{thumbFeil}</p>}
+                          </>
                         )}
                       </div>
                     )}
@@ -698,7 +705,7 @@ export default function HighlightViewerPage() {
                       {ig && (
                         <div className="p-3 bg-g-bg border border-purple-400/20 rounded-lg">
                           <div className="flex justify-between items-center mb-1">
-                            <p className="text-[9px] text-purple-400 font-bold uppercase">📸 Instagram</p>
+                            <p className="text-[9px] text-purple-400 font-bold uppercase">Instagram</p>
                             <button onClick={() => kopier(`${ig.caption}\n\n${(ig.hashtags ?? []).join(' ')}`, `ig-${h.id}`)}
                               className="text-[9px] text-g-muted hover:text-g-green transition-colors">
                               {kopiert === `ig-${h.id}` ? '✓ Kopiert!' : 'Kopier'}

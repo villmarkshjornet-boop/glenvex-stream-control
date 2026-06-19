@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface RPCharacter {
   id: string;
@@ -65,10 +66,7 @@ export default function RPVaultPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">RP Character Vault</h1>
-        <p className="text-xs text-g-muted mt-0.5">Alle lagrede RP-karakterer – Full oversikt og administrasjon</p>
-      </div>
+      <PageHeader title="RP Character Vault" subtitle="Alle lagrede RP-karakterer — full oversikt og administrasjon" />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
@@ -77,7 +75,7 @@ export default function RPVaultPage() {
           { label: 'Aktive', value: chars.filter(c => c.status === 'aktiv').length },
           { label: 'Publisert på Discord', value: chars.filter(c => c.discordMsgId).length },
         ].map(s => (
-          <div key={s.label} className="bg-g-card border border-g-border rounded-lg p-4 text-center">
+          <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
             <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
             <p className="text-2xl font-black text-g-green font-mono mt-1">{s.value}</p>
           </div>
@@ -92,13 +90,13 @@ export default function RPVaultPage() {
 
           {loading ? <p className="text-xs text-g-muted">Laster...</p> :
            filtrerte.length === 0 ? (
-            <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+            <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
               <p className="text-xs text-g-muted">Ingen karakterer. Opprett karakterer via RP Manager.</p>
             </div>
           ) : filtrerte.map(c => (
             <div key={c.id}
               onClick={() => { setValgt(valgt?.id === c.id ? null : c); setForm(c); setRedigerer(false); }}
-              className={`bg-g-card border rounded-xl overflow-hidden cursor-pointer transition-all hover:border-g-green/20 ${valgt?.id === c.id ? 'border-g-green/30' : 'border-g-border'}`}>
+              className={`bg-g-card border rounded-2xl overflow-hidden cursor-pointer transition-all hover:border-g-green/20 ${valgt?.id === c.id ? 'border-g-green/30' : 'border-g-border'}`}>
               <div className="flex gap-3 p-4">
                 {c.bildeUrl ? (
                   <img src={c.bildeUrl} alt={c.navn} className="w-16 h-16 rounded-lg object-cover flex-shrink-0 border border-g-border" />
@@ -124,7 +122,7 @@ export default function RPVaultPage() {
 
         {/* Sidepanel */}
         {valgt && (
-          <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4 sticky top-4">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4 sticky top-4">
             <div className="flex justify-between items-start">
               <p className="text-xs font-black text-g-text">{valgt.navn}</p>
               <button onClick={() => setValgt(null)} className="text-g-muted hover:text-g-text text-xs">✕</button>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader, ProgressBar, Spinner, EmptyState } from '@/components/ui';
 
 interface ModerationStatus {
   health: number;
@@ -20,38 +21,40 @@ export default function ModerationPage() {
   }, []);
 
   const healthColor = (status?.health ?? 0) >= 70 ? 'text-g-green' : (status?.health ?? 0) >= 40 ? 'text-yellow-400' : 'text-red-400';
+  const healthBarColor = (status?.health ?? 0) >= 70 ? 'green' : (status?.health ?? 0) >= 40 ? 'yellow' : 'red';
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">AI Moderator</h1>
-        <p className="text-xs text-g-muted mt-0.5">Community health og automatisk moderasjonsanalyse</p>
-      </div>
+      <PageHeader title="AI Moderator" subtitle="Community health og automatisk moderasjonsanalyse" />
 
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-lg p-8 text-center">
-          <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 flex justify-center">
+          <Spinner />
         </div>
       ) : !status ? (
-        <p className="text-xs text-g-muted">Ingen moderasjonsdata tilgjengelig.</p>
+        <EmptyState icon="◈" title="Ingen data" description="Ingen moderasjonsdata tilgjengelig." />
       ) : (
         <>
           {/* Health */}
-          <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
-            <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">Community Health</h2>
+          <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Community Health</p>
             <div className="flex items-center gap-4">
               <p className={`text-5xl font-black font-mono ${healthColor}`}>{status.health}</p>
               <div className="flex-1">
-                <div className="w-full bg-g-border rounded-full h-3 mb-2">
-                  <div className="h-3 rounded-full transition-all bg-g-green" style={{ width: `${status.health}%` }} />
-                </div>
-                <p className="text-xs text-g-muted">{status.health >= 70 ? 'God stemning' : status.health >= 40 ? 'Nøytral' : 'Behov for oppmerksomhet'}</p>
+                <ProgressBar value={status.health} max={100} color={healthBarColor as any} size="md" showGlow />
+                <p className="text-xs text-g-muted mt-1.5">
+                  {status.health >= 70 ? 'God stemning' : status.health >= 40 ? 'Nøytral' : 'Behov for oppmerksomhet'}
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              {[['😊 Positiv', status.positiv, 'text-g-green'], ['😐 Nøytral', status.nøytral, 'text-g-muted'], ['😠 Negativ', status.negativ, 'text-red-400']].map(([l, v, c]) => (
-                <div key={l as string} className="text-center p-3 bg-g-bg border border-g-border rounded">
-                  <p className="text-xs text-g-muted">{l}</p>
+              {[
+                ['Positiv', status.positiv, 'text-g-green'],
+                ['Nøytral', status.nøytral, 'text-g-muted'],
+                ['Negativ', status.negativ, 'text-red-400'],
+              ].map(([l, v, c]) => (
+                <div key={l as string} className="text-center p-3 bg-g-bg border border-g-border rounded-xl">
+                  <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{l}</p>
                   <p className={`text-xl font-black font-mono mt-1 ${c}`}>{v}%</p>
                 </div>
               ))}
@@ -60,14 +63,18 @@ export default function ModerationPage() {
 
           {/* Varsler */}
           {status.varsler.length > 0 && (
-            <div className="bg-g-card border border-yellow-400/20 rounded-lg p-5">
-              <h2 className="text-xs text-yellow-400 font-semibold tracking-widest uppercase mb-3">⚠ Varsler</h2>
-              {status.varsler.map((v, i) => <p key={i} className="text-xs text-g-text mb-1">• {v}</p>)}
+            <div className="bg-g-card border border-yellow-400/20 rounded-2xl p-5">
+              <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold mb-3">Varsler</p>
+              {status.varsler.map((v, i) => (
+                <p key={i} className="text-xs text-g-text mb-1 flex gap-2">
+                  <span className="text-yellow-400">!</span>{v}
+                </p>
+              ))}
             </div>
           )}
 
-          <div className="bg-g-card border border-g-border rounded-lg p-5">
-            <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-3">Siste moderasjonslogg</h2>
+          <div className="bg-g-card border border-g-border rounded-2xl p-5">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Siste moderasjonslogg</p>
             {status.siste.length === 0 ? (
               <p className="text-xs text-g-muted">Ingen hendelser registrert.</p>
             ) : status.siste.map((s, i) => (

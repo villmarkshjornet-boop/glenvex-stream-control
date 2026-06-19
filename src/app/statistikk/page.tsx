@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface Raid { username: string; viewers: number; timestamp: string; }
 interface GiftSub { username: string; count: number; timestamp: string; }
@@ -110,22 +111,21 @@ export default function StatistikkPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Statistikk</h1>
-          <p className="text-xs text-g-muted mt-0.5">Uke {events?.weekNumber ?? '–'} · Vekstanalyse og events</p>
-        </div>
+      <PageHeader
+        title="Statistikk"
+        subtitle={`Uke ${events?.weekNumber ?? '–'} · Vekstanalyse og events`}
+      >
         {sisteOppdatert && (
-          <p className="text-[9px] text-g-muted">
+          <span className="text-[9px] text-g-muted">
             ↻ {sisteOppdatert.toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </p>
+          </span>
         )}
-      </div>
+      </PageHeader>
 
       {/* ─── Vekstanalyse ──────────────────────────────────────────────────── */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">◆ Twitch Vekstanalyse</p>
+          <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">Twitch Vekstanalyse</p>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
             <span className="text-[9px] text-g-green">Live · 30s</span>
@@ -198,18 +198,16 @@ export default function StatistikkPage() {
           { label: 'Raid-seere totalt', value: totalRaidViewers.toLocaleString() },
           { label: 'Gift subs totalt', value: totalGiftSubs.toLocaleString() },
         ].map(item => (
-          <div key={item.label} className="bg-g-card border border-g-border rounded-lg p-4">
-            <p className="text-[10px] text-g-muted uppercase tracking-widest">{item.label}</p>
+          <div key={item.label} className="bg-g-card border border-g-border rounded-2xl p-4">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{item.label}</p>
             <p className="text-2xl font-black text-g-green font-mono mt-1">{item.value}</p>
           </div>
         ))}
       </div>
 
       {/* ─── Topp raids ───────────────────────────────────────────────────── */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">
-          🚨 Topp raids denne uken
-        </h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Topp raids denne uken</p>
         {loading ? (
           <p className="text-xs text-g-muted">Laster...</p>
         ) : topRaids.length === 0 ? (
@@ -235,10 +233,8 @@ export default function StatistikkPage() {
       </div>
 
       {/* ─── Topp gift-givere ─────────────────────────────────────────────── */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">
-          🎁 Topp gift-givere denne uken
-        </h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Topp gift-givere denne uken</p>
         {loading ? (
           <p className="text-xs text-g-muted">Laster...</p>
         ) : topGifters.length === 0 ? (
@@ -259,10 +255,8 @@ export default function StatistikkPage() {
       </div>
 
       {(events?.raids.length ?? 0) > 0 && (
-        <div className="bg-g-card border border-g-border rounded-lg p-5">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">
-            Alle raids denne uken
-          </h2>
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
+          <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Alle raids denne uken</p>
           <div className="space-y-1 max-h-60 overflow-y-auto">
             {[...(events?.raids ?? [])].reverse().map((r, i) => (
               <div key={i} className="flex justify-between py-1 text-xs border-b border-g-border/30 last:border-0">

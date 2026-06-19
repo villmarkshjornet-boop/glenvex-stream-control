@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { tidSiden } from '@/components/dashboard/helpers';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, ConfirmDialog } from '@/components/ui';
 
 interface PartnerStats {
   contentLog: {
@@ -97,6 +97,7 @@ export default function PartnerHubPage() {
   const [promoterer, setPromoterer] = useState(false);
   const [promotertMsg, setPromotertMsg] = useState('');
   const [kopiert, setKopiert] = useState(false);
+  const [confirmState, setConfirmState] = useState<import('@/components/ui').ConfirmState | null>(null);
   const [lagreFeil, setLagreFeil] = useState('');
 
   const hent = () => {
@@ -138,10 +139,17 @@ export default function PartnerHubPage() {
   }
 
   async function slett(id: string) {
-    if (!confirm('Slett partneren?')) return;
-    await fetch('/api/partners', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-    setValgt(null);
-    hent();
+    setConfirmState({
+      title: 'Slett partner',
+      message: 'Partneren og all tilknyttet data slettes permanent.',
+      danger: true,
+      confirmLabel: 'Slett partner',
+      onConfirm: async () => {
+        await fetch('/api/partners', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        setValgt(null);
+        hent();
+      },
+    });
   }
 
   async function settFeatured(id: string) {
@@ -182,6 +190,7 @@ export default function PartnerHubPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />
       <PageHeader title="Partner Hub" subtitle="Affiliate-avtaler, sponsorer og egne merker">
           <button onClick={() => postTilDiscord()} disabled={promoterer}
             className="px-3 py-2 bg-g-bg border border-g-border hover:border-g-green/30 text-g-muted hover:text-g-green text-xs font-bold rounded-lg transition-all">
@@ -214,7 +223,7 @@ export default function PartnerHubPage() {
 
       {/* Featured banner */}
       {featured && (
-        <div className="bg-g-card border border-yellow-400/20 rounded-xl p-6 relative overflow-hidden">
+        <div className="bg-g-card border border-yellow-400/20 rounded-2xl p-6 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-yellow-400/5 to-transparent pointer-events-none" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -222,7 +231,7 @@ export default function PartnerHubPage() {
                 <span className="text-yellow-400 text-xl font-black">★</span>
               </div>
               <div>
-                <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold">⭐ Featured Partner</p>
+                <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold">Featured Partner</p>
                 <p className="text-lg font-black text-g-text mt-0.5">{featured.navn}</p>
                 <p className="text-xs text-g-muted mt-0.5">{featured.beskrivelse}</p>
                 {featured.rabattkode && (
@@ -247,7 +256,7 @@ export default function PartnerHubPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Partner-liste */}
         <div className="lg:col-span-2 space-y-3">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">Alle partnere</h2>
+          <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Alle partnere</p>
           {loading ? <p className="text-xs text-g-muted">Laster...</p> :
            partners.length === 0 ? (
             <div className="bg-g-card border border-g-border rounded-lg p-8 text-center">
@@ -256,7 +265,7 @@ export default function PartnerHubPage() {
           ) : partners.map(p => (
             <div key={p.id}
               onClick={() => setValgt(valgt?.id === p.id ? null : p)}
-              className={`bg-g-card border rounded-xl p-4 cursor-pointer transition-all hover:border-g-green/20 ${valgt?.id === p.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border'} ${!p.aktiv ? 'opacity-50' : ''}`}>
+              className={`bg-g-card border rounded-2xl p-5 cursor-pointer transition-all hover:border-g-green/20 ${valgt?.id === p.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border'} ${!p.aktiv ? 'opacity-50' : ''}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 ${KATEGORI_FARGE[p.kategori]}`}>
@@ -287,7 +296,7 @@ export default function PartnerHubPage() {
           {valgt ? (
             <>
               {/* Partner-detaljer */}
-              <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm font-black text-g-text">{valgt.navn}</p>
@@ -412,7 +421,7 @@ export default function PartnerHubPage() {
               </div>
 
               {/* AI Content Studio */}
-              <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
                 <p className="text-[10px] text-g-green uppercase tracking-widest font-bold">◆ AI Content Studio</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {['discord', 'twitch', 'instagram', 'twitter', 'facebook', 'giveaway'].map(t => (
@@ -456,7 +465,7 @@ export default function PartnerHubPage() {
               </div>
             </>
           ) : (
-            <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
+            <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
               <p className="text-xs text-g-muted">Velg en partner for å se detaljer og generere innhold</p>
             </div>
           )}
@@ -466,7 +475,7 @@ export default function PartnerHubPage() {
       {/* Skjema */}
       {visForm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-g-card border border-g-border rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4">
+          <div className="bg-g-card border border-g-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="text-sm font-black text-g-text">{redigerId ? 'Rediger partner' : 'Ny partner'}</h2>
               <button onClick={() => { setVisForm(false); setRedigerId(null); setForm(TOM_PARTNER); }} className="text-g-muted hover:text-g-text text-sm">✕</button>

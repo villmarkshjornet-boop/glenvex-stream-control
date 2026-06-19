@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface KanalForslag { id: string; navn: string; nyttNavn: string; type: string; }
 interface Generert { karakterIntro: string; serverOppdatering: string; kanalForslag: KanalForslag[]; bildeUrl?: string; bildePrompt?: string; }
@@ -166,14 +167,11 @@ export default function RPManagerPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">RP Manager</h1>
-        <p className="text-xs text-g-muted mt-0.5">Administrer karakterer og RP-server – klikk på en karakter for å laste den inn</p>
-      </div>
+      <PageHeader title="RP Manager" subtitle="Administrer karakterer og RP-server — klikk på en karakter for å laste den inn" />
 
       {/* Lagrede karakterer */}
       {lagrede.length > 0 && (
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Lagrede karakterer – klikk for å laste inn</p>
           <div className="flex gap-2 flex-wrap">
             {lagrede.map(k => (
@@ -199,11 +197,11 @@ export default function RPManagerPage() {
       )}
 
       {/* Skjema */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-4">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">
+          <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">
             {valgtKarakter ? `Redigerer: ${valgtKarakter.navn}` : 'Ny karakter'}
-          </h2>
+          </p>
           {valgtKarakter && (
             <span className="text-[9px] text-g-green border border-g-green/30 bg-g-green/10 px-2 py-0.5 rounded-full font-bold">Lastet inn</span>
           )}
@@ -283,7 +281,7 @@ export default function RPManagerPage() {
 
       {/* Forhåndsvisning */}
       {redigert && (
-        <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+        <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
           <div className="flex border-b border-g-border">
             {(['karakter', 'server', 'kanaler'] as const).map(tab => (
               <button key={tab} onClick={() => setAktivTab(tab)}

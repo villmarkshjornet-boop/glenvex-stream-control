@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { createClient } from '@supabase/supabase-js';
+import { evaluateIntegrationStatus } from '@/lib/integrationStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,23 +28,29 @@ export async function POST(
 
   const { data: ws } = await db
     .from('workspaces')
-    .select('id,brand_name,twitch_login,twitch_connected_at,discord_guild_id,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,settings_json,owner_user_id')
+    .select('id,brand_name,twitch_login,twitch_connected_at,twitch_access_token,twitch_refresh_token,discord_guild_id,discord_guild_name,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,settings_json,owner_user_id')
     .eq('id', workspaceId)
     .single();
 
   if (!ws) return NextResponse.json({ error: 'Workspace ikke funnet' }, { status: 404 });
 
-  const kanalPrefs = ((ws.settings_json as any)?.kanalPreferanser ?? {}) as Record<string, string>;
-  const liveChannelId = kanalPrefs.live ?? ws.live_channel_id ?? null;
+  // Heartbeat check via system_events (last 12h) — single source of truth
+  const cutoff12h = new Date(Date.now() - 12 * 3_600_000).toISOString();
+  const [twitchEvRes, discordEvRes] = await Promise.all([
+    db.from('system_events').select('created_at').eq('workspace_id', workspaceId).eq('source', 'twitch_bot').gte('created_at', cutoff12h).order('created_at', { ascending: false }).limit(1),
+    db.from('system_events').select('created_at').eq('workspace_id', workspaceId).eq('source', 'discord_bot').gte('created_at', cutoff12h).order('created_at', { ascending: false }).limit(1),
+  ]);
 
-  const checks = {
-    twitchConnected:   !!ws.twitch_connected_at && !!ws.twitch_login,
-    discordConnected:  !!ws.discord_connected_at && !!ws.discord_guild_id,
-    liveChannelSet:    !!liveChannelId,
-    onboardingComplete: !!ws.onboarding_completed_at,
-    alphaEnabled:      !!ws.alpha_enabled,
-  };
+  const twitchBotLastEventAt  = twitchEvRes.data?.[0]?.created_at  ?? null;
+  const discordBotLastEventAt = discordEvRes.data?.[0]?.created_at ?? null;
 
+  const status = evaluateIntegrationStatus({
+    workspace: ws,
+    twitchBotLastEventAt,
+    discordBotLastEventAt,
+  });
+
+  const checks   = status.checks;
   const missing: string[] = [];
   if (!checks.twitchConnected)  missing.push('twitch_connection');
   if (!checks.discordConnected) missing.push('discord_connection');
@@ -53,14 +60,43 @@ export async function POST(
   const errors: string[] = [];
   const now = new Date().toISOString();
 
-  // Fix onboarding_completed_at if all connection prerequisites are met
+  // ── Backfill twitch_connected_at if bot is active but timestamp missing ──
+  if (status.twitch.botWatching && !ws.twitch_connected_at) {
+    const { error } = await db.from('workspaces').update({
+      twitch_connected_at: now,
+      updated_at: now,
+    }).eq('id', workspaceId);
+    if (error) {
+      errors.push(`twitch_connected_at backfill: ${error.message}`);
+    } else {
+      repairActions.push('twitch_connected_at satt (bot var aktiv, timestamp manglet)');
+      checks.twitchConnected = true;
+      missing.splice(missing.indexOf('twitch_connection'), 1);
+    }
+  }
+
+  // ── Backfill discord_connected_at if guild set + bot active ─────────────
+  if (status.discord.botInGuild && ws.discord_guild_id && !ws.discord_connected_at) {
+    const { error } = await db.from('workspaces').update({
+      discord_connected_at: now,
+      updated_at: now,
+    }).eq('id', workspaceId);
+    if (error) {
+      errors.push(`discord_connected_at backfill: ${error.message}`);
+    } else {
+      repairActions.push('discord_connected_at satt (bot aktiv i guild, timestamp manglet)');
+      checks.discordConnected = true;
+      missing.splice(missing.indexOf('discord_connection'), 1);
+    }
+  }
+
+  // ── Fix onboarding_completed_at if all prerequisites are now met ─────────
   if (missing.length === 0 && !checks.onboardingComplete) {
     const { error } = await db.from('workspaces').update({
       onboarding_completed_at: now,
       onboarding_step: 5,
       updated_at: now,
     }).eq('id', workspaceId);
-
     if (error) {
       errors.push(`onboarding_completed_at: ${error.message}`);
     } else {
@@ -69,21 +105,19 @@ export async function POST(
     }
   }
 
-  // Enable alpha if forceAlpha OR all conditions now met
+  // ── Enable alpha ─────────────────────────────────────────────────────────
   const shouldEnableAlpha = forceAlpha || (missing.length === 0 && checks.onboardingComplete);
   if (shouldEnableAlpha && !checks.alphaEnabled) {
     const { error } = await db.from('workspaces').update({
       alpha_enabled: true,
       updated_at: now,
     }).eq('id', workspaceId);
-
     if (error) {
       errors.push(`alpha_enabled: ${error.message}`);
     } else {
       repairActions.push('alpha_enabled satt til true');
       checks.alphaEnabled = true;
 
-      // Sync til user_metadata så JWT plukker det opp ved neste refresh
       if (ws.owner_user_id) {
         const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
         const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -98,8 +132,7 @@ export async function POST(
     }
   }
 
-  // Always sync workspace_id in user_metadata — covers the case where workspace
-  // exists and alpha is already on, but JWT user_metadata.workspace_id was never set
+  // ── Always sync workspace_id in user_metadata ────────────────────────────
   if (checks.alphaEnabled && ws.owner_user_id && !repairActions.some(a => a.includes('user_metadata'))) {
     const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -112,6 +145,8 @@ export async function POST(
     }
   }
 
+  const kanalPrefs = ((ws.settings_json as any)?.kanalPreferanser ?? {}) as Record<string, string>;
+  const liveChannelId = kanalPrefs.live ?? ws.live_channel_id ?? null;
   const readyForRuntime = checks.twitchConnected && checks.discordConnected && checks.liveChannelSet && checks.onboardingComplete && checks.alphaEnabled;
 
   try {
@@ -119,19 +154,13 @@ export async function POST(
       workspace_id: workspaceId,
       source: 'admin',
       event_type: 'WORKSPACE_REPAIR_RUN',
-      title: `Repair for ${ws.brand_name ?? workspaceId}: ${repairActions.length ? repairActions.join(', ') : 'ingen endringer — mangler prerequisites'}`,
+      title: `Repair for ${ws.brand_name ?? workspaceId}: ${repairActions.length ? repairActions.join(', ') : 'ingen endringer'}`,
       severity: repairActions.length > 0 ? 'info' : 'warning',
       metadata: {
-        workspaceId,
-        checks,
-        missing,
-        repairActions,
-        errors,
-        readyForRuntime,
+        workspaceId, checks, missing, repairActions, errors, readyForRuntime,
         repairedBy: h.get('x-user-email'),
-        twitchLogin: ws.twitch_login,
-        discordGuildId: ws.discord_guild_id,
-        liveChannelId,
+        twitchLogin: ws.twitch_login, discordGuildId: ws.discord_guild_id, liveChannelId,
+        twitchBotActive: status.twitch.botWatching, discordBotActive: status.discord.botInGuild,
       },
     });
   } catch {}
@@ -145,6 +174,7 @@ export async function POST(
     repairActions,
     errors,
     readyForRuntime,
+    integrationStatus: status,
     nextStep: !readyForRuntime && missing.length > 0
       ? `Mangler: ${missing.join(', ')} — bruker må fullføre onboarding`
       : !readyForRuntime && !checks.alphaEnabled

@@ -77,8 +77,8 @@ function konfidensBar(score: number) {
 
 function ForgetButton({ id, table, onForget }: { id: string; table?: string; onForget: () => void }) {
   const [loading, setLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const forget = async () => {
-    if (!confirm('Slett denne minneoppføringen?')) return;
     setLoading(true);
     await fetch('/api/ai-memory/forget', {
       method: 'DELETE',
@@ -86,12 +86,27 @@ function ForgetButton({ id, table, onForget }: { id: string; table?: string; onF
       body: JSON.stringify({ id, table }),
     });
     setLoading(false);
+    setConfirming(false);
     onForget();
   };
+  if (confirming) {
+    return (
+      <span className="flex items-center gap-1">
+        <button onClick={forget} disabled={loading}
+          className="px-1.5 py-0.5 text-[9px] text-red-400 border border-red-400/30 rounded bg-red-400/10 transition-all">
+          {loading ? '...' : 'Slett'}
+        </button>
+        <button onClick={() => setConfirming(false)}
+          className="px-1.5 py-0.5 text-[9px] text-g-muted border border-g-border rounded transition-all">
+          ✕
+        </button>
+      </span>
+    );
+  }
   return (
-    <button onClick={forget} disabled={loading}
+    <button onClick={() => setConfirming(true)}
       className="px-1.5 py-0.5 text-[9px] text-red-400/60 hover:text-red-400 border border-transparent hover:border-red-400/20 rounded transition-all">
-      {loading ? '...' : '✕'}
+      Slett
     </button>
   );
 }
@@ -100,13 +115,13 @@ function ForgetButton({ id, table, onForget }: { id: string; table?: string; onF
 
 function MemorySection({ title, items, onRefresh, icon }: { title: string; items: MemoryEntry[]; onRefresh: () => void; icon?: string }) {
   if (items.length === 0) return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">{icon} {title}</p>
       <p className="text-xs text-g-muted">Ingen data ennå – dette bygges opp automatisk over tid.</p>
     </div>
   );
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3">
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{icon} {title}</p>
         <span className="text-[9px] text-g-green font-bold">{items.length} oppføringer</span>
@@ -137,7 +152,7 @@ function MemorySection({ title, items, onRefresh, icon }: { title: string; items
 
 function SummaryCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4 text-center">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5 text-center">
       <p className="text-2xl font-black text-g-green">{value}</p>
       <p className="text-[10px] text-g-text font-bold mt-1">{label}</p>
       {sub && <p className="text-[9px] text-g-muted mt-0.5">{sub}</p>}
@@ -261,7 +276,7 @@ export default function AiMemoryPage() {
       )}
 
       {!data && (
-        <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
           <p className="text-sm text-g-muted">Ingen data funnet. Kjør SQL-migrasjonen fra <code className="text-g-green">supabase/global-ai-migration.sql</code> for å aktivere AI Memory.</p>
         </div>
       )}
@@ -300,7 +315,7 @@ export default function AiMemoryPage() {
               <MemorySection title="Stream-mønstre" items={data.streamPatterns} onRefresh={hent} icon="↻" />
 
               {/* Kanalstatus */}
-              <div className="bg-g-card border border-g-border rounded-xl p-4">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Kanalstatus</p>
                 <div className="space-y-3">
                   {(() => {
@@ -335,7 +350,7 @@ export default function AiMemoryPage() {
           {aktivTab === 'insights' && (
             <div className="space-y-4">
               {/* Innsikter */}
-              <div className="bg-g-card border border-g-border rounded-xl p-4">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Innsikter</p>
                 {data.insights.length === 0 ? (
                   <p className="text-xs text-g-muted">Ingen innsikter ennå. Innsikter genereres automatisk etter streams og av learning aggregatoren.</p>
@@ -361,7 +376,7 @@ export default function AiMemoryPage() {
               </div>
 
               {/* Beslutninger */}
-              <div className="bg-g-card border border-g-border rounded-xl p-4">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ AI Beslutninger</p>
                 {data.decisions.length === 0 ? (
                   <p className="text-xs text-g-muted">Ingen beslutninger ennå.</p>
@@ -394,7 +409,7 @@ export default function AiMemoryPage() {
             <div className="space-y-4">
               {/* Memory-lesinger */}
               {crossData && crossData.contextReads.length > 0 && (
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">↗ Siste 10 Memory-lesinger av botene</p>
                   <div className="space-y-1">
                     {crossData.contextReads.map((r, i) => {
@@ -415,7 +430,7 @@ export default function AiMemoryPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 {/* Twitch */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 rounded-full bg-purple-500" />
                     <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Twitch Chat (60 min)</p>
@@ -431,7 +446,7 @@ export default function AiMemoryPage() {
                 </div>
 
                 {/* Discord */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 rounded-full bg-blue-500" />
                     <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Discord (60 min)</p>
@@ -448,7 +463,7 @@ export default function AiMemoryPage() {
               </div>
 
               {/* Kommandoguide */}
-              <div className="bg-g-card/60 border border-g-border rounded-xl p-4 text-[11px]">
+              <div className="bg-g-card/60 border border-g-border rounded-2xl p-5 text-[11px]">
                 <p className="font-bold text-g-text mb-2">Kommandoer for cross-platform context</p>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-1 font-mono text-g-muted">
                   <span><span className="text-blue-400">Discord</span>  !twitchsiste — AI-oppsummering av siste Twitch-chat</span>
@@ -464,7 +479,7 @@ export default function AiMemoryPage() {
 
           {/* Hendelser-tab */}
           {aktivTab === 'events' && (
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Hendelsesstatistikk – siste 7 dager</p>
               {Object.keys(data.eventStats).length === 0 ? (
                 <p className="text-xs text-g-muted">Ingen hendelser logget ennå. Hendelser loggres automatisk fra Twitch og Discord.</p>

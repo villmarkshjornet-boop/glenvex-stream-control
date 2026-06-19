@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { PageHeader, Spinner } from '@/components/ui';
+import { tidSiden } from '@/components/dashboard/helpers';
 
 interface Target {
   username: string;
@@ -41,27 +43,17 @@ export default function RaidManagerPage() {
     return () => clearInterval(id);
   }, [fetchTargets, isLive]);
 
-  function tidSiden(d: Date): string {
-    const sek = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (sek < 60) return 'akkurat nå';
-    return `${Math.floor(sek / 60)}m siden`;
-  }
-
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Raid Manager</h1>
-          <p className="text-xs text-g-muted mt-0.5">AI-anbefalte raid-mål basert på kategori, størrelse og match-score</p>
-        </div>
+      <PageHeader title="Raid Manager" subtitle="AI-anbefalte raid-mål basert på kategori, størrelse og match-score">
         <div className="flex items-center gap-2">
           {lastUpdated && (
-            <p className="text-[9px] text-g-muted/50">Oppdatert {tidSiden(lastUpdated)}</p>
+            <span className="text-[9px] text-g-muted/50">Oppdatert {tidSiden(lastUpdated.toISOString())}</span>
           )}
           <button
             onClick={() => fetchTargets(true)}
             disabled={refreshing || loading}
-            className={`px-2.5 py-1.5 border rounded text-[9px] transition-all ${
+            className={`px-2.5 py-1.5 border rounded-lg text-[9px] transition-all ${
               refreshing ? 'border-g-green/30 text-g-green animate-pulse cursor-not-allowed'
                 : 'border-g-border text-g-muted hover:text-g-green hover:border-g-green/30'
             }`}
@@ -69,19 +61,19 @@ export default function RaidManagerPage() {
             {refreshing ? '↻ Laster...' : '↻ Oppdater'}
           </button>
         </div>
-      </div>
+      </PageHeader>
 
       {!isLive && !loading && (
-        <div className="bg-g-card border border-g-border rounded-lg p-6 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
           <p className="text-xs text-g-muted">Du er ikke live akkurat nå.</p>
           <p className="text-[9px] text-g-muted/60 mt-1">Oppdaterer automatisk hvert 5. minutt.</p>
         </div>
       )}
 
       {loading && (
-        <div className="bg-g-card border border-g-border rounded-lg p-6 text-center">
-          <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
-          <p className="text-xs text-g-muted mt-2">Henter raid-mål...</p>
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 flex flex-col items-center gap-2">
+          <Spinner />
+          <p className="text-xs text-g-muted">Henter raid-mål...</p>
         </div>
       )}
 
@@ -94,7 +86,7 @@ export default function RaidManagerPage() {
           </div>
           <div className="space-y-3">
             {targets.map((t, i) => (
-              <div key={t.login} className={`bg-g-card border rounded-lg p-4 space-y-2 hover:border-g-green/20 transition-all ${i === 0 ? 'border-g-green/40' : 'border-g-border'}`}>
+              <div key={t.login} className={`bg-g-card border rounded-2xl p-5 space-y-2 hover:border-g-green/20 transition-all ${i === 0 ? 'border-g-green/40' : 'border-g-border'}`}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">

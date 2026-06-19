@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader, TabBar, Spinner, EmptyState } from '@/components/ui';
 
 interface ClipContent {
   id: string;
@@ -62,27 +63,26 @@ export default function ClipFactoryPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Clip Factory</h1>
-        <p className="text-xs text-g-muted mt-0.5">Gjør streams om til innhold for TikTok, YouTube og Instagram</p>
-      </div>
+      <PageHeader title="Clip Factory" subtitle="Gjør streams om til innhold for TikTok, YouTube og Instagram" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Clip-liste */}
-        <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-3">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">Clips denne uken</h2>
-          {loading ? <p className="text-xs text-g-muted">Laster clips...</p> :
-           clips.length === 0 ? <p className="text-xs text-g-muted">Ingen clips ennå. Clips hentes automatisk fra Twitch.</p> :
-          clips.map(clip => (
+        <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
+          <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase">Clips denne uken</p>
+          {loading ? (
+            <div className="flex justify-center py-6"><Spinner /></div>
+          ) : clips.length === 0 ? (
+            <EmptyState icon="▶" title="Ingen clips" description="Clips hentes automatisk fra Twitch." />
+          ) : clips.map(clip => (
             <div key={clip.id}
               onClick={() => setValgt(valgt === clip.id ? null : clip.id)}
-              className={`flex gap-3 p-3 rounded-lg border cursor-pointer transition-all ${valgt === clip.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
+              className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition-all ${valgt === clip.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
               {clip.thumbnailUrl && (
-                <img src={clip.thumbnailUrl} alt={clip.title} className="w-20 h-12 object-cover rounded flex-shrink-0" />
+                <img src={clip.thumbnailUrl} alt={clip.title} className="w-20 h-12 object-cover rounded-lg flex-shrink-0" />
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-g-text truncate">{clip.title}</p>
-                <p className="text-[10px] text-g-muted mt-0.5">👀 {clip.viewCount} • ⏱ {Math.round(clip.duration)}s</p>
+                <p className="text-[10px] text-g-muted mt-0.5">{clip.viewCount} visninger · {Math.round(clip.duration)}s</p>
                 <button
                   onClick={e => { e.stopPropagation(); genererInnhold(clip.id); }}
                   disabled={clip.genererer}
@@ -95,10 +95,10 @@ export default function ClipFactoryPage() {
         </div>
 
         {/* Innhold-preview */}
-        <div className="bg-g-card border border-g-border rounded-lg overflow-hidden">
+        <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
           {!valgtClip?.innhold ? (
-            <div className="p-8 text-center h-full flex items-center justify-center">
-              <p className="text-xs text-g-muted">Velg et klipp og trykk "Generer innhold"</p>
+            <div className="p-8 h-full flex items-center justify-center">
+              <EmptyState icon="◆" title="Velg et klipp" description='Velg et klipp og trykk "Generer innhold"' />
             </div>
           ) : (
             <>
@@ -106,7 +106,7 @@ export default function ClipFactoryPage() {
                 {(['tiktok', 'youtube', 'instagram'] as const).map(p => (
                   <button key={p} onClick={() => setPlattform(p)}
                     className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-wider transition-all ${plattform === p ? 'text-g-green border-b-2 border-g-green bg-g-green/5' : 'text-g-muted hover:text-g-text'}`}>
-                    {p === 'tiktok' ? '📱 TikTok' : p === 'youtube' ? '🎬 YouTube' : '📸 Instagram'}
+                    {p === 'tiktok' ? 'TikTok' : p === 'youtube' ? 'YouTube' : 'Instagram'}
                   </button>
                 ))}
               </div>
@@ -137,7 +137,7 @@ export default function ClipFactoryPage() {
                         setKopiert(true);
                         setTimeout(() => setKopiert(false), 2000);
                       }}
-                      className="w-full py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                      className="w-full py-2 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                       {kopiert ? '✓ Kopiert!' : 'Kopier til utklippstavle'}
                     </button>
                   </>

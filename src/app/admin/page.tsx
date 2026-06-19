@@ -21,6 +21,20 @@ interface VodSummary {
   twitch_vod_id?: string;
 }
 
+interface IntegrationDim {
+  connected: boolean; oauthDone: boolean; oauthValid?: boolean;
+  botWatching?: boolean; botInGuild?: boolean;
+  channelsConfigured?: boolean; canPost?: boolean;
+  login?: string | null; guildName?: string | null;
+  lastEventAt: string | null; reason: string;
+}
+interface IntegrationStatusShape {
+  twitch: IntegrationDim & { botWatching: boolean; oauthValid: boolean };
+  discord: IntegrationDim & { botInGuild: boolean; channelsConfigured: boolean; canPost: boolean };
+  checks: { twitchConnected: boolean; discordConnected: boolean; liveChannelSet: boolean; onboardingComplete: boolean; alphaEnabled: boolean };
+  readyForRuntime: boolean;
+}
+
 interface WorkspaceRow {
   id: string;
   brandName: string;
@@ -45,6 +59,9 @@ interface WorkspaceRow {
   lastError: EventRow | null;
   audienceHb: { created_at: string; metadata: any } | null;
   botHb: { created_at: string } | null;
+  twitchBotLastEventAt: string | null;
+  discordBotLastEventAt: string | null;
+  integrationStatus: IntegrationStatusShape;
   lastStream: { created_at: string; metadata: any } | null;
   lastStreamEnd: { created_at: string } | null;
   coachReport: { created_at: string; metadata: any } | null;
@@ -121,8 +138,8 @@ function Badge({ ok, label, tiny }: { ok: boolean; label: string; tiny?: boolean
 
 function healthDots(ws: WorkspaceRow) {
   return {
-    twitch:   connLight(ws.twitchConnectedAt),
-    discord:  connLight(ws.discordConnectedAt),
+    twitch:   ws.integrationStatus.twitch.connected   ? 'green' : ('grey' as TL),
+    discord:  ws.integrationStatus.discord.connected  ? 'green' : ('grey' as TL),
     bot:      hbLight(ws.botHb?.created_at, 10 * 60_000, 60 * 60_000),
     audience: hbLight(ws.audienceHb?.created_at, 5 * 60_000, 30 * 60_000),
     cf:       (ws.cfActive > 0 ? 'green' : ws.cfLastVod ? 'grey' : 'grey') as TL,
@@ -279,20 +296,31 @@ function DetailSidebar({
         {/* Onboarding Diagnostics */}
         <Section title="Onboarding Diagnostics" />
         {(() => {
-          const hasTwitch    = !!ws.twitchConnectedAt && !!ws.twitchLogin;
-          const hasDiscord   = !!ws.discordConnectedAt && !!ws.discordGuildId;
-          const hasChannel   = !!(ws.kanalPrefs?.live || ws.liveChannelId);
-          const hasOnboarding = ws.onboardingComplete;
-          const hasAlpha     = ws.alphaEnabled;
-          const runtimeReady = hasTwitch && hasDiscord && hasChannel && hasOnboarding && hasAlpha;
+          const is       = ws.integrationStatus;
+          const hasTwitch    = is.twitch.connected;
+          const hasDiscord   = is.discord.connected;
+          const hasChannel   = is.checks.liveChannelSet;
+          const hasOnboarding = is.checks.onboardingComplete;
+          const hasAlpha     = is.checks.alphaEnabled;
+          const runtimeReady = is.readyForRuntime;
+
+          const twitchLabel = hasTwitch
+            ? (is.twitch.botWatching ? `✓ Bot aktiv${is.twitch.login ? ' · ' + is.twitch.login : ''}` : `✓ OAuth · ${is.twitch.login ?? 'koblet'}`)
+            : '✗ Mangler';
+          const discordLabel = hasDiscord
+            ? (is.discord.botInGuild ? `✓ Bot aktiv · ${is.discord.guildName ?? ws.discordGuildId}` : `✓ Guild koblet · ${is.discord.guildName ?? ws.discordGuildId}`)
+            : '✗ Mangler';
+
           return (
             <>
-              <Row label="Twitch koblet"   value={hasTwitch   ? '✓ ' + ws.twitchLogin : '✗ Mangler'}  color={hasTwitch   ? 'text-g-green' : 'text-red-400'} />
-              <Row label="Discord koblet"  value={hasDiscord  ? '✓ ' + (ws.discordGuildName ?? ws.discordGuildId) : '✗ Mangler'} color={hasDiscord  ? 'text-g-green' : 'text-red-400'} />
-              <Row label="Live-kanal"      value={hasChannel  ? '✓ ' + (ws.kanalPrefs?.live ?? ws.liveChannelId) : '✗ Mangler'}  color={hasChannel  ? 'text-g-green' : 'text-red-400'} />
-              <Row label="Onboarding"      value={hasOnboarding ? '✓ Steg 5/5' : `✗ Steg ${ws.onboardingStep}/5`} color={hasOnboarding ? 'text-g-green' : 'text-yellow-400'} />
-              <Row label="Alpha"           value={hasAlpha    ? '✓ Aktivert' : '✗ Ikke aktivert'} color={hasAlpha    ? 'text-g-green' : 'text-g-muted'} />
-              <Row label="Runtime klar"    value={runtimeReady ? '✓ Klart' : '✗ Ikke klar'} color={runtimeReady ? 'text-g-green' : 'text-red-400'} />
+              <Row label="Twitch koblet"  value={twitchLabel} color={hasTwitch ? 'text-g-green' : 'text-red-400'} />
+              {!hasTwitch && <Row label="  Årsak" value={is.twitch.reason} color="text-red-400/70" />}
+              <Row label="Discord koblet" value={discordLabel} color={hasDiscord ? 'text-g-green' : 'text-red-400'} />
+              {!hasDiscord && <Row label="  Årsak" value={is.discord.reason} color="text-red-400/70" />}
+              <Row label="Live-kanal"     value={hasChannel  ? '✓ ' + (ws.kanalPrefs?.live ?? ws.liveChannelId) : '✗ Mangler'}  color={hasChannel  ? 'text-g-green' : 'text-red-400'} />
+              <Row label="Onboarding"     value={hasOnboarding ? '✓ Steg 5/5' : `✗ Steg ${ws.onboardingStep}/5`} color={hasOnboarding ? 'text-g-green' : 'text-yellow-400'} />
+              <Row label="Alpha"          value={hasAlpha    ? '✓ Aktivert' : '✗ Ikke aktivert'} color={hasAlpha    ? 'text-g-green' : 'text-g-muted'} />
+              <Row label="Runtime klar"   value={runtimeReady ? '✓ Klart' : '✗ Ikke klar'} color={runtimeReady ? 'text-g-green' : 'text-red-400'} />
               <div className="px-4 py-2 flex gap-2">
                 <button
                   onClick={() => handleRepair(false)}
@@ -338,9 +366,11 @@ function DetailSidebar({
 
         {/* Twitch */}
         <Section title="Twitch" />
-        <Row label="Login" value={ws.twitchLogin ?? '–'} color={ws.twitchConnectedAt ? 'text-g-green' : 'text-g-muted'} />
+        <Row label="Login" value={ws.twitchLogin ?? '–'} color={ws.integrationStatus.twitch.connected ? 'text-g-green' : 'text-g-muted'} />
         <Row label="User ID" value={<span className="font-mono text-[9px]">{ws.twitchUserId ?? '–'}</span>} />
-        <Row label="Tilkoblet" value={timeAgo(ws.twitchConnectedAt)} />
+        <Row label="OAuth tilkoblet" value={timeAgo(ws.twitchConnectedAt)} />
+        <Row label="Bot siste event" value={timeAgo(ws.twitchBotLastEventAt)} color={ws.integrationStatus.twitch.botWatching ? 'text-g-green' : 'text-g-muted'} />
+        <Row label="OAuth-tokens" value={ws.integrationStatus.twitch.oauthValid ? '✓ Gyldige' : '✗ Mangler'} color={ws.integrationStatus.twitch.oauthValid ? 'text-g-green' : 'text-red-400'} />
         <Row label="Status" value={live ? '🔴 LIVE' : 'Offline'} color={live ? 'text-red-400' : 'text-g-muted'} />
         {ws.lastStream && (
           <Row label="Siste stream" value={`${ws.lastStream.metadata?.title?.slice(0, 40) ?? '–'} (${timeAgo(ws.lastStream.created_at)})`} />
@@ -354,9 +384,11 @@ function DetailSidebar({
 
         {/* Discord */}
         <Section title="Discord" />
-        <Row label="Guild" value={ws.discordGuildName ?? '–'} color={ws.discordConnectedAt ? 'text-g-green' : 'text-g-muted'} />
+        <Row label="Guild" value={ws.discordGuildName ?? '–'} color={ws.integrationStatus.discord.connected ? 'text-g-green' : 'text-g-muted'} />
         <Row label="Guild ID" value={<span className="font-mono text-[9px]">{ws.discordGuildId ?? '–'}</span>} />
-        <Row label="Tilkoblet" value={timeAgo(ws.discordConnectedAt)} />
+        <Row label="OAuth tilkoblet" value={timeAgo(ws.discordConnectedAt)} />
+        <Row label="Bot siste event" value={timeAgo(ws.discordBotLastEventAt)} color={ws.integrationStatus.discord.botInGuild ? 'text-g-green' : 'text-g-muted'} />
+        <Row label="Kan poste" value={ws.integrationStatus.discord.canPost ? '✓ Ja' : '✗ Nei'} color={ws.integrationStatus.discord.canPost ? 'text-g-green' : 'text-red-400'} />
         <Row label="Live-kanal" value={ws.kanalPrefs?.live ? `#${ws.kanalPrefs.live}` : ws.liveChannelId ? `#${ws.liveChannelId}` : '–'} />
         {ws.kanalPrefs?.chat && <Row label="Chat-kanal" value={`#${ws.kanalPrefs.chat}`} />}
         {ws.kanalPrefs?.clips && <Row label="Klipp-kanal" value={`#${ws.kanalPrefs.clips}`} />}
@@ -542,7 +574,7 @@ export default function AdminPage() {
   }, [workspaces]);
 
   const StatCard = ({ label, value, color }: { label: string; value: number; color?: string }) => (
-    <div className="bg-g-card border border-g-border rounded-xl p-3 flex flex-col gap-0.5">
+    <div className="bg-g-card border border-g-border rounded-2xl p-3 flex flex-col gap-0.5">
       <p className={`text-2xl font-black ${color ?? 'text-g-text'}`}>{value}</p>
       <p className="text-[9px] text-g-muted uppercase tracking-wider">{label}</p>
     </div>
@@ -590,7 +622,7 @@ export default function AdminPage() {
       <div className="p-6 space-y-5 max-w-[1800px] mx-auto">
         {/* Error */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-sm text-red-400">{error}</div>
+          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-sm text-red-400">{error}</div>
         )}
 
         {/* System Summary */}
@@ -608,7 +640,7 @@ export default function AdminPage() {
         )}
 
         {/* Diagnose User */}
-        <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+        <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-3">
           <p className="text-[9px] font-bold text-g-muted uppercase tracking-widest">Diagnose Bruker</p>
           <div className="flex gap-2">
             <input
@@ -709,7 +741,7 @@ export default function AdminPage() {
         {loading && <div className="text-xs text-g-muted animate-pulse py-8 text-center">Laster alle workspaces…</div>}
 
         {!loading && !error && (
-          <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+          <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1400px]">
                 <thead>

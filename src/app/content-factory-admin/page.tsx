@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, memo } from 'react';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, ConfirmDialog, type ConfirmState } from '@/components/ui';
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 interface Vod {
@@ -186,6 +186,7 @@ const VodTimeline = memo(function VodTimeline({ vodId }: { vodId: string }) {
 // ─── Komponent ─────────────────────────────────────────────────────────────────
 export default function ContentFactoryAdminPage() {
   const [vods, setVods] = useState<Vod[]>([]);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [vodInput, setVodInput] = useState('');
@@ -201,6 +202,7 @@ export default function ContentFactoryAdminPage() {
   const [detekterer, setDetekterer] = useState(false);
   const [detektFeil, setDetektFeil] = useState('');
   const [sisteVods, setSisteVods] = useState<{ id: string; title: string; duration: string; published_at: string; url: string }[]>([]);
+  const [manualPhase2Id, setManualPhase2Id] = useState('');
 
   const hentVods = useCallback(async () => {
     const res = await fetch('/api/content-factory').catch(() => null);
@@ -329,9 +331,16 @@ export default function ContentFactoryAdminPage() {
   }
 
   async function slettVod(vodId: string, tittel: string) {
-    if (!confirm(`Slett "${tittel}" og alle transkripter, highlights og klipp?\n\nKan ikke angres.`)) return;
-    await fetch(`/api/content-factory/${vodId}`, { method: 'DELETE' });
-    await hentVods();
+    setConfirmState({
+      title: 'Slett VOD',
+      message: `Slett "${tittel}" og alle transkripter, highlights og klipp? Kan ikke angres.`,
+      danger: true,
+      confirmLabel: 'Slett permanent',
+      onConfirm: async () => {
+        await fetch(`/api/content-factory/${vodId}`, { method: 'DELETE' });
+        await hentVods();
+      },
+    });
   }
 
   async function hentSisteVodFraTwitch() {
@@ -359,9 +368,16 @@ export default function ContentFactoryAdminPage() {
   }
 
   async function slettAlle() {
-    if (!confirm(`Slett ALLE ${vods.length} VODs og all data?\n\nKan ikke angres.`)) return;
-    for (const v of vods) await fetch(`/api/content-factory/${v.id}`, { method: 'DELETE' });
-    await hentVods();
+    setConfirmState({
+      title: `Slett alle ${vods.length} VODs`,
+      message: 'Sletter ALLE VODs og all data. Kan ikke angres.',
+      danger: true,
+      confirmLabel: 'Slett alle permanent',
+      onConfirm: async () => {
+        for (const v of vods) await fetch(`/api/content-factory/${v.id}`, { method: 'DELETE' });
+        await hentVods();
+      },
+    });
   }
 
   // ─── States ────────────────────────────────────────────────────────────────
@@ -388,6 +404,7 @@ export default function ContentFactoryAdminPage() {
 
   return (
     <div className="space-y-6">
+      <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />
 
       <PageHeader title="Content Factory" subtitle="VOD-pipeline — transkribering, highlights og klipp" />
 
@@ -460,11 +477,11 @@ export default function ContentFactoryAdminPage() {
             </div>
             <div className="flex gap-2">
               <button onClick={hentSisteVodFraTwitch} disabled={detekterer}
-                className="flex-1 px-3 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-xl hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40">
+                className="flex-1 px-3 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-lg hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40">
                 {detekterer ? '⏳ Henter...' : '↻ Forhåndsvis'}
               </button>
               <button onClick={startLatestVodPipeline} disabled={detekterer}
-                className="flex-1 px-3 py-2 bg-g-green text-black text-[11px] font-black rounded-xl hover:bg-g-green/80 transition-all disabled:opacity-40">
+                className="flex-1 px-3 py-2 bg-g-green text-black text-[11px] font-black rounded-lg hover:bg-g-green/80 transition-all disabled:opacity-40">
                 {detekterer ? '⏳...' : '▶ Start siste VOD'}
               </button>
             </div>
@@ -493,10 +510,10 @@ export default function ContentFactoryAdminPage() {
                 onChange={e => setVodInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && startPipeline()}
                 placeholder="Twitch VOD ID eller full URL..."
-                className="flex-1 bg-g-bg border border-g-border rounded-xl px-3 py-2 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+                className="flex-1 bg-g-bg border border-g-border rounded-lg px-3 py-2 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
               />
               <button onClick={startPipeline} disabled={!vodInput.trim() || starter}
-                className="px-4 py-2 bg-g-green/10 border border-g-green/30 text-g-green text-[11px] font-black rounded-xl hover:bg-g-green/20 transition-all disabled:opacity-40 whitespace-nowrap">
+                className="px-4 py-2 bg-g-green/10 border border-g-green/30 text-g-green text-[11px] font-black rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-40 whitespace-nowrap">
                 {starter ? <span className="flex items-center gap-1"><span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" /> Starter...</span> : '◆ Start'}
               </button>
             </div>
@@ -568,18 +585,18 @@ export default function ContentFactoryAdminPage() {
                     <div className="flex-shrink-0 flex flex-col gap-2">
                       {erRailwayFerdig && (
                         <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
-                          className="px-4 py-2 bg-g-green text-black text-[11px] font-black rounded-xl hover:bg-g-green/80 transition-all disabled:opacity-40">
+                          className="px-4 py-2 bg-g-green text-black text-[11px] font-black rounded-lg hover:bg-g-green/80 transition-all disabled:opacity-40">
                           {phase2Running === v.id ? '⏳...' : '◆ Phase 2'}
                         </button>
                       )}
                       {erHengt && (
                         <button onClick={() => retryRailway(v.id)}
-                          className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-bold rounded-xl hover:bg-red-500/20 transition-all">
+                          className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-bold rounded-lg hover:bg-red-500/20 transition-all">
                           ↺ Retry
                         </button>
                       )}
                       <button onClick={() => resetJob(v.id)}
-                        className="px-4 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-xl hover:border-yellow-400/30 hover:text-yellow-400 transition-all">
+                        className="px-4 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-lg hover:border-yellow-400/30 hover:text-yellow-400 transition-all">
                         ↩ Reset
                       </button>
                     </div>
@@ -622,19 +639,19 @@ export default function ContentFactoryAdminPage() {
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button onClick={() => retryRailway(v.id)}
-                      className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-xl hover:bg-red-500/20 transition-all">
+                      className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-lg hover:bg-red-500/20 transition-all">
                       ↻ Retry
                     </button>
                     <button onClick={() => resetJob(v.id)}
-                      className="px-3 py-1.5 border border-yellow-400/20 text-yellow-400/70 text-[10px] font-bold rounded-xl hover:border-yellow-400/40 hover:text-yellow-400 transition-all">
+                      className="px-3 py-1.5 border border-yellow-400/20 text-yellow-400/70 text-[10px] font-bold rounded-lg hover:border-yellow-400/40 hover:text-yellow-400 transition-all">
                       ↩ Reset
                     </button>
                     <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
-                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-xl hover:text-g-green transition-all">
+                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:text-g-green transition-all">
                       {phase2Running === v.id ? '⏳' : 'Phase 2'}
                     </button>
                     <button onClick={() => slettVod(v.id, v.title)}
-                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-xl hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
+                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
                       🗑
                     </button>
                   </div>
@@ -687,11 +704,11 @@ export default function ContentFactoryAdminPage() {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <a href="/content-factory-admin/highlights" onClick={e => e.stopPropagation()}
-                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded-xl hover:bg-g-green/20 transition-all">
+                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded-lg hover:bg-g-green/20 transition-all">
                         ▶ Highlights
                       </a>
                       <button onClick={e => { e.stopPropagation(); slettVod(v.id, v.title); }}
-                        className="px-2 py-1.5 border border-g-border text-g-muted text-[10px] rounded-xl hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
+                        className="px-2 py-1.5 border border-g-border text-g-muted text-[10px] rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
                         🗑
                       </button>
                       <span className="text-g-muted/60 text-xs">{erÅpen ? '▲' : '▼'}</span>
@@ -702,7 +719,7 @@ export default function ContentFactoryAdminPage() {
                     <div className="border-t border-g-border/40 p-4 space-y-4 bg-g-bg/30">
                       <div className="flex items-center gap-2">
                         <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
-                          className="px-4 py-2 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded-xl hover:text-g-green hover:border-g-green/30 transition-all">
+                          className="px-4 py-2 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:text-g-green hover:border-g-green/30 transition-all">
                           {phase2Running === v.id ? '⏳ Kjører...' : '↻ Re-kjør Phase 2'}
                         </button>
                         <p className="text-[9px] text-g-muted">Oppdaterer highlights + tekster fra eksisterende transkripsjon</p>
@@ -733,17 +750,18 @@ export default function ContentFactoryAdminPage() {
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">Manuell Phase 2</p>
         <div className="flex gap-2">
           <input
-            id="manual-phase2-vodid"
+            value={manualPhase2Id}
+            onChange={e => setManualPhase2Id(e.target.value)}
             placeholder="VOD ID fra Supabase..."
-            className="flex-1 bg-g-bg border border-g-border rounded-xl px-3 py-2 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+            className="flex-1 bg-g-bg border border-g-border rounded-lg px-3 py-2 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
           />
           <button
             onClick={async () => {
-              const el = document.getElementById('manual-phase2-vodid') as HTMLInputElement;
-              if (!el?.value) return;
-              await kjørPhase2(el.value);
+              if (!manualPhase2Id.trim()) return;
+              await kjørPhase2(manualPhase2Id.trim());
+              setManualPhase2Id('');
             }}
-            className="px-4 py-2 bg-g-green/10 border border-g-green/30 text-g-green text-[11px] font-bold rounded-xl hover:bg-g-green/20 transition-all whitespace-nowrap"
+            className="px-4 py-2 bg-g-green/10 border border-g-green/30 text-g-green text-[11px] font-bold rounded-lg hover:bg-g-green/20 transition-all whitespace-nowrap"
           >
             ◆ Start Phase 2
           </button>

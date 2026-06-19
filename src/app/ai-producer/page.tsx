@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface TiltakInnhold {
   tiktok?: string;
@@ -56,7 +57,7 @@ const PRIORITET_STIL: Record<string, string> = {
 
 function MetricKort({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-g-bg border border-g-border rounded-lg p-4 text-center">
+    <div className="bg-g-bg border border-g-border rounded-2xl p-4 text-center">
       <p className="text-[9px] text-g-muted uppercase tracking-widest">{label}</p>
       <p className="text-2xl font-black text-g-green font-mono mt-1">{value}</p>
       {sub && <p className="text-[9px] text-g-muted mt-0.5">{sub}</p>}
@@ -111,7 +112,7 @@ function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
   };
 
   return (
-    <div className="bg-g-card border border-red-500/30 rounded-xl p-5 space-y-4">
+    <div className="bg-g-card border border-red-500/30 rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-black text-red-400 uppercase tracking-wider">⚠ Live-deteksjon feilet</p>
@@ -305,7 +306,7 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
   return (
     <div className="space-y-4">
       {/* Hoveds-statuskort */}
-      <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+      <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
         <div className="flex items-center justify-center gap-2 mb-4">
           <span className="w-2.5 h-2.5 rounded-full bg-g-muted" />
           <p className="text-xs font-black text-g-muted uppercase tracking-widest">NO_ACTIVE_STREAM</p>
@@ -352,7 +353,7 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
 
       {/* Siste stream-score */}
       {standby?.sisteStreamScore && (
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Siste stream-score</p>
           <div className="flex items-end gap-4">
             <div>
@@ -371,7 +372,7 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
 
       {/* Siste AI-læring */}
       {standby?.sisteAiLaering && (
-        <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Siste AI-læring</p>
           <p className="text-xs font-bold text-g-text">{standby.sisteAiLaering.title}</p>
           <p className="text-xs text-g-muted mt-1 leading-relaxed">{standby.sisteAiLaering.summary}</p>
@@ -414,11 +415,7 @@ export default function AIProducerPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">AI Producer</h1>
-          <p className="text-xs text-g-muted mt-0.5">Sanntids stream-analyse og AI-anbefalinger</p>
-        </div>
+      <PageHeader title="AI Producer" subtitle="Sanntids stream-analyse og AI-anbefalinger">
         <div className="text-right">
           {sisteOppdatert && (
             <p className="text-[9px] text-g-muted">Oppdatert {sisteOppdatert.toLocaleTimeString('no-NO')}</p>
@@ -428,10 +425,10 @@ export default function AIProducerPage() {
             <span className="text-xs font-bold">{data?.isLive ? 'LIVE NÅ' : 'OFFLINE'}</span>
           </div>
         </div>
-      </div>
+      </PageHeader>
 
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-lg p-12 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-12 text-center">
           <span className="w-8 h-8 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
         </div>
       ) : !data?.isLive ? (
@@ -439,7 +436,7 @@ export default function AIProducerPage() {
       ) : (
         <>
           {/* Live banner */}
-          <div className="bg-g-card border border-red-500/20 rounded-xl p-4">
+          <div className="bg-g-card border border-red-500/20 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse" />
               <p className="text-xs font-black text-red-400 uppercase tracking-widest">LIVE NÅ</p>
@@ -470,7 +467,7 @@ export default function AIProducerPage() {
 
           {/* AI Analyse */}
           {data.analyse && (
-            <div className="bg-g-card border border-g-border rounded-xl p-5">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">◆ AI Analyse</p>
               <p className="text-sm text-g-text leading-relaxed">{data.analyse}</p>
             </div>

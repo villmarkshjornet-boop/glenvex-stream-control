@@ -29,7 +29,7 @@ function PassordPanel() {
   }
 
   return (
-    <div id="passord" className="bg-g-card border border-g-border rounded-xl p-5">
+    <div id="passord" className="bg-g-card border border-g-border rounded-2xl p-5">
       <h2 className="text-xs font-bold text-g-text mb-1">Sett passord</h2>
       <p className="text-[9px] text-g-muted mb-4">Sett et passord så du kan logge inn direkte neste gang.</p>
       <form onSubmit={settPassord} className="space-y-3 max-w-sm">
@@ -136,7 +136,7 @@ function TwitchBotAdminPanel() {
   };
 
   return (
-    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-2xloverflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-g-border flex items-center justify-between">
         <div>
@@ -313,7 +313,7 @@ function HelsePanel() {
   ] : [];
 
   return (
-    <div id="helse" className="bg-g-card border border-g-border rounded-xl p-5">
+    <div id="helse" className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-xs font-bold text-g-text">Systemstatus og API-status</h2>
@@ -376,7 +376,7 @@ function DebugPanel() {
   };
 
   return (
-    <div id="debug" className="bg-g-card border border-g-border rounded-xl p-5">
+    <div id="debug" className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-xs font-bold text-g-text">Debug</h2>
@@ -423,22 +423,14 @@ function DiscordKanalerPanel() {
 
   useEffect(() => {
     fetch('/api/channel-settings').then(r => r.json()).then(d => {
-      // DIAG-D: Raw response from GET /api/channel-settings
-      console.log('[DIAG DiscordKanalerPanel] GET /api/channel-settings raw response:', JSON.stringify(d));
-      // DIAG-E: State being set
-      console.log('[DIAG DiscordKanalerPanel] setPrefs with:', JSON.stringify(d.preferanser ?? {}));
       setKanaler(d.kanaler ?? []);
       setPrefs(d.preferanser ?? {});
-      console.log('[DIAG DiscordKanalerPanel] setPrefs called — state will update');
-    }).catch((err) => {
-      console.error('[DIAG DiscordKanalerPanel] GET /api/channel-settings FAILED:', err);
-    });
+    }).catch(() => {});
   }, []);
 
   async function lagre() {
     setLagrer(true);
     setLagreFeil(null);
-    console.log('[DIAG DiscordKanalerPanel] POST /api/channel-settings sending prefs:', JSON.stringify(prefs));
     try {
       const res = await fetch('/api/channel-settings', {
         method: 'POST',
@@ -446,7 +438,6 @@ function DiscordKanalerPanel() {
         body: JSON.stringify(prefs),
       });
       const data = await res.json().catch(() => null);
-      console.log('[DIAG DiscordKanalerPanel] POST /api/channel-settings response:', JSON.stringify(data));
       if (!res.ok || !data?.success) {
         setLagreFeil(data?.error ?? `Lagring feilet (HTTP ${res.status})`);
         setLagrer(false);
@@ -478,7 +469,7 @@ function DiscordKanalerPanel() {
   const ingenKanal = { id: '', navn: '— Ikke satt —' };
 
   return (
-    <div id="discord-kanaler" className="bg-g-card border border-g-border rounded-xl p-5">
+    <div id="discord-kanaler" className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-xs font-bold text-g-text">Discord Kanaler</h2>
         {kanaler.length === 0 && (
@@ -555,7 +546,7 @@ function AutomatiseringerPanel() {
   ] : [];
 
   return (
-    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-xl p-5 space-y-5">
+    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-2xl p-5 space-y-5">
       <div>
         <h2 className="text-xs font-bold text-g-text mb-1">Bot-innstillinger</h2>
         <p className="text-[9px] text-g-muted">Skru av/på handlinger og velg bot-tone. Synces til Railway-boten via Supabase.</p>
@@ -607,7 +598,7 @@ function AutomatiseringerPanel() {
 type Fane = 'bots' | 'integrasjoner' | 'system' | 'konto';
 
 const FANER: { id: Fane; label: string; ikon: string; desc: string }[] = [
-  { id: 'bots',           label: 'Bots',          ikon: '🟣', desc: 'Twitch og Discord bot-kontroll' },
+  { id: 'bots',           label: 'Bots',          ikon: '▶',  desc: 'Twitch og Discord bot-kontroll' },
   { id: 'integrasjoner',  label: 'Integrasjoner', ikon: '⚙',  desc: 'Kanaler, Twitch og sosiale medier' },
   { id: 'system',         label: 'Systemstatus',  ikon: '◉',  desc: 'Health checks og debug' },
   { id: 'konto',          label: 'Konto',         ikon: '◈',  desc: 'Passord og tilgang' },
@@ -708,7 +699,6 @@ export default function InnstillingerSide() {
               {/* Venstre: Twitch */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-base">🟣</span>
                   <span className="text-[10px] font-black uppercase tracking-widest text-g-muted">Twitch Bot</span>
                 </div>
                 <TwitchBotAdminPanel />
@@ -744,7 +734,7 @@ export default function InnstillingerSide() {
                   tekst: '!discordsiste (Twitch) og !twitchsiste (Discord) gir AI-oppsummering på tvers.',
                 },
               ].map(w => (
-                <div key={w.tittel} className="bg-g-card border border-g-border rounded-xl p-4">
+                <div key={w.tittel} className="bg-g-card border border-g-border rounded-2xlp-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-g-green text-sm">{w.ikon}</span>
                     <p className="text-[10px] font-bold text-g-text">{w.tittel}</p>
@@ -763,10 +753,8 @@ export default function InnstillingerSide() {
               <div className="grid grid-cols-2 gap-5 items-start">
                 {/* Venstre kolonne */}
                 <div className="space-y-5">
-                  <div className="bg-g-card border border-g-border rounded-xl p-5">
-                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4 flex items-center gap-2">
-                      <span>🔵</span> Discord
-                    </h2>
+                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
+                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Discord</p>
                     <div className="space-y-3">
                       {[
                         { label: 'Live Kanal ID', field: 'discordLiveChannelId' as keyof Settings, placeholder: '123456789012345678' },
@@ -786,10 +774,8 @@ export default function InnstillingerSide() {
                     </div>
                   </div>
 
-                  <div className="bg-g-card border border-g-border rounded-xl p-5">
-                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4 flex items-center gap-2">
-                      <span>🟣</span> Twitch
-                    </h2>
+                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
+                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Twitch</p>
                     <div className="space-y-3">
                       {[
                         { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'ditt-brukernavn' },
@@ -824,8 +810,8 @@ export default function InnstillingerSide() {
 
                 {/* Høyre kolonne */}
                 <div className="space-y-5">
-                  <div className="bg-g-card border border-g-border rounded-xl p-5">
-                    <h2 className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Sosiale Medier</h2>
+                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
+                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Sosiale Medier</p>
                     <div className="space-y-3">
                       {(['tiktok', 'instagram', 'twitter', 'youtube', 'discord'] as const).map(platform => (
                         <div key={platform}>
@@ -840,7 +826,7 @@ export default function InnstillingerSide() {
                   </div>
 
                   {/* Tips-widget */}
-                  <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-3">
+                  <div className="bg-g-card border border-g-border rounded-2xlp-4 space-y-3">
                     <p className="text-[10px] font-bold text-g-text uppercase tracking-widest">Hvor finner jeg IDer?</p>
                     {[
                       { label: 'Discord Kanal-ID', tip: 'Discord → Høyreklikk kanal → Kopier kanal-ID (developer mode på)' },
@@ -857,7 +843,7 @@ export default function InnstillingerSide() {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-5">
-                {[1, 2].map(i => <div key={i} className="h-64 bg-g-card border border-g-border rounded-xl animate-pulse" />)}
+                {[1, 2].map(i => <div key={i} className="h-64 bg-g-card border border-g-border rounded-2xlanimate-pulse" />)}
               </div>
             )}
           </div>
@@ -873,7 +859,7 @@ export default function InnstillingerSide() {
 
               {/* Systemsider + tips */}
               <div className="space-y-3">
-                <div className="bg-g-card border border-g-border rounded-xl p-5">
+                <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">Systemsider</p>
                   <div className="space-y-1">
                     {[
@@ -894,7 +880,7 @@ export default function InnstillingerSide() {
                   </div>
                 </div>
 
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xlp-4">
                   <p className="text-[10px] font-bold text-g-text mb-2">API-snarveier</p>
                   <div className="flex flex-wrap gap-1.5">
                     {[
@@ -923,7 +909,7 @@ export default function InnstillingerSide() {
             <PassordPanel />
 
             <div className="space-y-3">
-              <div className="bg-g-card border border-g-border rounded-xl p-5">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5">
                 <p className="text-[10px] font-bold text-g-text mb-3">Tilgang og sikkerhet</p>
                 <div className="space-y-3">
                   {[
@@ -939,7 +925,7 @@ export default function InnstillingerSide() {
                 </div>
               </div>
 
-              <div className="bg-g-card border border-g-border rounded-xl p-4">
+              <div className="bg-g-card border border-g-border rounded-2xlp-4">
                 <p className="text-[10px] font-bold text-g-text mb-2">Logg ut</p>
                 <p className="text-[9px] text-g-muted mb-3">Avslutter gjeldende session og sletter auth-cookie.</p>
                 <a href="/api/auth/logout"

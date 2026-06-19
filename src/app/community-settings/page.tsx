@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { PageHeader, Toggle as UIToggle, SettingsRow } from '@/components/ui';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,24 +46,9 @@ function Toggle({
   label: string; description?: string; value: boolean; onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3 border-b border-g-border/30 last:border-0">
-      <div>
-        <p className="text-xs font-bold text-g-text">{label}</p>
-        {description && <p className="text-[10px] text-g-muted mt-0.5">{description}</p>}
-      </div>
-      <button
-        onClick={() => onChange(!value)}
-        className={`flex-shrink-0 w-10 h-5 rounded-full border transition-all relative mt-0.5 ${
-          value
-            ? 'bg-g-green/20 border-g-green/60'
-            : 'bg-g-bg border-g-border'
-        }`}
-      >
-        <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-          value ? 'left-5 bg-g-green' : 'left-0.5 bg-g-muted'
-        }`} />
-      </button>
-    </div>
+    <SettingsRow label={label} hint={description}>
+      <UIToggle value={value} onChange={onChange} />
+    </SettingsRow>
   );
 }
 
@@ -277,21 +263,16 @@ export default function CommunitySettingsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Community-innstillinger</h1>
-          <p className="text-[10px] text-g-muted mt-0.5">XP-system · Automatisk aktivitet · Reward roles</p>
-        </div>
+      <PageHeader title="Community-innstillinger" subtitle="XP-system · Automatisk aktivitet · Reward roles">
         <Link href="/community-manager"
-          className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded px-2 py-1 transition-colors">
+          className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg px-2 py-1 transition-colors">
           ← Dashboard
         </Link>
-      </div>
+      </PageHeader>
 
       {/* Info box: channels managed elsewhere */}
-      <div className="bg-g-card border border-yellow-500/20 rounded-xl p-4 flex items-start gap-3">
-        <span className="text-base flex-shrink-0">ℹ️</span>
+      <div className="bg-g-card border border-yellow-500/20 rounded-2xl p-4 flex items-start gap-3">
+        <span className="text-yellow-400 text-sm font-bold flex-shrink-0">i</span>
         <div>
           <p className="text-xs font-bold text-g-text">Kanal-innstillinger</p>
           <p className="text-[10px] text-g-muted mt-0.5">
@@ -303,7 +284,7 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: General */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Generelt</p>
         <Toggle
           label="Community Manager aktiv"
@@ -344,7 +325,7 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: Automatic activity */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Automatisk aktivitet</p>
         <Toggle
           label="Community hype aktiv"
@@ -379,7 +360,7 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: Reward roles */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
         <RewardRolesSection
           roles={settings.rewardRoles}
           onChange={r => update('rewardRoles', r)}

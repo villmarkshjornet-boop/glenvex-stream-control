@@ -71,7 +71,7 @@ export function CreatorBrainLearning() {
   const shown = learnings.slice(0, 5);
 
   return (
-    <section className="bg-g-surface border border-g-border rounded-xl p-4 space-y-4">
+    <section className="bg-g-card border border-g-border rounded-2xl p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-g-text tracking-wide">
           Creator Brain — Hva har AI lært?

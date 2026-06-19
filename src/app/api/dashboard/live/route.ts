@@ -641,7 +641,7 @@ export async function GET() {
       priority: 'action',
       title: `Fremhev partner: ${stalestPartner.navn}`,
       detail: stalestPartner.sistePromotert ? `Sist promotert ${tidSiden(stalestPartner.sistePromotert)}` : 'Aldri promotert ennå',
-      href: '/partnere',
+      href: '/partner-hub',
       createdAt: stalestPartner.sistePromotert ?? stalestPartner.opprettet,
     });
   }

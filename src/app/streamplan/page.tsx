@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader, EmptyState } from '@/components/ui';
 
 interface StreamEntry {
   id: string;
@@ -135,15 +136,12 @@ export default function StreamplanPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Streamplan</h1>
-        <p className="text-xs text-g-muted mt-0.5">Ukentlige faste streams + enkeltdatoer</p>
-      </div>
+      <PageHeader title="Streamplan" subtitle="Ukentlige faste streams + enkeltdatoer" />
 
       {/* Ukentlige streams */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">🔁 Ukentlige streams</p>
-        <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Ukentlige streams</p>
+        <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
           <div className="divide-y divide-g-border">
             {weekly.map((entry, i) => (
               <div key={entry.dag} className={`p-4 transition-all ${entry.aktiv ? 'bg-g-green/5' : ''}`}>
@@ -212,18 +210,16 @@ export default function StreamplanPage() {
       {/* Enkeltdato-streams */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">📌 Enkeltdato-streams</p>
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Enkeltdato-streams</p>
           <button onClick={leggTilSingle}
             className="text-[10px] text-g-green border border-g-green/20 px-2 py-0.5 rounded hover:bg-g-green/10 transition-all">
             + Legg til dato
           </button>
         </div>
         {singles.length === 0 ? (
-          <p className="text-xs text-g-muted text-center py-4 border border-g-border border-dashed rounded-xl">
-            Ingen enkeltdato-streams. Bruk for spesielle events, premiere eller turneringer.
-          </p>
+          <EmptyState icon="▦" title="Ingen enkeltdato-streams" description="Bruk for spesielle events, premiere eller turneringer." />
         ) : (
-          <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+          <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
             <div className="divide-y divide-g-border">
               {singles.map(entry => (
                 <div key={entry.id} className="p-4">
@@ -284,18 +280,18 @@ export default function StreamplanPage() {
 
       {/* Forhåndsvisning */}
       {totalAktive > 0 && (
-        <div className="bg-g-card border border-g-border rounded-xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Forhåndsvisning – Discord embed</p>
+        <div className="bg-g-card border border-g-border rounded-2xl p-5">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Forhåndsvisning — Discord embed</p>
           <div className="border-l-2 border-l-g-green pl-4 space-y-1">
-            <p className="text-xs font-bold text-g-text">📅 Streamplan</p>
+            <p className="text-xs font-bold text-g-text">Streamplan</p>
             {aktiveUkentlige.map(e => (
               <p key={e.id} className="text-xs text-g-muted">
-                <span className="text-g-text font-semibold">🔁 {e.dag}</span> kl. {e.tid} · {e.spill}{e.tittel ? ` – ${e.tittel}` : ''}
+                <span className="text-g-text font-semibold">{e.dag}</span> kl. {e.tid} · {e.spill}{e.tittel ? ` – ${e.tittel}` : ''}
               </p>
             ))}
             {aktiveSingles.map(e => (
               <p key={e.id} className="text-xs text-g-muted">
-                <span className="text-g-text font-semibold">📌 {e.date}</span> kl. {e.tid} · {e.spill}{e.tittel ? ` – ${e.tittel}` : ''}
+                <span className="text-g-text font-semibold">{e.date}</span> kl. {e.tid} · {e.spill}{e.tittel ? ` – ${e.tittel}` : ''}
               </p>
             ))}
           </div>
@@ -304,11 +300,11 @@ export default function StreamplanPage() {
 
       <div className="flex gap-3">
         <button onClick={lagre}
-          className="flex-1 py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">
+          className="flex-1 py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded-lg transition-all">
           {lagret ? '✓ Lagret' : '◆ Lagre plan'}
         </button>
         <button onClick={postTilDiscord} disabled={posting || totalAktive === 0}
-          className="flex-1 py-2.5 bg-g-bg border border-g-border hover:border-g-green/30 text-g-muted hover:text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all disabled:opacity-40">
+          className="flex-1 py-2.5 bg-g-bg border border-g-border hover:border-g-green/30 text-g-muted hover:text-g-green text-xs font-bold tracking-widest uppercase rounded-lg transition-all disabled:opacity-40">
           {posting ? 'Poster...' : `Post (${totalAktive} stream${totalAktive !== 1 ? 's' : ''}) til Discord`}
         </button>
       </div>

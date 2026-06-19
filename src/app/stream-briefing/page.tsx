@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { PageHeader } from '@/components/ui';
 
 interface Briefing {
   overskrift:       string;
@@ -42,17 +42,10 @@ export default function StreamBriefingPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">AI Stream Briefing</h1>
-          <p className="text-[9px] text-g-muted mt-0.5">Automatisk generert fra Twitch, Discord, AI Memory og Content Factory</p>
-        </div>
-        <Link href="/" className="text-[9px] text-g-muted hover:text-g-green transition-colors">← Dashboard</Link>
-      </div>
+      <PageHeader title="AI Stream Briefing" subtitle="Automatisk generert fra Twitch, Discord, AI Memory og Content Factory" />
 
       {/* Generator */}
-      <div className="bg-g-card border border-g-border rounded-xl p-5">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
         <p className="text-xs text-g-muted mb-4 leading-relaxed">
           Klikk for å generere en AI-basert pre-stream briefing basert på alt systemet vet om communityet ditt akkurat nå.
           Inkluderer: community-stemning, topp-topics, AI-innsikter, highlights-status og strategisk anbefaling.
@@ -76,7 +69,7 @@ export default function StreamBriefingPage() {
         <div className="space-y-4">
 
           {/* Header */}
-          <div className="bg-g-card border border-g-green/20 rounded-xl p-5">
+          <div className="bg-g-card border border-g-green/20 rounded-2xl p-5">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Briefing</span>
               <span className="text-[9px] text-g-muted/50">Generert kl. {briefing.generert_kl}</span>
@@ -86,14 +79,14 @@ export default function StreamBriefingPage() {
 
           {/* Advarsel */}
           {briefing.advarsel && (
-            <div className="bg-red-500/5 border border-red-500/30 rounded-xl p-4 flex gap-3">
-              <span className="text-red-400 text-lg flex-shrink-0">⚠</span>
+            <div className="bg-red-500/5 border border-red-500/30 rounded-2xl p-4 flex gap-3">
+              <span className="text-red-400 font-black flex-shrink-0">!</span>
               <p className="text-sm text-red-300">{briefing.advarsel}</p>
             </div>
           )}
 
           {/* Høydepunkter */}
-          <div className="bg-g-card border border-g-border rounded-xl p-5">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5">
             <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Høydepunkter</p>
             <div className="space-y-2">
               {(briefing.hoyepunkter ?? []).map((punkt, i) => (
@@ -107,11 +100,11 @@ export default function StreamBriefingPage() {
 
           {/* Community + Topics */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-4">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Community-stemning</p>
               <p className="text-xs text-g-text leading-relaxed">{briefing.community_stemning}</p>
             </div>
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-4">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Topp Topics</p>
               <div className="flex flex-wrap gap-1.5">
                 {(briefing.topp_topics ?? []).map((t, i) => (
@@ -124,7 +117,7 @@ export default function StreamBriefingPage() {
           </div>
 
           {/* AI Anbefaling */}
-          <div className="bg-g-card border border-g-green/10 rounded-xl p-5">
+          <div className="bg-g-card border border-g-green/10 rounded-2xl p-5">
             <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">AI anbefaler</p>
             <p className="text-sm text-g-text leading-relaxed">{briefing.ai_anbefaling}</p>
           </div>

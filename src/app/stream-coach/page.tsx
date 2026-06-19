@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { PageHeader } from '@/components/ui';
 
 interface StreamSummary {
   id: string;
@@ -302,28 +303,19 @@ function StreamCoachInner() {
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-12">
 
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase flex items-center gap-2">
-            <span className="text-g-green">▲</span> Stream Coach
-          </h1>
-          <p className="text-xs text-g-muted mt-0.5">Creator intelligence — hva fungerte, hvem var der, hva gjøres neste gang</p>
-        </div>
+      <PageHeader title="Stream Coach" subtitle="Creator intelligence — hva fungerte, hvem var der, hva gjøres neste gang">
         {!loading && data && data.history.length > 0 && (
-          <div className="text-[10px] text-g-muted font-mono">
-            {data.history.length} streams analysert
-          </div>
+          <span className="text-[10px] text-g-muted font-mono">{data.history.length} streams analysert</span>
         )}
-      </div>
+      </PageHeader>
 
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-xl p-12 text-center">
-          <div className="text-g-green text-2xl mb-3 animate-pulse-green">◆</div>
+        <div className="bg-g-card border border-g-border rounded-2xl p-12 text-center">
+          <div className="text-g-green text-2xl mb-3 animate-pulse">◆</div>
           <p className="text-xs text-g-muted">Analyserer stream-data...</p>
         </div>
       ) : !data || data.history.length === 0 ? (
-        <div className="bg-g-card border border-g-border rounded-xl p-12 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-12 text-center">
           <div className="text-4xl text-g-muted mb-4">◈</div>
           <p className="text-sm text-g-muted">Ingen stream-historikk ennå.</p>
           <p className="text-xs text-g-muted/60 mt-1">Data samles automatisk etter første stream.</p>
@@ -353,7 +345,7 @@ function StreamCoachInner() {
               {/* ── KPI-rad ── */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 {/* Score */}
-                <div className="col-span-2 lg:col-span-1 bg-g-card border border-g-border rounded-xl p-4 flex flex-col items-center justify-center">
+                <div className="col-span-2 lg:col-span-1 bg-g-card border border-g-border rounded-2xl p-4 flex flex-col items-center justify-center">
                   {score ? (
                     <>
                       <ScoreRing score={score.total} grade={score.grade} />
@@ -365,14 +357,14 @@ function StreamCoachInner() {
                 </div>
 
                 {/* Seere */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-4">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest mb-1">Peak seere</p>
                   <p className="text-3xl font-black font-mono text-g-green">{s.peak_viewers}</p>
                   <p className="text-[10px] text-g-muted mt-1">Snitt {s.avg_viewers}</p>
                 </div>
 
                 {/* Varighet */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-4">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest mb-1">Varighet</p>
                   <p className="text-3xl font-black font-mono text-g-green">
                     {s.duration_minutes >= 60
@@ -383,7 +375,7 @@ function StreamCoachInner() {
                 </div>
 
                 {/* Chat */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-4">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest mb-1">Chat-meldinger</p>
                   <p className="text-3xl font-black font-mono text-g-green">{s.chat_messages}</p>
                   <p className="text-[10px] text-g-muted mt-1">
@@ -392,7 +384,7 @@ function StreamCoachInner() {
                 </div>
 
                 {/* Vekst */}
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-4">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest mb-1">Vekst</p>
                   <div className="flex items-end gap-3">
                     <div>
@@ -409,7 +401,7 @@ function StreamCoachInner() {
 
               {/* ── Top insight ── */}
               {data.analyse?.toppInsikt && (
-                <div className="bg-g-card border border-g-green/20 rounded-xl p-4 flex items-start gap-3"
+                <div className="bg-g-card border border-g-green/20 rounded-2xl p-4 flex items-start gap-3"
                   style={{ boxShadow: '0 0 20px rgba(0,255,65,0.05)' }}>
                   <span className="text-g-green text-lg mt-0.5">◆</span>
                   <div>
@@ -424,7 +416,7 @@ function StreamCoachInner() {
 
               {/* ── Score breakdown (hvis score finnes) ── */}
               {score && (
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-4">
                   <p className="text-[10px] text-g-muted uppercase tracking-widest mb-3">Score-fordeling</p>
                   <div className="space-y-2">
                     {([
@@ -472,7 +464,7 @@ function StreamCoachInner() {
               {activeTab === 'coach' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="bg-g-card border border-g-border rounded-xl p-4">
+                    <div className="bg-g-card border border-g-border rounded-2xl p-4">
                       <p className="text-[10px] font-bold text-g-green uppercase tracking-widest mb-3 flex items-center gap-1.5">
                         <span>✓</span> Hva fungerte
                       </p>
@@ -490,7 +482,7 @@ function StreamCoachInner() {
                       )}
                     </div>
 
-                    <div className="bg-g-card border border-g-border rounded-xl p-4">
+                    <div className="bg-g-card border border-g-border rounded-2xl p-4">
                       <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
                         <span>✗</span> Hva fungerte ikke
                       </p>
@@ -509,7 +501,7 @@ function StreamCoachInner() {
                     </div>
                   </div>
 
-                  <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-4">
                     <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
                       <span>→</span> Anbefalinger — neste stream
                     </p>
@@ -558,7 +550,7 @@ function StreamCoachInner() {
 
                       {/* Audience distribution bar */}
                       {audience.total > 0 && (
-                        <div className="bg-g-card border border-g-border rounded-xl p-4">
+                        <div className="bg-g-card border border-g-border rounded-2xl p-4">
                           <p className="text-[10px] text-g-muted uppercase tracking-widest mb-3">Publikumsfordeling</p>
                           <div className="flex h-4 rounded-full overflow-hidden gap-0.5">
                             {audience.newViewers > 0 && (
@@ -594,7 +586,7 @@ function StreamCoachInner() {
                       )}
 
                       {/* Viewer table */}
-                      <div className="bg-g-card border border-g-border rounded-xl p-4">
+                      <div className="bg-g-card border border-g-border rounded-2xl p-4">
                         <p className="text-[10px] text-g-muted uppercase tracking-widest mb-4">
                           Brukere innom streamen
                         </p>
@@ -608,7 +600,7 @@ function StreamCoachInner() {
               {/* ── Tab: Retention ── */}
               {activeTab === 'retention' && (
                 <div className="space-y-4">
-                  <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-4">
                     <p className="text-[10px] text-g-muted uppercase tracking-widest mb-3">Seertall over tid</p>
                     <RetentionChart data={data.retentionCurve ?? []} />
                     {data.analyse?.retentionObservasjon && (
@@ -623,19 +615,19 @@ function StreamCoachInner() {
 
                   {data.retentionCurve && data.retentionCurve.length > 0 && (
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-g-card border border-g-border rounded-xl p-4 text-center">
+                      <div className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
                         <p className="text-2xl font-black font-mono text-g-green">
                           {data.retentionCurve[0]?.count ?? 0}
                         </p>
                         <p className="text-[10px] text-g-muted mt-1">Åpning</p>
                       </div>
-                      <div className="bg-g-card border border-g-border rounded-xl p-4 text-center">
+                      <div className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
                         <p className="text-2xl font-black font-mono text-g-green">
                           {Math.max(...data.retentionCurve.map(r => r.count))}
                         </p>
                         <p className="text-[10px] text-g-muted mt-1">Peak</p>
                       </div>
-                      <div className="bg-g-card border border-g-border rounded-xl p-4 text-center">
+                      <div className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
                         <p className="text-2xl font-black font-mono text-g-green">
                           {data.retentionCurve[data.retentionCurve.length - 1]?.count ?? 0}
                         </p>
@@ -651,7 +643,7 @@ function StreamCoachInner() {
                 <div className="space-y-4">
                   {data.historiskAnalyse ? (
                     <>
-                      <div className="bg-g-card border border-g-border rounded-xl p-4 flex items-start gap-3">
+                      <div className="bg-g-card border border-g-border rounded-2xl p-4 flex items-start gap-3">
                         <span className="text-g-green text-lg mt-0.5">◆</span>
                         <div>
                           <p className="text-[10px] text-g-muted uppercase tracking-widest font-semibold mb-1">Historisk mønster</p>
@@ -666,7 +658,7 @@ function StreamCoachInner() {
                           ['↻ Bør gjentas', data.historiskAnalyse.børGjentas, 'text-blue-400'],
                           ['⚠ Bør unngås', data.historiskAnalyse.børUnngås, 'text-yellow-400'],
                         ] as [string, string[], string][]).map(([label, items, color]) => (
-                          <div key={label} className="bg-g-card border border-g-border rounded-xl p-4">
+                          <div key={label} className="bg-g-card border border-g-border rounded-2xl p-4">
                             <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${color}`}>{label}</p>
                             <ul className="space-y-2">
                               {(items ?? []).map((item, i) => (
@@ -687,7 +679,7 @@ function StreamCoachInner() {
                   )}
 
                   {/* Stream-historikk tabell */}
-                  <div className="bg-g-card border border-g-border rounded-xl p-4">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-4">
                     <p className="text-[10px] text-g-muted uppercase tracking-widest mb-4">Siste streams</p>
                     <div className="space-y-2">
                       {data.history.slice(0, 10).map(h => (

@@ -1,18 +1,14 @@
 'use client';
 
+import { BrandLogo } from '@/components/ui';
+
 export default function WaitingPage() {
   return (
     <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
       <div className="w-full max-w-md text-center space-y-6">
-        <div>
-          <div className="text-g-green font-black text-xl tracking-[0.15em] uppercase mb-1"
-            style={{ textShadow: '0 0 20px rgba(0,255,65,0.4)' }}>
-            GLENVEX
-          </div>
-          <p className="text-[9px] text-g-muted tracking-[0.3em] uppercase">Creator OS · Alpha</p>
-        </div>
+        <BrandLogo subtitle="Creator OS · Alpha" />
 
-        <div className="bg-g-card border border-g-border rounded-xl p-8 space-y-5">
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 space-y-5">
           <div className="w-12 h-12 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center mx-auto">
             <span className="text-g-green text-xl">⏳</span>
           </div>
@@ -25,7 +21,7 @@ export default function WaitingPage() {
             </p>
           </div>
 
-          <div className="bg-g-bg border border-g-border/50 rounded-lg p-4 text-left space-y-2">
+          <div className="bg-g-bg border border-g-border/50 rounded-xl p-4 text-left space-y-2">
             <p className="text-[10px] text-g-muted font-bold uppercase tracking-widest">Hva skjer nå?</p>
             {[
               'Vi verifiserer Twitch- og Discord-tilkoblingen din',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface QAFeil { type: string; entitetId: string; felt: string; verdi: any; anbefaling: string; }
 interface QARes {
@@ -30,21 +31,17 @@ export default function ContentFactoryQAPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Content Factory QA</h1>
-          <p className="text-[10px] text-g-muted mt-0.5">Automatisk datavalidering – kjøres etter hver endring</p>
-        </div>
+      <PageHeader title="Content Factory QA" subtitle="Automatisk datavalidering — kjøres etter hver endring">
         <button onClick={kjørQA} disabled={loading}
-          className="px-4 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">
-          {loading ? '⏳ Kjører...' : '▶ Kjør QA'}
+          className="px-4 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded-lg hover:bg-g-green/20 transition-all">
+          {loading ? 'Kjører...' : '▶ Kjør QA'}
         </button>
-      </div>
+      </PageHeader>
 
       {res && (
         <>
           {/* Status */}
-          <div className={`rounded-xl p-6 border ${res.status === 'PASSED' ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <div className={`rounded-2xl p-6 border ${res.status === 'PASSED' ? 'border-g-green/30 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
             <div className="flex items-center gap-4">
               <p className={`text-4xl font-black ${res.status === 'PASSED' ? 'text-g-green' : 'text-red-400'}`}>
                 {res.status === 'PASSED' ? '✓ PASSED' : '✗ FAILED'}
@@ -73,7 +70,7 @@ export default function ContentFactoryQAPage() {
 
           {/* Feil-liste */}
           {res.feil.length > 0 && (
-            <div className="bg-g-card border border-g-border rounded-xl p-5 space-y-3">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-g-text">Datafeil ({res.feil.length})</p>
                 <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filtrer..."
@@ -96,7 +93,7 @@ export default function ContentFactoryQAPage() {
           )}
 
           {/* Definition of Done */}
-          <div className="bg-g-card border border-g-border rounded-xl p-5">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5">
             <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Definition of Done</p>
             <div className="space-y-1.5">
               {[

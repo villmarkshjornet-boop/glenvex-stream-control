@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { BrandLogo } from '@/components/ui';
 
 type Mode = 'signin' | 'signup';
 
@@ -84,17 +85,10 @@ export default function LoginPage() {
     <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
 
-        {/* Logo */}
-        <div className="text-center space-y-1">
-          <div className="text-g-green font-black text-2xl tracking-[0.15em] uppercase"
-            style={{ textShadow: '0 0 20px rgba(0,255,65,0.4)' }}>
-            GLENVEX
-          </div>
-          <p className="text-[10px] text-g-muted tracking-[0.3em] uppercase">Creator OS</p>
-        </div>
+        <div className="text-center"><BrandLogo size="lg" /></div>
 
         {/* Card */}
-        <div className="bg-g-card border border-g-border rounded-xl p-6 space-y-5">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-5">
           <div>
             <h1 className="text-sm font-black text-g-text">
               {mode === 'signin' ? 'Logg inn' : 'Opprett konto'}

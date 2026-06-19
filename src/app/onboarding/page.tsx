@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { BrandLogo } from '@/components/ui';
 
 interface OboardingStatus {
   workspaceId: string | null;
@@ -184,15 +185,9 @@ function OnboardingInner() {
     <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
       <div className="w-full max-w-lg space-y-5">
 
-        <div className="text-center">
-          <div className="text-g-green font-black text-xl tracking-[0.15em] uppercase"
-            style={{ textShadow: '0 0 20px rgba(0,255,65,0.4)' }}>
-            GLENVEX
-          </div>
-          <p className="text-[9px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS · Oppsett</p>
-        </div>
+        <div className="text-center"><BrandLogo subtitle="Creator OS · Oppsett" /></div>
 
-        <div className="bg-g-card border border-g-border rounded-xl p-6 space-y-6">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-6">
 
           <ProgressBar step={step} />
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import { getDb } from '@/lib/db';
+import { evaluateIntegrationStatus } from '@/lib/integrationStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function GET() {
 
   const [wsRes, eventsRes, vodsRes, snapshotsRes] = await Promise.allSettled([
     db.from('workspaces')
-      .select('id,brand_name,streamer_name,twitch_login,twitch_user_id,twitch_display_name,twitch_connected_at,discord_guild_id,discord_guild_name,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,created_at,updated_at,owner_user_id,plan,settings_json')
+      .select('id,brand_name,streamer_name,twitch_login,twitch_user_id,twitch_display_name,twitch_connected_at,twitch_access_token,twitch_refresh_token,discord_guild_id,discord_guild_name,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,created_at,updated_at,owner_user_id,plan,settings_json')
       .order('created_at', { ascending: false })
       .limit(200),
 
@@ -47,13 +48,15 @@ export async function GET() {
   const allSnapshots  = snapshotsRes.status === 'fulfilled' ? (snapshotsRes.value?.data ?? []) : [];
 
   // Build per-workspace event maps — single pass
-  const lastEventByWs:     Record<string, any> = {};
-  const lastErrorByWs:     Record<string, any> = {};
-  const audienceHbByWs:    Record<string, any> = {};
-  const botHbByWs:         Record<string, any> = {};
-  const lastStreamByWs:    Record<string, any> = {};
-  const lastStreamEndByWs: Record<string, any> = {};
-  const coachReportByWs:   Record<string, any> = {};
+  const lastEventByWs:      Record<string, any> = {};
+  const lastErrorByWs:      Record<string, any> = {};
+  const audienceHbByWs:     Record<string, any> = {};
+  const botHbByWs:          Record<string, any> = {};
+  const twitchBotEventByWs: Record<string, any> = {};
+  const discordBotEventByWs: Record<string, any> = {};
+  const lastStreamByWs:     Record<string, any> = {};
+  const lastStreamEndByWs:  Record<string, any> = {};
+  const coachReportByWs:    Record<string, any> = {};
 
   const BOT_HB_SOURCES = new Set(['twitch_bot', 'workspace_manager', 'discord_bot', 'recovery_engine']);
 
@@ -64,6 +67,9 @@ export async function GET() {
     if (ev.severity === 'error' && !lastErrorByWs[wId]) lastErrorByWs[wId] = ev;
     if (ev.event_type === 'AUDIENCE_TRACKING_HEARTBEAT' && !audienceHbByWs[wId]) audienceHbByWs[wId] = ev;
     if (ev.event_type === 'HEARTBEAT' && BOT_HB_SOURCES.has(ev.source) && !botHbByWs[wId]) botHbByWs[wId] = ev;
+    // Per-bot tracking (any event type, not just HEARTBEAT)
+    if (ev.source === 'twitch_bot'  && !twitchBotEventByWs[wId])  twitchBotEventByWs[wId]  = ev;
+    if (ev.source === 'discord_bot' && !discordBotEventByWs[wId]) discordBotEventByWs[wId] = ev;
     if (ev.event_type === 'TWITCH_LIVE_DETECTED' && !lastStreamByWs[wId]) lastStreamByWs[wId] = ev;
     if (ev.event_type === 'TWITCH_OFFLINE_DETECTED' && !lastStreamEndByWs[wId]) lastStreamEndByWs[wId] = ev;
     if (ev.event_type === 'COACH_REPORT_GENERATED' && !coachReportByWs[wId]) coachReportByWs[wId] = ev;
@@ -95,6 +101,28 @@ export async function GET() {
   const result = workspaces.map((ws: any) => {
     const kanalPrefs = (ws.settings_json?.kanalPreferanser ?? {}) as Record<string, string>;
     const liveChannelId = kanalPrefs.live ?? ws.live_channel_id ?? null;
+
+    const twitchBotLastEventAt  = twitchBotEventByWs[ws.id]?.created_at  ?? null;
+    const discordBotLastEventAt = discordBotEventByWs[ws.id]?.created_at ?? null;
+
+    const integrationStatus = evaluateIntegrationStatus({
+      workspace: {
+        twitch_connected_at:     ws.twitch_connected_at,
+        twitch_login:            ws.twitch_login,
+        twitch_access_token:     ws.twitch_access_token,
+        twitch_refresh_token:    ws.twitch_refresh_token,
+        discord_connected_at:    ws.discord_connected_at,
+        discord_guild_id:        ws.discord_guild_id,
+        discord_guild_name:      ws.discord_guild_name,
+        live_channel_id:         ws.live_channel_id,
+        settings_json:           ws.settings_json,
+        alpha_enabled:           ws.alpha_enabled,
+        onboarding_completed_at: ws.onboarding_completed_at,
+      },
+      twitchBotLastEventAt,
+      discordBotLastEventAt,
+    });
+
     return {
       id:                     ws.id,
       brandName:              ws.brand_name,
@@ -116,13 +144,16 @@ export async function GET() {
       createdAt:              ws.created_at,
       ownerUserId:            ws.owner_user_id,
 
-      lastEvent:       lastEventByWs[ws.id]     ?? null,
-      lastError:       lastErrorByWs[ws.id]     ?? null,
-      audienceHb:      audienceHbByWs[ws.id]    ?? null,
-      botHb:           botHbByWs[ws.id]         ?? null,
-      lastStream:      lastStreamByWs[ws.id]    ?? null,
-      lastStreamEnd:   lastStreamEndByWs[ws.id] ?? null,
-      coachReport:     coachReportByWs[ws.id]   ?? null,
+      lastEvent:       lastEventByWs[ws.id]      ?? null,
+      lastError:       lastErrorByWs[ws.id]      ?? null,
+      audienceHb:      audienceHbByWs[ws.id]     ?? null,
+      botHb:           botHbByWs[ws.id]          ?? null,
+      twitchBotLastEventAt,
+      discordBotLastEventAt,
+      integrationStatus,
+      lastStream:      lastStreamByWs[ws.id]     ?? null,
+      lastStreamEnd:   lastStreamEndByWs[ws.id]  ?? null,
+      coachReport:     coachReportByWs[ws.id]    ?? null,
 
       cfActive:   cfActiveByWs[ws.id]  ?? 0,
       cfFailed:   cfFailedByWs[ws.id]  ?? 0,

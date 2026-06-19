@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { PageHeader, FilterBar, EmptyState, Spinner } from '@/components/ui';
 
 interface TwitterDraft {
   id: string;
@@ -140,15 +141,12 @@ export default function TwitterDraftsPage() {
   const charCount = (text: string) => text.length;
 
   return (
-    <main className="min-h-screen bg-g-bg p-8 max-w-3xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-g-text tracking-wide">Twitter / X Utkast</h1>
-        <p className="text-g-muted text-sm mt-1">AI-genererte partner-innlegg. Godkjenn, rediger og post manuelt.</p>
-      </div>
+    <div className="max-w-3xl space-y-5">
+      <PageHeader title="Twitter / X Utkast" subtitle="AI-genererte partner-innlegg. Godkjenn, rediger og post manuelt." />
 
       {/* ── Generate new draft ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Generer nytt utkast</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Generer nytt utkast</p>
 
         <div className="space-y-4">
           <div>
@@ -226,13 +224,13 @@ export default function TwitterDraftsPage() {
       {loading ? (
         <div className="text-g-muted text-sm animate-pulse">Laster utkast…</div>
       ) : drafts.length === 0 ? (
-        <div className="p-5 bg-g-surface border border-g-border rounded-lg text-center text-g-muted text-sm">
+        <div className="p-5 bg-g-card border border-g-border rounded-2xl text-center text-g-muted text-sm">
           Ingen {STATUS_LABEL[filter]?.toLowerCase()} utkast.
         </div>
       ) : (
         <div className="space-y-4">
           {drafts.map(d => (
-            <div key={d.id} className={`p-4 bg-g-surface border rounded-lg ${filter === 'archived' ? 'opacity-50' : ''}`} style={{ borderColor: 'var(--g-border)' }}>
+            <div key={d.id} className={`p-4 bg-g-card border border-g-border rounded-2xl ${filter === 'archived' ? 'opacity-50' : ''}`}>
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div>
                   <span className="font-semibold text-g-text">{d.partner_name}</span>
@@ -331,6 +329,6 @@ export default function TwitterDraftsPage() {
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }

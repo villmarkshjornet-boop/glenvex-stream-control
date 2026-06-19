@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface StegStatus {
   steg: string;
@@ -86,13 +87,9 @@ export default function JobMonitorPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Job Monitor</h1>
-          <p className="text-[10px] text-g-muted mt-0.5">Overvåk alle Content Factory-jobber og pipeline-steg</p>
-        </div>
+      <PageHeader title="Job Monitor" subtitle="Overvåk alle Content Factory-jobber og pipeline-steg">
         <button onClick={hent} className="text-[9px] text-g-muted hover:text-g-green transition-colors">↻ Oppdater</button>
-      </div>
+      </PageHeader>
 
       {/* Sammendrag */}
       <div className="grid grid-cols-4 gap-3">
@@ -121,15 +118,15 @@ export default function JobMonitorPage() {
 
       {/* Jobb-liste */}
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
           <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
         </div>
       ) : filtrert.length === 0 ? (
-        <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
           <p className="text-xs text-g-muted">Ingen jobber.</p>
         </div>
       ) : filtrert.map(v => (
-        <div key={v.id} className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+        <div key={v.id} className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
           {/* Jobb-header */}
           <div className="p-4 cursor-pointer flex items-start gap-3" onClick={() => setValgt(valgt === v.id ? null : v.id)}>
             <div className={`text-[9px] px-2 py-0.5 rounded border font-bold uppercase flex-shrink-0 mt-0.5 ${STATUS_STIL[v.status] ?? STATUS_STIL.PENDING}`}>

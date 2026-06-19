@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { GuildInfo, Settings } from '@/types';
+import { PageHeader } from '@/components/ui';
 
 interface Channel {
   id: string;
@@ -137,14 +138,11 @@ export default function DiscordPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Discord</h1>
-        <p className="text-xs text-g-muted mt-0.5">Discord bot-status og live-varsling</p>
-      </div>
+      <PageHeader title="Discord" subtitle="Discord bot-status og live-varsling" />
 
       {/* Server info */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">Server Info</h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Server Info</p>
         {guild ? (
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -174,9 +172,9 @@ export default function DiscordPage() {
       </div>
 
       {/* Kanalstruktur + AI-forslag */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
+      <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase">Kanalstruktur</h2>
+          <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase">Kanalstruktur</p>
           <button
             onClick={hentKanaler}
             disabled={loadingChannels}
@@ -315,8 +313,8 @@ export default function DiscordPage() {
       </div>
 
       {/* Bot config */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-4">Bot Konfigurasjon</h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Bot Konfigurasjon</p>
         <div className="space-y-2">
           {[
             { label: 'Live Kanal ID', value: settings?.discordLiveChannelId || '–' },
@@ -333,8 +331,8 @@ export default function DiscordPage() {
       </div>
 
       {/* Test embed */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-3">Test Live Varsel</h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-3">Test Live Varsel</p>
         <button
           onClick={testAlert}
           disabled={testing}
@@ -350,8 +348,8 @@ export default function DiscordPage() {
       </div>
 
       {/* Manuell melding */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-1">Send melding som bot</h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-1">Send melding som bot</p>
         <p className="text-[10px] text-g-muted mb-4">Send en melding direkte på en kanal via Discord-boten.</p>
         <form onSubmit={sendManuellMelding} className="space-y-3">
           <div>
@@ -409,11 +407,11 @@ export default function DiscordPage() {
       </div>
 
       {/* Slash commands */}
-      <div className="bg-g-card border border-g-border rounded-lg p-5">
-        <h2 className="text-xs text-g-muted font-semibold tracking-widest uppercase mb-3">Slash Kommandoer</h2>
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-3">Slash Kommandoer</p>
         <div className="grid grid-cols-2 gap-2">
           {['/live', '/twitch', '/promo', '/setup', '/status', '/socials', '/clip', '/kanaler'].map(cmd => (
-            <div key={cmd} className="flex items-center gap-2 py-1.5 px-3 bg-g-bg border border-g-border rounded">
+            <div key={cmd} className="flex items-center gap-2 py-1.5 px-3 bg-g-bg border border-g-border rounded-lg">
               <span className="text-g-green text-xs font-mono font-bold">{cmd}</span>
             </div>
           ))}

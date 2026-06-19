@@ -34,8 +34,29 @@ export async function GET() {
     });
   }
 
-  const twitchConnected  = !!ws.twitch_connected_at;
-  const discordConnected = !!ws.discord_connected_at;
+  // Check heartbeat from each bot as fallback signal — catches cases where workspace
+  // was configured manually without going through the OAuth onboarding flow.
+  const cutoff12h = new Date(Date.now() - 12 * 3_600_000).toISOString();
+  const [twitchHbRes, discordHbRes] = await Promise.all([
+    db.from('system_events')
+      .select('id')
+      .eq('workspace_id', ws.id)
+      .eq('source', 'twitch_bot')
+      .gte('created_at', cutoff12h)
+      .limit(1),
+    db.from('system_events')
+      .select('id')
+      .eq('workspace_id', ws.id)
+      .eq('source', 'discord_bot')
+      .gte('created_at', cutoff12h)
+      .limit(1),
+  ]);
+
+  const twitchBotActive  = (twitchHbRes.data?.length ?? 0) > 0;
+  const discordBotActive = (discordHbRes.data?.length ?? 0) > 0;
+
+  const twitchConnected  = !!ws.twitch_connected_at || twitchBotActive;
+  const discordConnected = !!ws.discord_connected_at || discordBotActive;
   const channelsSaved    = !!(ws.settings_json?.kanalPreferanser?.live || ws.live_channel_id);
   const onboardingComplete = !!ws.onboarding_completed_at;
 

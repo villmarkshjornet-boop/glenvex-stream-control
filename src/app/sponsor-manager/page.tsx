@@ -280,7 +280,7 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
   const decided = s.godkjent + s.avvist;
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+    <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-g-border bg-g-sidebar">
         <div>
@@ -558,7 +558,7 @@ export default function SponsorManagerPage() {
       <PageHeader title="Sponsor Manager" subtitle="Sponsorrapport, score og veksthistorikk" />
 
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-lg p-12 flex items-center justify-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-12 flex items-center justify-center">
           <div className="text-center space-y-2">
             <span className="w-8 h-8 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
             <p className="text-xs text-g-muted">Henter statistikk og genererer rapport...</p>
@@ -567,14 +567,14 @@ export default function SponsorManagerPage() {
       ) : !data ? (
         <p className="text-xs text-g-muted p-4">Kunne ikke hente sponsor-data.</p>
       ) : data.dataErSvak ? (
-        <div className="bg-g-card border border-yellow-400/20 rounded-lg p-8 text-center space-y-2">
+        <div className="bg-g-card border border-yellow-400/20 rounded-2xl p-8 text-center space-y-2">
           <p className="text-yellow-400 font-bold">⚠ Datagrunnlaget er foreløpig for svakt.</p>
           <p className="text-xs text-g-muted">Kjør flere streams for mer nøyaktig analyse. Du trenger minst 3 registrerte streams og noen følgere.</p>
         </div>
       ) : (
         <>
           {/* Score + one-liner */}
-          <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
             <ScoreBar score={data.score} />
             {data.pitchOneLiner && (
               <p className="text-xs text-g-green font-mono italic border-l-2 border-g-green/30 pl-3">&ldquo;{data.pitchOneLiner}&rdquo;</p>
@@ -582,7 +582,7 @@ export default function SponsorManagerPage() {
           </div>
 
           {/* Milestones */}
-          <div className="bg-g-card border border-g-border rounded-lg p-4">
+          <div className="bg-g-card border border-g-border rounded-2xl p-4">
             <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">Milestones</p>
             <div className="flex items-center gap-0">
               {data.milestones.map((m, i) => (
@@ -603,7 +603,7 @@ export default function SponsorManagerPage() {
           </div>
 
           {/* Score breakdown */}
-          <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-3">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
             <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">Score Breakdown</p>
             <div className="space-y-2">
               {data.scoreKomponenter.map(k => (
@@ -640,7 +640,7 @@ export default function SponsorManagerPage() {
           </div>
 
           {/* Historikk-tabs */}
-          <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-3">
+          <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">Veksthistorikk</p>
               <div className="flex gap-1">
@@ -680,7 +680,7 @@ export default function SponsorManagerPage() {
               { label: 'Timer streamet', value: `${data.hoursStreamed}t` },
               { label: 'Klipp publisert', value: data.contentStats.totaleKlipp, trend: data.trends.klipp },
             ].map(s => (
-              <div key={s.label} className="bg-g-card border border-g-border rounded-lg p-4 text-center">
+              <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
                 <div className="flex items-center justify-center gap-1 mt-1">
                   <p className="text-xl font-black text-g-green font-mono">{s.value}</p>
@@ -693,11 +693,11 @@ export default function SponsorManagerPage() {
           {/* Sterke punkter + Forbedringer */}
           {(data.sterktePunkter.length > 0 || data.forbedringer.length > 0) && (
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-g-card border border-g-border rounded-lg p-4 space-y-1.5">
+              <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-1.5">
                 <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">✓ Sterke punkter</p>
                 {data.sterktePunkter.map((s2, i) => <p key={i} className="text-[11px] text-g-text leading-snug">{s2}</p>)}
               </div>
-              <div className="bg-g-card border border-g-border rounded-lg p-4 space-y-1.5">
+              <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-1.5">
                 <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold mb-2">⚠ Kan forbedres</p>
                 {data.forbedringer.map((s2, i) => <p key={i} className="text-[11px] text-g-text leading-snug">{s2}</p>)}
               </div>
@@ -706,9 +706,9 @@ export default function SponsorManagerPage() {
 
           {/* AI Sponsorrapport */}
           {data.rapport && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-3">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-[10px] text-g-muted font-semibold tracking-widest uppercase">AI Sponsorrapport</h2>
+                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">AI Sponsorrapport</p>
                 <button onClick={() => {
                   const blob = new Blob([data.rapport], { type: 'text/plain' });
                   const url = URL.createObjectURL(blob);
@@ -724,7 +724,7 @@ export default function SponsorManagerPage() {
 
           {/* Målgruppe */}
           {data.malgruppe && (
-            <div className="bg-g-card border border-g-border rounded-lg p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-4">
               <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-2">Målgruppe</p>
               <p className="text-xs text-g-text leading-relaxed">{data.malgruppe}</p>
             </div>
@@ -732,9 +732,9 @@ export default function SponsorManagerPage() {
 
           {/* Pitch e-post */}
           {data.pitchEmail && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-3">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-[10px] text-g-muted font-semibold tracking-widest uppercase">Pitch e-post</h2>
+                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Pitch e-post</p>
                 <button onClick={() => setVisEmail(v => !v)} className="px-3 py-1 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                   {visEmail ? 'Skjul' : 'Vis e-post'}
                 </button>
@@ -752,9 +752,9 @@ export default function SponsorManagerPage() {
 
           {/* Partner-historikk + Partner Report */}
           {data.partnerHistorikk?.length > 0 && (
-            <div className="bg-g-card border border-g-border rounded-lg p-5 space-y-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-[10px] text-g-muted font-semibold tracking-widest uppercase">Partner-historikk (ekte data)</h2>
+                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Partner-historikk (ekte data)</p>
                 {data.partnerTotaler && (
                   <span className="text-[10px] text-g-muted/60">
                     {data.partnerTotaler.totalePromoer} promoer totalt

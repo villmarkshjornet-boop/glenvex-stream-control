@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { tidSiden } from '@/components/dashboard/helpers';
+import { PageHeader } from '@/components/ui';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -249,7 +250,7 @@ function MemberDetailView({
       </div>
 
       {loading && (
-        <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
           <p className="text-xs text-g-muted animate-pulse">Henter AI-vurdering...</p>
         </div>
       )}
@@ -262,7 +263,7 @@ function MemberDetailView({
 
         return (
           <div className="space-y-4">
-            <div className="bg-g-card border border-g-border rounded-xl p-5">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <div className="flex items-start gap-4">
                 <div className="w-14 h-14 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0">
                   <span className="text-2xl font-black text-g-green">{m.displayName?.[0]?.toUpperCase() ?? '?'}</span>
@@ -299,7 +300,7 @@ function MemberDetailView({
             </div>
 
             {aiProfil.aiBeskrivelse && (
-              <div className="bg-g-card border border-g-border rounded-xl p-4">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">AI-vurdering</p>
                 <p className="text-xs text-g-text leading-relaxed">{aiProfil.aiBeskrivelse}</p>
                 {aiProfil.punkter.length > 0 && (
@@ -314,7 +315,7 @@ function MemberDetailView({
               </div>
             )}
 
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Engasjement</p>
               <div className="space-y-2">
                 <div className="flex justify-between text-[10px]">
@@ -330,7 +331,7 @@ function MemberDetailView({
               </div>
             </div>
 
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Historikk</p>
               <ActivityBand label="Aktiv siste 7 dager"  aktiv={historikk.aktiv7d} />
               <ActivityBand label="Aktiv siste 30 dager" aktiv={historikk.aktiv30d} />
@@ -346,7 +347,7 @@ function MemberDetailView({
               </p>
             </div>
 
-            <div className="bg-g-card border border-g-border rounded-xl p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl p-5">
               <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Handlinger</p>
               <div className="flex flex-wrap gap-2">
                 <ActionBtn label="Gi XP-bonus" icon="⭐" onClick={() => handleAction('xp_bonus')}
@@ -361,7 +362,7 @@ function MemberDetailView({
             </div>
 
             {kontekst.length > 0 && (
-              <div className="bg-g-card border border-g-border rounded-xl p-4 space-y-2">
+              <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-2">
                 <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Minne & Kontekst</p>
                 <div className="space-y-2">
                   {kontekst.map((k, i) => (
@@ -404,7 +405,7 @@ function HealthWidget({ health, diagnostics }: { health: Health; diagnostics: Di
   const hasData = health.activeMembers7d > 0 || health.xpGranted7d > 0;
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3">
         <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Community Health</p>
         <span className={`text-[10px] font-bold ${idleColor}`}>{idleLabel}</span>
@@ -422,7 +423,7 @@ function HealthWidget({ health, diagnostics }: { health: Health; diagnostics: Di
       </div>
       {!diagnostics.communityKanalKonfigurert && (
         <div className="mt-3 text-[10px] text-yellow-400 flex items-center gap-1.5">
-          <span>⚠️</span>
+          <span className="font-black">!</span>
           <span>Community-kanal ikke konfigurert — bot kan ikke sende automatiske meldinger.</span>
           <Link href="/innstillinger" className="underline hover:text-yellow-300">Sett opp →</Link>
         </div>
@@ -436,7 +437,7 @@ function HealthWidget({ health, diagnostics }: { health: Health; diagnostics: Di
 
 function TopMembersWidget({ members }: { members: TopMember7d[] }) {
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp Membres — 7 dager</p>
       {members.length === 0 ? (
         <p className="text-[10px] text-g-muted py-2">
@@ -458,7 +459,7 @@ function TopMembersWidget({ members }: { members: TopMember7d[] }) {
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[9px] text-g-green font-mono">+{m.xp7d} XP</span>
-                    {m.streakDays >= 2 && <span className="text-[9px] text-orange-400">🔥 {m.streakDays}d</span>}
+                    {m.streakDays >= 2 && <span className="text-[9px] text-orange-400">▲ {m.streakDays}d</span>}
                   </div>
                 </div>
                 <span className="text-[9px] text-g-muted font-mono flex-shrink-0">Lv {m.level}</span>
@@ -473,7 +474,7 @@ function TopMembersWidget({ members }: { members: TopMember7d[] }) {
 
 function RecentLevelUpsWidget({ levelUps }: { levelUps: LevelUp[] }) {
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Nylige Level-ups</p>
       {levelUps.length === 0 ? (
         <p className="text-[10px] text-g-muted py-2">
@@ -483,7 +484,7 @@ function RecentLevelUpsWidget({ levelUps }: { levelUps: LevelUp[] }) {
         <div className="space-y-2">
           {levelUps.map((lu, i) => (
             <div key={i} className="flex items-center gap-3 py-2 border-b border-g-border/20 last:border-0">
-              <span className="text-base flex-shrink-0">⭐</span>
+              <span className="text-base flex-shrink-0 text-yellow-400">★</span>
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-bold text-g-text">{lu.username || lu.userId.slice(0, 8)}</p>
                 <p className="text-[9px] text-g-muted">
@@ -509,7 +510,7 @@ function BotActivityWidget({ activity }: { activity: BotEvent[] }) {
   }
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Bot Aktivitet (7d)</p>
       {activity.length === 0 ? (
         <p className="text-[10px] text-g-muted py-2">
@@ -536,7 +537,7 @@ function RecommendationsWidget({ recs }: { recs: Recommendation[] }) {
   if (recs.length === 0) return null;
 
   return (
-    <div className="bg-g-card border border-g-border rounded-xl p-4">
+    <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Anbefalte Tiltak</p>
       <div className="space-y-2">
         {recs.map((r, i) => (
@@ -563,7 +564,7 @@ function DashboardTab({ summary, loading }: { summary: SummaryData | null; loadi
 
   if (!summary) {
     return (
-      <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
+      <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
         <p className="text-xs text-g-muted">Kunne ikke laste dashboard-data. Sjekk Supabase-tilkobling.</p>
       </div>
     );
@@ -667,23 +668,18 @@ export default function CommunityManagerPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Community Manager</h1>
-          <p className="text-[10px] text-g-muted mt-0.5">Aktivitet · Helse · Automatisk styring</p>
-        </div>
+      <PageHeader title="Community Manager" subtitle="Aktivitet · Helse · Automatisk styring">
         <div className="flex items-center gap-2">
           <Link href="/community-settings"
-            className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded px-2 py-1 transition-colors">
-            ⚙ Innstillinger
+            className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg px-2 py-1 transition-colors">
+            Innstillinger
           </Link>
           <Link href="/community-intelligence"
-            className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded px-2 py-1 transition-colors">
+            className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg px-2 py-1 transition-colors">
             Intelligence →
           </Link>
         </div>
-      </div>
+      </PageHeader>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-g-border">
@@ -706,7 +702,7 @@ export default function CommunityManagerPage() {
       {tab === 'membres' && (
         <div className="space-y-4">
           {membresLoading && (
-            <div className="bg-g-card border border-g-border rounded-xl p-6 text-center">
+            <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
               <p className="text-xs text-g-muted animate-pulse">Laster membres...</p>
             </div>
           )}
@@ -715,7 +711,7 @@ export default function CommunityManagerPage() {
             <>
               {/* Top 3 */}
               {topp3.length > 0 && (
-                <div className="bg-g-card border border-g-border rounded-xl p-4">
+                <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">
                     Topp 3 — {sorter === 'xp' ? 'XP' : sorter === 'engagement' ? 'Engasjement' : sorter === 'messages' ? 'Chat' : 'Community-score'}
                   </p>

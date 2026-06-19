@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader } from '@/components/ui';
 
 interface RPNote {
   id: string;
@@ -64,15 +65,12 @@ export default function RPIntelligencePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">RP Intelligence</h1>
-        <p className="text-xs text-g-muted mt-0.5">Future RP-notater, karakterer, relasjoner og hendelser</p>
-      </div>
+      <PageHeader title="RP Intelligence" subtitle="Future RP-notater, karakterer, relasjoner og hendelser" />
 
       {/* Viktige påminnelser */}
       {viktige.length > 0 && (
-        <div className="bg-g-card border border-yellow-400/20 rounded-lg p-5">
-          <h2 className="text-xs text-yellow-400 font-semibold tracking-widest uppercase mb-3">⚠ Husk før stream</h2>
+        <div className="bg-g-card border border-yellow-400/20 rounded-2xl p-5">
+          <p className="text-[9px] text-yellow-400 font-bold tracking-widest uppercase mb-3">Husk før stream</p>
           <div className="space-y-2">
             {viktige.map(n => (
               <div key={n.id} className="flex items-start gap-2">
@@ -105,7 +103,7 @@ export default function RPIntelligencePage() {
 
       {/* Form */}
       {visForm && (
-        <div className="bg-g-card border border-g-green/20 rounded-lg p-5 space-y-3">
+        <div className="bg-g-card border border-g-green/20 rounded-2xl p-5 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Type</label>
@@ -143,11 +141,11 @@ export default function RPIntelligencePage() {
       {/* Notat-liste */}
       <div className="space-y-2">
         {loading ? <p className="text-xs text-g-muted">Laster...</p> : filtrerte.length === 0 ? (
-          <div className="bg-g-card border border-g-border rounded-lg p-6 text-center">
+          <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
             <p className="text-xs text-g-muted">Ingen notater. Trykk "+ Ny note" for å starte.</p>
           </div>
         ) : filtrerte.map(n => (
-          <div key={n.id} className="bg-g-card border border-g-border rounded-lg p-4 space-y-2">
+          <div key={n.id} className="bg-g-card border border-g-border rounded-xl p-4 space-y-2">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider ${TYPE_FARGE[n.type]}`}>{n.type}</span>

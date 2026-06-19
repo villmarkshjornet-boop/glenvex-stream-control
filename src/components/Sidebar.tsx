@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutGrid,
-  Radio,
   Calendar,
   Mic,
   Zap,
@@ -53,7 +52,6 @@ const GROUPS: NavGroup[] = [
     id:    'live',
     label: 'Live',
     items: [
-      { label: 'Oversikt',        href: '/twitch',            icon: Radio       },
       { label: 'Streamplan',      href: '/streamplan',        icon: Calendar    },
       { label: 'AI Coach',        href: '/stream-briefing',   icon: Mic         },
       { label: 'Stream Coach',    href: '/stream-coach',      icon: Zap         },

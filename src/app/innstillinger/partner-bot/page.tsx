@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import type { PartnerBotSettings } from '@/app/api/partner-bot/settings/route';
+import { PageHeader, Toggle as UIToggle, SectionLabel, Spinner, EmptyState } from '@/components/ui';
 
 interface Proposal {
   id: string;
@@ -35,16 +36,11 @@ const DEFAULT: PartnerBotSettings = {
 
 function Toggle({ value, onChange, label, hint }: { value: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer group">
-      <div
-        className={`relative mt-0.5 w-10 h-5 rounded-full transition-colors flex-shrink-0 ${value ? 'bg-g-green' : 'bg-g-border'}`}
-        onClick={() => onChange(!value)}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${value ? 'translate-x-5' : ''}`} />
-      </div>
+    <label className="flex items-start gap-3 cursor-pointer">
+      <UIToggle value={value} onChange={onChange} />
       <div>
-        <div className="text-sm text-g-text font-medium">{label}</div>
-        {hint && <div className="text-xs text-g-muted mt-0.5">{hint}</div>}
+        <div className="text-xs font-semibold text-g-text">{label}</div>
+        {hint && <div className="text-[10px] text-g-muted mt-0.5 leading-snug">{hint}</div>}
       </div>
     </label>
   );
@@ -62,7 +58,7 @@ function NumberInput({ value, onChange, label, hint, min, max, step }: { value: 
         max={max}
         step={step ?? 1}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-32 px-3 py-1.5 bg-g-surface border border-g-border rounded text-sm text-g-text focus:outline-none focus:border-g-green"
+        className="w-32 px-3 py-1.5 bg-g-bg border border-g-border rounded-2xl text-xs text-g-text focus:outline-none focus:border-g-green/50"
       />
     </div>
   );
@@ -135,22 +131,19 @@ export default function PartnerBotSettingsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-g-bg p-8">
-        <div className="text-g-muted text-sm animate-pulse">Laster innstillinger…</div>
-      </main>
+      <div className="flex items-center justify-center py-16">
+        <Spinner />
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-g-bg p-8 max-w-3xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-g-text tracking-wide">Partner Sales Bot</h1>
-        <p className="text-g-muted text-sm mt-1">Kontekstsensitiv, anti-spam partner-promotering for Twitch og Discord.</p>
-      </div>
+    <div className="max-w-3xl space-y-5">
+      <PageHeader title="Partner Sales Bot" subtitle="Kontekstsensitiv, anti-spam partner-promotering for Twitch og Discord." />
 
       {/* ── Global kill switch ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Status</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Status</p>
         <Toggle
           value={settings.enabled}
           onChange={v => set('enabled', v)}
@@ -160,8 +153,8 @@ export default function PartnerBotSettingsPage() {
       </section>
 
       {/* ── Platform ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg space-y-4">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Plattformer</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-4">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Plattformer</p>
         <Toggle value={settings.twitchEnabled} onChange={v => set('twitchEnabled', v)} label="Twitch chat-promo" />
         <Toggle value={settings.discordEnabled} onChange={v => set('discordEnabled', v)} label="Discord-promo" />
         <Toggle
@@ -174,8 +167,8 @@ export default function PartnerBotSettingsPage() {
       </section>
 
       {/* ── Approval ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Godkjenning</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Godkjenning</p>
         <Toggle
           value={settings.requireApproval}
           onChange={v => set('requireApproval', v)}
@@ -185,8 +178,8 @@ export default function PartnerBotSettingsPage() {
       </section>
 
       {/* ── Cooldowns ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg space-y-5">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Cooldowns og grenser</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-5">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Cooldowns og grenser</p>
         <div className="grid grid-cols-2 gap-5">
           <NumberInput value={settings.maxPostsPerStream} onChange={v => set('maxPostsPerStream', v)} label="Maks promoer per stream" min={1} max={10} />
           <NumberInput value={settings.cooldownMinutes} onChange={v => set('cooldownMinutes', v)} label="Cooldown (minutter)" hint="Min tid mellom promoer" min={5} max={240} />
@@ -197,14 +190,14 @@ export default function PartnerBotSettingsPage() {
       </section>
 
       {/* ── Message settings ── */}
-      <section className="mb-8 p-5 bg-g-surface border border-g-border rounded-lg space-y-4">
-        <h2 className="text-sm font-semibold text-g-muted uppercase tracking-wider mb-4">Meldingsinnstillinger</h2>
+      <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-4">
+        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Meldingsinnstillinger</p>
         <div>
           <label className="block text-sm font-medium text-g-text mb-1">Tone</label>
           <select
             value={settings.tone}
             onChange={e => set('tone', e.target.value as PartnerBotSettings['tone'])}
-            className="w-48 px-3 py-1.5 bg-g-surface border border-g-border rounded text-sm text-g-text focus:outline-none focus:border-g-green"
+            className="w-48 px-3 py-1.5 bg-g-card border border-g-border rounded text-sm text-g-text focus:outline-none focus:border-g-green"
           >
             <option value="natural">Natural (anbefalt)</option>
             <option value="energetic">Energisk</option>
@@ -220,7 +213,7 @@ export default function PartnerBotSettingsPage() {
             onChange={e => set('affiliateDisclosure', e.target.value)}
             placeholder="#ad"
             maxLength={30}
-            className="w-48 px-3 py-1.5 bg-g-surface border border-g-border rounded text-sm text-g-text focus:outline-none focus:border-g-green"
+            className="w-48 px-3 py-1.5 bg-g-card border border-g-border rounded text-sm text-g-text focus:outline-none focus:border-g-green"
           />
         </div>
       </section>
@@ -245,7 +238,7 @@ export default function PartnerBotSettingsPage() {
         </div>
 
         {proposals.length === 0 ? (
-          <div className="p-5 bg-g-surface border border-g-border rounded-lg text-center text-g-muted text-sm">
+          <div className="p-5 bg-g-card border border-g-border rounded-2xl text-center text-g-muted text-sm">
             Ingen ventende forslag. Boten legger forslag her når den finner gode tidspunkter.
           </div>
         ) : (
@@ -253,7 +246,7 @@ export default function PartnerBotSettingsPage() {
             {proposals.map(p => {
               const expiresIn = Math.max(0, Math.round((new Date(p.expires_at).getTime() - Date.now()) / 60_000));
               return (
-                <div key={p.id} className="p-4 bg-g-surface border border-g-border rounded-lg">
+                <div key={p.id} className="p-4 bg-g-card border border-g-border rounded-2xl">
                   <div className="flex items-start justify-between gap-4 mb-3">
                     <div>
                       <div className="font-semibold text-g-text">{p.partner_name}</div>
@@ -336,6 +329,6 @@ export default function PartnerBotSettingsPage() {
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

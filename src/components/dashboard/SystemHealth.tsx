@@ -11,6 +11,7 @@ import { RaidWidget } from './RaidWidget';
 import { DetteVetGlenvex } from './DetteVetGlenvex';
 import { Sjekkliste } from './Sjekkliste';
 import { ActivityFeed } from './ActivityFeed';
+import { IntegrationStatus } from './IntegrationStatus';
 
 export function SystemHealth({ live, loading, onResetSyklus }: {
   live: LiveData | null; loading: boolean; onResetSyklus: () => void;
@@ -30,6 +31,7 @@ export function SystemHealth({ live, loading, onResetSyklus }: {
             <Kontrollsenter data={live?.kontrollsenter} loading={loading} />
             <SystemStatus data={live?.coverage} loading={loading} />
           </div>
+          <IntegrationStatus />
           <EventCoverage data={live?.coverage} loading={loading} />
           <JobMonitor resultater={live?.sisteResultater ?? []} clipStatus={live?.clipStatus} loading={loading} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
