@@ -2,7 +2,6 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWorker';
-import { forceThumbnail, getThumbnailWorkerStatus } from './thumbnailGenerator';
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 
@@ -349,41 +348,6 @@ async function prosesserVodAsynkront(vodId: string, twitchVodUrl: string, userOa
   }
 }
 
-// ── Frame-ekstraksjon for thumbnail V2 ────────────────────────────────────────
-
-function extractFrameJpeg(
-  videoUrl: string,
-  timestamp: number,
-  w: number,
-  h: number,
-  timeoutMs = 16_000
-): Promise<Buffer | null> {
-  return new Promise(resolve => {
-    const { spawn } = require('child_process');
-    const proc = spawn('ffmpeg', [
-      '-ss', String(Math.max(0, timestamp)),
-      '-i', videoUrl,
-      '-vframes', '1',
-      '-f', 'image2',
-      '-vcodec', 'mjpeg',
-      '-q:v', '3',
-      '-vf', `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`,
-      'pipe:1',
-    ]);
-    const chunks: Buffer[] = [];
-    proc.stdout?.on('data', (c: Buffer) => chunks.push(c));
-    const tid = setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch {}
-      resolve(null);
-    }, timeoutMs);
-    proc.on('close', (code: number) => {
-      clearTimeout(tid);
-      resolve(code === 0 && chunks.length > 0 ? Buffer.concat(chunks) : null);
-    });
-    proc.on('error', () => { clearTimeout(tid); resolve(null); });
-  });
-}
-
 export function startDataApi(port = 4242) {
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -509,109 +473,10 @@ export function startDataApi(port = 4242) {
       return;
     }
 
-    // ── Worker-status: clip + thumbnail worker ───────────────────────────────
+    // ── Worker-status: clip worker ───────────────────────────────────────────
     if (url === '/content-factory/worker-status' && method === 'GET') {
       res.writeHead(200);
-      res.end(JSON.stringify({
-        ...getWorkerStatus(),
-        thumbnail: getThumbnailWorkerStatus(),
-      }));
-      return;
-    }
-
-    // ── Frame-ekstraksjon for thumbnail V2 ──────────────────────────────────────
-    if (url.startsWith('/content-factory/frames/') && method === 'GET') {
-      const highlightId = url.replace('/content-factory/frames/', '').split('?')[0];
-      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
-      }
-      (async () => {
-        const execAsync = require('util').promisify(require('child_process').exec);
-        const { createClient } = require('@supabase/supabase-js');
-        const ws = require('ws');
-        const sb = createClient(
-          process.env.SUPABASE_URL,
-          process.env.SUPABASE_SERVICE_ROLE_KEY,
-          { realtime: { transport: ws } }
-        );
-
-        const { data: h } = await sb.from('content_highlights')
-          .select('clip_url,vertical_clip_url')
-          .eq('id', highlightId)
-          .single();
-
-        if (!h?.clip_url) {
-          res.writeHead(404); res.end(JSON.stringify({ error: 'Ingen clip_url' })); return;
-        }
-
-        // Klippvarighet med ffprobe
-        let duration = 30;
-        try {
-          const { stdout } = await execAsync(
-            `ffprobe -v error -show_entries format=duration -of csv=p=0 "${h.clip_url}"`,
-            { timeout: 10_000 }
-          );
-          const d = parseFloat(stdout.trim());
-          if (d > 0 && isFinite(d)) duration = d;
-        } catch {}
-
-        // Ekstraher 3 landscape + 1 portrait parallelt
-        const pts = [0.25, 0.50, 0.75].map(p => Math.max(1, Math.floor(duration * p)));
-        const [f1, f2, f3, fv] = await Promise.all([
-          extractFrameJpeg(h.clip_url, pts[0], 1280, 720),
-          extractFrameJpeg(h.clip_url, pts[1], 1280, 720),
-          extractFrameJpeg(h.clip_url, pts[2], 1280, 720),
-          h.vertical_clip_url
-            ? extractFrameJpeg(h.vertical_clip_url, Math.max(1, Math.floor(duration * 0.5)), 720, 1280)
-            : Promise.resolve(null),
-        ]);
-
-        const landscapeFrames = [
-          f1 ? { t: pts[0], b64: f1.toString('base64') } : null,
-          f2 ? { t: pts[1], b64: f2.toString('base64') } : null,
-          f3 ? { t: pts[2], b64: f3.toString('base64') } : null,
-        ].filter(Boolean);
-
-        if (landscapeFrames.length === 0) {
-          res.writeHead(500); res.end(JSON.stringify({ error: 'Ingen frames ekstrahert' })); return;
-        }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          landscape_frames: landscapeFrames,
-          portrait_frame: fv ? { t: Math.floor(duration * 0.5), b64: fv.toString('base64') } : null,
-          duration,
-          format: 'jpeg',
-        }));
-      })().catch((e: any) => {
-        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
-      });
-      return;
-    }
-
-    // ── Thumbnail V2: frame-basert bygging (async) ───────────────────────────
-    if (url.startsWith('/content-factory/thumbnail-build-v2/') && method === 'POST') {
-      const highlightId = url.replace('/content-factory/thumbnail-build-v2/', '');
-      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
-      }
-      res.writeHead(202);
-      res.end(JSON.stringify({ ok: true, melding: `Thumbnail V7 startet for ${highlightId}` }));
-      forceThumbnail(highlightId, 'highlight_regenerate').catch((e: any) =>
-        console.error('[DataApi] thumbnailV7 feil:', e.message)
-      );
-      return;
-    }
-
-    // ── Thumbnail force-trigger (bypass 90s polling) ──────────────────────────
-    if (url.startsWith('/content-factory/thumbnail-force/') && method === 'POST') {
-      const highlightId = url.replace('/content-factory/thumbnail-force/', '');
-      if (process.env.CONTENT_FACTORY_ENABLED !== 'true') {
-        res.writeHead(403); res.end(JSON.stringify({ error: 'FEATURE_DISABLED' })); return;
-      }
-      res.writeHead(202);
-      res.end(JSON.stringify({ ok: true, melding: `Thumbnail-generering startet for ${highlightId}` }));
-      forceThumbnail(highlightId, 'cf_admin_force').catch(console.error);
+      res.end(JSON.stringify(getWorkerStatus()));
       return;
     }
 

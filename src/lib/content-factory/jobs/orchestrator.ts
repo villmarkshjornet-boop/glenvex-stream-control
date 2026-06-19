@@ -1,6 +1,6 @@
 /**
- * Content Factory Job Orchestrator
- * Pipeline: DOWNLOAD → TRANSCRIBE → DISCOVER → RANK → CUT → SUBTITLE → RENDER → COPYWRITE → QUEUE
+ * Content Factory V2 Job Orchestrator
+ * Pipeline: DOWNLOAD → TRANSCRIBE → DISCOVER (multi-pass) → RANK → CUT (1080p+) → COPYWRITE → QUEUE
  * Alle steg kan restartes individuelt.
  * KREVER: CONTENT_FACTORY_ENABLED=true
  */
@@ -148,7 +148,7 @@ export async function kjørFullPipeline(
   steg.push({ steg: 'RENDER', status: 'VENTER', melding: 'Kjøres etter SUBTITLE' });
 
   // STEG 8: COPYWRITE – Generer tekster
-  const topp = await hentToppHighlights(vod.id, opts.antallHighlights ?? 10);
+  const topp = await hentToppHighlights(vod.id, opts.antallHighlights ?? 5);
   let copy: any[] = [];
   try {
     copy = await genererCopyForAlle(

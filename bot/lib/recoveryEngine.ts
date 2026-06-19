@@ -7,7 +7,6 @@ const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const TIMEOUT_VOD_TRANSCRIBING        = 30;
 const TIMEOUT_VOD_HIGHLIGHT_DISCOVERY = 15;
 const TIMEOUT_CLIPPING                =  15;
-const TIMEOUT_THUMBNAIL_GENERATING   =   5;
 
 function getClient() {
   const url = process.env.SUPABASE_URL;
@@ -103,41 +102,6 @@ export async function runRecoveryCheck(): Promise<void> {
     });
   }
 
-  // ── Stuck thumbnails (GENERATING > 5 min) ─────────────────────────────────
-  const { data: stuckThumbs } = await sb
-    .from('content_highlights')
-    .select('id,title,vod_id,thumbnail_started_at,updated_at')
-    .eq('thumbnail_status', 'GENERATING')
-    .limit(30);
-
-  for (const thumb of stuckThumbs ?? []) {
-    const ref      = thumb.thumbnail_started_at ?? thumb.updated_at;
-    if (!ref) continue;
-    const minStuck = (now.getTime() - new Date(ref).getTime()) / 60_000;
-    if (minStuck < TIMEOUT_THUMBNAIL_GENERATING) continue;
-
-    logSystemEvent({
-      source:      'recovery_engine',
-      event_type:  'RECOVERY_TRIGGERED',
-      title:       `Thumbnail stuck i GENERATING (${Math.round(minStuck)}min) – setter FAILED`,
-      description: `"${(thumb.title ?? '').slice(0, 80)}"`,
-      severity:    'warning',
-      metadata:    { highlight_id: thumb.id, vod_id: thumb.vod_id, minutes_stuck: Math.round(minStuck) },
-    });
-
-    const { error } = await sb.from('content_highlights').update({
-      thumbnail_status: 'FAILED',
-      thumbnail_error:  `Recovery: timeout etter ${Math.round(minStuck)} min i GENERATING`,
-    }).eq('id', thumb.id);
-
-    logSystemEvent({
-      source:     'recovery_engine',
-      event_type: error ? 'RECOVERY_FAILED' : 'RECOVERY_SUCCESS',
-      title:      error ? `Thumbnail recovery feilet` : `Thumbnail resatt til FAILED`,
-      severity:   error ? 'error' : 'info',
-      metadata:   { highlight_id: thumb.id, error: error?.message },
-    });
-  }
 }
 
 export function startRecoveryEngine(): void {

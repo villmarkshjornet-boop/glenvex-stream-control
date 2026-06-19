@@ -17,7 +17,6 @@ import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat } from './lib/twitchBot';
-import { startThumbnailWorker } from './lib/thumbnailGenerator';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -1801,7 +1800,6 @@ function writeHeartbeats(): void {
 client.once('clientReady', () => {
   startTwitchBot();
   startClipWorker().catch(console.error);
-  startThumbnailWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
   startLearningAggregator();
   startRecoveryEngine();

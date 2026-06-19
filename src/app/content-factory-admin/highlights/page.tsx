@@ -21,18 +21,12 @@ interface Highlight {
   vertical_clip_url?: string | null;
   clip_finished_at?: string | null;
   clip_error?: string | null;
-  thumbnail_status?: string | null;
-  thumbnail_youtube_url?: string | null;
-  thumbnail_tiktok_url?: string | null;
-  thumbnail_error?: string | null;
-  thumbnail_headline?: string | null;
-  thumbnail_subheadline?: string | null;
-  thumbnail_quality_score?: number | null;
-  thumbnail_source_frame?: number | null;
-  thumbnail_variant_b_url?: string | null;
-  thumbnail_variant_c_url?: string | null;
-  thumbnail_ctr_score?: number | null;
-  thumbnail_ctr_reason?: string | null;
+  clip_quality_score?: number | null;
+  clip_quality_entertainment?: number | null;
+  clip_quality_emotion?: number | null;
+  clip_quality_surprise?: number | null;
+  clip_quality_viral?: number | null;
+  clip_quality_story_arc?: number | null;
 }
 
 interface Copy {
@@ -57,13 +51,20 @@ interface Asset {
 
 const KAT_FARGE: Record<string, string> = {
   FUNNY: 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10',
+  LAUGH: 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10',
   FAIL: 'text-red-400 border-red-400/30 bg-red-400/10',
   CLUTCH: 'text-g-green border-g-green/30 bg-g-green/10',
+  WIN: 'text-g-green border-g-green/30 bg-g-green/10',
   RAGE: 'text-orange-400 border-orange-400/30 bg-orange-400/10',
   REACTION: 'text-blue-400 border-blue-400/30 bg-blue-400/10',
   TACTICAL: 'text-purple-400 border-purple-400/30 bg-purple-400/10',
   RP_MOMENT: 'text-pink-400 border-pink-400/30 bg-pink-400/10',
   EDUCATIONAL: 'text-cyan-400 border-cyan-400/30 bg-cyan-400/10',
+  SURPRISE: 'text-amber-400 border-amber-400/30 bg-amber-400/10',
+  HYPE: 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10',
+  CHAT_REACTION: 'text-indigo-400 border-indigo-400/30 bg-indigo-400/10',
+  DIALOGUE: 'text-sky-400 border-sky-400/30 bg-sky-400/10',
+  KEY_MOMENT: 'text-violet-400 border-violet-400/30 bg-violet-400/10',
 };
 
 function tidFormat(sek: number | string | null | undefined): string {
@@ -99,11 +100,9 @@ export default function HighlightViewerPage() {
   const [phase2Running, setPhase2Running] = useState(false);
   const [phase2Res, setPhase2Res] = useState<any>(null);
   const [lasterZip, setLasterZip] = useState<string | null>(null);
-  const [regenerererThumb, setRegenerererThumb] = useState<string | null>(null);
   const [posterDiscord, setPosterDiscord] = useState<string | null>(null);
   const [discordPostet, setDiscordPostet] = useState<string | null>(null);
   const [discordFeil, setDiscordFeil] = useState<string | null>(null);
-  const [thumbFeil, setThumbFeil] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/content-factory').then(r => r.json()).then(d => {
@@ -145,9 +144,7 @@ export default function HighlightViewerPage() {
     if (!pollerKlipp || !valgtVod) return;
     if (!pollerStartRef.current) pollerStartRef.current = Date.now();
     const harAktiv = highlights.some(h =>
-      h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP' ||
-      // Stop thumbnail polling the moment the URL arrives, regardless of status
-      ((h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING') && !h.thumbnail_youtube_url)
+      h.clip_status === 'CLIPPING' || h.clip_status === 'READY_FOR_CLIP'
     );
     const timeoutNådd = Date.now() - pollerStartRef.current > 15 * 60 * 1000;
     if (!harAktiv || timeoutNådd) {
@@ -461,194 +458,38 @@ export default function HighlightViewerPage() {
                       </div>
                     )}
 
-                    {/* AI Thumbnails – kun når klippet er ferdig */}
-                    {h.clip_status === 'CLIPPED' && (
-                      <div className="bg-g-bg border border-purple-400/20 rounded-lg p-4 space-y-3">
+                    {/* Klipp-kvalitet — vises når klippet er ferdig */}
+                    {h.clip_status === 'CLIPPED' && h.clip_quality_score != null && (
+                      <div className="bg-g-bg border border-g-green/20 rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[9px] text-purple-400 uppercase tracking-widest font-bold">AI Thumbnails</p>
-                          <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
-                            h.thumbnail_status === 'DONE'               ? 'text-purple-400 border-purple-400/30 bg-purple-400/5' :
-                            h.thumbnail_status === 'GENERATING'         ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
-                            h.thumbnail_status === 'PENDING'            ? 'text-blue-400 border-blue-400/30' :
-                            h.thumbnail_status === 'FAILED'             ? 'text-red-400 border-red-400/30' :
-                            h.thumbnail_status === 'NEEDS_MANUAL_REVIEW'? 'text-orange-400 border-orange-400/30 bg-orange-400/5' :
-                            'text-g-muted border-g-border'
-                          }`}>
-                            {h.thumbnail_status === 'DONE' ? 'COMPLETE' : (h.thumbnail_status ?? 'IKKE GENERERT')}
-                          </span>
+                          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">Klipp-kvalitet (GPT-4o)</p>
+                          <span className={`text-[8px] px-2 py-0.5 rounded border font-black ${
+                            h.clip_quality_score >= 80 ? 'text-g-green border-g-green/30 bg-g-green/5' :
+                            h.clip_quality_score >= 65 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
+                            'text-red-400 border-red-400/30 bg-red-400/5'
+                          }`}>{h.clip_quality_score}/100</span>
                         </div>
-
-                        {/* Quality score + CTR score + source frame */}
-                        {h.thumbnail_status === 'DONE' && (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {h.thumbnail_quality_score != null && (
-                                <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
-                                  h.thumbnail_quality_score >= 80 ? 'text-green-400 border-green-400/30 bg-green-400/5' :
-                                  h.thumbnail_quality_score >= 60 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
-                                  'text-red-400 border-red-400/30 bg-red-400/5'
-                                }`}>
-                                  ★ Score {h.thumbnail_quality_score}/100
-                                </span>
-                              )}
-                              {h.thumbnail_ctr_score != null && (
-                                <span className={`text-[9px] px-2 py-0.5 rounded border font-bold ${
-                                  h.thumbnail_ctr_score >= 75 ? 'text-purple-400 border-purple-400/30 bg-purple-400/5' :
-                                  h.thumbnail_ctr_score >= 55 ? 'text-blue-400 border-blue-400/30 bg-blue-400/5' :
-                                  'text-g-muted border-g-border'
-                                }`}>
-                                  ◈ CTR {h.thumbnail_ctr_score}/100
-                                </span>
-                              )}
-                              {h.thumbnail_source_frame != null && (
-                                <span className="text-[9px] text-g-muted">
-                                  Frame @ {h.thumbnail_source_frame.toFixed(1)}s
-                                </span>
-                              )}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                          {[
+                            { label: 'Underholdning', val: h.clip_quality_entertainment },
+                            { label: 'Emosjon', val: h.clip_quality_emotion },
+                            { label: 'Overraskelse', val: h.clip_quality_surprise },
+                            { label: 'Viral potensial', val: h.clip_quality_viral },
+                            { label: 'Narrativ bue', val: h.clip_quality_story_arc },
+                          ].map(({ label, val }) => val != null && (
+                            <div key={label} className="space-y-0.5">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[9px] text-g-muted">{label}</span>
+                                <span className="text-[9px] font-bold text-g-text">{val}</span>
+                              </div>
+                              <div className="h-1 bg-g-border rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all ${
+                                  val >= 80 ? 'bg-g-green' : val >= 60 ? 'bg-yellow-400' : 'bg-red-400'
+                                }`} style={{ width: `${val}%` }} />
+                              </div>
                             </div>
-                            {h.thumbnail_ctr_reason && (
-                              <p className="text-[9px] text-g-muted italic">
-                                Vision: {h.thumbnail_ctr_reason}
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {(h.thumbnail_status === 'GENERATING' || h.thumbnail_status === 'PENDING') && (
-                          <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
-                            <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
-                            {h.thumbnail_status === 'GENERATING'
-                              ? 'Genererer V7 (Pango + IMPACT_DRAMA) – ca 60s...'
-                              : 'Thumbnail i kø – plukkes opp automatisk...'}
-                          </div>
-                        )}
-
-                        {h.thumbnail_youtube_url && (
-                          <div className="space-y-1.5">
-                            <p className="text-[9px] text-g-muted font-bold uppercase">▶ YouTube 16:9</p>
-                            <img
-                              src={h.thumbnail_youtube_url}
-                              alt="YouTube thumbnail"
-                              className="w-full rounded border border-g-border"
-                              style={{ maxHeight: '160px', objectFit: 'cover' }}
-                            />
-                            {h.thumbnail_headline && (
-                              <p className="text-[9px] text-purple-400 font-bold">
-                                {h.thumbnail_headline}
-                                {h.thumbnail_subheadline ? ` · ${h.thumbnail_subheadline}` : ''}
-                              </p>
-                            )}
-                            <a
-                              href={h.thumbnail_youtube_url}
-                              download="thumbnail_youtube.png"
-                              className="inline-block px-3 py-1 bg-g-bg border border-purple-400/30 rounded text-[10px] text-purple-400 hover:bg-purple-400/10 transition-all font-bold"
-                            >
-                              ↓ Last ned YouTube thumbnail
-                            </a>
-                          </div>
-                        )}
-
-                        {h.thumbnail_tiktok_url && (
-                          <div className="space-y-1.5">
-                            <p className="text-[9px] text-g-muted font-bold uppercase">♪ TikTok 9:16</p>
-                            <img
-                              src={h.thumbnail_tiktok_url}
-                              alt="TikTok thumbnail"
-                              className="mx-auto rounded border border-g-border"
-                              style={{ maxHeight: '210px', maxWidth: '120px', objectFit: 'cover' }}
-                            />
-                            <a
-                              href={h.thumbnail_tiktok_url}
-                              download="thumbnail_tiktok.png"
-                              className="inline-block px-3 py-1 bg-g-bg border border-purple-400/30 rounded text-[10px] text-purple-400 hover:bg-purple-400/10 transition-all font-bold"
-                            >
-                              ↓ Last ned TikTok thumbnail
-                            </a>
-                          </div>
-                        )}
-
-                        {/* Variant B – Cinema */}
-                        {h.thumbnail_variant_b_url && (
-                          <div className="space-y-1.5 border-t border-g-border pt-3">
-                            <p className="text-[9px] text-indigo-400 font-bold uppercase">◈ Variant B – Cinema</p>
-                            <img
-                              src={h.thumbnail_variant_b_url}
-                              alt="Variant B thumbnail"
-                              className="w-full rounded border border-indigo-400/20"
-                              style={{ maxHeight: '160px', objectFit: 'cover' }}
-                            />
-                            <a
-                              href={h.thumbnail_variant_b_url}
-                              download="thumbnail_variant_b.png"
-                              className="inline-block px-3 py-1 bg-g-bg border border-indigo-400/30 rounded text-[10px] text-indigo-400 hover:bg-indigo-400/10 transition-all font-bold"
-                            >
-                              ↓ Last ned Variant B
-                            </a>
-                          </div>
-                        )}
-
-                        {/* Variant C – Impact Block */}
-                        {h.thumbnail_variant_c_url && (
-                          <div className="space-y-1.5 border-t border-g-border pt-3">
-                            <p className="text-[9px] text-orange-400 font-bold uppercase">◈ Variant C – Impact Block</p>
-                            <img
-                              src={h.thumbnail_variant_c_url}
-                              alt="Variant C thumbnail"
-                              className="w-full rounded border border-orange-400/20"
-                              style={{ maxHeight: '160px', objectFit: 'cover' }}
-                            />
-                            <a
-                              href={h.thumbnail_variant_c_url}
-                              download="thumbnail_variant_c.png"
-                              className="inline-block px-3 py-1 bg-g-bg border border-orange-400/30 rounded text-[10px] text-orange-400 hover:bg-orange-400/10 transition-all font-bold"
-                            >
-                              ↓ Last ned Variant C
-                            </a>
-                          </div>
-                        )}
-
-                        {h.thumbnail_error && (
-                          <p className="text-[9px] text-red-400 break-all">Feil: {h.thumbnail_error}</p>
-                        )}
-
-                        {/* Generer/regenerer-knapp */}
-                        {h.thumbnail_status !== 'GENERATING' && (
-                          <>
-                          <button
-                            onClick={async () => {
-                              setRegenerererThumb(h.id);
-                              setHighlights(prev => prev.map(x =>
-                                x.id === h.id ? { ...x, thumbnail_status: 'GENERATING', thumbnail_error: null, thumbnail_youtube_url: null } : x
-                              ));
-                              const res = await fetch('/api/content-factory/thumbnails/generate-v2', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ highlight_id: h.id }),
-                              });
-                              const d = await res.json().catch(() => ({}));
-                              setRegenerererThumb(null);
-                              if (!res.ok) {
-                                setThumbFeil(d.error ?? 'Thumbnail-generering feilet');
-                                setTimeout(() => setThumbFeil(null), 8000);
-                                await hentHighlights(valgtVod);
-                              } else {
-                                // Start polling — stopper automatisk når status er DONE/FAILED
-                                pollerStartRef.current = Date.now();
-                                setPollerKlipp(true);
-                              }
-                            }}
-                            disabled={regenerererThumb === h.id}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-g-bg border border-purple-400/30 text-purple-400 text-[10px] font-black rounded hover:bg-purple-400/10 transition-all disabled:opacity-40"
-                          >
-                            {regenerererThumb === h.id ? (
-                              <><span className="w-2.5 h-2.5 border border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Genererer V7 (~60s)...</>
-                            ) : (
-                              <>↻ {h.thumbnail_status === 'DONE' ? 'Regenerer thumbnail' : 'Generer thumbnail'}</>
-                            )}
-                          </button>
-                          {thumbFeil && <p className="text-[9px] text-red-400 mt-1">{thumbFeil}</p>}
-                          </>
-                        )}
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -670,7 +511,7 @@ export default function HighlightViewerPage() {
                           </>
                         )}
                       </button>
-                      <p className="text-[9px] text-g-muted">tekster + metadata + thumbnails (hvis klare)</p>
+                      <p className="text-[9px] text-g-muted">tekster + metadata + klipp-URLs</p>
                     </div>
 
                     {/* Captions */}

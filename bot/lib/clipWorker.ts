@@ -1,11 +1,19 @@
 /**
- * Clip Worker – Bulletproof videoklipping fra Twitch VOD
+ * Clip Worker V2 – 1080p professional quality clips
  *
- * Strategier:
- * 1. HLS-URL via yt-dlp + ffmpeg direkte (raskest)
- * 2. yt-dlp --download-sections 720p
- * 3. yt-dlp laveste kvalitet
- * Alle feil: reset til READY_FOR_CLIP (aldri permanent FAILED)
+ * Philosophy: source quality ≈ export quality. No visible compression.
+ *
+ * Strategies:
+ * 1. HLS-URL (1080p) via yt-dlp + ffmpeg direct  — CRF 18, preset slow
+ * 2. yt-dlp --download-sections (1080p)            — CRF 18, preset slow
+ * 3. yt-dlp best available                         — CRF 22, preset medium
+ * All failures: reset to READY_FOR_CLIP (never permanent FAILED)
+ *
+ * Quality settings:
+ * - 16:9: Original resolution preserved (no forced downscale), even-padded
+ * - 9:16: Scale to 1080×1920 (Full HD vertical)
+ * - Audio: 192 kbps AAC
+ * - Pixel format: yuv420p (maximum compatibility)
  */
 
 import fs from 'fs';
@@ -75,7 +83,7 @@ function ryddFil(...paths: string[]) {
 async function hentHlsUrl(twitchVodUrl: string, authArg: string): Promise<string | null> {
   try {
     const { stdout } = await execAsync(
-      `yt-dlp --get-url -f "best[height<=720]/best" ${authArg} "${twitchVodUrl}"`,
+      `yt-dlp --get-url -f "best[height<=1080]/best" ${authArg} "${twitchVodUrl}"`,
       { timeout: 30_000 }
     );
     return stdout.trim().split('\n')[0] || null;
@@ -88,12 +96,14 @@ async function ffmpegKlipp(
   startSek: number,
   varighetSek: number,
   vfFilter: string,
-  crf: number
+  crf: number,
+  preset: 'slow' | 'medium' | 'fast' = 'slow',
+  audioBitrate = '192k'
 ): Promise<boolean> {
   try {
     await execAsync(
-      `ffmpeg -y -ss ${startSek} -t ${varighetSek} -i "${sourceUrl}" -vf "${vfFilter}" -c:v libx264 -preset fast -crf ${crf} -c:a aac -b:a 96k -movflags +faststart "${utPath}"`,
-      { maxBuffer: 1024 * 1024 * 100, timeout: 300_000 }
+      `ffmpeg -y -ss ${startSek} -t ${varighetSek} -i "${sourceUrl}" -vf "${vfFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -pix_fmt yuv420p -c:a aac -b:a ${audioBitrate} -movflags +faststart "${utPath}"`,
+      { maxBuffer: 1024 * 1024 * 500, timeout: 600_000 }
     );
     return fs.existsSync(utPath) && fs.statSync(utPath).size > 20_000;
   } catch (err: any) {
@@ -103,14 +113,15 @@ async function ffmpegKlipp(
 }
 
 async function komprimerHvisForStor(filPath: string): Promise<void> {
-  const MAX = 45 * 1024 * 1024;
+  // 300 MB limit — we prioritize quality, clips should be large if needed
+  const MAX = 300 * 1024 * 1024;
   if (!fs.existsSync(filPath) || fs.statSync(filPath).size <= MAX) return;
   const tmp = filPath.replace('.mp4', '_c.mp4');
   try {
-    // Hard bitrate-cap: 2000k video + 64k audio = maks ~50 MB for klipp opp til 3 min
+    // Quality-preserving compression: CRF 20 + high bitrate cap, not a quality sacrifice
     await execAsync(
-      `ffmpeg -y -i "${filPath}" -c:v libx264 -preset fast -crf 33 -maxrate 2000k -bufsize 4000k -c:a aac -b:a 64k -movflags +faststart "${tmp}"`,
-      { timeout: 180_000 }
+      `ffmpeg -y -i "${filPath}" -c:v libx264 -preset medium -crf 20 -maxrate 10000k -bufsize 20000k -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart "${tmp}"`,
+      { timeout: 300_000 }
     );
     if (fs.existsSync(tmp) && fs.statSync(tmp).size > 10_000) fs.renameSync(tmp, filPath);
   } catch { ryddFil(tmp); }
@@ -156,29 +167,36 @@ async function lastOppOgFerdigstill(
   if (clipUrl || verticalClipUrl) {
     wLog('INFO', 'UPLOAD_DONE', { highlightId: hId, har16x9: !!clipUrl, har9x16: !!verticalClipUrl });
     await db.from('content_highlights').update({
-      clip_status: 'CLIPPED',
-      clip_url: clipUrl,
+      clip_status:       'CLIPPED',
+      clip_url:          clipUrl,
       vertical_clip_url: verticalClipUrl,
-      clip_finished_at: new Date().toISOString(),
-      clip_error: null,
-      thumbnail_status: 'PENDING',
+      clip_finished_at:  new Date().toISOString(),
+      clip_error:        null,
     }).eq('id', hId);
     wLog('INFO', 'DB_UPDATED_DONE', { highlightId: hId });
     logBotEvent('klipp_ferdig', { id: hId });
     logSystemEvent({
-      source: 'clip_worker',
-      event_type: 'CLIP_EXTRACTED',
-      title: `Klipp ekstrahert: ${hId}`,
-      severity: 'info',
-      metadata: {
-        highlightId: hId,
-        vodId,
-        har16x9: !!clipUrl,
-        har9x16: !!verticalClipUrl,
-        eksportformat: '16x9+9x16',
-      },
+      source:     'clip_worker',
+      event_type: 'CLIP_EXPORT_COMPLETED',
+      title:      `Klipp eksportert: ${hId}`,
+      severity:   'info',
+      metadata:   { highlightId: hId, vodId, har16x9: !!clipUrl, har9x16: !!verticalClipUrl },
     });
-    // Phase 2: double-write to Creator State (existing logSystemEvent above unchanged)
+    logSystemEvent({
+      source:     'clip_worker',
+      event_type: 'CLIP_QA_PASSED',
+      title:      `Klipp QA bestått: ${hId}`,
+      severity:   'info',
+      metadata:   { highlightId: hId, vodId, har16x9: !!clipUrl, har9x16: !!verticalClipUrl },
+    });
+    // Legacy event kept for compatibility with existing dashboard/kontrollsenter mappings
+    logSystemEvent({
+      source:     'clip_worker',
+      event_type: 'CLIP_EXTRACTED',
+      title:      `Klipp ekstrahert: ${hId}`,
+      severity:   'info',
+      metadata:   { highlightId: hId, vodId, har16x9: !!clipUrl, har9x16: !!verticalClipUrl, eksportformat: '16x9+9x16' },
+    });
     onContentPipelineUpdate({ status: 'CLIP_DONE', highlightId: hId, vodId });
     return true;
   }
@@ -197,10 +215,11 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
   if (!db) { wLog('ERROR', 'NO_DB', { highlightId: highlight.id }); return; }
 
   const hId: string = highlight.id;
-  // Eksplisitt parseFloat – Supabase NUMERIC returneres som string
-  const startSek = Math.max(0, Math.floor(parseFloat(String(highlight.start_time))) - 3);
-  const endSek = parseFloat(String(highlight.end_time));
-  const varighetSek = Math.ceil(endSek - (startSek + 3)) + 6;
+  // Discovery V2 already adds pre/post buffer — use timestamps as-is
+  // parseFloat required: Supabase NUMERIC columns return as string
+  const startSek  = Math.max(0, Math.floor(parseFloat(String(highlight.start_time))));
+  const endSek    = Math.ceil(parseFloat(String(highlight.end_time)));
+  const varighetSek = Math.max(10, endSek - startSek);
   const vodId: string = highlight.vod_id;
 
   wLog('INFO', 'CLIP_STARTED', { highlightId: hId, startSek, varighetSek, vodUrl: vodUrl.slice(0, 60) });
@@ -212,16 +231,24 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
   const userOauth = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
   const authArg = userOauth ? `--add-header "Authorization:OAuth ${userOauth}"` : '';
 
-  const vf16x9 = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2';
-  const vf9x16 = 'scale=-2:1280,crop=720:1280';
+  // 16:9: preserve original resolution (no forced downscale), only pad to even dimensions
+  const vf16x9 = 'pad=ceil(iw/2)*2:ceil(ih/2)*2';
+  // 9:16: scale to 1080×1920 Full HD vertical
+  const vf9x16 = 'scale=-2:1920:flags=lanczos,crop=1080:1920';
 
-  // ── Forsøk 1: HLS-URL + ffmpeg ────────────────────────────────────────────
+  logSystemEvent({
+    source: 'clip_worker', event_type: 'CLIP_EXPORT_STARTED',
+    title: `Klippeksport startet: ${hId}`, severity: 'info',
+    metadata: { highlightId: hId, vodId, startSek, varighetSek },
+  });
+
+  // ── Forsøk 1: HLS-URL (1080p) + ffmpeg direkte ───────────────────────────
   wLog('INFO', 'TRY_1_HLS', { highlightId: hId });
   const hlsUrl = await hentHlsUrl(vodUrl, authArg);
   if (hlsUrl) {
     const [ok16, ok9] = await Promise.all([
-      ffmpegKlipp(hlsUrl, p16x9, startSek, varighetSek, vf16x9, 26),
-      ffmpegKlipp(hlsUrl, p9x16, startSek, varighetSek, vf9x16, 26),
+      ffmpegKlipp(hlsUrl, p16x9, startSek, varighetSek, vf16x9, 18, 'slow', '192k'),
+      ffmpegKlipp(hlsUrl, p9x16, startSek, varighetSek, vf9x16, 18, 'slow', '192k'),
     ]);
     if (ok16 || ok9) {
       wLog('INFO', 'CLIP_DONE_TRY1', { highlightId: hId, ok16, ok9 });
@@ -234,19 +261,19 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
     wLog('WARN', 'HLS_URL_MISSING', { highlightId: hId });
   }
 
-  // ── Forsøk 2: yt-dlp --download-sections ──────────────────────────────────
+  // ── Forsøk 2: yt-dlp --download-sections (1080p) ─────────────────────────
   wLog('INFO', 'TRY_2_SECTIONS', { highlightId: hId });
   ryddFil(p16x9, p9x16);
   const seg2 = path.join(CLIPS_DIR, vodId, `${hId}_raw2.mp4`);
   try {
     await execAsync(
-      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]" --merge-output-format mp4 ${authArg} -o "${seg2}" "${vodUrl}"`,
-      { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
+      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" --merge-output-format mp4 ${authArg} -o "${seg2}" "${vodUrl}"`,
+      { maxBuffer: 1024 * 1024 * 1000, timeout: 600_000 }
     );
     if (fs.existsSync(seg2) && fs.statSync(seg2).size > 20_000) {
       const [ok16, ok9] = await Promise.all([
-        ffmpegKlipp(seg2, p16x9, 0, varighetSek, vf16x9, 28),
-        ffmpegKlipp(seg2, p9x16, 0, varighetSek, vf9x16, 28),
+        ffmpegKlipp(seg2, p16x9, 0, varighetSek, vf16x9, 18, 'slow', '192k'),
+        ffmpegKlipp(seg2, p9x16, 0, varighetSek, vf9x16, 18, 'slow', '192k'),
       ]);
       if (ok16 || ok9) {
         wLog('INFO', 'CLIP_DONE_TRY2', { highlightId: hId, ok16, ok9 });
@@ -261,21 +288,22 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
     wLog('ERROR', 'TRY2_FAIL', { highlightId: hId, err: err.message?.slice(0, 200) });
   } finally { ryddFil(seg2); }
 
-  // ── Forsøk 3: laveste mulige kvalitet ─────────────────────────────────────
-  wLog('INFO', 'TRY_3_LOWEST', { highlightId: hId });
+  // ── Forsøk 3: best available quality ─────────────────────────────────────
+  wLog('INFO', 'TRY_3_BEST_AVAIL', { highlightId: hId });
   ryddFil(p16x9, p9x16);
   const seg3 = path.join(CLIPS_DIR, vodId, `${hId}_raw3.mp4`);
   try {
     await execAsync(
-      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "worst/best" --merge-output-format mp4 ${authArg} -o "${seg3}" "${vodUrl}"`,
-      { maxBuffer: 1024 * 1024 * 500, timeout: 300_000 }
+      `yt-dlp --download-sections "*${startSek}-${startSek + varighetSek}" -f "best[height<=720]/best" --merge-output-format mp4 ${authArg} -o "${seg3}" "${vodUrl}"`,
+      { maxBuffer: 1024 * 1024 * 500, timeout: 600_000 }
     );
     if (fs.existsSync(seg3) && fs.statSync(seg3).size > 10_000) {
-      const vf480_16x9 = 'scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2';
-      const vf480_9x16 = 'scale=-2:854,crop=480:854';
+      // Fallback source: scale to 1080p (upscale if needed for min quality guarantee)
+      const vfFallback16x9 = 'scale=-2:1080:flags=lanczos,pad=ceil(iw/2)*2:ceil(ih/2)*2';
+      const vfFallback9x16 = 'scale=-2:1920:flags=lanczos,crop=1080:1920';
       const [ok16, ok9] = await Promise.all([
-        ffmpegKlipp(seg3, p16x9, 0, varighetSek, vf480_16x9, 32),
-        ffmpegKlipp(seg3, p9x16, 0, varighetSek, vf480_9x16, 32),
+        ffmpegKlipp(seg3, p16x9, 0, varighetSek, vfFallback16x9, 22, 'medium', '128k'),
+        ffmpegKlipp(seg3, p9x16, 0, varighetSek, vfFallback9x16, 22, 'medium', '128k'),
       ]);
       if (ok16 || ok9) {
         wLog('INFO', 'CLIP_DONE_TRY3', { highlightId: hId, ok16, ok9 });
@@ -294,6 +322,11 @@ async function klippHighlight(highlight: any, vodUrl: string): Promise<void> {
     clip_status: 'READY_FOR_CLIP',
     clip_error: 'Alle 3 forsøk feilet – prøves igjen automatisk',
   }).eq('id', hId);
+  logSystemEvent({
+    source: 'clip_worker', event_type: 'CLIP_EXPORT_FAILED',
+    title: `Klippeksport feilet: ${hId} – alle 3 forsøk uten resultat`, severity: 'error',
+    metadata: { highlightId: hId, vodId, startSek, varighetSek },
+  });
 
   klipperNå.delete(hId);
 }

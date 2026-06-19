@@ -1,3 +1,17 @@
+/**
+ * Highlight Discovery V2 — multi-pass full-transcript analysis.
+ *
+ * Philosophy: 5 exceptional clips beats 25 mediocre ones.
+ * We send the ENTIRE transcript to GPT-4o (128k context) so it can
+ * understand the narrative arc before picking moments.
+ *
+ * Pass 1  — GPT-4o reads full transcript, nominates 8–12 candidates
+ * Pass 2  — Boundary refinement: find natural sentence start/end, add 3–5s buffer
+ * Pass 3  — Story arc + quality scoring (entertainment, emotion, surprise, viral)
+ * Pass 4  — Quality filter: keep ≤5 clips, score ≥ 65
+ * Pass 5  — Persist + log CLIP_SELECTED / CLIP_REJECTED per candidate
+ */
+
 import { assertContentFactoryEnabled } from '../index';
 import { getDb } from '@/lib/db';
 import OpenAI from 'openai';
@@ -6,43 +20,206 @@ import { logPipeline } from '../jobs/pipelineLogger';
 import { logSystemEvent } from '@/lib/systemEvents';
 import type { ContentHighlight, HighlightSignal, HighlightCategory } from '../types';
 
-// Beregner et råsignal-score basert på tekstinnhold (aktivitet, reaksjoner)
-function beregneSignalScore(tekst: string): number {
-  let score = 0;
-  score += Math.min(tekst.length / 15, 30);                                            // tekstlengde → aktivitet
-  score += Math.min((tekst.split('!').length - 1) * 10, 40);                           // utropstegn
-  score += (tekst.split('?').length - 1) * 5;                                          // spørsmål
-  const capsOrd = tekst.split(' ').filter(w => w.length > 2 && w === w.toUpperCase() && /[A-ZÆØÅ]/.test(w)).length;
-  score += Math.min(capsOrd * 12, 35);                                                  // CAPS-reaksjoner
-  const korteFraser = tekst.split(' ').filter(w => w.length <= 3).length;
-  score += Math.min(korteFraser * 2, 15);                                               // korte ord = reaksjonsfraser
-  return Math.min(Math.round(score), 100);
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface TranscriptSegment {
+  startTime: number;
+  endTime: number;
+  text: string;
+  confidence?: number;
 }
 
-// Grupper transkripter i overlappende vinduer på 60s med 30s overlapp
-function grupperSegmenter(segmenter: any[], vinduSekunder = 60, overlapSekunder = 30) {
-  const grupper: { segs: any[]; startTime: number; endTime: number }[] = [];
-  if (segmenter.length === 0) return grupper;
+interface Candidate {
+  rough_start: number;
+  rough_end: number;
+  category: string;
+  title: string;
+  begrunnelse: string;
+  quality: {
+    entertainment: number;  // 1–10
+    emotion: number;        // 1–10
+    surprise: number;       // 1–10
+    viral_potential: number;// 1–10
+    story_arc: boolean;     // has setup → buildup → climax → payoff
+  };
+  score: number;            // 0–100 composite
+}
 
-  const totalVarighet = segmenter[segmenter.length - 1].endTime ?? 0;
-  let pos = 0;
+interface RefinedCandidate extends Candidate {
+  start_time: number;
+  end_time: number;
+  context_text: string;
+}
 
-  while (pos < totalVarighet) {
-    const vinduSegs = segmenter.filter(
-      s => s.startTime >= pos && s.startTime < pos + vinduSekunder
-    );
-    if (vinduSegs.length > 0) {
-      grupper.push({
-        segs: vinduSegs,
-        startTime: vinduSegs[0].startTime,
-        endTime: vinduSegs[vinduSegs.length - 1].endTime,
-      });
-    }
-    pos += vinduSekunder - overlapSekunder;
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MIN_CLIP_SECONDS = 15;
+const MAX_CLIP_SECONDS = 120;
+const MIN_QUALITY_SCORE = 65;
+const MAX_CLIPS = 5;
+const PRE_BUFFER_S = 4;   // seconds before the highlight moment
+const POST_BUFFER_S = 4;  // seconds after the reaction/payoff
+
+// ── Pass 2: Boundary refinement ───────────────────────────────────────────────
+
+function refineBoundaries(
+  candidate: Omit<Candidate, 'score'> & { rough_start: number; rough_end: number },
+  segments: TranscriptSegment[]
+): { start_time: number; end_time: number; context_text: string } {
+  // Find segments that overlap with the rough window
+  const window = segments.filter(
+    s => s.endTime >= candidate.rough_start - 15 && s.startTime <= candidate.rough_end + 15
+  );
+
+  if (window.length === 0) {
+    return {
+      start_time: Math.max(0, candidate.rough_start - PRE_BUFFER_S),
+      end_time: candidate.rough_end + POST_BUFFER_S,
+      context_text: '',
+    };
   }
 
-  return grupper;
+  // Walk backward from rough_start to find a natural sentence boundary
+  // (segment that doesn't end mid-sentence relative to what follows)
+  const firstInWindow = window[0];
+  const lastInWindow  = window[window.length - 1];
+
+  // Apply buffer, clamped to available transcript range
+  const totalDuration = segments[segments.length - 1]?.endTime ?? 0;
+  const startWithBuffer = Math.max(0, firstInWindow.startTime - PRE_BUFFER_S);
+  const endWithBuffer   = Math.min(totalDuration, lastInWindow.endTime + POST_BUFFER_S);
+
+  // Enforce min/max clip length
+  const rawDuration = endWithBuffer - startWithBuffer;
+  let finalStart = startWithBuffer;
+  let finalEnd   = endWithBuffer;
+
+  if (rawDuration < MIN_CLIP_SECONDS) {
+    const pad = (MIN_CLIP_SECONDS - rawDuration) / 2;
+    finalStart = Math.max(0, startWithBuffer - pad);
+    finalEnd   = Math.min(totalDuration, endWithBuffer + pad);
+  } else if (rawDuration > MAX_CLIP_SECONDS) {
+    // Center the window around the midpoint of the rough range
+    const mid = (candidate.rough_start + candidate.rough_end) / 2;
+    finalStart = Math.max(0, mid - MAX_CLIP_SECONDS / 2);
+    finalEnd   = finalStart + MAX_CLIP_SECONDS;
+  }
+
+  const context_text = window.map(s => s.text).join(' ');
+  return { start_time: Math.round(finalStart), end_time: Math.round(finalEnd), context_text };
 }
+
+// ── Pass 1 + 3: GPT-4o full transcript analysis ──────────────────────────────
+
+async function analyzeFullTranscript(
+  segments: TranscriptSegment[],
+  streamData?: { raids?: any[]; chatSpikes?: any[] },
+  creatorContext?: string
+): Promise<Candidate[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey || segments.length === 0) return [];
+
+  const openai = new OpenAI({ apiKey });
+
+  // Format full transcript — include timestamps for reference
+  const transcriptText = segments
+    .map(s => `[${Math.round(s.startTime)}s] ${s.text}`)
+    .join('\n');
+
+  // Encode external signals as context
+  const externalSignals: string[] = [];
+  for (const raid of streamData?.raids ?? []) {
+    if (raid.timestamp) {
+      const raidSec = typeof raid.timestamp === 'number'
+        ? raid.timestamp
+        : (Date.now() - new Date(raid.timestamp).getTime()) / -1000;
+      externalSignals.push(`Raid fra ${raid.username} med ${raid.viewers} seere ved ~${Math.round(Math.abs(raidSec))}s`);
+    }
+  }
+  for (const spike of streamData?.chatSpikes ?? []) {
+    if (spike.intensity > 70) {
+      externalSignals.push(`Høy chat-aktivitet (${spike.intensity}%) ved ~${Math.round(spike.timestamp)}s`);
+    }
+  }
+
+  const signalContext = externalSignals.length > 0
+    ? `\nEksternal kontekst:\n${externalSignals.join('\n')}`
+    : '';
+
+  const prompt = `Du er en profesjonell video editor og innholdsstrateg for en norsk Twitch-streamer.
+
+Din jobb: Les HELE denne transskripsjonen og finn de ${MAX_CLIPS + 3} beste øyeblikkene for korte klipp.
+${creatorContext ?? ''}${signalContext}
+
+KATEGORIER du skal velge mellom:
+- CLUTCH: Nervepirrende øyeblikk, nesten-seier/tap
+- WIN: Klar seier, mestring, triumf
+- FAIL: Morsom/dramatisk feil
+- SURPRISE: Uventet skjer
+- LAUGH: Genuint latterfylt øyeblikk
+- RAGE: Sinne/frustrasjon (som entertainment)
+- CHAT_REACTION: Chat-eksplosjon + streamer-reaksjon
+- HYPE: Høy energi, dominans
+- DIALOGUE: Interessant samtale/fortelling
+- KEY_MOMENT: Viktig hendelse i storyline
+- REACTION: Sterk emosjonell reaksjon
+- RP_MOMENT: Viktig rollespill-øyeblikk
+
+HVA GJØR ET GODT KLIPP:
+- Har en naturlig begynnelse (kontekst/oppbygging)
+- Har et klart høydepunkt
+- Har en avslutning (reaksjon, payoff)
+- Føles komplett uten å se resten av streamen
+- Kan publiseres direkte på TikTok/YouTube Shorts/Reels
+
+SCORE-GUIDE (0–100):
+- 0–64: Ikke godt nok (hopp over)
+- 65–79: Bra klipp
+- 80–89: Veldig bra
+- 90–100: Eksepsjonelt – dette går viralt
+
+Returner KUN JSON:
+{
+  "highlights": [
+    {
+      "rough_start": 123,
+      "rough_end": 178,
+      "category": "CLUTCH",
+      "title": "Tittel (maks 8 ord, norsk)",
+      "begrunnelse": "Hvorfor dette er et godt klipp (maks 20 ord)",
+      "quality": {
+        "entertainment": 8,
+        "emotion": 7,
+        "surprise": 9,
+        "viral_potential": 8,
+        "story_arc": true
+      },
+      "score": 82
+    }
+  ]
+}
+
+TRANSKRIPSJON (timestamps i sekunder):
+${transcriptText}`;
+
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 3000,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+  });
+
+  try {
+    const { sikreJsonParse } = await import('../utils/retry');
+    const data = sikreJsonParse(res.choices[0]?.message?.content ?? '{}', { highlights: [] });
+    return (data.highlights ?? []) as Candidate[];
+  } catch {
+    return [];
+  }
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
 
 export async function oppdagHighlights(
   vodId: string,
@@ -57,200 +234,146 @@ export async function oppdagHighlights(
   await logPipeline({ vodId, step: 'DISCOVER', status: 'STARTED' });
 
   const transkripter = await hentTranskripsjon(vodId);
-  if (transkripter.length === 0) throw new Error('Ingen transkripsjon funnet');
+  if (transkripter.length === 0) throw new Error('Ingen transkripsjon funnet for VOD ' + vodId);
 
-  // Hent delt kanalkontext fra Global AI Memory
-  let knowledge: import('@/lib/ai/creatorContext').CreatorContext | null = null;
+  // Creator context for better AI understanding
+  let creatorCtx: string | undefined;
   try {
-    const { getCreatorContext } = await import('@/lib/ai/creatorContext');
-    knowledge = await getCreatorContext({ limit: 15 });
-  } catch { /* kjør uten historikk */ }
+    const { getCreatorContext, buildContextPrompt } = await import('@/lib/ai/creatorContext');
+    const knowledge = await getCreatorContext({ limit: 10 });
+    if (knowledge && (knowledge.streamCount > 0 || knowledge.runningJokes.length > 0)) {
+      creatorCtx = buildContextPrompt(knowledge);
+    }
+  } catch { /* run without history */ }
 
-  // Grupper i 60s vinduer med 30s overlapp
-  const grupper = grupperSegmenter(transkripter, 60, 30);
+  // ── Pass 1+3: GPT-4o reads the full transcript ───────────────────────────
+  const rawCandidates = await analyzeFullTranscript(transkripter, streamData, creatorCtx);
 
-  const kandidater: {
-    startTime: number;
-    endTime: number;
-    score: number;
-    signals: HighlightSignal[];
-    tekst: string;
-  }[] = [];
+  // ── Pass 2: Boundary refinement for each candidate ───────────────────────
+  const refined: RefinedCandidate[] = rawCandidates.map(c => {
+    const boundaries = refineBoundaries(c, transkripter);
+    return { ...c, ...boundaries };
+  });
 
-  for (const gruppe of grupper) {
-    const tekst = gruppe.segs.map(s => s.text).join(' ');
-    if (tekst.trim().length < 10) continue;
+  // ── Pass 4: Quality filter — keep ≤MAX_CLIPS with score ≥ MIN_QUALITY_SCORE ──
+  const passing = refined
+    .filter(c => (c.score ?? 0) >= MIN_QUALITY_SCORE)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_CLIPS);
 
-    const signalScore = beregneSignalScore(tekst);
+  const rejected = refined.filter(c => !passing.includes(c));
+
+  // ── Pass 5: Persist to DB + log observability events ─────────────────────
+  const highlights: ContentHighlight[] = [];
+
+  for (const c of passing) {
+    const duration = c.end_time - c.start_time;
+    if (duration < MIN_CLIP_SECONDS) continue;
+
     const signals: HighlightSignal[] = [];
-    const { startTime, endTime } = gruppe;
+    for (const raid of streamData?.raids ?? []) {
+      const raidTs = typeof raid.timestamp === 'number' ? raid.timestamp : 0;
+      if (raidTs >= c.start_time - 30 && raidTs <= c.end_time + 30) {
+        signals.push({ type: 'raid', timestamp: raidTs, intensity: Math.min(raid.viewers / 10, 100), description: `Raid: ${raid.username} (${raid.viewers})` });
+      }
+    }
+    for (const spike of streamData?.chatSpikes ?? []) {
+      if (spike.timestamp >= c.start_time - 10 && spike.timestamp <= c.end_time + 10) {
+        signals.push({ type: 'chat_spike', timestamp: spike.timestamp, intensity: spike.intensity, description: 'Chat-eksplosjon' });
+      }
+    }
 
-    if (signalScore > 0) {
-      signals.push({
-        type: 'emotional',
-        timestamp: startTime,
-        intensity: signalScore,
-        description: 'Signal fra tale',
+    const { data } = await db
+      .from('content_highlights')
+      .insert({
+        vod_id:      vodId,
+        start_time:  c.start_time,
+        end_time:    c.end_time,
+        score:       Math.min(100, Math.max(0, Math.round(c.score))),
+        category:    c.category,
+        title:       c.title,
+        begrunnelse: c.begrunnelse,
+        signals,
+        status:      'PENDING',
+        clip_quality_score: c.score,
+        clip_quality_entertainment: c.quality?.entertainment ?? null,
+        clip_quality_emotion:       c.quality?.emotion       ?? null,
+        clip_quality_surprise:      c.quality?.surprise      ?? null,
+        clip_quality_viral:         c.quality?.viral_potential ?? null,
+        clip_quality_story_arc:     c.quality?.story_arc     ?? false,
+      })
+      .select()
+      .single();
+
+    if (data) {
+      highlights.push({
+        id:          data.id,
+        vodId,
+        startTime:   c.start_time,
+        endTime:     c.end_time,
+        score:       c.score,
+        category:    c.category as HighlightCategory,
+        title:       c.title,
+        begrunnelse: c.begrunnelse,
+        signals:     signals.map(s => s.description),
+        status:      'PENDING',
+      });
+
+      await logSystemEvent({
+        source:     'content_factory',
+        event_type: 'CLIP_SELECTED',
+        title:      `Klipp valgt: "${c.title}" (score ${c.score})`,
+        severity:   'info',
+        metadata:   {
+          vodId, highlightId: data.id, score: c.score, category: c.category,
+          duration: c.end_time - c.start_time,
+          quality: c.quality,
+        },
       });
     }
-
-    for (const raid of streamData?.raids ?? []) {
-      const raidSek = raid.timestamp
-        ? (new Date(raid.timestamp).getTime() - new Date(transkripter[0]?.startTime ?? 0).getTime()) / 1000
-        : 0;
-      if (Math.abs(raidSek - startTime) < 60) {
-        signals.push({
-          type: 'raid',
-          timestamp: raidSek,
-          intensity: Math.min(raid.viewers / 10, 100),
-          description: `Raid med ${raid.viewers} seere`,
-        });
-      }
-    }
-
-    for (const spike of streamData?.chatSpikes ?? []) {
-      if (spike.timestamp >= startTime - 10 && spike.timestamp <= endTime + 10) {
-        signals.push({
-          type: 'chat_spike',
-          timestamp: spike.timestamp,
-          intensity: spike.intensity,
-          description: 'Høy chat-aktivitet',
-        });
-      }
-    }
-
-    const totalScore = Math.min(
-      100,
-      signalScore + signals.filter(s => s.type !== 'emotional').reduce((s, sig) => s + sig.intensity * 0.3, 0)
-    );
-    kandidater.push({ startTime, endTime, score: Math.round(totalScore), signals, tekst });
   }
 
-  // Fjern nær-duplikater (overlappende vinduer) – behold beste score innenfor 30s
-  const unikKandidater = kandidater
-    .sort((a, b) => b.score - a.score)
-    .filter((k, idx, arr) =>
-      !arr.slice(0, idx).some(
-        prev => Math.abs(prev.startTime - k.startTime) < 30 && prev.score >= k.score
-      )
-    )
-    .slice(0, 20);
-
-  const highlights: ContentHighlight[] = [];
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (apiKey && unikKandidater.length > 0) {
-    const openai = new OpenAI({ apiKey });
-
-    // Bygg rik kontekst fra delt AI-minne
-    let kontekst: string;
-    if (knowledge && (knowledge.streamCount > 0 || knowledge.topViewers.length > 0 || knowledge.runningJokes.length > 0)) {
-      const { buildContextPrompt } = await import('@/lib/ai/creatorContext');
-      kontekst = buildContextPrompt(knowledge);
-    } else {
-      kontekst = 'Kanal: streameren – norsk gaming streamer. Fokus på genuine reaksjoner og episke øyeblikk.';
-    }
-
-    const begrenset = unikKandidater.slice(0, 12);
-
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'user',
-          content: `Du er AI Producer for en norsk Twitch-kanal. Analyser disse stream-øyeblikkene og velg de beste highlights.
-${kontekst}
-
-SCORING (0-100):
-- 0-30: Ikke interessant nok
-- 31-60: OK innhold
-- 61-80: Bra highlight
-- 81-100: Eksepsjonelt øyeblikk
-
-Returner KUN JSON – inkluder BARE øyeblikk med score > 30:
-{"highlights": [{"index": 0, "score": 75, "category": "FUNNY|FAIL|CLUTCH|RAGE|REACTION|TACTICAL|RP_MOMENT|EDUCATIONAL", "title": "Tittel (maks 8 ord)", "begrunnelse": "Kort begrunnelse (maks 15 ord)"}]}
-
-Øyeblikk å vurdere:
-${begrenset.map((k, i) => `${i}. [${Math.round(k.startTime)}s–${Math.round(k.endTime)}s] RåScore:${k.score} "${k.tekst.slice(0, 130)}"`).join('\n')}`,
-        },
-      ],
-      max_tokens: 1500,
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
+  // Log rejected candidates
+  for (const c of rejected) {
+    await logSystemEvent({
+      source:     'content_factory',
+      event_type: 'CLIP_REJECTED',
+      title:      `Klipp forkastet: "${c.title ?? 'ukjent'}" (score ${c.score ?? 0} < ${MIN_QUALITY_SCORE})`,
+      severity:   'info',
+      metadata:   {
+        vodId, score: c.score ?? 0, category: c.category,
+        rough_start: c.rough_start, rough_end: c.rough_end,
+        reason: (c.score ?? 0) < MIN_QUALITY_SCORE ? 'score_below_threshold' : 'quality_filter',
+      },
     });
-
-    const rawContent = res.choices[0]?.message?.content ?? '{}';
-    const { sikreJsonParse } = await import('../utils/retry');
-    const aiData = sikreJsonParse(rawContent, { highlights: [] });
-
-    for (const ai of aiData.highlights ?? []) {
-      if ((ai.score ?? 0) < 31) continue;
-
-      const kandidat = begrenset[ai.index];
-      if (!kandidat) continue;
-
-      const startNum = parseFloat(String(kandidat.startTime));
-      const endNum = parseFloat(String(kandidat.endTime));
-      if (isNaN(startNum) || isNaN(endNum)) continue;
-
-      console.log(`[DISCOVER] Lagrer: start=${startNum}, end=${endNum}, score=${ai.score}, kat=${ai.category}`);
-
-      const { data } = await db
-        .from('content_highlights')
-        .insert({
-          vod_id: vodId,
-          start_time: startNum,
-          end_time: endNum,
-          score: Math.min(100, Math.max(0, Math.round(ai.score))),
-          category: ai.category,
-          title: ai.title,
-          begrunnelse: ai.begrunnelse,
-          signals: kandidat.signals,
-          status: 'PENDING',
-        })
-        .select()
-        .single();
-
-      if (data) {
-        highlights.push({
-          id: data.id,
-          vodId,
-          startTime: startNum,
-          endTime: endNum,
-          score: ai.score,
-          category: ai.category as HighlightCategory,
-          title: ai.title,
-          begrunnelse: ai.begrunnelse,
-          signals: kandidat.signals.map(s => s.description),
-          status: 'PENDING',
-        });
-      }
-    }
   }
 
   const durationMs = Date.now() - start;
+  const scores = highlights.map(h => h.score);
+
   await logPipeline({
     vodId,
-    step: 'DISCOVER',
-    status: 'COMPLETE',
+    step:        'DISCOVER',
+    status:      'COMPLETE',
     durationMs,
     outputCount: highlights.length,
-    message: `${highlights.length} highlights funnet (${knowledge && knowledge.streamCount > 0 ? `${knowledge.streamCount} streams + ${knowledge.topViewers.length} seere i AI-minnet` : 'ingen historikk ennå'})`,
+    message:     `${highlights.length} klipp valgt, ${rejected.length} forkastet. GPT-4o full-transskript analyse (${transkripter.length} segmenter).`,
   });
 
-  const scores = highlights.map(h => h.score);
   await logSystemEvent({
-    source: 'content_factory',
+    source:     'content_factory',
     event_type: 'HIGHLIGHTS_DISCOVERED',
-    title: `${highlights.length} highlights oppdaget for VOD ${vodId}`,
-    severity: 'info',
-    metadata: {
+    title:      `${highlights.length} highlights oppdaget for VOD ${vodId}`,
+    severity:   'info',
+    metadata:   {
       vodId,
-      segmenterAnalysert: grupper.length,
-      highlightsFunnet: highlights.length,
-      avgScore: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
-      topScore: scores.length > 0 ? Math.max(...scores) : 0,
-      executionTime: durationMs,
+      segmenterAnalysert: transkripter.length,
+      highlightsFunnet:   highlights.length,
+      forkastet:          rejected.length,
+      avgScore:           scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
+      topScore:           scores.length > 0 ? Math.max(...scores) : 0,
+      executionTime:      durationMs,
+      model:              'gpt-4o',
     },
   });
 
@@ -267,24 +390,30 @@ export async function hentHighlights(vodId: string): Promise<ContentHighlight[]>
     .eq('vod_id', vodId)
     .order('score', { ascending: false });
   return (data ?? []).map(r => ({
-    id: r.id,
-    vodId: r.vod_id,
-    vod_id: r.vod_id,
-    startTime: parseFloat(r.start_time) || 0,
-    start_time: parseFloat(r.start_time) || 0,
-    endTime: parseFloat(r.end_time) || 0,
-    end_time: parseFloat(r.end_time) || 0,
-    score: parseInt(r.score) || 0,
-    category: r.category,
-    title: r.title,
-    begrunnelse: r.begrunnelse,
-    signals: r.signals ?? [],
-    rank: r.rank,
-    status: r.status,
-    clip_status: r.clip_status ?? 'READY_FOR_CLIP',
-    clip_url: r.clip_url ?? null,
+    id:           r.id,
+    vodId:        r.vod_id,
+    vod_id:       r.vod_id,
+    startTime:    parseFloat(r.start_time) || 0,
+    start_time:   parseFloat(r.start_time) || 0,
+    endTime:      parseFloat(r.end_time) || 0,
+    end_time:     parseFloat(r.end_time) || 0,
+    score:        parseInt(r.score) || 0,
+    category:     r.category,
+    title:        r.title,
+    begrunnelse:  r.begrunnelse,
+    signals:      r.signals ?? [],
+    rank:         r.rank,
+    status:       r.status,
+    clip_status:  r.clip_status ?? 'READY_FOR_CLIP',
+    clip_url:     r.clip_url ?? null,
     vertical_clip_url: r.vertical_clip_url ?? null,
-    clip_finished_at: r.clip_finished_at ?? null,
-    clip_error: r.clip_error ?? null,
+    clip_finished_at:  r.clip_finished_at ?? null,
+    clip_error:        r.clip_error ?? null,
+    clip_quality_score:         r.clip_quality_score ?? null,
+    clip_quality_entertainment: r.clip_quality_entertainment ?? null,
+    clip_quality_emotion:       r.clip_quality_emotion ?? null,
+    clip_quality_surprise:      r.clip_quality_surprise ?? null,
+    clip_quality_viral:         r.clip_quality_viral ?? null,
+    clip_quality_story_arc:     r.clip_quality_story_arc ?? null,
   }));
 }
