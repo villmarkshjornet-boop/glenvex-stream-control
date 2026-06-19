@@ -11,8 +11,8 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
-import { getRandomActivePartner, getFeaturedPartner, PartnerInfo } from './partnerHelper';
-import { logDecision } from './decisionEngine';
+import { getRandomActivePartner, getFeaturedPartner, PartnerInfo, trackPartnerExposure } from './partnerHelper';
+import { logDecision, recordOutcome } from './decisionEngine';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
 const MIN_CONFIDENCE = 0.35; // minimum score to fire a promo
@@ -595,4 +595,98 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     confidence: best.score, cooldownApplied: best.cooldownPenalty > 0,
     triggerType, proposalId: null, scoringDetail,
   };
+}
+
+// ── Dispatch approved proposals ───────────────────────────────────────────────
+// Polls partner_proposals for human-approved proposals and sends them.
+// Called by the bot's 2-minute interval. Send functions are injected by bot/index.ts
+// so Discord/Twitch clients stay in their respective modules.
+
+export async function dispatchApprovedProposals(opts: {
+  sendDiscord: (msg: string) => Promise<void>;
+  sendTwitch: (msg: string) => void;
+}): Promise<void> {
+  const sb = getSb();
+  if (!sb) return;
+  const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+
+  const { data: proposals } = await sb
+    .from('partner_proposals')
+    .select('id, partner_name, partner_id, platform, message_twitch, message_discord')
+    .eq('workspace_id', wsId)
+    .eq('status', 'approved')
+    .is('sent_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: true })
+    .limit(5);
+
+  if (!proposals || proposals.length === 0) return;
+
+  for (const proposal of proposals as Array<{
+    id: string;
+    partner_name: string;
+    partner_id: string | null;
+    platform: string;
+    message_twitch: string | null;
+    message_discord: string | null;
+  }>) {
+    try {
+      let sentDiscord = false;
+      let sentTwitch = false;
+
+      if ((proposal.platform === 'discord' || proposal.platform === 'both') && proposal.message_discord) {
+        await opts.sendDiscord(proposal.message_discord);
+        sentDiscord = true;
+      }
+
+      if ((proposal.platform === 'twitch' || proposal.platform === 'both') && proposal.message_twitch) {
+        opts.sendTwitch(proposal.message_twitch);
+        sentTwitch = true;
+      }
+
+      if (!sentDiscord && !sentTwitch) continue;
+
+      await sb
+        .from('partner_proposals')
+        .update({ status: 'sent', sent_at: new Date().toISOString() })
+        .eq('id', proposal.id);
+
+      // Close the latest linked ai_agent_decisions row
+      const { data: decision } = await sb
+        .from('ai_agent_decisions')
+        .select('id')
+        .eq('workspace_id', wsId)
+        .filter('input_context->>proposalId', 'eq', proposal.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (decision?.id) {
+        await recordOutcome(decision.id, 'success');
+      }
+
+      void logEvent(wsId, 'PARTNER_PROPOSAL_SENT',
+        `Godkjent forslag sendt: ${proposal.partner_name}`,
+        {
+          proposalId: proposal.id,
+          partnerName: proposal.partner_name,
+          platform: proposal.platform,
+          sentDiscord,
+          sentTwitch,
+          decisionId: decision?.id ?? null,
+        });
+
+      void trackPartnerExposure({
+        partnerId: proposal.partner_id ?? undefined,
+        partnerName: proposal.partner_name,
+        platform: proposal.platform === 'twitch' ? 'twitch' : 'discord',
+        source: 'approved_proposal',
+      }).catch(() => {});
+
+    } catch (err: unknown) {
+      void logEvent(wsId, 'PARTNER_PROPOSAL_SEND_FAILED',
+        `Feil ved sending av godkjent forslag: ${proposal.partner_name}`,
+        { proposalId: proposal.id, error: String(err).slice(0, 200) });
+    }
+  }
 }

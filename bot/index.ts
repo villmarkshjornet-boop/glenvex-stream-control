@@ -16,7 +16,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat } from './lib/twitchBot';
 import { startThumbnailWorker } from './lib/thumbnailGenerator';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
@@ -33,7 +33,7 @@ import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
 import { startLearningAggregator } from './lib/learningAggregator';
 import { getRandomActivePartner, logPartnerPromoResult, trackPartnerExposure } from './lib/partnerHelper';
-import { decidePromotion, loadPartnerBotSettings } from './lib/partnerPromotionEngine';
+import { decidePromotion, loadPartnerBotSettings, dispatchApprovedProposals } from './lib/partnerPromotionEngine';
 import { getBotTone, getPauseProaktiv, getAktiv, getPauseDiscord, getPauseLiveVarsler, getTwitchUrl, getChatKanalId as getSbChatKanalId, getLiveKanalId, getClipsKanalId as getSbClipsKanalId, getPartnerKanalId as getSbPartnerKanalId, getAdminKanalId, getPreHypeKanalId, getCommunityKanalId, getCommunitySettings } from './lib/botKanalPreferanser';
 import { getRecentCrossPlatformContext, summarizeRecentActivity, hentCommunityMemorySummary, isCommandCooldown, setCommandCooldown } from './lib/crossPlatformContext';
 import { startRecoveryEngine } from './lib/recoveryEngine';
@@ -1158,6 +1158,16 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
   addToMemory({ type: 'proaktiv', innhold: `partner: ${partner.navn}` });
 }
 
+async function dispatchApprovedProposalsRunner(): Promise<void> {
+  await dispatchApprovedProposals({
+    sendDiscord: async (msg) => {
+      const kanal = await finnPartnerKanal();
+      if (kanal) await discordSend(kanal, msg, { trigger: 'approved_proposal' });
+    },
+    sendTwitch: (msg) => sendTwitchPromoToChat(msg),
+  });
+}
+
 async function sendStreamInfoMelding(kanal: TextChannel): Promise<void> {
   const plan = await getStreamplan();
   const osloDatoISO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(new Date());
@@ -1861,6 +1871,7 @@ client.once('clientReady', () => {
   // Heartbeat: skriv til system_events hvert 5. min (sikrer at Coverage aldri viser 0)
   setTimeout(() => { writeHeartbeats(); setInterval(writeHeartbeats, 5 * 60_000); }, 60_000);
   setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
+  setInterval(() => withCron('dispatch-approved-proposals', dispatchApprovedProposalsRunner), 2 * 60 * 1000);
   setTimeout(() => { withCron('send-proaktiv', sendProaktivMelding); setInterval(() => withCron('send-proaktiv', sendProaktivMelding), PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
   setTimeout(() => { withCron('post-top-clip', postTopClip); setInterval(() => withCron('post-top-clip', postTopClip), CLIP_INTERVAL); }, 60 * 60 * 1000);
   setTimeout(() => { withCron('del-socials', delSocialsSubtilt); setInterval(() => withCron('del-socials', delSocialsSubtilt), SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);

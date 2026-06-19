@@ -685,6 +685,10 @@ export function startTwitchBot() {
   // fjernet for å unngå dobbel kadens og fordi den ikke sjekket lastNotifiedStreamId.
 }
 
+export function sendTwitchPromoToChat(msg: string): void {
+  void chatSend(`#${KANAL}`, msg, { trigger: 'approved_proposal' });
+}
+
 export function stopTwitchBot() {
   client?.disconnect();
   client = null;
