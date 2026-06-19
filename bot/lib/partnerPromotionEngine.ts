@@ -289,6 +289,21 @@ async function storeProposal(opts: {
   if (!sb) return null;
 
   try {
+    // Dedup: reuse any non-expired pending proposal for the same partner.
+    // Prevents ~24 identical rows per 2-hour stream when requireApproval=true.
+    if (opts.partner.id) {
+      const { data: existing } = await sb
+        .from('partner_proposals')
+        .select('id')
+        .eq('workspace_id', opts.workspaceId)
+        .eq('partner_id', opts.partner.id)
+        .eq('status', 'pending')
+        .gt('expires_at', new Date().toISOString())
+        .limit(1)
+        .maybeSingle();
+      if (existing?.id) return existing.id as string;
+    }
+
     const { data, error } = await sb
       .from('partner_proposals')
       .insert({
