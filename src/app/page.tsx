@@ -11,6 +11,7 @@ import { RecentStreams } from '@/components/dashboard/RecentStreams';
 import { NextStreamCard } from '@/components/dashboard/NextStreamCard';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { SystemHealth } from '@/components/dashboard/SystemHealth';
+import { PartnerProposalQueue } from '@/components/dashboard/PartnerProposalQueue';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -97,6 +98,9 @@ export default function Dashboard() {
 
       {/* ── ACTION CENTER ────────────────────────────────────────────────────── */}
       <ActionCenter items={live?.actionCenter} loading={loadingLive} />
+
+      {/* ── PARTNER PROPOSALS ────────────────────────────────────────────────── */}
+      <PartnerProposalQueue />
 
       {/* ── RECENT STREAMS ───────────────────────────────────────────────────── */}
       <RecentStreams streams={live?.recentStreams} loading={loadingLive} />
