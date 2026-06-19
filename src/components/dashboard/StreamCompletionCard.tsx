@@ -1,15 +1,15 @@
 'use client';
 
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock } from 'lucide-react';
 import type { HeroStream } from './types';
 
-const CHECKLIST_LABELS: { key: keyof HeroStream['checklist']; label: string }[] = [
+const CHECKLIST_LABELS: { key: keyof HeroStream['checklist']; label: string; optional?: boolean }[] = [
   { key: 'streamHistory',  label: 'Stream History' },
   { key: 'audienceData',   label: 'Audience-data' },
   { key: 'retentionCurve', label: 'Retention-kurve' },
   { key: 'chatEvents',     label: 'Chat-events' },
   { key: 'streamCoach',    label: 'Stream Coach' },
-  { key: 'vodDetected',    label: 'VOD' },
+  { key: 'vodDetected',    label: 'VOD', optional: true },
   { key: 'aiLearning',     label: 'AI-læring' },
 ];
 
@@ -30,14 +30,16 @@ export function StreamCompletionCard({ heroStream, loading }: { heroStream: Hero
       <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Stream Completion</p>
 
       <div className="space-y-2">
-        {CHECKLIST_LABELS.map(({ key, label }) => {
+        {CHECKLIST_LABELS.map(({ key, label, optional }) => {
           const done = heroStream.checklist[key];
           return (
             <div key={key} className="flex items-center gap-2.5">
               {done
                 ? <CheckCircle2 size={16} className="text-g-green flex-shrink-0" />
-                : <XCircle size={16} className="text-red-400 flex-shrink-0" />}
-              <span className="text-sm text-g-text">{label}</span>
+                : optional
+                  ? <Clock size={16} className="text-g-muted/50 flex-shrink-0" />
+                  : <XCircle size={16} className="text-red-400 flex-shrink-0" />}
+              <span className={`text-sm ${done ? 'text-g-text' : optional ? 'text-g-muted/60' : 'text-g-text'}`}>{label}</span>
             </div>
           );
         })}

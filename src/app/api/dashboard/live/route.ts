@@ -406,7 +406,7 @@ export async function GET() {
     if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
     if (coachFailed) failureReasons.push('Stream Coach feilet');
     if (historyUpsertFailed) failureReasons.push('Stream History-lagring feilet (delvis)');
-    if (!vodDetected) failureReasons.push('VOD ikke funnet');
+    // vodDetected is informational — not a stream failure
 
     heroStream = {
       streamId: sisteStream.stream_id,
@@ -643,6 +643,27 @@ export async function GET() {
       detail: stalestPartner.sistePromotert ? `Sist promotert ${tidSiden(stalestPartner.sistePromotert)}` : 'Aldri promotert ennå',
       href: '/partner-hub',
       createdAt: stalestPartner.sistePromotert ?? stalestPartner.opprettet,
+    });
+  }
+
+  // Raid-anbefalinger: vis på dashbordet hvis Raid Manager fant kandidater siste 6t (= aktiv stream)
+  const raidAction = subsystemEvents.find((e: any) =>
+    e.event_type === 'RAID_RECOMMENDATION_CREATED' &&
+    (Date.now() - new Date(e.created_at).getTime()) < 6 * 3600_000
+  ) ?? subsystemEvents.find((e: any) =>
+    e.event_type === 'RAID_CANDIDATES_CHECKED' &&
+    (e.metadata?.candidateCount ?? 0) > 0 &&
+    (Date.now() - new Date(e.created_at).getTime()) < 6 * 3600_000
+  ) ?? null;
+  if (raidAction) {
+    const count = raidAction.metadata?.candidateCount ?? null;
+    actionCenter.push({
+      type: 'raid_check',
+      priority: 'action',
+      title: count ? `${count} raid-mål klare` : 'Raid-anbefalinger tilgjengelig',
+      detail: 'Se hvem du bør raide etter streamen',
+      href: '/raid-manager',
+      createdAt: raidAction.created_at,
     });
   }
 

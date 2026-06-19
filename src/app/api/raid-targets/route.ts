@@ -29,12 +29,17 @@ export async function GET() {
     brandName    = ws?.brand_name    ?? 'Streamer';
   }
 
+  // Fall back to bot env var if workspace has no OAuth login yet
+  if (!twitchLogin) {
+    twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? null;
+  }
+
   if (!twitchLogin) {
     void db?.from('system_events').insert({
       workspace_id: wsId,
       source:       'raid_manager',
       event_type:   'WORKSPACE_MISSING_TWITCH',
-      title:        'Raid-manager: workspace mangler twitch_login',
+      title:        'Raid-manager: workspace og env mangler Twitch-kanalidentitet',
       severity:     'warning',
       metadata:     { wsId, field: 'twitch_login' },
     });

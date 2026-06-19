@@ -801,9 +801,11 @@ export default function AdminPage() {
 
                         {/* Twitch */}
                         <td className="px-3 py-2.5">
-                          {ws.twitchLogin ? (
+                          {ws.integrationStatus.twitch.connected ? (
                             <div className="space-y-0.5">
-                              <p className="text-[10px] text-g-text font-semibold">{ws.twitchLogin}</p>
+                              <p className="text-[10px] text-g-text font-semibold">
+                                {ws.twitchLogin ?? (ws.integrationStatus.twitch.botWatching ? 'Bot aktiv' : 'Koblet')}
+                              </p>
                               {live
                                 ? <Badge ok label="LIVE" tiny />
                                 : <span className="text-[8px] text-g-muted">Offline</span>
@@ -814,10 +816,11 @@ export default function AdminPage() {
 
                         {/* Discord */}
                         <td className="px-3 py-2.5">
-                          {ws.discordGuildName
-                            ? <p className="text-[10px] text-g-text">{ws.discordGuildName}</p>
-                            : <Badge ok={false} label="Ikke koblet" tiny />
-                          }
+                          {ws.integrationStatus.discord.connected ? (
+                            <p className="text-[10px] text-g-text">
+                              {ws.discordGuildName ?? (ws.integrationStatus.discord.botInGuild ? 'Bot aktiv' : 'Koblet')}
+                            </p>
+                          ) : <Badge ok={false} label="Ikke koblet" tiny />}
                         </td>
 
                         {/* Onboarding */}
