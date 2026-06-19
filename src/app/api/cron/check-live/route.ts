@@ -56,13 +56,8 @@ export async function POST(req: NextRequest) {
       brandName   = ws?.brand_name   ?? 'Stream';
     }
 
-    // Fall back to bot env var if workspace has no OAuth login yet
     if (!twitchLogin) {
-      twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? null;
-    }
-
-    if (!twitchLogin) {
-      await logEvent('scheduler', 'WORKSPACE_MISSING_TWITCH', 'Cron check-live: workspace og env mangler Twitch-kanalidentitet', 'warning', {
+      await logEvent('scheduler', 'WORKSPACE_MISSING_TWITCH', 'Cron check-live: workspace mangler twitch_login — kjør Repair i admin', 'warning', {
         wsId, field: 'twitch_login',
       });
       return NextResponse.json({ status: 'skipped', reason: 'twitch_not_connected' });

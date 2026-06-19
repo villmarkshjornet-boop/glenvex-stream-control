@@ -60,18 +60,23 @@ export async function POST(
   const errors: string[] = [];
   const now = new Date().toISOString();
 
-  // ── Backfill twitch_connected_at if bot is active but timestamp missing ──
-  if (status.twitch.botWatching && !ws.twitch_connected_at) {
-    const { error } = await db.from('workspaces').update({
-      twitch_connected_at: now,
-      updated_at: now,
-    }).eq('id', workspaceId);
+  // ── Backfill twitch_connected_at (+ twitch_login fra env) hvis bot er aktiv ──
+  if (status.twitch.botWatching && (!ws.twitch_connected_at || !ws.twitch_login)) {
+    const envLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? null;
+    const patch: Record<string, string> = { updated_at: now };
+    if (!ws.twitch_connected_at) patch.twitch_connected_at = now;
+    if (!ws.twitch_login && envLogin) patch.twitch_login = envLogin.toLowerCase();
+
+    const { error } = await db.from('workspaces').update(patch).eq('id', workspaceId);
     if (error) {
-      errors.push(`twitch_connected_at backfill: ${error.message}`);
+      errors.push(`twitch backfill: ${error.message}`);
     } else {
-      repairActions.push('twitch_connected_at satt (bot var aktiv, timestamp manglet)');
+      const parts: string[] = [];
+      if (patch.twitch_connected_at) parts.push('twitch_connected_at');
+      if (patch.twitch_login) parts.push(`twitch_login=${patch.twitch_login}`);
+      repairActions.push(`Twitch backfill: ${parts.join(', ')} (bot aktiv, hentet fra env)`);
       checks.twitchConnected = true;
-      missing.splice(missing.indexOf('twitch_connection'), 1);
+      if (missing.includes('twitch_connection')) missing.splice(missing.indexOf('twitch_connection'), 1);
     }
   }
 
