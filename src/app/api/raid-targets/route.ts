@@ -42,17 +42,11 @@ export async function GET() {
   }
 
   try {
+    // getStreamInfo returns game/viewerCount without an independent live gate —
+    // live detection is owned by the dashboard slow-poll (slow.streamStatus.isLive).
+    // Doing a second independent Twitch call here caused Raid Manager to disagree
+    // with Live Command Center when the Twitch API had any brief inconsistency.
     const stream = await getStreamInfo(twitchLogin);
-    if (!stream.isLive) {
-      void logSystemEvent({
-        source:     'raid_manager',
-        event_type: 'RAID_SKIPPED_NOT_LIVE',
-        title:      'Raid Manager: hoppet over – streamen er ikke live',
-        severity:   'info',
-        metadata:   { twitchLogin, brandName },
-      });
-      return NextResponse.json({ targets: [], reason: 'Ikke live' });
-    }
 
     const broadcasterId = twitchUserId ?? await getBroadcasterId(twitchLogin);
     const clientId = process.env.TWITCH_CLIENT_ID;

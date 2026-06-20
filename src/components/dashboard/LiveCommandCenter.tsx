@@ -339,15 +339,157 @@ function buildLearning(live: LiveData): string[] {
   ].filter(Boolean).slice(0, 4) as string[];
 }
 
+// ── Mission Queue — deterministic task list for the stream ────────────────────
+// CEO Brain's primary job: find the next uncompleted mission and show it
+// with pre-drafted content and one-click actions.
+
+interface StreamMission {
+  id:               string;
+  label:            string;
+  context:          string;
+  draftTitle?:      string;
+  draftText?:       string;
+  forventetEffekt?: string;
+  href:             string;
+  triggerAfterMin:  number;
+  done:             boolean;
+  isManual:         boolean;  // needs user to click "Gjort" vs auto-detectable
+}
+
+function buildMissionQueue(
+  live: LiveData,
+  slow: SlowData,
+  elapsedMin: number,
+  doneManual: Set<string>,
+): StreamMission[] {
+  const tips   = live.liveAgentTips ?? [];
+  const hasCat = (cat: string) => tips.some(t => t.category === cat);
+
+  const game  = slow.streamStatus.game  ?? 'stream';
+  const title = slow.streamStatus.title ?? 'Vi er live!';
+  const thumb = slow.streamStatus.thumbnailUrl ?? '';
+  const login = thumb.match(/live_user_(\w+)-/)?.[1] ?? 'glenvex';
+  const url   = `twitch.tv/${login}`;
+
+  // Discord auto-detect: kontrollsenter Discord entry ran within last 45 min
+  const discordKS = live.kontrollsenter?.find(
+    k => k.key.toLowerCase().includes('discord') || k.label.toLowerCase().includes('discord'),
+  );
+  const discordAutoDetected = discordKS?.sisteKjøring
+    ? Date.now() - new Date(discordKS.sisteKjøring).getTime() < 45 * 60_000
+    : false;
+
+  const pollsDone   = (live.pollManager?.totalPollsThisStream ?? 0) > 0;
+  const sponsorDone = hasCat('sponsor');
+  const raidDone    = hasCat('raid');
+
+  const all: StreamMission[] = [
+    {
+      id:              'x_post',
+      label:           'Post på X',
+      context:         'Streamen er ikke annonsert på X ennå',
+      draftTitle:      'Klar til posting:',
+      draftText:       `Vi er LIVE! 🔴\n\n${title}\n🎮 ${game}\n\n${url}`,
+      forventetEffekt: '3–7 ekstra seere fra X-følgere',
+      href:            '/',
+      triggerAfterMin: 0,
+      done:            doneManual.has('x_post'),
+      isManual:        true,
+    },
+    {
+      id:              'discord_post',
+      label:           'Post i Discord',
+      context:         discordAutoDetected
+        ? 'Discord-bot kjørte nettopp — sjekk at meldingen ble sendt'
+        : 'Discord-annonsering ikke sendt ennå denne streamen',
+      draftTitle:      'Klar til posting:',
+      draftText:       `@everyone Vi er LIVE! 🔴\n\n${title}\n🎮 ${game}\n\n→ ${url}`,
+      forventetEffekt: '5–15 Discord-følgere inn i chatten',
+      href:            '/',
+      triggerAfterMin: 0,
+      done:            doneManual.has('discord_post') || discordAutoDetected,
+      isManual:        !discordAutoDetected,
+    },
+    {
+      id:              'chat_cta',
+      label:           'Engasjer chatten',
+      context:         'Still chatten et personlig spørsmål — aktiver lurkers',
+      draftTitle:      'Forslag til spørsmål:',
+      draftText:       `Hvem er her for første gang i dag? ${game !== 'stream' ? `Hva synes dere om ${game}?` : 'Hva vil dere se mer av?'}`,
+      forventetEffekt: 'Økt chatrate og aktivering av lurkers',
+      href:            '/',
+      triggerAfterMin: 5,
+      done:            doneManual.has('chat_cta'),
+      isManual:        true,
+    },
+    {
+      id:              'poll',
+      label:           'Kjør en poll',
+      context:         pollsDone
+        ? `Poll kjørt (${live.pollManager?.totalPollsThisStream} totalt)`
+        : 'Ingen poll kjørt ennå — godt tidspunkt nå',
+      forventetEffekt: 'Økt engagement og Twitch-algoritmesignal',
+      href:            '/',
+      triggerAfterMin: 15,
+      done:            pollsDone,
+      isManual:        false,
+    },
+    {
+      id:              'sponsor',
+      label:           'Nevn sponsor/partner',
+      context:         sponsorDone
+        ? 'Sponsor nevnt av Live Agent'
+        : 'Chatten er varm nok — greit å nevne partner nå',
+      forventetEffekt: 'Partnereksponering uten å virke salgsorientert',
+      href:            '/partner-hub',
+      triggerAfterMin: 20,
+      done:            doneManual.has('sponsor') || sponsorDone,
+      isManual:        !sponsorDone,
+    },
+    {
+      id:              'raid',
+      label:           'Finn raid-kandidat',
+      context:         raidDone
+        ? 'Raid-analyse kjørt av Live Agent'
+        : 'Begynn å planlegge hvem du raider ved stream-slutt',
+      forventetEffekt: 'Godt raid bygger goodwill og kan gi follow-backs',
+      href:            '/raid-manager',
+      triggerAfterMin: 75,
+      done:            doneManual.has('raid') || raidDone,
+      isManual:        !raidDone,
+    },
+  ];
+
+  return all.filter(m => elapsedMin >= m.triggerAfterMin);
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowData }) {
+  const [doneManual, setDoneManual] = useState<Set<string>>(new Set());
+  const [copied, setCopied]         = useState<string | null>(null);
+
   const status   = slow.streamStatus;
   const startIso = live.systemEvents?.find(e =>
     e.event_type === 'LIVE_AGENT_STARTED' || e.event_type === 'LIVE_DETECTED'
   )?.created_at ?? null;
 
   const elapsedMin = startIso ? (Date.now() - new Date(startIso).getTime()) / 60_000 : 0;
+
+  const missions     = buildMissionQueue(live, slow, elapsedMin, doneManual);
+  const nextMission  = missions.find(m => !m.done) ?? null;
+  const doneMissions = missions.filter(m => m.done);
+
+  const markDone = (id: string) =>
+    setDoneManual(prev => { const n = new Set(prev); n.add(id); return n; });
+
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {}
+  };
 
   const brain      = buildCeoBrain(live, elapsedMin);
   const confidence = buildConfidence(live);
@@ -413,61 +555,164 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
           </div>
         </div>
 
-        {/* Self-correction notice */}
-        {brain.selfCorrectionNote && (
-          <div className="mx-5 mt-4 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
-            <p className="text-[11px] text-yellow-400 font-bold">↺ {brain.selfCorrectionNote}</p>
-          </div>
-        )}
+        {/* Mission Queue — proactive task orchestration */}
+        {nextMission ? (
+          <>
+            {/* Current mission */}
+            <div className="px-5 pt-4 pb-3">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-[10px] font-black text-g-green uppercase tracking-widest">Neste oppdrag</span>
+                {missions.length > 1 && (
+                  <span className="text-[10px] text-g-muted/40">{doneMissions.length}/{missions.length} gjort</span>
+                )}
+              </div>
 
-        {/* Primary recommendation */}
-        <div className="px-5 py-4">
-          <Link href={brain.href} className="block group">
-            <p className="text-[15px] font-bold text-g-text leading-snug group-hover:text-g-green transition-colors">
-              {brain.anbefaling}
-            </p>
-          </Link>
+              <p className="text-[16px] font-black text-g-text leading-tight">{nextMission.label}</p>
+              <p className="text-[12px] text-g-muted mt-1 leading-snug">{nextMission.context}</p>
+              {nextMission.forventetEffekt && (
+                <p className="text-[11px] text-g-green/70 mt-1">→ {nextMission.forventetEffekt}</p>
+              )}
 
-          {brain.hvorfor && (
-            <div className="mt-3">
-              <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold mb-1">Hvorfor</p>
-              <p className="text-sm text-g-muted leading-relaxed">{brain.hvorfor}</p>
-            </div>
-          )}
-
-          {/* Rejected alternatives */}
-          {brain.avvistAlternativer.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold">Vurderte, men valgte bort</p>
-              {brain.avvistAlternativer.map((alt, i) => (
-                <div key={i} className="flex items-start gap-2 px-3 py-2 bg-g-bg/30 rounded-xl border border-g-border/20">
-                  <XCircle size={11} className="text-g-muted/30 flex-shrink-0 mt-0.5" />
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold text-g-muted/70 leading-snug truncate">{alt.title}</p>
-                    <p className="text-[10px] text-g-muted/40 leading-snug mt-0.5">{alt.grunn}</p>
+              {/* Draft text + copy */}
+              {nextMission.draftText && (
+                <div className="mt-3">
+                  {nextMission.draftTitle && (
+                    <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold mb-1.5">{nextMission.draftTitle}</p>
+                  )}
+                  <div className="bg-g-bg/60 border border-g-border/30 rounded-xl px-3 py-2.5 text-[11px] text-g-muted font-mono leading-relaxed whitespace-pre-line">
+                    {nextMission.draftText}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => copyToClipboard(nextMission.draftText!, nextMission.id)}
+                      className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-green/30 transition-all"
+                    >
+                      {copied === nextMission.id ? '✓ Kopiert' : 'Kopier'}
+                    </button>
+                    {nextMission.isManual && (
+                      <button
+                        onClick={() => markDone(nextMission.id)}
+                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all"
+                      >
+                        Gjort ✓
+                      </button>
+                    )}
+                    <Link href={nextMission.href} className="ml-auto text-[10px] text-g-muted/50 hover:text-g-green transition-colors">
+                      Åpne →
+                    </Link>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )}
 
-        {/* Forventet effekt + evaluering */}
-        {(brain.forventetEffekt || brain.evaluering) && (
-          <div className="flex divide-x divide-g-border/30 border-t border-g-border/30">
-            {brain.forventetEffekt && (
-              <div className="flex-1 px-5 py-3">
-                <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold mb-1">Forventet effekt</p>
-                <p className="text-[11px] text-g-muted leading-snug">{brain.forventetEffekt}</p>
+              {/* No draft — just action buttons */}
+              {!nextMission.draftText && (
+                <div className="mt-3 flex items-center gap-2">
+                  <Link href={nextMission.href}
+                    className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all">
+                    Åpne →
+                  </Link>
+                  {nextMission.isManual && (
+                    <button
+                      onClick={() => markDone(nextMission.id)}
+                      className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-green/30 transition-all"
+                    >
+                      Gjort ✓
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Mission checklist */}
+            {missions.length > 1 && (
+              <div className="px-5 pb-3 border-t border-g-border/20 pt-3">
+                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  {missions.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => m.isManual && !m.done ? markDone(m.id) : undefined}
+                      className={`text-[10px] leading-snug ${
+                        m.done          ? 'text-g-muted/35 line-through' :
+                        m.id === nextMission.id ? 'text-g-green font-bold' :
+                        'text-g-muted/55'
+                      }`}
+                    >
+                      {m.done ? '✓' : m.id === nextMission.id ? '→' : '○'} {m.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
-            {brain.evaluering && (
-              <div className="flex-1 px-5 py-3">
-                <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold mb-1">Slik evaluerer vi</p>
-                <p className="text-[11px] text-g-muted leading-snug">{brain.evaluering}</p>
+
+            {/* AI tip as supporting context */}
+            {brain.kilde && brain.anbefaling && brain.anbefaling !== 'Alle systemer aktive — overvåker stream.' && (
+              <div className="px-5 pb-4 border-t border-g-border/10 pt-3">
+                <p className="text-[10px] text-g-muted/35 uppercase tracking-wider font-bold mb-1">AI observerer</p>
+                <p className="text-[11px] text-g-muted/60 leading-snug">{brain.anbefaling}</p>
               </div>
             )}
-          </div>
+
+            {brain.selfCorrectionNote && (
+              <div className="mx-5 mb-3 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
+                <p className="text-[11px] text-yellow-400 font-bold">↺ {brain.selfCorrectionNote}</p>
+              </div>
+            )}
+          </>
+        ) : (
+          /* All missions done — AI runs the show */
+          <>
+            {brain.selfCorrectionNote && (
+              <div className="mx-5 mt-4 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
+                <p className="text-[11px] text-yellow-400 font-bold">↺ {brain.selfCorrectionNote}</p>
+              </div>
+            )}
+            <div className="px-5 py-4">
+              {missions.length > 0 && (
+                <p className="text-[10px] text-g-green/60 font-bold uppercase tracking-wider mb-3">✓ Alle oppdrag gjort — AI overvåker</p>
+              )}
+              <Link href={brain.href} className="block group">
+                <p className="text-[15px] font-bold text-g-text leading-snug group-hover:text-g-green transition-colors">
+                  {brain.anbefaling}
+                </p>
+              </Link>
+              {brain.hvorfor && (
+                <div className="mt-3">
+                  <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold mb-1">Hvorfor</p>
+                  <p className="text-sm text-g-muted leading-relaxed">{brain.hvorfor}</p>
+                </div>
+              )}
+              {brain.avvistAlternativer.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold">Vurderte, men valgte bort</p>
+                  {brain.avvistAlternativer.map((alt, i) => (
+                    <div key={i} className="flex items-start gap-2 px-3 py-2 bg-g-bg/30 rounded-xl border border-g-border/20">
+                      <XCircle size={11} className="text-g-muted/30 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-g-muted/70 leading-snug truncate">{alt.title}</p>
+                        <p className="text-[10px] text-g-muted/40 leading-snug mt-0.5">{alt.grunn}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {(brain.forventetEffekt || brain.evaluering) && (
+              <div className="flex divide-x divide-g-border/30 border-t border-g-border/30">
+                {brain.forventetEffekt && (
+                  <div className="flex-1 px-5 py-3">
+                    <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold mb-1">Forventet effekt</p>
+                    <p className="text-[11px] text-g-muted leading-snug">{brain.forventetEffekt}</p>
+                  </div>
+                )}
+                {brain.evaluering && (
+                  <div className="flex-1 px-5 py-3">
+                    <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold mb-1">Slik evaluerer vi</p>
+                    <p className="text-[11px] text-g-muted leading-snug">{brain.evaluering}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* Spillmønster + Confidence breakdown */}
