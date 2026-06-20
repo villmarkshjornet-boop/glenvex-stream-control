@@ -44,6 +44,7 @@ import { startWorkspaceManager } from './lib/workspaceManager';
 import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
 import { initCreatorBrain, getBrainState } from './lib/creatorBrain';
 import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate } from './lib/streamStateSync';
+import { startLiveAgent, stopLiveAgent } from './lib/liveAgent';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
@@ -442,6 +443,10 @@ async function checkLive() {
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_live', importance_score: 100, metadata: { title: stream.title, game: stream.game, streamId: stream.id } });
       // Phase 2: double-write to Creator State (existing streamHistory unchanged)
       onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
+      // Phase Live Agent V2: start continuous AI producer loop
+      const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+      const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
+      startLiveAgent(stream.id, twitchLogin, wsId);
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
@@ -449,6 +454,10 @@ async function checkLive() {
         addLog('info', `Stream Coach: gjenopprettet session for pågående stream "${stream.title}"`, 'OK');
         // Phase 2: restore Creator State on bot restart during live stream
         onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
+        // Phase Live Agent V2: resume live agent on bot restart during active stream
+        const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+        const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
+        startLiveAgent(stream.id, twitchLogin, wsId);
       }
       updateSession(stream.viewerCount ?? 0);
       onViewerUpdate(stream.viewerCount ?? 0);
@@ -456,6 +465,7 @@ async function checkLive() {
       saveSettings({ lastNotifiedStreamId: null });
       await endSession(0);
       onStreamOffline();
+      stopLiveAgent();
       logBotEvent('stream_offline', {});
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
       logSystemEvent({

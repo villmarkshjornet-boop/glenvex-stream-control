@@ -693,3 +693,14 @@ export function stopTwitchBot() {
   client?.disconnect();
   client = null;
 }
+
+// ─── Live Agent accessors ─────────────────────────────────────────────────────
+// Read-only snapshots of chat state for the live agent loop.
+
+export function getRecentChatLines(): string[] {
+  return [..._recentChatLines];
+}
+
+export function getChatMsgsLastMinute(): number {
+  return _chatMsgsLastMinute;
+}

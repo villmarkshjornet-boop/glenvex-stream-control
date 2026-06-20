@@ -151,7 +151,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners] = await Promise.all([
+  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners, liveAgentTipsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -230,10 +230,20 @@ export async function GET() {
 
     // Partnere – for "Fremhev partner"-handling i Action Center
     getPartners(),
+
+    // Live Agent V2 — aktive tips (ikke-utløpte) fra live agent-loopen
+    db.from('live_agent_tips')
+      .select('id,category,message,reasoning,priority,expires_at,created_at')
+      .eq('workspace_id', ws)
+      .gt('expires_at', new Date().toISOString())
+      .order('priority', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(10),
   ]);
 
-  const vods: any[]       = vodsRes.data ?? [];
-  const highlights: any[] = highlightsRes.data ?? [];
+  const vods: any[]          = vodsRes.data ?? [];
+  const liveAgentTips: any[] = liveAgentTipsRes.data ?? [];
+  const highlights: any[]    = highlightsRes.data ?? [];
   const contentCopy: any[] = contentCopyRes.data ?? [];
   const captionByHighlight = new Set<string>(
     contentCopy
@@ -667,6 +677,27 @@ export async function GET() {
     });
   }
 
+  // Live Agent V2 — inject AI tips from continuous loop into action center
+  for (const tip of liveAgentTips.slice(0, 4)) {
+    const categoryHref: Record<string, string> = {
+      chat:      '/',
+      viewers:   '/',
+      promotion: '/partner-hub',
+      raid:      '/raid-manager',
+      sponsor:   '/partner-hub',
+      content:   '/content-factory-admin',
+      general:   '/',
+    };
+    actionCenter.push({
+      type:      `live_agent_${tip.category}`,
+      priority:  (tip.priority ?? 50) >= 75 ? 'action' : 'action',
+      title:     tip.message,
+      detail:    tip.reasoning ?? undefined,
+      href:      categoryHref[tip.category] ?? '/',
+      createdAt: tip.created_at,
+    });
+  }
+
   if (msTilNeste != null && msTilNeste > 0) {
     actionCenter.push({
       type: 'next_stream',
@@ -709,6 +740,7 @@ export async function GET() {
   // ── Kontrollsenter: subsystem-status fra system_events siste 24t ─────────
   const SUBSYSTEMER = [
     { key: 'live',         label: 'Live Detection',      events: ['LIVE_DETECTED', 'STREAM_OFFLINE_DETECTED', 'POST_STREAM_STARTED', 'LIVE_DETECTION_FAILED'] },
+    { key: 'live_agent',  label: 'Live Agent V2',       events: ['LIVE_AGENT_STARTED', 'LIVE_AGENT_STOPPED', 'LIVE_AGENT_HEARTBEAT', 'AI_TICK_COMPLETED', 'RAID_EVALUATION_COMPLETED', 'LIVE_AGENT_MODULE_ERROR'] },
     { key: 'pre_hype',     label: 'Pre-hype',            events: ['PREHYPE_SENT', 'PREHYPE_SCHEDULED', 'STREAM_CYCLE_RESET'] },
     { key: 'vod',          label: 'VOD Pipeline',        events: ['VOD_AUTO_QUEUE_STARTED', 'VOD_NOT_FOUND', 'VOD_LOOKUP_STARTED', 'VOD_DETECTED', 'VOD_PIPELINE_DONE'] },
     { key: 'discovery',    label: 'Highlight Discovery', events: ['DISCOVERY_STARTED', 'DISCOVERY_COMPLETED'] },
@@ -813,6 +845,7 @@ export async function GET() {
     { key: 'aggregator', label: 'AI Learning',     sources: ['learning_aggregator'], windowH: 12, passive: false },
     { key: 'content',    label: 'Content Factory', sources: ['content_factory'],     windowH: 24, passive: false },
     { key: 'cron',       label: 'Cron Jobs',       sources: ['cron'],                windowH: 24, passive: false },
+    { key: 'live_agent', label: 'Live Agent',      sources: ['live_agent'],          windowH: 2,  passive: false },
     { key: 'api',        label: 'API Monitor',     sources: ['api_monitor'],         windowH: 24, passive: true  },
     { key: 'database',   label: 'Database',        sources: ['database'],            windowH: 24, passive: true  },
     { key: 'recovery',   label: 'Recovery Engine', sources: ['recovery_engine'],     windowH: 24, passive: false },
@@ -864,6 +897,7 @@ export async function GET() {
     coverage,
     heroStream,
     actionCenter,
+    liveAgentTips,
     recentStreams,
     debug,
     ts: new Date().toISOString(),
