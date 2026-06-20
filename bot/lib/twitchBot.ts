@@ -72,6 +72,10 @@ let _sistePartnerPromo = 0;
 let _promoerDenneStream = 0;
 let _sisteRaidTidspunkt: number | null = null;
 
+// ─── External chat message handlers (for Poll Manager vote collection) ────────
+type ExternalChatHandler = (username: string, message: string) => void;
+const _externalChatHandlers = new Set<ExternalChatHandler>();
+
 // ─── Multi-tenant ekstern kanal-ruting ────────────────────────────────────────
 
 type ExternalChannelHandler = (channel: string, username: string, text: string, tags: tmi.ChatUserstate) => void;
@@ -611,6 +615,11 @@ export function startTwitchBot() {
     _recentChatLines.push(`${tags.username}: ${tekst}`);
     if (_recentChatLines.length > 30) _recentChatLines = _recentChatLines.slice(-30);
 
+    // Notify external handlers (e.g. Poll Manager vote collection)
+    if (_externalChatHandlers.size > 0) {
+      _externalChatHandlers.forEach(h => { try { h(tags.username, tekst); } catch {} });
+    }
+
     const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
 
     // ── Cross-platform kommandoer (BEFORE vanlig kommando-filter) ───────────
@@ -703,4 +712,24 @@ export function getRecentChatLines(): string[] {
 
 export function getChatMsgsLastMinute(): number {
   return _chatMsgsLastMinute;
+}
+
+// ─── Poll Manager hooks ───────────────────────────────────────────────────────
+
+export function sendTwitchChatMessage(msg: string): void {
+  if (!client) return;
+  client.say(`#${KANAL}`, msg).catch(() => {});
+  logSystemEvent({
+    source: 'twitch_bot', event_type: 'BOT_CHAT_MESSAGE',
+    title: msg.slice(0, 100), severity: 'info',
+    metadata: { trigger: 'poll_manager', channel: KANAL },
+  });
+}
+
+export function onTwitchChatMessage(handler: (username: string, message: string) => void): void {
+  _externalChatHandlers.add(handler);
+}
+
+export function offTwitchChatMessage(handler: (username: string, message: string) => void): void {
+  _externalChatHandlers.delete(handler);
 }

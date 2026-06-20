@@ -151,7 +151,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners, liveAgentTipsRes] = await Promise.all([
+  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners, liveAgentTipsRes, pollEventsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -239,10 +239,23 @@ export async function GET() {
       .order('priority', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(10),
+
+    // Poll Learning Engine — aktiv poll + siste fullførte poll
+    db.from('poll_events')
+      .select('id,poll_type,question,options,winner,total_votes,status,reason,created_at,closed_at')
+      .eq('workspace_id', ws)
+      .order('created_at', { ascending: false })
+      .limit(5),
   ]);
 
   const vods: any[]          = vodsRes.data ?? [];
   const liveAgentTips: any[] = liveAgentTipsRes.data ?? [];
+  const pollEventsAll: any[] = pollEventsRes.data ?? [];
+  const activePoll = pollEventsAll.find(p => p.status === 'active') ?? null;
+  const lastClosedPoll = pollEventsAll.find(p => p.status === 'closed') ?? null;
+  const pollLearning = lastClosedPoll && lastClosedPoll.winner && lastClosedPoll.total_votes > 0
+    ? `AI lærte: ${lastClosedPoll.total_votes > 0 ? Math.round((lastClosedPoll.options?.find((o: any) => o.label === lastClosedPoll.winner)?.twitchVotes + lastClosedPoll.options?.find((o: any) => o.label === lastClosedPoll.winner)?.discordVotes || 0) / lastClosedPoll.total_votes * 100) : 0}% valgte "${lastClosedPoll.winner}" på spørsmålet "${lastClosedPoll.question}"`
+    : null;
   const highlights: any[]    = highlightsRes.data ?? [];
   const contentCopy: any[] = contentCopyRes.data ?? [];
   const captionByHighlight = new Set<string>(
@@ -744,6 +757,7 @@ export async function GET() {
   const SUBSYSTEMER = [
     { key: 'live',         label: 'Live Detection',      events: ['LIVE_DETECTED', 'STREAM_OFFLINE_DETECTED', 'POST_STREAM_STARTED', 'LIVE_DETECTION_FAILED'] },
     { key: 'live_agent',  label: 'Live Agent V2',       events: ['LIVE_AGENT_STARTED', 'LIVE_AGENT_STOPPED', 'LIVE_AGENT_HEARTBEAT', 'AI_TICK_COMPLETED', 'RAID_EVALUATION_COMPLETED', 'LIVE_AGENT_MODULE_ERROR'] },
+    { key: 'poll_manager', label: 'Poll Manager',       events: ['POLL_MANAGER_STARTED', 'POLL_MANAGER_STOPPED', 'POLL_CREATED', 'POLL_RESULT_COLLECTED', 'POLL_LEARNING_SAVED', 'POLL_SKIPPED', 'POLL_POST_FAILED'] },
     { key: 'pre_hype',     label: 'Pre-hype',            events: ['PREHYPE_SENT', 'PREHYPE_SCHEDULED', 'STREAM_CYCLE_RESET'] },
     { key: 'vod',          label: 'VOD Pipeline',        events: ['VOD_AUTO_QUEUE_STARTED', 'VOD_NOT_FOUND', 'VOD_LOOKUP_STARTED', 'VOD_DETECTED', 'VOD_PIPELINE_DONE'] },
     { key: 'discovery',    label: 'Highlight Discovery', events: ['DISCOVERY_STARTED', 'DISCOVERY_COMPLETED'] },
@@ -911,6 +925,28 @@ export async function GET() {
     actionCenter,
     liveAgentTips,
     twitchAuthStatus,
+    pollManager: {
+      activePoll: activePoll ? {
+        id:        activePoll.id,
+        pollType:  activePoll.poll_type,
+        question:  activePoll.question,
+        options:   activePoll.options,
+        createdAt: activePoll.created_at,
+        reason:    activePoll.reason ?? null,
+      } : null,
+      lastPoll: lastClosedPoll ? {
+        id:         lastClosedPoll.id,
+        pollType:   lastClosedPoll.poll_type,
+        question:   lastClosedPoll.question,
+        winner:     lastClosedPoll.winner ?? null,
+        totalVotes: lastClosedPoll.total_votes ?? 0,
+        options:    lastClosedPoll.options,
+        closedAt:   lastClosedPoll.closed_at,
+        reason:     lastClosedPoll.reason ?? null,
+      } : null,
+      pollLearning,
+      totalPollsThisStream: pollEventsAll.length,
+    },
     recentStreams,
     debug,
     ts: new Date().toISOString(),

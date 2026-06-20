@@ -16,7 +16,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -45,6 +45,7 @@ import { startDiscordHistoryBootstrap } from './lib/discordHistoryBootstrap';
 import { initCreatorBrain, getBrainState } from './lib/creatorBrain';
 import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate } from './lib/streamStateSync';
 import { startLiveAgent, stopLiveAgent } from './lib/liveAgent';
+import { startPollManager, stopPollManager } from './lib/pollManager';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import OpenAI from 'openai';
 
@@ -188,6 +189,63 @@ async function finnCommunityKanal(): Promise<TextChannel | null> {
   const ch = client.channels.cache.get(id);
   return ch instanceof TextChannel ? ch : null;
   // No public fallback — missing community channel = skip, not post to chat
+}
+
+// ─── Poll Manager starter (med Discord-callbacks) ────────────────────────────
+
+function startPollManagerForStream(streamId: string, workspaceId: string, streamStartedAt: number): void {
+  // Get Discord poll channel asynchronously; if it fails, poll runs Twitch-only
+  finnChatKanal().then(pollKanal => {
+    startPollManager({
+      workspaceId,
+      streamId,
+      streamStartedAt,
+      chatMsgsPerMin: getChatMsgsLastMinute,
+      sendTwitchChat: (msg) => { sendTwitchChatMessage(msg); },
+      onChatMessage:  (h) => onTwitchChatMessage(h),
+      offChatMessage: (h) => offTwitchChatMessage(h),
+
+      // Discord callbacks — only wired if channel found
+      discordSendPoll: pollKanal
+        ? async (embed) => {
+            try {
+              const msg = await pollKanal.send(embed as any);
+              return msg.id;
+            } catch { return null; }
+          }
+        : undefined,
+
+      discordAddReaction: pollKanal
+        ? async (messageId, emoji) => {
+            try {
+              const msg = await pollKanal.messages.fetch(messageId);
+              await msg.react(emoji);
+            } catch {}
+          }
+        : undefined,
+
+      discordGetReactionCount: pollKanal
+        ? async (messageId, emoji) => {
+            try {
+              const msg = await pollKanal.messages.fetch(messageId);
+              const r   = msg.reactions.cache.find(rx => rx.emoji.name === emoji || rx.emoji.toString() === emoji);
+              return r?.count ?? 0;
+            } catch { return 0; }
+          }
+        : undefined,
+    });
+  }).catch(() => {
+    // Discord unavailable — start Poll Manager with Twitch-only
+    startPollManager({
+      workspaceId,
+      streamId,
+      streamStartedAt,
+      chatMsgsPerMin: getChatMsgsLastMinute,
+      sendTwitchChat: (msg) => { sendTwitchChatMessage(msg); },
+      onChatMessage:  (h) => onTwitchChatMessage(h),
+      offChatMessage: (h) => offTwitchChatMessage(h),
+    });
+  });
 }
 
 // ─── Community Manager wrappers ───────────────────────────────────────────────
@@ -436,17 +494,20 @@ async function checkLive() {
 
       addToMemory({ type: 'live-varsel', innhold: stream.title ?? '' });
       tweetLiveNå(stream).catch(() => {});
-      await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
+      if (process.env.ENABLE_RP_CONTEXT_ANALYSIS === 'true') {
+        await analyserStreamKontekst(stream.title ?? '', stream.game ?? '');
+      }
       await postPreLiveHype(stream.title ?? '', stream.game ?? '');
       updateStreamSyklus({ stream_start_at: new Date().toISOString(), sist_live_id: stream.id }).catch(() => {});
       logBotEvent('stream_live', { tittel: stream.title ?? '', spill: stream.game ?? '' });
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_live', importance_score: 100, metadata: { title: stream.title, game: stream.game, streamId: stream.id } });
       // Phase 2: double-write to Creator State (existing streamHistory unchanged)
       onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
-      // Phase Live Agent V2: start continuous AI producer loop
+      // Phase Live Agent V2 + Poll Manager: start continuous AI producer loop
       const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
       const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
       startLiveAgent(stream.id, twitchLogin, wsId);
+      startPollManagerForStream(stream.id, wsId, Date.now());
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
@@ -454,10 +515,11 @@ async function checkLive() {
         addLog('info', `Stream Coach: gjenopprettet session for pågående stream "${stream.title}"`, 'OK');
         // Phase 2: restore Creator State on bot restart during live stream
         onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
-        // Phase Live Agent V2: resume live agent on bot restart during active stream
+        // Phase Live Agent V2 + Poll Manager: resume on bot restart during active stream
         const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
         const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
         startLiveAgent(stream.id, twitchLogin, wsId);
+        startPollManagerForStream(stream.id, wsId, new Date(stream.startedAt ?? Date.now()).getTime());
       }
       updateSession(stream.viewerCount ?? 0);
       onViewerUpdate(stream.viewerCount ?? 0);
@@ -466,6 +528,7 @@ async function checkLive() {
       await endSession(0);
       onStreamOffline();
       stopLiveAgent();
+      stopPollManager();
       logBotEvent('stream_offline', {});
       logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
       logSystemEvent({
@@ -1388,6 +1451,45 @@ async function sjekkUkentligStats() {
 
 // ─── Clip-deling ─────────────────────────────────────────────────────────────
 
+const CLIP_COPY_VARIANTS = [
+  'Har du sett dette klippet? 👀',
+  'Fikk du med deg dette øyeblikket?',
+  'Dette skjedde på streamen 👀',
+  'Nytt høydepunkt fra streamen!',
+  'Se dette fra siste sending',
+  'Her er et nytt øyeblikk fra streamen',
+  'Dette må du få med deg 🔥',
+  'Et klipp du ikke vil gå glipp av',
+];
+
+const VOD_COPY_VARIANTS = [
+  'Hele VOD-en er klar – fikk du den med deg?',
+  'Sendingen er tilgjengelig nå! Se det du gikk glipp av',
+  'Full replay fra gårsdagens stream er klar 🎥',
+  'Gikk du glipp av streamen? Her er VOD-en',
+  'Hele sendingen er klar – se den her',
+];
+
+let _sisteClipCopyIndex = -1;
+let _sisteVodCopyIndex  = -1;
+
+function velgClipCopy(erVod = false): string {
+  const variants = erVod ? VOD_COPY_VARIANTS : CLIP_COPY_VARIANTS;
+  const sisteIdx = erVod ? _sisteVodCopyIndex : _sisteClipCopyIndex;
+  let idx = Math.floor(Math.random() * variants.length);
+  // Avoid same index twice in a row
+  if (idx === sisteIdx) idx = (idx + 1) % variants.length;
+  if (erVod) _sisteVodCopyIndex = idx; else _sisteClipCopyIndex = idx;
+  const variant = variants[idx];
+  logSystemEvent({
+    source: 'discord_bot', event_type: 'CONTENT_COPY_SELECTED',
+    title: `Content copy valgt: "${variant}"`,
+    severity: 'info',
+    metadata: { contentType: erVod ? 'vod' : 'clip', variant, variantIndex: idx },
+  });
+  return variant;
+}
+
 async function postTopClip() {
   const kanal = await finnClipsKanal();
   if (!kanal) return;
@@ -1399,15 +1501,17 @@ async function postTopClip() {
     if (!nyClip) return;
     postedeClips.add(nyClip.id);
 
+    const copy = velgClipCopy(false);
+
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)
       .setTitle(`🎬 ${nyClip.title}`)
-      .setDescription(`👀 **${nyClip.viewCount}** visninger • ⏱️ ${Math.round(nyClip.duration)}s\n\n[Se clipsen her](${nyClip.url})`)
+      .setDescription(`👀 **${nyClip.viewCount}** visninger • ⏱️ ${Math.round(nyClip.duration)}s\n\n[Se klippet her](${nyClip.url})`)
       .setImage(nyClip.thumbnailUrl)
       .setFooter({ text: 'Stream Control • Auto Clip' })
       .setTimestamp();
 
-    await discordSend(kanal, { content: '🔥 Har dere sett denne clipsen?', embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
+    await discordSend(kanal, { content: copy, embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
     addLog('success', `Clip postet: ${nyClip.title}`, 'OK');
   } catch (error) {
     addLog('error', `Clip-post feil: ${(error as Error).message}`, 'ERROR');
@@ -1832,6 +1936,29 @@ client.once('clientReady', () => {
   logWorkspaceIdDiagnose().catch(() => {});
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
+
+  // Post startup changelog to admin channel (delayed 15s to let channels populate)
+  setTimeout(async () => {
+    try {
+      const adminKanal = await finnAdminKanal();
+      if (!adminKanal) return;
+      const { EmbedBuilder: StartEmbed } = await import('discord.js');
+      const embed = new StartEmbed()
+        .setColor(0x00ff41)
+        .setTitle(`🤖 ${BOT_BRAND} er klar`)
+        .setDescription(
+          '**Siste oppdateringer:**\n' +
+          '• Poll Learning Engine V1 — GLENVEX kjører nå polls automatisk under stream\n' +
+          '• Live Agent V2 — kontinuerlig AI-produsent starter når du går live\n' +
+          '• Clip-copy roterer — norske tekster, aldri samme to ganger\n' +
+          '• Twitch auth retry — automatisk fornyer token ved 401\n' +
+          '• FutureRP/GTA-spam fjernet\n' +
+          '\n_Alle moduler er aktive. BOT_STARTED loggett._'
+        )
+        .setFooter({ text: `GLENVEX Creator OS • ${new Date().toLocaleString('no-NO', { timeZone: 'Europe/Oslo' })}` });
+      await adminKanal.send({ embeds: [embed] });
+    } catch {}
+  }, 15_000);
   lasterMedlemmerFraSupabase().catch(() => {});
 
   // VOD startup recovery: if CONTENT_FACTORY_ENABLED and stream is offline at startup,
