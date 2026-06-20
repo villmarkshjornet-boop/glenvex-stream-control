@@ -582,11 +582,14 @@ export async function GET() {
   }
 
   const ATTENTION_EVENT_TYPES: Record<string, { severity: 'warning' | 'error'; label: string; href: string }> = {
-    VOD_NOT_FOUND:                 { severity: 'warning', label: 'VOD ikke funnet etter stream',           href: '/content-factory-admin' },
-    DISCORD_ADMIN_CHANNEL_MISSING: { severity: 'warning', label: 'Discord admin-kanal mangler',             href: '/discord' },
-    TWITCH_AUTH_ERROR:             { severity: 'error',   label: 'Twitch-autentisering feilet',             href: '/innstillinger' },
-    STREAM_COACH_FAILED:           { severity: 'error',   label: 'Stream Coach feilet',                     href: '/stream-coach' },
-    STREAM_HISTORY_UPSERT_FAILED:  { severity: 'error',   label: 'Stream History-lagring feilet',           href: '/stream-coach' },
+    VOD_NOT_FOUND:                  { severity: 'warning', label: 'VOD ikke funnet etter stream',                               href: '/content-factory-admin' },
+    DISCORD_ADMIN_CHANNEL_MISSING:  { severity: 'warning', label: 'Discord admin-kanal mangler',                                href: '/discord' },
+    TWITCH_AUTH_ERROR:              { severity: 'error',   label: 'Twitch-autentisering feilet',                                href: '/innstillinger' },
+    TWITCH_AUTH_TOKEN_FETCH_FAILED: { severity: 'error',   label: 'Twitch token ugyldig — oppdater TWITCH_CLIENT_SECRET',       href: '/innstillinger' },
+    LIVE_DETECTION_AUTH_FAILED:     { severity: 'error',   label: 'Live-deteksjon feilet: Twitch auth — koble Twitch på nytt',  href: '/innstillinger' },
+    TWITCH_RATE_LIMIT:              { severity: 'warning', label: 'Twitch API rate limit',                                      href: '/innstillinger' },
+    STREAM_COACH_FAILED:            { severity: 'error',   label: 'Stream Coach feilet',                                        href: '/stream-coach' },
+    STREAM_HISTORY_UPSERT_FAILED:   { severity: 'error',   label: 'Stream History-lagring feilet',                             href: '/stream-coach' },
   };
   for (const [eventType, def] of Object.entries(ATTENTION_EVENT_TYPES)) {
     const e = systemEvents.find((e: any) => e.event_type === eventType);
@@ -869,6 +872,15 @@ export async function GET() {
   // ── Aktivitetsfeed uten heartbeat-spam ─────────────────────────────────────
   const visibleSystemEvents = systemEvents.filter((e: any) => !/HEARTBEAT/i.test(e.event_type));
 
+  // ── Twitch auth status (derived from recent system_events) ───────────────────
+  const authErrorTypes = new Set(['TWITCH_AUTH_ERROR', 'TWITCH_AUTH_TOKEN_FETCH_FAILED', 'LIVE_DETECTION_AUTH_FAILED']);
+  const recentAuthError = systemEvents.find((e: any) => authErrorTypes.has(e.event_type));
+  const twitchAuthStatus: 'ok' | 'token_fetch_failed' | 'auth_failed' | 'unknown' =
+    !recentAuthError ? 'ok' :
+    recentAuthError.event_type === 'TWITCH_AUTH_TOKEN_FETCH_FAILED' ? 'token_fetch_failed' :
+    recentAuthError.event_type === 'LIVE_DETECTION_AUTH_FAILED'     ? 'auth_failed' :
+    'unknown';
+
   return NextResponse.json({
     nyesteInnsikter: nyesteInnsikter.map(i => ({
       title: i.title, summary: i.summary,
@@ -898,6 +910,7 @@ export async function GET() {
     heroStream,
     actionCenter,
     liveAgentTips,
+    twitchAuthStatus,
     recentStreams,
     debug,
     ts: new Date().toISOString(),

@@ -16,12 +16,23 @@ export interface ChannelStats {
   topClips: ClipInfo[];
 }
 
-interface TwitchToken {
-  access_token: string;
-  expires_at: number;
+// ─── Typed error so callers can distinguish auth failures from other errors ───
+
+export class TwitchApiError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    public readonly kind: 'token_fetch_failed' | 'auth_failed' | 'rate_limit' | 'api_error',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TwitchApiError';
+  }
 }
 
-let cachedToken: TwitchToken | null = null;
+// ─── App access token (client credentials, not user OAuth) ────────────────────
+
+interface CachedToken { access_token: string; expires_at: number; }
+let cachedToken: CachedToken | null = null;
 
 async function getAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.expires_at > Date.now() + 60_000) {
@@ -32,61 +43,79 @@ async function getAccessToken(): Promise<string> {
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error('TWITCH_CLIENT_ID og TWITCH_CLIENT_SECRET mangler i .env');
+    throw new TwitchApiError(0, 'token_fetch_failed',
+      'TWITCH_CLIENT_ID og TWITCH_CLIENT_SECRET mangler i miljøet');
   }
 
   const res = await fetch(
     `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-    { method: 'POST' }
+    { method: 'POST' },
   );
 
   if (!res.ok) {
-    throw new Error(`Twitch auth feilet: HTTP ${res.status}`);
+    throw new TwitchApiError(res.status, 'token_fetch_failed',
+      res.status === 401 || res.status === 400
+        ? `Twitch token feilet: HTTP ${res.status} — sjekk TWITCH_CLIENT_SECRET i Railway`
+        : `Twitch token feilet: HTTP ${res.status}`,
+    );
   }
 
   const data = await res.json() as { access_token: string; expires_in: number };
-  cachedToken = {
-    access_token: data.access_token,
-    expires_at: Date.now() + data.expires_in * 1000,
-  };
-
+  cachedToken = { access_token: data.access_token, expires_at: Date.now() + data.expires_in * 1000 };
   return cachedToken.access_token;
 }
+
+// Exported so bot-side code (raid evaluator etc.) can share the same app token
+// instead of relying on TWITCH_ACCESS_TOKEN (user OAuth) which expires.
+export async function getAppAccessToken(): Promise<string> {
+  return getAccessToken();
+}
+
+// ─── Helix helper: auto-retry once on 401 (handles revoked/rotated tokens) ───
+
+async function helixGet(clientId: string, url: string, isRetry = false): Promise<unknown> {
+  const token = await getAccessToken();
+  const res = await fetch(url, {
+    headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+  });
+
+  if (res.status === 401) {
+    if (!isRetry) {
+      cachedToken = null;           // invalidate stale token
+      return helixGet(clientId, url, true);
+    }
+    throw new TwitchApiError(401, 'auth_failed',
+      'Twitch Helix autentisering feilet etter retry (401) — sjekk TWITCH_CLIENT_SECRET i Railway');
+  }
+
+  if (res.status === 429) {
+    throw new TwitchApiError(429, 'rate_limit', 'Twitch API rate limit: HTTP 429');
+  }
+
+  if (!res.ok) {
+    throw new TwitchApiError(res.status, 'api_error', `Twitch API feil: HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function getStreamInfo(username?: string): Promise<StreamInfo> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   const twitchUsername = username || process.env.TWITCH_USERNAME;
-  // Never fall back to a hardcoded channel — return offline if no identity available
   if (!twitchUsername) return { isLive: false, streamUrl: '', userName: '' };
-  const twitchUrl =
-    process.env.TWITCH_URL || `https://twitch.tv/${twitchUsername}`;
 
-  if (!clientId) {
-    return { isLive: false, streamUrl: twitchUrl, userName: twitchUsername };
-  }
+  const twitchUrl = process.env.TWITCH_URL || `https://twitch.tv/${twitchUsername}`;
+  if (!clientId) return { isLive: false, streamUrl: twitchUrl, userName: twitchUsername };
 
-  const token = await getAccessToken();
-
-  const res = await fetch(
+  const data = await helixGet(
+    clientId,
     `https://api.twitch.tv/helix/streams?user_login=${encodeURIComponent(twitchUsername)}`,
-    {
-      headers: {
-        'Client-ID': clientId,
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  ) as { data: any[] };
 
-  if (!res.ok) {
-    throw new Error(`Twitch API feil: HTTP ${res.status}`);
-  }
-
-  const data = await res.json() as { data: any[] };
   const stream = data.data?.[0];
-
-  if (!stream) {
-    return { isLive: false, streamUrl: twitchUrl, userName: twitchUsername };
-  }
+  if (!stream) return { isLive: false, streamUrl: twitchUrl, userName: twitchUsername };
 
   const thumbnail = stream.thumbnail_url
     .replace('{width}', '1280')
@@ -110,76 +139,57 @@ export async function getBroadcasterId(username?: string): Promise<string | null
   const login = username || process.env.TWITCH_USERNAME;
   if (!clientId || !login) return null;
 
-  const token = await getAccessToken();
-  const res = await fetch(
-    `https://api.twitch.tv/helix/users?login=${encodeURIComponent(login)}`,
-    { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) return null;
-  const data = await res.json() as { data: { id: string }[] };
-  return data.data?.[0]?.id ?? null;
+  try {
+    const data = await helixGet(
+      clientId,
+      `https://api.twitch.tv/helix/users?login=${encodeURIComponent(login)}`,
+    ) as { data: { id: string }[] };
+    return data.data?.[0]?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getTopClips(broadcasterId: string, count = 5): Promise<ClipInfo[]> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   if (!clientId) return [];
 
-  const token = await getAccessToken();
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const res = await fetch(
-    `https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=${count}&started_at=${weekAgo}`,
-    { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) return [];
-
-  const data = await res.json() as { data: any[] };
-  return (data.data ?? []).map((c: any) => ({
-    id: c.id,
-    title: c.title,
-    url: c.url,
-    thumbnailUrl: c.thumbnail_url,
-    viewCount: c.view_count,
-    createdAt: c.created_at,
-    duration: c.duration,
-  }));
+  try {
+    const data = await helixGet(
+      clientId,
+      `https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=${count}&started_at=${weekAgo}`,
+    ) as { data: any[] };
+    return (data.data ?? []).map((c: any) => ({
+      id: c.id, title: c.title, url: c.url,
+      thumbnailUrl: c.thumbnail_url, viewCount: c.view_count,
+      createdAt: c.created_at, duration: c.duration,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function getChannelStats(broadcasterId: string): Promise<ChannelStats> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   if (!clientId) return { followerCount: 0, clipCount: 0, topClips: [] };
 
-  const token = await getAccessToken();
+  try {
+    const [followersData, clipsData] = await Promise.all([
+      helixGet(clientId, `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`),
+      helixGet(clientId, `https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=5`),
+    ]) as [{ total: number }, { data: any[] }];
 
-  const [followersRes, clipsRes] = await Promise.all([
-    fetch(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`,
-      { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` } }),
-    fetch(`https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=5`,
-      { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` } }),
-  ]);
+    const topClips: ClipInfo[] = (clipsData.data ?? []).map((c: any) => ({
+      id: c.id, title: c.title, url: c.url,
+      thumbnailUrl: c.thumbnail_url, viewCount: c.view_count,
+      createdAt: c.created_at, duration: c.duration,
+    }));
 
-  const followersData = followersRes.ok
-    ? await followersRes.json() as { total: number }
-    : { total: 0 };
-
-  const clipsData = clipsRes.ok
-    ? await clipsRes.json() as { data: any[] }
-    : { data: [] };
-
-  const topClips: ClipInfo[] = (clipsData.data ?? []).map((c: any) => ({
-    id: c.id,
-    title: c.title,
-    url: c.url,
-    thumbnailUrl: c.thumbnail_url,
-    viewCount: c.view_count,
-    createdAt: c.created_at,
-    duration: c.duration,
-  }));
-
-  return {
-    followerCount: followersData.total ?? 0,
-    clipCount: topClips.length,
-    topClips,
-  };
+    return { followerCount: followersData.total ?? 0, clipCount: topClips.length, topClips };
+  } catch {
+    return { followerCount: 0, clipCount: 0, topClips: [] };
+  }
 }
 
 export async function checkTwitchApiHealth(): Promise<boolean> {

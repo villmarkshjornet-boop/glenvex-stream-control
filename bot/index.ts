@@ -489,20 +489,30 @@ async function checkLive() {
     }
   } catch (error) {
     const msg = (error as Error).message ?? '';
-    const match = msg.match(/HTTP (\d{3})/);
-    const statusCode = match ? parseInt(match[1]) : null;
+    const isTwitchApiError = (error as any)?.name === 'TwitchApiError';
+    const kind: string | null = isTwitchApiError ? (error as any).kind : null;
+    const statusCode: number | null = isTwitchApiError
+      ? (error as any).statusCode || null
+      : (msg.match(/HTTP (\d{3})/) ? parseInt(msg.match(/HTTP (\d{3})/)![1]) : null);
+
     const eventType =
-      statusCode === 401 ? 'TWITCH_AUTH_ERROR' :
-      statusCode === 429 ? 'TWITCH_RATE_LIMIT' :
-      !statusCode        ? 'TWITCH_NETWORK_ERROR' :
-                           'LIVE_DETECTION_FAILED';
+      kind === 'token_fetch_failed' ? 'TWITCH_AUTH_TOKEN_FETCH_FAILED' :
+      kind === 'auth_failed'        ? 'LIVE_DETECTION_AUTH_FAILED' :
+      kind === 'rate_limit'         ? 'TWITCH_RATE_LIMIT' :
+      statusCode === 401            ? 'TWITCH_AUTH_ERROR' :
+      statusCode === 429            ? 'TWITCH_RATE_LIMIT' :
+      !statusCode                   ? 'TWITCH_NETWORK_ERROR' :
+                                      'LIVE_DETECTION_FAILED';
+
+    const isAuthError = kind === 'token_fetch_failed' || kind === 'auth_failed' || statusCode === 401;
+
     addLog('error', `Live-sjekk feil: ${msg}`, 'ERROR');
     logSystemEvent({
       source: 'twitch_bot',
       event_type: eventType,
-      title: `Live-deteksjon feilet: ${msg.slice(0, 100)}`,
+      title: `Live-deteksjon feilet: ${msg.slice(0, 120)}`,
       severity: statusCode === 429 ? 'warning' : 'error',
-      metadata: { error: msg.slice(0, 200), statusCode },
+      metadata: { error: msg.slice(0, 200), statusCode, kind, isAuthError },
     });
   }
 }

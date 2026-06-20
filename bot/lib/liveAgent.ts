@@ -17,7 +17,7 @@ import { getBotDb, WORKSPACE_ID } from './supabase';
 import { logSystemEvent } from './systemEvents';
 import { getCreatorState } from './creatorState';
 import { getRecentChatLines, getChatMsgsLastMinute } from './twitchBot';
-import { getStreamInfo } from '@/lib/twitch';
+import { getAppAccessToken } from '@/lib/twitch';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -309,11 +309,12 @@ async function runRaidEvaluator(
   if (!game || currentViewers <= 0) return;
 
   const clientId = process.env.TWITCH_CLIENT_ID;
-  const accessToken = process.env.TWITCH_ACCESS_TOKEN;
-  if (!clientId || !accessToken) return;
+  if (!clientId) return;
 
   try {
-    // Fetch streams in same game
+    // Use app access token (client credentials) — never expires during a stream session
+    const accessToken = await getAppAccessToken();
+
     const gameRes = await fetch(
       `https://api.twitch.tv/helix/games?name=${encodeURIComponent(game)}`,
       { headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${accessToken}` } }
@@ -337,7 +338,7 @@ async function runRaidEvaluator(
       .slice(0, 5);
 
     if (candidates.length === 0) {
-      // Fallback: English streams
+      // Fallback: international streams in same game
       const fallbackRes = await fetch(
         `https://api.twitch.tv/helix/streams?game_id=${gameId}&first=20`,
         { headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${accessToken}` } }
