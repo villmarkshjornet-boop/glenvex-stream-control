@@ -339,9 +339,11 @@ function buildLearning(live: LiveData): string[] {
   ].filter(Boolean).slice(0, 4) as string[];
 }
 
-// ── Mission Queue — deterministic task list for the stream ────────────────────
-// CEO Brain's primary job: find the next uncompleted mission and show it
-// with pre-drafted content and one-click actions.
+// ── Mission Queue — dynamic task orchestration ────────────────────────────────
+// CEO Brain asks one question each tick: "What is the biggest bottleneck right now?"
+// The answer determines the entire queue — which changes per stream.
+
+type MissionPriority = 'kritisk' | 'høy' | 'normal';
 
 interface StreamMission {
   id:               string;
@@ -351,9 +353,72 @@ interface StreamMission {
   draftText?:       string;
   forventetEffekt?: string;
   href:             string;
-  triggerAfterMin:  number;
   done:             boolean;
-  isManual:         boolean;  // needs user to click "Gjort" vs auto-detectable
+  isManual:         boolean;
+  priority:         MissionPriority;
+}
+
+interface DagensPlan {
+  mulighet: string | null;
+  risiko:   string | null;
+  fokus:    string | null;
+}
+
+// Derives today's opportunity and risk from existing stream history + lærdom
+function buildDagensPlan(live: LiveData, slow: SlowData): DagensPlan {
+  const game          = slow.streamStatus.game;
+  const recentStreams = live.recentStreams ?? [];
+  const hour          = new Date().getHours();
+  const isPrimeTime   = hour >= 19 && hour <= 23;
+
+  // Historical patterns for this game (last 5 streams minimum)
+  const gameStreams = game
+    ? recentStreams.filter(s => s.game === game)
+    : [];
+  const avgRetention = gameStreams.length >= 2
+    ? Math.round(gameStreams.reduce((s, r) => s + r.retentionPct, 0) / gameStreams.length)
+    : null;
+  const avgViewers = gameStreams.length >= 2
+    ? Math.round(gameStreams.reduce((s, r) => s + r.avgViewers, 0) / gameStreams.length)
+    : null;
+  const bestStream = gameStreams.length >= 2
+    ? gameStreams.reduce((best, s) => s.streamScore > best.streamScore ? s : best)
+    : null;
+
+  // All-game average for comparison
+  const allAvgViewers = recentStreams.length >= 3
+    ? Math.round(recentStreams.reduce((s, r) => s + r.avgViewers, 0) / recentStreams.length)
+    : null;
+
+  let mulighet: string | null = null;
+  let risiko:   string | null = null;
+  let fokus:    string | null = null;
+
+  // Opportunity: strong game + prime time
+  if (game && avgRetention !== null && avgRetention >= 65 && gameStreams.length >= 2) {
+    mulighet = `${game} er ditt sterkeste spill (${avgRetention}% retention, ${gameStreams.length} streams) — push på raid og Discord`;
+  } else if (isPrimeTime && !mulighet) {
+    mulighet = 'Primetime — sendetidspunktet gir 20–40% høyere oppdagbarhet enn dag';
+  } else if (game && avgViewers && allAvgViewers && avgViewers > allAvgViewers * 1.15) {
+    mulighet = `${game} gir deg ${Math.round(((avgViewers / allAvgViewers) - 1) * 100)}% flere seere enn snitt — godt valg i dag`;
+  }
+
+  // Risk: low retention pattern, or weak game
+  if (game && avgRetention !== null && avgRetention < 50 && gameStreams.length >= 2) {
+    risiko = `${game} har lav historisk retention (${avgRetention}%) — prioriter chat-engasjement over sponsorprat`;
+  } else if (game && avgViewers && allAvgViewers && avgViewers < allAvgViewers * 0.8) {
+    risiko = `${game} gir under normalen (snitt ${avgViewers} vs ${allAvgViewers}) — vurder sterkere CTA tidlig`;
+  }
+
+  // Focus: derive from what worked last time
+  const bestTiltak = live.lærdom?.utførteTiltak?.[0];
+  if (bestTiltak) {
+    fokus = bestTiltak.summary.slice(0, 90);
+  } else if (bestStream?.grade === 'S' || bestStream?.grade === 'A') {
+    fokus = `Beste ${game}-stream: ${bestStream.streamScore} poeng — gjenta formelen`;
+  }
+
+  return { mulighet, risiko, fokus };
 }
 
 function buildMissionQueue(
@@ -371,7 +436,75 @@ function buildMissionQueue(
   const login = thumb.match(/live_user_(\w+)-/)?.[1] ?? 'glenvex';
   const url   = `twitch.tv/${login}`;
 
-  // Discord auto-detect: kontrollsenter Discord entry ran within last 45 min
+  // ── RAID MODE — detected via systemEvents ─────────────────────────────────
+  // When a raid arrives the entire queue flips to raid-response missions.
+  const raidEvent = live.systemEvents?.find(e =>
+    e.event_type === 'TWITCH_RAID_RECEIVED' ||
+    e.event_type === 'RAID_RECEIVED' ||
+    (e.event_type.toLowerCase().includes('raid') && e.severity !== 'info'),
+  );
+  const raidViewers = raidEvent?.metadata?.viewers ?? raidEvent?.metadata?.raidSize ?? 0;
+  const raidFromChannel = raidEvent?.metadata?.fromChannel ?? raidEvent?.metadata?.raider ?? null;
+  const raidAgeMin = raidEvent
+    ? (Date.now() - new Date(raidEvent.created_at).getTime()) / 60_000
+    : null;
+  const isRaidMode = raidAgeMin !== null && raidAgeMin < 20; // active for 20 min after raid
+
+  if (isRaidMode) {
+    const followerEstMin = raidViewers ? Math.round(raidViewers * 0.10) : 5;
+    const followerEstMax = raidViewers ? Math.round(raidViewers * 0.25) : 20;
+    return [
+      {
+        id:              'raid_intro',
+        label:           'Presenter deg for raid-seerne',
+        context:         `${raidFromChannel ? `${raidFromChannel} raidet deg` : 'Du fikk raid'}${raidViewers ? ` med ${raidViewers} seere` : ''} — de kjenner deg ikke ennå`,
+        draftTitle:      'Si dette nå:',
+        draftText:       `Hei alle nye! Jeg heter ${login} og streamer ${game}. Takk for raiden${raidFromChannel ? `, ${raidFromChannel}` : ''}! Bli med i Discord-fellesskapet (linken er i panelet)!`,
+        forventetEffekt: `+${followerEstMin}–${followerEstMax} nye followers`,
+        href:            '/',
+        done:            doneManual.has('raid_intro'),
+        isManual:        true,
+        priority:        'kritisk',
+      },
+      {
+        id:              'raid_chat_activate',
+        label:           'Aktiver raid-chatten med et spørsmål',
+        context:         'Raid-seere er nysgjerrige — still dem et spørsmål de kan svare på',
+        draftTitle:      'Forslag:',
+        draftText:       `Hei alle nye! Hvem er her for første gang? Hva spiller dere ellers til vanlig?`,
+        forventetEffekt: 'Raid-seere forblir lenger når de føler seg inkludert',
+        href:            '/',
+        done:            doneManual.has('raid_chat_activate'),
+        isManual:        true,
+        priority:        'kritisk',
+      },
+      {
+        id:              'raid_discord_cta',
+        label:           'Discord CTA',
+        context:         'Raid-audience konverterer bedre til Discord enn faste seere — timing er nå',
+        draftTitle:      'Si i chatten:',
+        draftText:       `Linken til Discord er i panelet → kom og bli kjent med fellesskapet! Det er her vi planlegger neste stream.`,
+        forventetEffekt: '5–20 nye Discord-medlemmer',
+        href:            '/',
+        done:            doneManual.has('raid_discord_cta'),
+        isManual:        true,
+        priority:        'høy',
+      },
+      {
+        id:              'raid_no_sponsor',
+        label:           'Ikke promoter sponsor ennå',
+        context:         'Nye seere trenger å bli kjent med deg først. Sponsor-nevnelse i raid-vinduet virker salgsorientert.',
+        href:            '/',
+        done:            doneManual.has('raid_no_sponsor'),
+        isManual:        true,
+        priority:        'høy',
+      },
+    ];
+  }
+
+  // ── NORMAL MISSION QUEUE ──────────────────────────────────────────────────
+  // Priority: derived from context (overdue missions escalate from høy → kritisk)
+
   const discordKS = live.kontrollsenter?.find(
     k => k.key.toLowerCase().includes('discord') || k.label.toLowerCase().includes('discord'),
   );
@@ -381,58 +514,74 @@ function buildMissionQueue(
 
   const pollsDone   = (live.pollManager?.totalPollsThisStream ?? 0) > 0;
   const sponsorDone = hasCat('sponsor');
-  const raidDone    = hasCat('raid');
+  const raidPlanDone = hasCat('raid');
+
+  // Overdue escalation — mission urgency grows if it wasn't done on time
+  const overduePriority = (triggerMin: number): MissionPriority => {
+    const late = elapsedMin - triggerMin;
+    if (late > triggerMin * 2) return 'kritisk'; // more than 2x past trigger time
+    if (late > triggerMin * 0.5) return 'høy';   // more than 50% past trigger time
+    return 'høy'; // X/Discord are always at least høy — never feel optional
+  };
 
   const all: StreamMission[] = [
     {
       id:              'x_post',
       label:           'Post på X',
-      context:         'Streamen er ikke annonsert på X ennå',
+      context:         elapsedMin > 15
+        ? 'Streamen startet for over 15 min siden — X-post er forsinket'
+        : 'Streamen er ikke annonsert på X ennå',
       draftTitle:      'Klar til posting:',
       draftText:       `Vi er LIVE! 🔴\n\n${title}\n🎮 ${game}\n\n${url}`,
       forventetEffekt: '3–7 ekstra seere fra X-følgere',
       href:            '/',
-      triggerAfterMin: 0,
       done:            doneManual.has('x_post'),
       isManual:        true,
+      priority:        elapsedMin > 15 ? 'kritisk' : overduePriority(0),
     },
     {
       id:              'discord_post',
       label:           'Post i Discord',
       context:         discordAutoDetected
-        ? 'Discord-bot kjørte nettopp — sjekk at meldingen ble sendt'
-        : 'Discord-annonsering ikke sendt ennå denne streamen',
-      draftTitle:      'Klar til posting:',
-      draftText:       `@everyone Vi er LIVE! 🔴\n\n${title}\n🎮 ${game}\n\n→ ${url}`,
+        ? 'Discord-bot kjørte nettopp'
+        : elapsedMin > 10
+          ? 'Discord-annonsering er forsinket — seerne venter i Discord'
+          : 'Discord-annonsering ikke sendt ennå',
+      draftTitle:      !discordAutoDetected ? 'Klar til posting:' : undefined,
+      draftText:       !discordAutoDetected
+        ? `@everyone Vi er LIVE! 🔴\n\n${title}\n🎮 ${game}\n\n→ ${url}`
+        : undefined,
       forventetEffekt: '5–15 Discord-følgere inn i chatten',
       href:            '/',
-      triggerAfterMin: 0,
       done:            doneManual.has('discord_post') || discordAutoDetected,
       isManual:        !discordAutoDetected,
+      priority:        discordAutoDetected ? 'normal' : elapsedMin > 10 ? 'kritisk' : 'høy',
     },
     {
       id:              'chat_cta',
       label:           'Engasjer chatten',
-      context:         'Still chatten et personlig spørsmål — aktiver lurkers',
+      context:         elapsedMin > 20
+        ? 'Chat er fortsatt ikke aktivert — still et spørsmål nå'
+        : 'Still chatten et personlig spørsmål — aktiver lurkers',
       draftTitle:      'Forslag til spørsmål:',
       draftText:       `Hvem er her for første gang i dag? ${game !== 'stream' ? `Hva synes dere om ${game}?` : 'Hva vil dere se mer av?'}`,
-      forventetEffekt: 'Økt chatrate og aktivering av lurkers',
+      forventetEffekt: 'Økt chatrate og lurker-aktivering',
       href:            '/',
-      triggerAfterMin: 5,
       done:            doneManual.has('chat_cta'),
       isManual:        true,
+      priority:        elapsedMin > 20 ? 'kritisk' : elapsedMin > 10 ? 'høy' : 'normal',
     },
     {
       id:              'poll',
       label:           'Kjør en poll',
       context:         pollsDone
         ? `Poll kjørt (${live.pollManager?.totalPollsThisStream} totalt)`
-        : 'Ingen poll kjørt ennå — godt tidspunkt nå',
+        : elapsedMin > 35 ? 'Poll er forsinket — godt tidspunkt nå' : 'Godt tidspunkt for en poll',
       forventetEffekt: 'Økt engagement og Twitch-algoritmesignal',
       href:            '/',
-      triggerAfterMin: 15,
       done:            pollsDone,
       isManual:        false,
+      priority:        pollsDone ? 'normal' : elapsedMin > 35 ? 'høy' : 'normal',
     },
     {
       id:              'sponsor',
@@ -442,25 +591,38 @@ function buildMissionQueue(
         : 'Chatten er varm nok — greit å nevne partner nå',
       forventetEffekt: 'Partnereksponering uten å virke salgsorientert',
       href:            '/partner-hub',
-      triggerAfterMin: 20,
       done:            doneManual.has('sponsor') || sponsorDone,
       isManual:        !sponsorDone,
+      priority:        'normal',
     },
     {
       id:              'raid',
       label:           'Finn raid-kandidat',
-      context:         raidDone
+      context:         raidPlanDone
         ? 'Raid-analyse kjørt av Live Agent'
         : 'Begynn å planlegge hvem du raider ved stream-slutt',
       forventetEffekt: 'Godt raid bygger goodwill og kan gi follow-backs',
       href:            '/raid-manager',
-      triggerAfterMin: 75,
-      done:            doneManual.has('raid') || raidDone,
-      isManual:        !raidDone,
+      done:            doneManual.has('raid') || raidPlanDone,
+      isManual:        !raidPlanDone,
+      priority:        'normal',
     },
   ];
 
-  return all.filter(m => elapsedMin >= m.triggerAfterMin);
+  // Only show missions that should be visible by now + sort by priority
+  const priorityOrder: Record<MissionPriority, number> = { kritisk: 0, høy: 1, normal: 2 };
+  return all
+    .filter(m => {
+      // Map id to trigger time
+      const triggerMap: Record<string, number> = {
+        x_post: 0, discord_post: 0, chat_cta: 5, poll: 15, sponsor: 20, raid: 75,
+      };
+      return elapsedMin >= (triggerMap[m.id] ?? 0);
+    })
+    .sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1; // incomplete first
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -479,6 +641,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
   const missions     = buildMissionQueue(live, slow, elapsedMin, doneManual);
   const nextMission  = missions.find(m => !m.done) ?? null;
   const doneMissions = missions.filter(m => m.done);
+  const dagensPlan   = buildDagensPlan(live, slow);
 
   const markDone = (id: string) =>
     setDoneManual(prev => { const n = new Set(prev); n.add(id); return n; });
@@ -555,13 +718,36 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
           </div>
         </div>
 
+        {/* Dagensplan — why is this the priority today */}
+        {(dagensPlan.mulighet || dagensPlan.risiko) && (
+          <div className="px-5 pt-3 pb-2 space-y-1 border-b border-g-border/20">
+            {dagensPlan.mulighet && (
+              <p className="text-[11px] text-g-green/70">💡 {dagensPlan.mulighet}</p>
+            )}
+            {dagensPlan.risiko && (
+              <p className="text-[11px] text-yellow-400/70">⚠ {dagensPlan.risiko}</p>
+            )}
+            {dagensPlan.fokus && (
+              <p className="text-[11px] text-g-muted/45 italic">{dagensPlan.fokus}</p>
+            )}
+          </div>
+        )}
+
         {/* Mission Queue — proactive task orchestration */}
         {nextMission ? (
           <>
             {/* Current mission */}
             <div className="px-5 pt-4 pb-3">
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-[10px] font-black text-g-green uppercase tracking-widest">Neste oppdrag</span>
+                <span className={`text-[10px] font-black uppercase tracking-widest ${
+                  nextMission.priority === 'kritisk' ? 'text-red-400' :
+                  nextMission.priority === 'høy'    ? 'text-yellow-400' :
+                  'text-g-green'
+                }`}>
+                  {nextMission.priority === 'kritisk' ? '🔥 Kritisk' :
+                   nextMission.priority === 'høy'    ? '⭐ Høy prioritet' :
+                   'Neste oppdrag'}
+                </span>
                 {missions.length > 1 && (
                   <span className="text-[10px] text-g-muted/40">{doneMissions.length}/{missions.length} gjort</span>
                 )}
@@ -626,18 +812,30 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
             {/* Mission checklist */}
             {missions.length > 1 && (
               <div className="px-5 pb-3 border-t border-g-border/20 pt-3">
-                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                <div className="space-y-1">
                   {missions.map(m => (
                     <button
                       key={m.id}
                       onClick={() => m.isManual && !m.done ? markDone(m.id) : undefined}
-                      className={`text-[10px] leading-snug ${
-                        m.done          ? 'text-g-muted/35 line-through' :
-                        m.id === nextMission.id ? 'text-g-green font-bold' :
+                      className={`flex items-center gap-2 text-[10px] leading-snug ${
+                        m.done               ? 'text-g-muted/35 line-through' :
+                        m.id === nextMission.id ? 'text-g-text font-bold' :
                         'text-g-muted/55'
                       }`}
                     >
-                      {m.done ? '✓' : m.id === nextMission.id ? '→' : '○'} {m.label}
+                      <span className={`flex-shrink-0 ${
+                        m.done               ? 'text-g-muted/35' :
+                        m.priority === 'kritisk' && !m.done ? 'text-red-400' :
+                        m.priority === 'høy'    && !m.done ? 'text-yellow-400' :
+                        m.id === nextMission.id ? 'text-g-green' :
+                        'text-g-muted/40'
+                      }`}>
+                        {m.done ? '✓' :
+                         m.priority === 'kritisk' && !m.done ? '🔥' :
+                         m.priority === 'høy'     && !m.done ? '⭐' :
+                         m.id === nextMission.id  ? '→' : '○'}
+                      </span>
+                      {m.label}
                     </button>
                   ))}
                 </div>
