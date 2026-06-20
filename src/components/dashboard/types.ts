@@ -117,6 +117,18 @@ export interface CoverageEntry {
   count24h: number; passive: boolean; errors24h: number;
 }
 
+export interface LiveAgentTip {
+  id: string; category: string; message: string;
+  reasoning?: string | null; priority: number; created_at: string;
+}
+
+export interface PollManagerData {
+  activePoll: { id: string; pollType: string; question: string; options: { label: string }[]; createdAt: string; reason: string | null } | null;
+  lastPoll: { id: string; pollType: string; question: string; winner: string | null; totalVotes: number; closedAt: string | null; reason: string | null } | null;
+  pollLearning: string | null;
+  totalPollsThisStream: number;
+}
+
 export interface LiveData {
   activeJobs: { agent: string; task: string; progress: number; href: string; detail?: string }[];
   sjekkliste:  { label: string; done: boolean; href: string }[];
@@ -133,6 +145,9 @@ export interface LiveData {
   aiLearning?: AiLearning;
   heroStream?: HeroStream | null;
   actionCenter?: ActionCenterItem[];
+  liveAgentTips?: LiveAgentTip[];
+  pollManager?: PollManagerData | null;
+  twitchAuthStatus?: 'ok' | 'token_fetch_failed' | 'auth_failed' | 'unknown';
   recentStreams?: RecentStream[];
   debug?: Record<string, any>;
   ts: string;

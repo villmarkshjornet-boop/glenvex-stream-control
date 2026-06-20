@@ -16,6 +16,7 @@ import { PartnerEngineStatus } from '@/components/dashboard/PartnerEngineStatus'
 import { CreatorBrainLearning } from '@/components/dashboard/CreatorBrainLearning';
 import { AiStatusRow } from '@/components/dashboard/AiStatusRow';
 import { CollapseSection } from '@/components/ui';
+import { LiveCommandCenter } from '@/components/dashboard/LiveCommandCenter';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -60,7 +61,7 @@ export default function Dashboard() {
     return () => { clearInterval(liveId); clearInterval(slowId); };
   }, [hentLive, hentSlow]);
 
-  const isLive      = slow?.streamStatus?.isLive ?? false;
+  const isLive       = slow?.streamStatus?.isLive ?? false;
   const pendingCount = live?.actionCenter?.filter(i => i.priority === 'action' || i.priority === 'error').length ?? 0;
 
   return (
@@ -69,15 +70,9 @@ export default function Dashboard() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">Creator Command Center</h1>
-          {isLive && (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 border border-red-500/30 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-              <span className="text-[10px] font-black text-red-400">
-                LIVE · {slow?.streamStatus?.viewers ?? 0}
-              </span>
-            </span>
-          )}
+          <h1 className="text-xl font-black tracking-wider text-g-text uppercase">
+            {isLive ? 'Live Command Center' : 'Creator Command Center'}
+          </h1>
         </div>
         <div className="flex items-center gap-3">
           {sistOppdatert && (
@@ -97,85 +92,85 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── HERO — stream status ────────────────────────────────────────────── */}
-      <Hero heroStream={live?.heroStream} loading={loadingLive} />
+      {/* ── LIVE MODE: Live Command Center ───────────────────────────────────── */}
+      {isLive && live && slow ? (
+        <LiveCommandCenter live={live} slow={slow} />
+      ) : (
 
-      {/* ── ACTION CENTER — første prioritet ─────────────────────────────── */}
-      <ActionCenter items={live?.actionCenter} loading={loadingLive} />
+        /* ── OFFLINE MODE: eksisterende dashboard ──────────────────────────── */
+        <>
+          {/* Hero — siste stream */}
+          <Hero heroStream={live?.heroStream} loading={loadingLive} />
 
-      {/* ── PARTNER PROPOSALS — venter på godkjenning ────────────────────── */}
-      <PartnerProposalQueue />
+          {/* Action Center */}
+          <ActionCenter items={live?.actionCenter} loading={loadingLive} />
 
-      {/* ── AI STATUS ROW — kompakt systemoversikt ─────────────────────── */}
-      <AiStatusRow coverage={live?.coverage} loading={loadingLive} />
+          {/* Partner Proposals */}
+          <PartnerProposalQueue />
 
-      {/* ── DETALJER — alt annet, kollapset som standard ─────────────────── */}
-      <CollapseSection
-        label="Detaljer"
-        badge={
-          pendingCount > 0
-            ? <span className="px-1.5 py-0.5 text-[9px] bg-g-green/10 text-g-green border border-g-green/30 rounded font-bold">{pendingCount}</span>
-            : undefined
-        }
-      >
-        {/* Stream Completion + AI Insight */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <StreamCompletionCard heroStream={live?.heroStream} loading={loadingLive} />
-          <AiInsightFeed innsikter={live?.nyesteInnsikter ?? []} lærdom={live?.lærdom} loading={loadingLive} />
-        </div>
+          {/* AI Status Row */}
+          <AiStatusRow coverage={live?.coverage} loading={loadingLive} />
 
-        {/* Partner Engine Status */}
-        <PartnerEngineStatus />
+          {/* Detaljer */}
+          <CollapseSection
+            label="Detaljer"
+            badge={
+              pendingCount > 0
+                ? <span className="px-1.5 py-0.5 text-[9px] bg-g-green/10 text-g-green border border-g-green/30 rounded font-bold">{pendingCount}</span>
+                : undefined
+            }
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <StreamCompletionCard heroStream={live?.heroStream} loading={loadingLive} />
+              <AiInsightFeed innsikter={live?.nyesteInnsikter ?? []} lærdom={live?.lærdom} loading={loadingLive} />
+            </div>
 
-        {/* Creator Brain Learning */}
-        <CreatorBrainLearning />
+            <PartnerEngineStatus />
+            <CreatorBrainLearning />
+            <RecentStreams streams={live?.recentStreams} loading={loadingLive} />
 
-        {/* Recent Streams */}
-        <RecentStreams streams={live?.recentStreams} loading={loadingLive} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <NextStreamCard
+                nesteStream={live?.nesteStream ?? slow?.streamStatus?.nesteStream ?? null}
+                preHype={live?.preHype ?? null}
+                loading={loadingLive && loadingSlow}
+              />
+              <QuickActions />
+            </div>
 
-        {/* Neste stream + Hurtighandlinger */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <NextStreamCard
-            nesteStream={live?.nesteStream ?? slow?.streamStatus?.nesteStream ?? null}
-            preHype={live?.preHype ?? null}
-            loading={loadingLive && loadingSlow}
-          />
-          <QuickActions />
-        </div>
+            <SystemHealth
+              live={live}
+              loading={loadingLive}
+              onResetSyklus={async () => {
+                await fetch('/api/stream-syklus/reset', { method: 'POST' });
+                hentLive();
+              }}
+            />
 
-        {/* Systemhelse */}
-        <SystemHealth
-          live={live}
-          loading={loadingLive}
-          onResetSyklus={async () => {
-            await fetch('/api/stream-syklus/reset', { method: 'POST' });
-            hentLive();
-          }}
-        />
-
-        {/* Debug panel */}
-        {live?.debug && (
-          <div className="border border-g-border/30 rounded-xl overflow-hidden">
-            <button
-              onClick={() => setVisDebug(v => !v)}
-              className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left"
-            >
-              <span className="text-[9px] text-g-muted/60 uppercase tracking-widest font-bold">Debug</span>
-              <span className="text-[9px] text-g-muted/40">{visDebug ? '▲ Skjul' : '▼ Vis'}</span>
-            </button>
-            {visDebug && (
-              <div className="px-4 py-3 bg-g-bg/20 grid grid-cols-2 gap-x-6 gap-y-1">
-                {Object.entries(live.debug).map(([k, v]) => (
-                  <div key={k} className="flex items-baseline gap-2">
-                    <span className="text-[9px] text-g-muted/50 font-mono w-32 flex-shrink-0">{k}</span>
-                    <span className="text-[9px] text-g-text font-mono truncate">{String(v ?? '—')}</span>
+            {live?.debug && (
+              <div className="border border-g-border/30 rounded-xl overflow-hidden">
+                <button
+                  onClick={() => setVisDebug(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left"
+                >
+                  <span className="text-[9px] text-g-muted/60 uppercase tracking-widest font-bold">Debug</span>
+                  <span className="text-[9px] text-g-muted/40">{visDebug ? '▲ Skjul' : '▼ Vis'}</span>
+                </button>
+                {visDebug && (
+                  <div className="px-4 py-3 bg-g-bg/20 grid grid-cols-2 gap-x-6 gap-y-1">
+                    {Object.entries(live.debug).map(([k, v]) => (
+                      <div key={k} className="flex items-baseline gap-2">
+                        <span className="text-[9px] text-g-muted/50 font-mono w-32 flex-shrink-0">{k}</span>
+                        <span className="text-[9px] text-g-text font-mono truncate">{String(v ?? '—')}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
-          </div>
-        )}
-      </CollapseSection>
+          </CollapseSection>
+        </>
+      )}
 
     </div>
   );
