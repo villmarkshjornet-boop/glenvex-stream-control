@@ -89,6 +89,9 @@ interface CeoBrainResult {
   category: string;
   avvistAlternativer: RejectedAlternativ[];
   dimensjonerVurdert: number;
+  selfCorrectionNote: string | null;    // AI changed previous recommendation
+  confidenceLevel: 'lav' | 'middels' | 'høy' | null;  // parsed from reasoning
+  spillmønster: string | null;          // pattern from recentStreams
 }
 
 function rejectionReason(
@@ -139,6 +142,67 @@ function evalueringFor(category: string): string {
   return map[category] ?? 'Sammenlign med historisk data etter streamen';
 }
 
+// ── Derive game patterns from recentStreams ────────────────────────────────────
+
+function deriveSpillmønster(live: LiveData, currentGame: string | null): string | null {
+  const streams = live.recentStreams;
+  if (!streams || streams.length < 3 || !currentGame) return null;
+
+  const byGame: Record<string, { avgs: number[]; retentions: number[] }> = {};
+  for (const s of streams) {
+    if (!byGame[s.game]) byGame[s.game] = { avgs: [], retentions: [] };
+    byGame[s.game].avgs.push(s.avgViewers);
+    if (s.retentionPct) byGame[s.game].retentions.push(s.retentionPct);
+  }
+
+  const avgOf = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+
+  const bestRetention = Object.entries(byGame)
+    .filter(([, v]) => v.retentions.length >= 2)
+    .sort(([, a], [, b]) => avgOf(b.retentions) - avgOf(a.retentions))[0];
+
+  const bestViewers = Object.entries(byGame)
+    .filter(([, v]) => v.avgs.length >= 2)
+    .sort(([, a], [, b]) => avgOf(b.avgs) - avgOf(a.avgs))[0];
+
+  const parts: string[] = [];
+  if (bestRetention && bestRetention[0] !== currentGame) {
+    parts.push(`${bestRetention[0]} gir høyest retention (${avgOf(bestRetention[1].retentions)}%)`);
+  } else if (bestRetention && bestRetention[0] === currentGame) {
+    parts.push(`${currentGame} er ditt sterkeste spill for retention`);
+  }
+  if (bestViewers && bestViewers[0] !== bestRetention?.[0]) {
+    parts.push(`${bestViewers[0]} gir flest seere (snitt ${avgOf(bestViewers[1].avgs)})`);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+// ── Parse confidence level from reasoning text ─────────────────────────────────
+
+function parseConfidenceLevel(reasoning: string | null | undefined): 'lav' | 'middels' | 'høy' | null {
+  if (!reasoning) return null;
+  const r = reasoning.toLowerCase();
+  if (r.includes('confidence: lav') || r.includes('confidence lav')) return 'lav';
+  if (r.includes('confidence: middels') || r.includes('confidence middels')) return 'middels';
+  if (r.includes('confidence: høy') || r.includes('confidence høy')) return 'høy';
+  return null;
+}
+
+// ── Detect self-correction from reasoning text ─────────────────────────────────
+
+function detectSelfCorrection(reasoning: string | null | undefined): string | null {
+  if (!reasoning) return null;
+  const r = reasoning.toLowerCase();
+  if (r.includes('negativ') && (r.includes('falt') || r.includes('endrer'))) {
+    return 'AI endret anbefaling — forrige råd hadde ingen målbar positiv effekt';
+  }
+  if (r.includes('trekker tilbake') || r.includes('endrer anbefaling')) {
+    return 'AI endret anbefaling basert på endret situasjon';
+  }
+  return null;
+}
+
 function buildCeoBrain(live: LiveData, elapsedMin: number): CeoBrainResult {
   // Collect all candidate signals ranked by importance
   const tips = [...(live.liveAgentTips ?? [])].sort((a, b) => (b.priority ?? 50) - (a.priority ?? 50));
@@ -152,34 +216,36 @@ function buildCeoBrain(live: LiveData, elapsedMin: number): CeoBrainResult {
   const allSignals = [...tips, ...liveAgentItems, ...otherItems];
   const dimensjonerVurdert = Math.min(9, Math.max(1, allSignals.length));
 
+  const currentGame = live.systemEvents?.find(e => e.metadata?.game)?.metadata?.game ?? null;
+  const spillmønster = deriveSpillmønster(live, currentGame);
+
   // Primary: best live agent tip
   if (topTip?.message) {
     const rejected: RejectedAlternativ[] = [];
-
-    // Next best tip is a rejected alternative
     if (tips[1]?.message) {
       rejected.push({
         title: tips[1].message,
         grunn: rejectionReason(tips[1].category, topTip.category, elapsedMin),
       });
     }
-
-    // First non-live-agent error/warning action is also a rejected alternative
     const urgentOther = otherItems.find(a => a.priority === 'error' || a.priority === 'warning');
     if (urgentOther) {
       rejected.push({ title: urgentOther.title, grunn: 'Live Agent-anbefaling prioriteres under aktiv stream' });
     }
 
     return {
-      anbefaling: topTip.message,
-      hvorfor:    topTip.reasoning ?? null,
-      forventetEffekt: forventetEffekt(topTip.category),
-      evaluering:      evalueringFor(topTip.category),
-      href:            catHref(topTip.category),
-      kilde:           'Live Agent V2',
-      category:        topTip.category,
-      avvistAlternativer: rejected.slice(0, 2),
+      anbefaling:          topTip.message,
+      hvorfor:             topTip.reasoning ?? null,
+      forventetEffekt:     forventetEffekt(topTip.category),
+      evaluering:          evalueringFor(topTip.category),
+      href:                catHref(topTip.category),
+      kilde:               'Live Agent V2',
+      category:            topTip.category,
+      avvistAlternativer:  rejected.slice(0, 2),
       dimensjonerVurdert,
+      selfCorrectionNote:  detectSelfCorrection(topTip.reasoning),
+      confidenceLevel:     parseConfidenceLevel(topTip.reasoning),
+      spillmønster,
     };
   }
 
@@ -187,20 +253,22 @@ function buildCeoBrain(live: LiveData, elapsedMin: number): CeoBrainResult {
   const laItem = liveAgentItems[0];
   if (laItem) {
     const cat = laItem.type.replace('live_agent_', '');
-    const rejected: RejectedAlternativ[] = liveAgentItems.slice(1, 2).map(a => ({
-      title: a.title,
-      grunn: rejectionReason(a.type.replace('live_agent_', ''), cat, elapsedMin),
-    }));
     return {
-      anbefaling: laItem.title,
-      hvorfor:    laItem.detail ?? null,
-      forventetEffekt: forventetEffekt(cat),
-      evaluering:      evalueringFor(cat),
-      href:            laItem.href,
-      kilde:           'Action Center',
-      category:        cat,
-      avvistAlternativer: rejected,
+      anbefaling:         laItem.title,
+      hvorfor:            laItem.detail ?? null,
+      forventetEffekt:    forventetEffekt(cat),
+      evaluering:         evalueringFor(cat),
+      href:               laItem.href,
+      kilde:              'Action Center',
+      category:           cat,
+      avvistAlternativer: liveAgentItems.slice(1, 2).map(a => ({
+        title: a.title,
+        grunn: rejectionReason(a.type.replace('live_agent_', ''), cat, elapsedMin),
+      })),
       dimensjonerVurdert,
+      selfCorrectionNote: null,
+      confidenceLevel:    null,
+      spillmønster,
     };
   }
 
@@ -208,28 +276,34 @@ function buildCeoBrain(live: LiveData, elapsedMin: number): CeoBrainResult {
   const ins = live.nyesteInnsikter?.[0];
   if (ins) {
     return {
-      anbefaling: ins.title,
-      hvorfor:    ins.summary,
-      forventetEffekt: 'Basert på historisk AI-analyse',
-      evaluering:      'Sammenlign stream-score med historisk gjennomsnitt etter streamen',
-      href:            '/stream-coach',
-      kilde:           'AI Memory',
-      category:        'general',
+      anbefaling:         ins.title,
+      hvorfor:            ins.summary,
+      forventetEffekt:    'Basert på historisk AI-analyse',
+      evaluering:         'Sammenlign stream-score med historisk gjennomsnitt etter streamen',
+      href:               '/stream-coach',
+      kilde:              'AI Memory',
+      category:           'general',
       avvistAlternativer: [],
       dimensjonerVurdert: 1,
+      selfCorrectionNote: null,
+      confidenceLevel:    null,
+      spillmønster,
     };
   }
 
   return {
-    anbefaling: 'Alle systemer aktive — overvåker stream.',
-    hvorfor:    null,
-    forventetEffekt: null,
-    evaluering:      null,
-    href:            '/',
-    kilde:           '',
-    category:        'general',
+    anbefaling:         'Alle systemer aktive — overvåker stream.',
+    hvorfor:            null,
+    forventetEffekt:    null,
+    evaluering:         null,
+    href:               '/',
+    kilde:              '',
+    category:           'general',
     avvistAlternativer: [],
     dimensjonerVurdert: 0,
+    selfCorrectionNote: null,
+    confidenceLevel:    null,
+    spillmønster:       null,
   };
 }
 
@@ -327,7 +401,10 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
               <span className="text-[10px] text-g-muted/40">vurderte {brain.dimensjonerVurdert} signaler</span>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            {brain.confidenceLevel === 'lav' && (
+              <span className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Confidence: lav</span>
+            )}
             <span className="text-[10px] text-g-muted/40 uppercase tracking-wider">Confidence</span>
             <span className={`text-sm font-black tabular-nums ${
               confidence.score >= 70 ? 'text-g-green' :
@@ -335,6 +412,13 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
             }`}>{confidence.score}%</span>
           </div>
         </div>
+
+        {/* Self-correction notice */}
+        {brain.selfCorrectionNote && (
+          <div className="mx-5 mt-4 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
+            <p className="text-[11px] text-yellow-400 font-bold">↺ {brain.selfCorrectionNote}</p>
+          </div>
+        )}
 
         {/* Primary recommendation */}
         <div className="px-5 py-4">
@@ -386,9 +470,11 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
           </div>
         )}
 
-        {/* Confidence breakdown */}
-        <div className="px-5 py-3 border-t border-g-border/30 bg-g-bg/20">
-          <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold mb-2">Data brukt</p>
+        {/* Spillmønster + Confidence breakdown */}
+        <div className="px-5 py-3 border-t border-g-border/30 bg-g-bg/20 space-y-1.5">
+          {brain.spillmønster && (
+            <p className="text-[10px] text-g-muted/50 italic">{brain.spillmønster}</p>
+          )}
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {confidence.breakdown.filter(b => b.active).map((b, i) => (
               <span key={i} className="text-[10px] text-g-muted/60">✔ {b.label}</span>

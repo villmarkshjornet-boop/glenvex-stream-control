@@ -65,18 +65,20 @@ async function getAiMemorySummary(ws: string): Promise<string> {
     if (!db) return '';
     const { data } = await db
       .from('ai_agent_memory')
-      .select('memory_type, content, occurrence_count')
+      .select('memory_type, content, summary, occurrence_count')
       .eq('workspace_id', ws)
       .order('occurrence_count', { ascending: false })
-      .limit(8);
+      .limit(10);
     if (!data || data.length === 0) return '';
-    return data.map(m => `[${m.memory_type}] ${String(m.content).slice(0, 150)}`).join('\n');
+    return data.map(m =>
+      `[${m.memory_type}] ${String(m.summary ?? m.content).slice(0, 180)} (observert ${m.occurrence_count}x)`
+    ).join('\n');
   } catch {
     return '';
   }
 }
 
-// ─── Module: Recent Stream History ────────────────────────────────────────────
+// ─── Module: Stream History ────────────────────────────────────────────────────
 
 async function getStreamHistorySummary(ws: string): Promise<string> {
   try {
@@ -84,14 +86,56 @@ async function getStreamHistorySummary(ws: string): Promise<string> {
     if (!db) return '';
     const { data } = await db
       .from('stream_history')
-      .select('title, game, peak_viewers, avg_viewers, ended_at, chat_messages')
+      .select('title, game, peak_viewers, avg_viewers, ended_at, chat_messages, retention_pct')
       .eq('workspace_id', ws)
       .order('ended_at', { ascending: false })
-      .limit(3);
+      .limit(5);
     if (!data || data.length === 0) return '';
-    return data.map(s =>
-      `${new Date(s.ended_at).toLocaleDateString('no-NO')}: ${s.game} — topp ${s.peak_viewers} seere, snitt ${s.avg_viewers}, ${s.chat_messages} chat-meldinger`
-    ).join('\n');
+    return data.map(s => {
+      const date = new Date(s.ended_at).toLocaleDateString('no-NO');
+      const ret  = s.retention_pct != null ? `, ${Math.round(s.retention_pct)}% retention` : '';
+      return `${date}: ${s.game} — topp ${s.peak_viewers ?? 0} seere, snitt ${s.avg_viewers ?? 0}, ${s.chat_messages ?? 0} chat${ret}`;
+    }).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+// ─── Module: Game Pattern Analyser ────────────────────────────────────────────
+
+async function getGamePatterns(ws: string): Promise<string> {
+  try {
+    const db = getBotDb();
+    if (!db) return '';
+    const { data } = await db
+      .from('stream_history')
+      .select('game, peak_viewers, avg_viewers, chat_messages, retention_pct')
+      .eq('workspace_id', ws)
+      .order('ended_at', { ascending: false })
+      .limit(20);
+    if (!data || data.length < 3) return '(for lite data — under 3 streams)';
+
+    const byGame: Record<string, { peaks: number[]; avgs: number[]; chats: number[]; retentions: number[] }> = {};
+    for (const s of data) {
+      const g = s.game ?? 'Ukjent';
+      if (!byGame[g]) byGame[g] = { peaks: [], avgs: [], chats: [], retentions: [] };
+      if (s.peak_viewers)          byGame[g].peaks.push(s.peak_viewers);
+      if (s.avg_viewers)           byGame[g].avgs.push(s.avg_viewers);
+      if (s.chat_messages)         byGame[g].chats.push(s.chat_messages);
+      if (s.retention_pct != null) byGame[g].retentions.push(s.retention_pct);
+    }
+
+    const avg = (arr: number[]) =>
+      arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+
+    const lines = Object.entries(byGame)
+      .filter(([, v]) => v.peaks.length >= 2)
+      .map(([game, v]) => {
+        const ret = v.retentions.length ? `, ${avg(v.retentions)}% retention` : '';
+        return `${game} (${v.peaks.length} streams): snitt ${avg(v.avgs)} seere, ${avg(v.chats)} chat/stream${ret}`;
+      });
+
+    return lines.length > 0 ? lines.join('\n') : '(ikke nok data per spill ennå)';
   } catch {
     return '';
   }
@@ -215,6 +259,14 @@ async function runDurationModule(
 
 // ─── Module: AI Analysis ──────────────────────────────────────────────────────
 
+interface LastTickContext {
+  viewerCount: number;
+  chatRate: number;
+  tipCategory: string | null;
+  tipMessage: string | null;
+  sentAt: number;
+}
+
 async function runAiAnalysis(
   ws: string, streamId: string,
   state: ReturnType<typeof getCreatorState>,
@@ -222,37 +274,80 @@ async function runAiAnalysis(
   msgsPerMin: number,
   aiMemory: string,
   streamHistory: string,
-): Promise<void> {
+  gamePatterns: string,
+  lastCtx: LastTickContext | null,
+): Promise<TipPayload | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) return null;
 
   const openai = new OpenAI({ apiKey });
   const { game, title, viewerCount, viewerPeak, durationMin, phase } = state.stream;
 
-  const systemPrompt = `Du er GLENVEX AI-produsent. Du hjelper en live-streamer i sanntid.
-Analyser situasjonen og generer ${MAX_TIPS_PER_TICK} konkrete og handlingsklare råd.
-Hvert råd skal være på norsk, maks 120 tegn, og direkte nyttig akkurat NÅ.
-Fokuser på hva streameren bør gjøre neste 5-10 minutter.
-Svar alltid i dette JSON-formatet:
-{"tips":[{"category":"chat|viewers|promotion|raid|sponsor|content|general","message":"Rådet her","reasoning":"Kort intern begrunnelse","priority":70}]}`;
+  // ── Self-evaluation block ───────────────────────────────────────────────────
+  const minutesSinceLast = lastCtx
+    ? Math.round((Date.now() - lastCtx.sentAt) / 60_000) : 0;
+  const viewerDelta = lastCtx ? (viewerCount ?? 0) - lastCtx.viewerCount : 0;
+  const chatDelta   = lastCtx ? msgsPerMin - lastCtx.chatRate : 0;
+  const selfEval = !lastCtx?.tipMessage
+    ? '(første analyse denne streamen)'
+    : [
+        `Forrige råd (${minutesSinceLast} min siden): "${lastCtx.tipMessage}" [${lastCtx.tipCategory}]`,
+        `Seere: ${lastCtx.viewerCount} → ${viewerCount ?? 0} (${viewerDelta >= 0 ? '+' : ''}${viewerDelta})`,
+        `Chat: ${lastCtx.chatRate} → ${msgsPerMin} msgs/min (${chatDelta >= 0 ? '+' : ''}${chatDelta})`,
+        `Indikasjon: ${
+          viewerDelta > (viewerCount ?? 1) * 0.05 ? 'POSITIV — seertallet økte' :
+          viewerDelta < -(viewerCount ?? 1) * 0.10 ? 'NEGATIV — seertallet falt, skift fokus' :
+          chatDelta > 2  ? 'POSITIV — chataktiviteten økte' :
+          chatDelta < -2 ? 'NØYTRAL/NEGATIV — chat falt' :
+          'NØYTRAL — ingen klar effekt'
+        }`,
+      ].join('\n');
 
-  const userPrompt = `STREAM-STATUS:
-Spill: ${game ?? 'ukjent'}
-Tittel: ${title ?? 'ukjent'}
-Seere nå: ${viewerCount ?? 0} (topp: ${viewerPeak ?? 0})
-Varighet: ${durationMin ?? 0} min (fase: ${phase ?? 'ukjent'})
-Chat-aktivitet: ${msgsPerMin} meldinger/min
+  const systemPrompt = `Du er GLENVEX AI-produsent — en senior streaming-konsulent som kjenner kanalen til bunns.
 
-SISTE CHAT (siste 20 linjer):
-${chatLines.slice(-20).join('\n') || '(ingen)'}
+DIN ROLLE:
+Du er en mentor, ikke en notis-generator. Du tenker, velger og forklarer.
 
-AI HUKOMMELSE (pattern fra tidligere streams):
-${aiMemory || '(ingen)'}
+REGLER DU MÅ FØLGE:
+1. EVALUER ALLTID forrige anbefaling eksplisitt — nevn om den fungerte eller ikke i reasoning
+2. TREKK TILBAKE råd hvis situasjonen er endret negativt siden forrige analyse
+3. BRUK ALLTID personlig stemme: "Du pleier å...", "For deg fungerer...", "Basert på dine X streams...", "I dine ${durationMin ? Math.round(durationMin) : '?'} minutter med dette spillet..."
+4. UTFORDRE ANTAKELSER: hvis data viser noe overraskende (f.eks. at en partner gjør det bedre enn forventet), si det
+5. VÆR ÆRLIG om usikkerhet: hvis du mangler data, si "Confidence: lav" i reasoning og forklar hvorfor
+6. PRIORITER langsiktig kanalvekst, ikke kortsiktige tall
+7. MAKSIMALT ${MAX_TIPS_PER_TICK} råd. Velg det viktigste, ikke alt mulig
+
+FORMAT (JSON kun):
+{"tips":[
+  {
+    "category":"chat|viewers|promotion|raid|sponsor|content|general",
+    "message":"Personlig råd maks 140 tegn — bruk 'du', ikke 'man'",
+    "reasoning":"Hva data viser + self-eval av forrige råd + confidence-nivå + forventet effekt",
+    "priority":75
+  }
+]}`;
+
+  const userPrompt = `SITUASJON NÅ:
+Spill: ${game ?? 'ukjent'} | Tittel: ${title ?? 'ukjent'}
+Seere: ${viewerCount ?? 0} (topp: ${viewerPeak ?? 0}) | Varighet: ${durationMin ?? 0} min | Fase: ${phase ?? 'ukjent'}
+Chat: ${msgsPerMin} meldinger/min
+
+SELF-EVALUATION (forrige anbefaling):
+${selfEval}
+
+SISTE CHAT (20 linjer):
+${chatLines.slice(-20).join('\n') || '(ingen chat-aktivitet)'}
+
+KANALENS PERSONLIGE HISTORIKK (AI Memory):
+${aiMemory || '(ingen historikk ennå — vær forsiktig med antakelser, mark confidence som lav)'}
+
+SPILLMØNSTRE (basert på ${game ?? 'alle'} og andre spill):
+${gamePatterns || '(ingen spilldata ennå)'}
 
 SISTE STREAMS:
 ${streamHistory || '(ingen)'}
 
-Generer ${MAX_TIPS_PER_TICK} råd basert på denne konteksten.`;
+Generer ${MAX_TIPS_PER_TICK} råd. Bruk alltid personlig stemme. Evaluer forrige råd eksplisitt.`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -262,34 +357,39 @@ Generer ${MAX_TIPS_PER_TICK} råd basert på denne konteksten.`;
         { role: 'user', content: userPrompt },
       ],
       response_format: { type: 'json_object' },
-      max_tokens: 600,
-      temperature: 0.7,
+      max_tokens: 800,
+      temperature: 0.65,
     });
 
-    const raw = response.choices[0]?.message?.content ?? '{}';
+    const raw    = response.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw);
     const tips: any[] = parsed.tips ?? [];
 
-    let pushed = 0;
+    let pushed     = 0;
+    let firstTip: TipPayload | null = null;
     for (const tip of tips.slice(0, MAX_TIPS_PER_TICK)) {
       if (!tip.message) continue;
       if (await tipAlreadySentRecently(ws, streamId, tip.category ?? 'general')) continue;
-      await pushTip(ws, streamId, {
-        category: tip.category ?? 'general',
-        message:  String(tip.message).slice(0, 200),
-        reasoning: tip.reasoning ?? null,
-        priority: typeof tip.priority === 'number' ? Math.min(100, Math.max(0, tip.priority)) : 60,
-        ttlMs: 8 * 60_000,
-      });
+      const payload: TipPayload = {
+        category:  tip.category ?? 'general',
+        message:   String(tip.message).slice(0, 200),
+        reasoning: tip.reasoning ? String(tip.reasoning).slice(0, 500) : null,
+        priority:  typeof tip.priority === 'number' ? Math.min(100, Math.max(0, tip.priority)) : 60,
+        ttlMs:     8 * 60_000,
+      };
+      await pushTip(ws, streamId, payload);
+      if (!firstTip) firstTip = payload;
       pushed++;
     }
 
     logSystemEvent({
       workspaceId: ws, source: 'live_agent', event_type: 'AI_TICK_COMPLETED',
-      title: `AI-analyse: ${pushed} tips generert (${game}, ${viewerCount ?? 0} seere)`,
+      title: `AI-analyse: ${pushed} tips (${game}, ${viewerCount ?? 0} seere, self-eval: ${selfEval.split('\n')[3]?.slice(13, 40) ?? 'n/a'})`,
       severity: 'info',
-      metadata: { streamId, pushed, game, viewerCount, durationMin, phase, msgsPerMin },
+      metadata: { streamId, pushed, game, viewerCount, durationMin, phase, msgsPerMin, selfEvalIndication: selfEval.split('\n')[3] ?? null },
     });
+
+    return firstTip;
 
   } catch (err: any) {
     logSystemEvent({
@@ -297,6 +397,7 @@ Generer ${MAX_TIPS_PER_TICK} råd basert på denne konteksten.`;
       title: `AI-analyse feilet: ${err.message?.slice(0, 100)}`,
       severity: 'error', metadata: { streamId, error: err.message },
     });
+    return null;
   }
 }
 
@@ -408,6 +509,9 @@ export class LiveAgent {
   // Error counters for fail-safe logging
   private errorCounts: Record<string, number> = {};
 
+  // Self-evaluation context — updated after each successful AI tick
+  private lastAiCtx: LastTickContext | null = null;
+
   constructor(streamId: string, twitchLogin: string, workspaceId?: string) {
     this.streamId    = streamId;
     this.twitchLogin = twitchLogin;
@@ -509,13 +613,41 @@ export class LiveAgent {
     // ── Module: AI Analysis (every 3 min) ─────────────────────────────────────
     if (now - this.lastAiTickAt >= AI_TICK_MS) {
       this.lastAiTickAt = now;
-      const [aiMemory, streamHistory] = await Promise.all([
+      const capturedCtx = this.lastAiCtx;
+      const [aiMemory, streamHistory, gamePatterns] = await Promise.all([
         getAiMemorySummary(ws).catch(() => ''),
         getStreamHistorySummary(ws).catch(() => ''),
+        getGamePatterns(ws).catch(() => ''),
       ]);
-      await this.runSafe('ai_analysis', () =>
-        runAiAnalysis(ws, streamId, state, chatLines, msgsPerMin, aiMemory, streamHistory)
-      );
+      // Run directly (not through runSafe) to capture the returned tip for self-evaluation
+      try {
+        const firstTip = await runAiAnalysis(
+          ws, streamId, state, chatLines, msgsPerMin,
+          aiMemory, streamHistory, gamePatterns, capturedCtx
+        );
+        this.errorCounts['ai_analysis'] = 0;
+        if (firstTip) {
+          this.lastAiCtx = {
+            viewerCount:  viewerCount,
+            chatRate:     msgsPerMin,
+            tipCategory:  firstTip.category,
+            tipMessage:   firstTip.message,
+            sentAt:       now,
+          };
+        }
+      } catch (err: any) {
+        const count = (this.errorCounts['ai_analysis'] ?? 0) + 1;
+        this.errorCounts['ai_analysis'] = count;
+        console.error('[LiveAgent:ai_analysis] feil:', err?.message);
+        if (count === 1 || count % 5 === 0) {
+          logSystemEvent({
+            workspaceId: ws, source: 'live_agent', event_type: 'LIVE_AGENT_MODULE_ERROR',
+            title: `Live Agent modul feilet: ai_analysis (x${count})`,
+            severity: count >= 5 ? 'error' : 'warning',
+            metadata: { module: 'ai_analysis', errorCount: count, error: err?.message?.slice(0, 200), streamId },
+          });
+        }
+      }
     }
 
     // ── Module: Raid Evaluator (every 5 min) ──────────────────────────────────
