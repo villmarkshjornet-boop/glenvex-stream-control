@@ -102,8 +102,13 @@ async function getStreamHistorySummary(ws: string): Promise<string> {
 }
 
 // ─── Module: Game Pattern Analyser ────────────────────────────────────────────
+// All comparisons computed here. GPT may only reference numbers returned by this function.
 
-async function getGamePatterns(ws: string): Promise<string> {
+async function getGamePatterns(
+  ws: string,
+  currentGame: string | null,
+  currentViewers: number | null,
+): Promise<string> {
   try {
     const db = getBotDb();
     if (!db) return '';
@@ -113,7 +118,7 @@ async function getGamePatterns(ws: string): Promise<string> {
       .eq('workspace_id', ws)
       .order('ended_at', { ascending: false })
       .limit(20);
-    if (!data || data.length < 3) return '(for lite data — under 3 streams)';
+    if (!data || data.length < 3) return '(for lite data — under 3 streams totalt, Confidence: lav)';
 
     const byGame: Record<string, { peaks: number[]; avgs: number[]; chats: number[]; retentions: number[] }> = {};
     for (const s of data) {
@@ -125,17 +130,91 @@ async function getGamePatterns(ws: string): Promise<string> {
       if (s.retention_pct != null) byGame[g].retentions.push(s.retention_pct);
     }
 
-    const avg = (arr: number[]) =>
+    const avgOf = (arr: number[]) =>
       arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+    const conf = (n: number) => n >= 5 ? 'høy' : n >= 3 ? 'middels' : 'lav';
 
-    const lines = Object.entries(byGame)
-      .filter(([, v]) => v.peaks.length >= 2)
-      .map(([game, v]) => {
-        const ret = v.retentions.length ? `, ${avg(v.retentions)}% retention` : '';
-        return `${game} (${v.peaks.length} streams): snitt ${avg(v.avgs)} seere, ${avg(v.chats)} chat/stream${ret}`;
-      });
+    const lines: string[] = [];
+    lines.push('=== BEREGNET SPILLSTATISTIKK — BRUK BARE DISSE TALLENE, ALDRI EGNE ===');
 
-    return lines.length > 0 ? lines.join('\n') : '(ikke nok data per spill ennå)';
+    // Per-game rows
+    const games = Object.entries(byGame)
+      .filter(([, v]) => v.avgs.length >= 2)
+      .sort(([, a], [, b]) => b.avgs.length - a.avgs.length);
+
+    for (const [game, v] of games) {
+      const retStr = v.retentions.length >= 2
+        ? `, ${avgOf(v.retentions)}% retention`
+        : ', retention: for lite data';
+      lines.push(
+        `${game} (${v.avgs.length} streams, tillit: ${conf(v.avgs.length)}): snitt ${avgOf(v.avgs)} seere, ${avgOf(v.chats)} chat/stream${retStr}`,
+      );
+    }
+
+    // Best-of — only include facts with sufficient data
+    lines.push('');
+    lines.push('BESTE SPILL (beregnet i kode):');
+    const bestRet = games
+      .filter(([, v]) => v.retentions.length >= 3)
+      .sort(([, a], [, b]) => avgOf(b.retentions) - avgOf(a.retentions))[0];
+    if (bestRet) {
+      const [g, v] = bestRet;
+      lines.push(`  Høyest retention: ${g} — ${avgOf(v.retentions)}% (${v.retentions.length} streams, tillit: ${conf(v.retentions.length)})`);
+    } else {
+      lines.push('  Høyest retention: for lite data (min 3 streams per spill)');
+    }
+
+    const bestView = games.sort(([, a], [, b]) => avgOf(b.avgs) - avgOf(a.avgs))[0];
+    if (bestView) {
+      const [g, v] = bestView;
+      lines.push(`  Flest seere: ${g} — snitt ${avgOf(v.avgs)} (${v.avgs.length} streams, tillit: ${conf(v.avgs.length)})`);
+    }
+
+    const bestChat = games.sort(([, a], [, b]) => avgOf(b.chats) - avgOf(a.chats))[0];
+    if (bestChat) {
+      const [g, v] = bestChat;
+      lines.push(`  Mest chat: ${g} — snitt ${avgOf(v.chats)} meldinger/stream (${v.chats.length} streams)`);
+    }
+
+    // Cross-game retention diff — only when we have 2+ games with enough retention data
+    const withRet = games.filter(([, v]) => v.retentions.length >= 2);
+    if (withRet.length >= 2) {
+      const sorted = [...withRet].sort(([, a], [, b]) => avgOf(b.retentions) - avgOf(a.retentions));
+      const [bestG, bestV] = sorted[0];
+      const [worstG, worstV] = sorted[sorted.length - 1];
+      const diff = avgOf(bestV.retentions) - avgOf(worstV.retentions);
+      lines.push(`  ${bestG} gir ${diff}% høyere retention enn ${worstG} (${avgOf(bestV.retentions)}% vs ${avgOf(worstV.retentions)}%) — beregnet`);
+    }
+
+    // Current game vs historical average — most important comparison
+    lines.push('');
+    if (currentGame && byGame[currentGame] && byGame[currentGame].avgs.length >= 2) {
+      const hist = byGame[currentGame];
+      const histAvg = avgOf(hist.avgs);
+      const diff    = currentViewers != null ? currentViewers - histAvg : null;
+      const sign    = diff != null ? (diff >= 0 ? '+' : '') : '';
+      const pctStr  = diff != null && histAvg > 0
+        ? ` (${sign}${Math.round((diff / histAvg) * 100)}% fra snitt)`
+        : '';
+      lines.push(`NÅVÆRENDE vs. HISTORISK (${currentGame}):`);
+      if (diff != null) {
+        lines.push(`  Seere nå: ${currentViewers} — historisk snitt: ${histAvg} → ${sign}${diff}${pctStr}`);
+      } else {
+        lines.push(`  Historisk snitt for ${currentGame}: ${histAvg} seere`);
+      }
+      if (hist.retentions.length >= 2) {
+        lines.push(`  Historisk retention for ${currentGame}: ${avgOf(hist.retentions)}% snitt`);
+      }
+    } else if (currentGame) {
+      lines.push(`${currentGame}: for lite data for direkte sammenligning (min 2 streams kreves)`);
+    }
+
+    lines.push('');
+    lines.push('REGEL: Presenter IKKE tall eller prosenter som ikke er oppgitt ovenfor.');
+    lines.push('Hvis tillit er "lav" — bruk "for lite historikk" og "Confidence: lav" i reasoning-feltet.');
+    lines.push('=== SLUTT STATISTIKK ===');
+
+    return lines.join('\n');
   } catch {
     return '';
   }
@@ -274,7 +353,6 @@ async function runAiAnalysis(
   msgsPerMin: number,
   aiMemory: string,
   streamHistory: string,
-  gamePatterns: string,
   lastCtx: LastTickContext | null,
 ): Promise<TipPayload | null> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -283,24 +361,36 @@ async function runAiAnalysis(
   const openai = new OpenAI({ apiKey });
   const { game, title, viewerCount, viewerPeak, durationMin, phase } = state.stream;
 
-  // ── Self-evaluation block ───────────────────────────────────────────────────
+  // Pre-compute game patterns here so we can pass current context
+  const gamePatterns = await getGamePatterns(ws, game ?? null, viewerCount ?? null).catch(() => '');
+
+  // ── Self-evaluation block — all deltas computed in code, not by GPT ──────────
   const minutesSinceLast = lastCtx
     ? Math.round((Date.now() - lastCtx.sentAt) / 60_000) : 0;
-  const viewerDelta = lastCtx ? (viewerCount ?? 0) - lastCtx.viewerCount : 0;
-  const chatDelta   = lastCtx ? msgsPerMin - lastCtx.chatRate : 0;
+  const viewerNow    = viewerCount ?? 0;
+  const viewerDelta  = lastCtx ? viewerNow - lastCtx.viewerCount : 0;
+  const viewerPct    = lastCtx && lastCtx.viewerCount > 0
+    ? Math.round((viewerDelta / lastCtx.viewerCount) * 100) : 0;
+  const chatDelta    = lastCtx ? msgsPerMin - lastCtx.chatRate : 0;
+  const chatPct      = lastCtx && lastCtx.chatRate > 0
+    ? Math.round((chatDelta / lastCtx.chatRate) * 100) : null;
+  const vSign        = viewerDelta >= 0 ? '+' : '';
+  const cSign        = chatDelta   >= 0 ? '+' : '';
+
+  const indication = !lastCtx?.tipMessage ? null :
+    viewerPct >  5  ? 'KLAR POSITIV EFFEKT — seertallet økte merkbart' :
+    viewerPct < -10 ? 'NEGATIV EFFEKT — seertallet falt, vurder å endre fokus' :
+    chatPct != null && chatPct >  30 ? 'KLAR POSITIV EFFEKT — chat-aktiviteten økte markant' :
+    chatPct != null && chatPct < -30 ? 'NØYTRAL/NEGATIV — chat-aktiviteten falt' :
+    'USIKKER EFFEKT — for lite endring til å konkludere';
+
   const selfEval = !lastCtx?.tipMessage
     ? '(første analyse denne streamen)'
     : [
         `Forrige råd (${minutesSinceLast} min siden): "${lastCtx.tipMessage}" [${lastCtx.tipCategory}]`,
-        `Seere: ${lastCtx.viewerCount} → ${viewerCount ?? 0} (${viewerDelta >= 0 ? '+' : ''}${viewerDelta})`,
-        `Chat: ${lastCtx.chatRate} → ${msgsPerMin} msgs/min (${chatDelta >= 0 ? '+' : ''}${chatDelta})`,
-        `Indikasjon: ${
-          viewerDelta > (viewerCount ?? 1) * 0.05 ? 'POSITIV — seertallet økte' :
-          viewerDelta < -(viewerCount ?? 1) * 0.10 ? 'NEGATIV — seertallet falt, skift fokus' :
-          chatDelta > 2  ? 'POSITIV — chataktiviteten økte' :
-          chatDelta < -2 ? 'NØYTRAL/NEGATIV — chat falt' :
-          'NØYTRAL — ingen klar effekt'
-        }`,
+        `Seere: ${lastCtx.viewerCount} → ${viewerNow} (${vSign}${viewerDelta}, ${vSign}${viewerPct}%)`,
+        `Chat: ${lastCtx.chatRate} → ${msgsPerMin} msgs/min (${cSign}${chatDelta}${chatPct != null ? `, ${cSign}${chatPct}%` : ''})`,
+        `Konklusjon: ${indication}`,
       ].join('\n');
 
   const systemPrompt = `Du er GLENVEX AI-produsent — en senior streaming-konsulent som kjenner kanalen til bunns.
@@ -308,14 +398,20 @@ async function runAiAnalysis(
 DIN ROLLE:
 Du er en mentor, ikke en notis-generator. Du tenker, velger og forklarer.
 
-REGLER DU MÅ FØLGE:
-1. EVALUER ALLTID forrige anbefaling eksplisitt — nevn om den fungerte eller ikke i reasoning
-2. TREKK TILBAKE råd hvis situasjonen er endret negativt siden forrige analyse
-3. BRUK ALLTID personlig stemme: "Du pleier å...", "For deg fungerer...", "Basert på dine X streams...", "I dine ${durationMin ? Math.round(durationMin) : '?'} minutter med dette spillet..."
-4. UTFORDRE ANTAKELSER: hvis data viser noe overraskende (f.eks. at en partner gjør det bedre enn forventet), si det
-5. VÆR ÆRLIG om usikkerhet: hvis du mangler data, si "Confidence: lav" i reasoning og forklar hvorfor
+VIKTIG — DATATILLIT:
+Du har KUN LOV til å bruke tall og prosentandeler som er oppgitt i BEREGNET STATISTIKK nedenfor.
+Finn ALDRI opp prosentandeler, snitt, retention-tall eller effektvurderinger som ikke er eksplisitt oppgitt.
+Hvis statistikken sier "for lite data" eller "tillit: lav" — bruk ALLTID "for lite historikk" og "Confidence: lav" i reasoning.
+Bruk aldri fraser som "X% bedre" eller "økte med Y%" med egne beregnede tall.
+
+REGLER:
+1. EVALUER forrige anbefaling eksplisitt — se self-eval-blokken, bruk kun tallene der
+2. TREKK TILBAKE råd hvis Konklusjon er NEGATIV EFFEKT eller USIKKER EFFEKT
+3. BRUK personlig stemme: "Du pleier å...", "For deg fungerer...", "Basert på dine X streams..."
+4. UTFORDRE ANTAKELSER hvis statistikken viser noe overraskende
+5. VÆR ÆRLIG: skriv "Confidence: lav" i reasoning hvis datagrunnlaget er tynt
 6. PRIORITER langsiktig kanalvekst, ikke kortsiktige tall
-7. MAKSIMALT ${MAX_TIPS_PER_TICK} råd. Velg det viktigste, ikke alt mulig
+7. MAKSIMALT ${MAX_TIPS_PER_TICK} råd
 
 FORMAT (JSON kun):
 {"tips":[
@@ -329,25 +425,24 @@ FORMAT (JSON kun):
 
   const userPrompt = `SITUASJON NÅ:
 Spill: ${game ?? 'ukjent'} | Tittel: ${title ?? 'ukjent'}
-Seere: ${viewerCount ?? 0} (topp: ${viewerPeak ?? 0}) | Varighet: ${durationMin ?? 0} min | Fase: ${phase ?? 'ukjent'}
+Seere: ${viewerNow} (topp: ${viewerPeak ?? 0}) | Varighet: ${durationMin ?? 0} min | Fase: ${phase ?? 'ukjent'}
 Chat: ${msgsPerMin} meldinger/min
 
-SELF-EVALUATION (forrige anbefaling):
+SELF-EVALUATION (forrige anbefaling — tall beregnet i kode):
 ${selfEval}
 
 SISTE CHAT (20 linjer):
 ${chatLines.slice(-20).join('\n') || '(ingen chat-aktivitet)'}
 
 KANALENS PERSONLIGE HISTORIKK (AI Memory):
-${aiMemory || '(ingen historikk ennå — vær forsiktig med antakelser, mark confidence som lav)'}
+${aiMemory || '(ingen historikk ennå — mark confidence som lav)'}
 
-SPILLMØNSTRE (basert på ${game ?? 'alle'} og andre spill):
-${gamePatterns || '(ingen spilldata ennå)'}
+${gamePatterns || 'SPILLSTATISTIKK: (ingen data ennå)'}
 
 SISTE STREAMS:
 ${streamHistory || '(ingen)'}
 
-Generer ${MAX_TIPS_PER_TICK} råd. Bruk alltid personlig stemme. Evaluer forrige råd eksplisitt.`;
+Generer ${MAX_TIPS_PER_TICK} råd. Bruk alltid personlig stemme. Evaluer forrige råd eksplisitt. Bruk BARE tall fra statistikken ovenfor.`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -614,16 +709,15 @@ export class LiveAgent {
     if (now - this.lastAiTickAt >= AI_TICK_MS) {
       this.lastAiTickAt = now;
       const capturedCtx = this.lastAiCtx;
-      const [aiMemory, streamHistory, gamePatterns] = await Promise.all([
+      const [aiMemory, streamHistory] = await Promise.all([
         getAiMemorySummary(ws).catch(() => ''),
         getStreamHistorySummary(ws).catch(() => ''),
-        getGamePatterns(ws).catch(() => ''),
       ]);
       // Run directly (not through runSafe) to capture the returned tip for self-evaluation
       try {
         const firstTip = await runAiAnalysis(
           ws, streamId, state, chatLines, msgsPerMin,
-          aiMemory, streamHistory, gamePatterns, capturedCtx
+          aiMemory, streamHistory, capturedCtx
         );
         this.errorCounts['ai_analysis'] = 0;
         if (firstTip) {
