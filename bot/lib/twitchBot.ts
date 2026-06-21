@@ -638,7 +638,7 @@ export function startTwitchBot() {
 
     // Notify external handlers (e.g. Poll Manager vote collection)
     if (_externalChatHandlers.size > 0) {
-      _externalChatHandlers.forEach(h => { try { h(tags.username, tekst); } catch {} });
+      _externalChatHandlers.forEach(h => { try { h(tags.username ?? '', tekst); } catch {} });
     }
 
     const erBot = brukernavn.includes('nightbot') || brukernavn.includes('streamlabs') || brukernavn.includes('streamelements');
