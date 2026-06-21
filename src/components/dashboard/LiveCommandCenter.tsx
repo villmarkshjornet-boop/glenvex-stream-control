@@ -857,25 +857,33 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     prevViewersRef.current = slow.streamStatus.viewers ?? 0;
   }, [slow.streamStatus.viewers]);
 
-  // Load persisted mission state from localStorage (keyed by stream start date)
-  // so "Gjort ✓" survives page refresh. Also pulls from DB as secondary source.
+  // Mission state load: DB is source of truth, localStorage is optimistic cache.
+  // Key uses full startIso (not date-only) to avoid same-day stream collisions.
   useEffect(() => {
     if (!startIso || missionStateLoadedRef.current) return;
     missionStateLoadedRef.current = true;
-    const key = `gmq_${startIso.split('T')[0]}`;
+    // Safe localStorage key: replace colons and dots to avoid encoding issues
+    const lsKey = `gmq_${startIso.replace(/[:.]/g, '-')}`;
+
+    // Step 1: Apply localStorage immediately — instant optimistic UI
+    let localIds: string[] = [];
     try {
-      const raw = localStorage.getItem(key);
+      const raw = localStorage.getItem(lsKey);
       if (raw) {
-        const ids = JSON.parse(raw) as string[];
-        if (ids.length > 0) setDoneManual(new Set(ids));
-        return; // localStorage is fast and sufficient
+        localIds = JSON.parse(raw) as string[];
+        if (localIds.length > 0) setDoneManual(new Set(localIds));
       }
     } catch {}
-    // Fallback: load from system_events via API
+
+    // Step 2: Always fetch DB (source of truth). DB wins; local additions are kept.
     fetch(`/api/missions/state?startIso=${encodeURIComponent(startIso)}`)
       .then(r => r.ok ? r.json() : null)
       .then((d: { completed: string[] } | null) => {
-        if (d?.completed?.length) setDoneManual(new Set(d.completed));
+        const dbIds = d?.completed ?? [];
+        // DB-completed missions are authoritative; keep optimistic local additions too
+        const merged = Array.from(new Set([...dbIds, ...localIds]));
+        try { localStorage.setItem(lsKey, JSON.stringify(merged)); } catch {}
+        setDoneManual(new Set(merged));
       })
       .catch(() => {});
   }, [startIso]);
@@ -937,12 +945,12 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     setDoneManual(prev => {
       const n = new Set(prev);
       n.add(id);
-      // Persist to localStorage (survives refresh, instant)
+      // Persist to localStorage (optimistic cache, same key as load effect)
       if (startIso) {
         try {
-          const key = `gmq_${startIso.split('T')[0]}`;
-          const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]');
-          if (!existing.includes(id)) localStorage.setItem(key, JSON.stringify([...existing, id]));
+          const lsKey = `gmq_${startIso.replace(/[:.]/g, '-')}`;
+          const existing: string[] = JSON.parse(localStorage.getItem(lsKey) ?? '[]');
+          if (!existing.includes(id)) localStorage.setItem(lsKey, JSON.stringify([...existing, id]));
         } catch {}
       }
       return n;
