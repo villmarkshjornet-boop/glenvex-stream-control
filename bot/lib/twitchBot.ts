@@ -366,6 +366,13 @@ export function startTwitchBot() {
 
   if (!oauth) {
     console.log('  ⚠ TWITCH_BOT_OAUTH mangler – Twitch chat-bot ikke startet');
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'TWITCH_BOT_MISSING_OAUTH',
+      title: 'Twitch chat-bot ikke startet — TWITCH_BOT_OAUTH mangler i Railway',
+      severity: 'error',
+      metadata: { channel: KANAL, fix: 'Legg til TWITCH_BOT_OAUTH i Railway Variables' },
+    });
     return;
   }
 
@@ -377,6 +384,13 @@ export function startTwitchBot() {
 
   client.connect().then(() => {
     console.log(`  ✓ Twitch chat-bot koblet til #${KANAL}`);
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'TWITCH_CHAT_JOINED',
+      title: `Twitch chat-bot koblet til #${KANAL}`,
+      severity: 'info',
+      metadata: { channel: KANAL, botUsername: botNavn },
+    });
     // Join eventuelle workspace-kanaler som ble registrert før connect()
     for (const ch of externalChannelHandlers.keys()) {
       client!.join(ch).catch(() => {});
@@ -454,6 +468,13 @@ export function startTwitchBot() {
     }, 60_000);
   }).catch((err: Error) => {
     console.error('  ✗ Twitch chat feil:', err.message);
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'TWITCH_CHAT_JOIN_FAILED',
+      title: `Twitch chat-bot kunne ikke koble til #${KANAL}`,
+      severity: 'error',
+      metadata: { channel: KANAL, error: err.message?.slice(0, 200) },
+    });
   });
 
   // ─── RAID ──────────────────────────────────────────────────────────────────

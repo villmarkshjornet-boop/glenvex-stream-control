@@ -826,15 +826,20 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
   const [copied, setCopied]             = useState<string | null>(null);
   const [raidTargets, setRaidTargets]   = useState<RaidTarget[]>([]);
   const [pollQueued, setPollQueued]     = useState(false);
+  const missionStateLoadedRef           = useRef(false);
 
   // Viewer drop tracking across renders (refs don't trigger re-render)
   const prevViewersRef = useRef<number | null>(null);
   const viewerDropRef  = useRef<ViewerDrop>({ dropped: false, magnitude: 0 });
 
   const status   = slow.streamStatus;
-  const startIso = live.systemEvents?.find(e =>
-    e.event_type === 'LIVE_AGENT_STARTED' || e.event_type === 'LIVE_DETECTED'
-  )?.created_at ?? null;
+  // startIso: prefer bot's LIVE_DETECTED event (authoritative), fall back to Twitch API startedAt.
+  // Without a fallback, the plan stays stuck on "Beregner tidsplan…" if the bot is offline.
+  const startIso =
+    live.systemEvents?.find(e =>
+      e.event_type === 'LIVE_AGENT_STARTED' || e.event_type === 'LIVE_DETECTED'
+    )?.created_at
+    ?? (slow.streamStatus.isLive ? slow.streamStatus.startedAt ?? null : null);
   const elapsedMin = startIso ? (Date.now() - new Date(startIso).getTime()) / 60_000 : 0;
 
   // Detect 18%+ viewer drop; reset when viewers recover
@@ -851,6 +856,29 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     }
     prevViewersRef.current = slow.streamStatus.viewers ?? 0;
   }, [slow.streamStatus.viewers]);
+
+  // Load persisted mission state from localStorage (keyed by stream start date)
+  // so "Gjort ✓" survives page refresh. Also pulls from DB as secondary source.
+  useEffect(() => {
+    if (!startIso || missionStateLoadedRef.current) return;
+    missionStateLoadedRef.current = true;
+    const key = `gmq_${startIso.split('T')[0]}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const ids = JSON.parse(raw) as string[];
+        if (ids.length > 0) setDoneManual(new Set(ids));
+        return; // localStorage is fast and sufficient
+      }
+    } catch {}
+    // Fallback: load from system_events via API
+    fetch(`/api/missions/state?startIso=${encodeURIComponent(startIso)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { completed: string[] } | null) => {
+        if (d?.completed?.length) setDoneManual(new Set(d.completed));
+      })
+      .catch(() => {});
+  }, [startIso]);
 
   // Auto-fetch raid targets near stream end (lazy start, 5-min refresh)
   useEffect(() => {
@@ -905,8 +933,29 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     .sort((a, b) => a.minutesAway - b.minutesAway)
     .slice(0, 3);
 
-  const markDone = (id: string) =>
-    setDoneManual(prev => { const n = new Set(prev); n.add(id); return n; });
+  const markDone = (id: string, label?: string) => {
+    setDoneManual(prev => {
+      const n = new Set(prev);
+      n.add(id);
+      // Persist to localStorage (survives refresh, instant)
+      if (startIso) {
+        try {
+          const key = `gmq_${startIso.split('T')[0]}`;
+          const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]');
+          if (!existing.includes(id)) localStorage.setItem(key, JSON.stringify([...existing, id]));
+        } catch {}
+      }
+      return n;
+    });
+    // Async DB write — fire and forget, non-blocking
+    if (startIso) {
+      fetch('/api/missions/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ missionId: id, label, startIso }),
+      }).catch(() => {});
+    }
+  };
 
   const startPoll = async (question: string, options: string[]) => {
     setPollQueued(true);
@@ -1094,7 +1143,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                     )}
                     {nextMission.isManual && nextMission.id !== 'poll' && (
                       <button
-                        onClick={() => markDone(nextMission.id)}
+                        onClick={() => markDone(nextMission.id, nextMission.label)}
                         className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all"
                       >
                         Gjort ✓
@@ -1102,7 +1151,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                     )}
                     {nextMission.id === 'poll' && (
                       <button
-                        onClick={() => markDone(nextMission.id)}
+                        onClick={() => markDone(nextMission.id, nextMission.label)}
                         className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text transition-all"
                       >
                         Gjort ✓
@@ -1124,7 +1173,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                   </Link>
                   {nextMission.isManual && (
                     <button
-                      onClick={() => markDone(nextMission.id)}
+                      onClick={() => markDone(nextMission.id, nextMission.label)}
                       className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-green/30 transition-all"
                     >
                       Gjort ✓
@@ -1141,7 +1190,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                   {missions.map(m => (
                     <button
                       key={m.id}
-                      onClick={() => m.isManual && !m.done ? markDone(m.id) : undefined}
+                      onClick={() => m.isManual && !m.done ? markDone(m.id, m.label) : undefined}
                       className={`flex items-center gap-2 text-[10px] leading-snug ${
                         m.done               ? 'text-g-muted/35 line-through' :
                         m.id === nextMission.id ? 'text-g-text font-bold' :

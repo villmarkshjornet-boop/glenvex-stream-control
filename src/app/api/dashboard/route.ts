@@ -199,6 +199,7 @@ export async function GET() {
     game: stream?.game ?? null,
     title: stream?.title ?? null,
     thumbnailUrl: stream?.thumbnailUrl ?? null,
+    startedAt: stream?.startedAt ?? null,
     nesteStream: nesteStream
       ? {
           dag: nesteStream.dag,

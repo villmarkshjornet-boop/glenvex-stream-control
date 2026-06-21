@@ -290,15 +290,16 @@ export class PollManager {
         .limit(3);
       lastPollResults = (polls ?? []).map((p: any) => `${p.poll_type}: "${p.winner ?? 'ukjent'}"`);
 
-      // All question texts asked in the last 7 days — used to skip repeated questions
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      // Question texts asked in the last 48h — skip repeating the same question too soon.
+      // 48h (not 7d) so weekly streamers still get all question types each stream.
+      const fortyEightHoursAgo = new Date(Date.now() - 48 * 3600_000).toISOString();
       const { data: recentQs } = await db
         .from('poll_events')
         .select('question')
         .eq('workspace_id', ws)
         .neq('status', 'failed')
-        .gte('created_at', sevenDaysAgo)
-        .limit(25);
+        .gte('created_at', fortyEightHoursAgo)
+        .limit(15);
       usedQuestions = (recentQs ?? []).map((p: any) => p.question as string).filter(Boolean);
     }
 
@@ -339,13 +340,17 @@ export class PollManager {
       // If chat is dead, skip DISCORD_GROWTH (useless) unless it's a wake-chat attempt
       if (chatDead && type === 'DISCORD_GROWTH') continue;
 
-      // Cross-session dedup: skip if the question for this type was asked in the last 7 days
+      // Cross-session dedup: skip if the same question was asked in the last 48h
       const preview = this.buildPoll(type, ctx);
       if (preview && ctx.usedQuestions.includes(preview.question)) continue;
 
       return type;
     }
-    return null;
+
+    // All types were blocked by dedup — fall back to STREAM_DIRECTION (most generic)
+    // Prevents the poll engine from going completely silent after many recent polls.
+    this.logSkip('Alle poll-typer nylig brukt — faller tilbake til STREAM_DIRECTION', { usedCount: ctx.usedQuestions.length });
+    return 'STREAM_DIRECTION';
   }
 
   // ─── Poll builder per type ──────────────────────────────────────────────────

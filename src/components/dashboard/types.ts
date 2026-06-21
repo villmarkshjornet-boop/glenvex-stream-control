@@ -8,6 +8,7 @@ export interface SlowData {
   streamStatus: {
     isLive: boolean; viewers: number; game: string | null; title: string | null;
     thumbnailUrl: string | null;
+    startedAt: string | null;
     nesteStream: { dag: string; tid: string; spill: string; tittel: string | null; nedtelling: string | null; tidspunkt: string | null } | null;
   };
   meta: { hentetKl: string };
