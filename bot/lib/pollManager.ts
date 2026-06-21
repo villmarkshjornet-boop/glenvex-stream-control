@@ -53,12 +53,13 @@ interface PollOption {
 }
 
 interface PollContext {
-  recentGames:     string[];
-  activePartners:  string[];
-  currentGame:     string | null;
-  aiMemoryHints:   string[];
-  lastPollResults: string[];
-  chatActivity:    'dead' | 'low' | 'medium' | 'high';
+  recentGames:      string[];
+  activePartners:   string[];
+  currentGame:      string | null;
+  aiMemoryHints:    string[];
+  lastPollResults:  string[];
+  usedQuestions:    string[];   // recently asked question texts — cross-session dedup
+  chatActivity:     'dead' | 'low' | 'medium' | 'high';
   streamDurationMin: number;
 }
 
@@ -149,16 +150,36 @@ export class PollManager {
       return;
     }
 
+    // ── Dashboard-requested poll — user explicitly clicked "Start poll" ───────
+    // Check first so explicit user action bypasses the AI rotation.
+    const requested = await this.pickRequestedPoll();
+    if (requested) {
+      const context = await this.buildContext(streamAgeMs, msgsPerMin);
+      logSystemEvent({
+        workspaceId: this.cfg.workspaceId,
+        source: 'poll_manager',
+        event_type: 'POLL_DASHBOARD_REQUEST_PICKED',
+        title: `Dashboard-poll plukket: "${requested.question}"`,
+        severity: 'info',
+        metadata: { streamId: this.cfg.streamId, question: requested.question, options: requested.options },
+      });
+      this.pollInProgress = true;
+      this.runPoll('STREAM_DIRECTION', requested.question, requested.options, 'Dashboard-anmodet poll', context)
+        .catch(err => console.error('[PollManager] dashboard-poll error:', err?.message))
+        .finally(() => { this.pollInProgress = false; });
+      return;
+    }
+
     // ── Guard: chat dead (skip unless we're trying to wake it) ───────────────
     const chatDead = msgsPerMin === 0;
 
     // ── Build context ────────────────────────────────────────────────────────
     const context = await this.buildContext(streamAgeMs, msgsPerMin);
 
-    // ── Choose poll type ─────────────────────────────────────────────────────
+    // ── Choose poll type (skips recently asked questions via ctx.usedQuestions) ──
     const pollType = this.choosePollType(context, chatDead);
     if (!pollType) {
-      this.logSkip('Ingen egnet poll-type for nåværende kontekst', { chatDead, recentGames: context.recentGames });
+      this.logSkip('Ingen egnet poll-type for nåværende kontekst', { chatDead, recentGames: context.recentGames, usedQuestionsCount: context.usedQuestions.length });
       return;
     }
 
@@ -188,6 +209,35 @@ export class PollManager {
       .finally(() => { this.pollInProgress = false; });
   }
 
+  // Pick up oldest pending dashboard-requested poll for this workspace
+  private async pickRequestedPoll(): Promise<{ question: string; options: string[] } | null> {
+    const db = getBotDb();
+    if (!db) return null;
+
+    const { data, error } = await db
+      .from('poll_events')
+      .select('id, question, options')
+      .eq('workspace_id', this.cfg.workspaceId)
+      .eq('status', 'requested')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (error || !data) return null;
+
+    // Claim the row (set active + real stream_id)
+    await db.from('poll_events').update({
+      status:    'active',
+      stream_id: this.cfg.streamId,
+    }).eq('id', data.id).catch(() => {});
+
+    const options = ((data.options ?? []) as any[])
+      .map((o: any) => (typeof o === 'string' ? o : (o?.label ?? '')))
+      .filter(Boolean) as string[];
+
+    return options.length >= 2 ? { question: data.question, options } : null;
+  }
+
   // ─── Context builder ────────────────────────────────────────────────────────
 
   private async buildContext(streamAgeMs: number, msgsPerMin: number): Promise<PollContext> {
@@ -198,6 +248,7 @@ export class PollManager {
     let activePartners: string[] = [];
     let aiMemoryHints: string[]  = [];
     let lastPollResults: string[] = [];
+    let usedQuestions: string[]  = [];
 
     if (db) {
       // Last 5 distinct games from stream history
@@ -238,6 +289,17 @@ export class PollManager {
         .order('closed_at', { ascending: false })
         .limit(3);
       lastPollResults = (polls ?? []).map((p: any) => `${p.poll_type}: "${p.winner ?? 'ukjent'}"`);
+
+      // All question texts asked in the last 7 days — used to skip repeated questions
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const { data: recentQs } = await db
+        .from('poll_events')
+        .select('question')
+        .eq('workspace_id', ws)
+        .neq('status', 'failed')
+        .gte('created_at', sevenDaysAgo)
+        .limit(25);
+      usedQuestions = (recentQs ?? []).map((p: any) => p.question as string).filter(Boolean);
     }
 
     const chatActivity: PollContext['chatActivity'] =
@@ -251,6 +313,7 @@ export class PollManager {
       currentGame: null, // populated from CreatorState if available
       aiMemoryHints,
       lastPollResults,
+      usedQuestions,
       chatActivity,
       streamDurationMin: Math.round(streamAgeMs / 60_000),
     };
@@ -264,7 +327,7 @@ export class PollManager {
       const type = POLL_TYPE_ROTATION[this.pollTypeIndex % POLL_TYPE_ROTATION.length];
       this.pollTypeIndex++;
 
-      // Don't repeat last type
+      // Don't repeat last type in this session
       if (type === this.lastPollType) continue;
 
       // GAME_PREFERENCE requires at least 3 recent games
@@ -275,6 +338,10 @@ export class PollManager {
 
       // If chat is dead, skip DISCORD_GROWTH (useless) unless it's a wake-chat attempt
       if (chatDead && type === 'DISCORD_GROWTH') continue;
+
+      // Cross-session dedup: skip if the question for this type was asked in the last 7 days
+      const preview = this.buildPoll(type, ctx);
+      if (preview && ctx.usedQuestions.includes(preview.question)) continue;
 
       return type;
     }
@@ -586,6 +653,24 @@ export class PollManager {
       severity: 'info',
       metadata: { key: `poll_${opts.pollType}_latest`, summary, confidence },
     });
+
+    // Write question to dedup history in ai_agent_memory (Creator Brain V2 input)
+    // This lets Creator Brain V2 read poll_question_history without scanning poll_events.
+    await db.from('ai_agent_memory').upsert({
+      workspace_id:     ws,
+      agent_type:       'poll_manager',
+      memory_type:      'poll_question',
+      key:              'poll_question_history',
+      summary:          `Siste poll-spørsmål (dedup + Creator Brain V2 input)`,
+      confidence_score: 0.9,
+      metadata: {
+        lastQuestion: opts.question,
+        lastType:     opts.pollType,
+        lastWinner:   opts.winner.label,
+        lastRunAt:    now,
+      },
+      updated_at: now,
+    }, { onConflict: 'workspace_id,key' }).catch(() => {});
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────

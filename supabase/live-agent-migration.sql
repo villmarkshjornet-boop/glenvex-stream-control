@@ -20,3 +20,4 @@ CREATE INDEX IF NOT EXISTS idx_live_agent_tips_stream
 CREATE INDEX IF NOT EXISTS idx_live_agent_tips_active
   ON live_agent_tips(workspace_id, stream_id, expires_at)
   WHERE expires_at IS NOT NULL;
+Her må vi være nøy

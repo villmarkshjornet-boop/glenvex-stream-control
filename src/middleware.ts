@@ -169,6 +169,9 @@ export async function middleware(request: NextRequest) {
 
   // Alpha gate: alpha_enabled === false means the workspace is on the waiting list.
   // undefined/true means allowed (preserves access for existing users without the flag).
+  // JWT claims are cached — if admin just enabled access the DB is authoritative.
+  // We do one fast REST check and force-refresh the token so the user gets through
+  // without having to log out and back in.
   if (
     claims.workspace_id &&
     claims.alpha_enabled === false &&
@@ -176,9 +179,31 @@ export async function middleware(request: NextRequest) {
     !isOnboardingPath &&
     !isAdminPath
   ) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/waiting';
-    return NextResponse.redirect(url);
+    let dbAlphaEnabled = false;
+    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    if (sbUrl && sbKey) {
+      try {
+        const checkRes = await fetch(
+          `${sbUrl}/rest/v1/workspaces?id=eq.${encodeURIComponent(claims.workspace_id)}&select=alpha_enabled&limit=1`,
+          { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }, signal: AbortSignal.timeout(3000) },
+        );
+        if (checkRes.ok) {
+          const rows = await checkRes.json() as { alpha_enabled: boolean }[];
+          dbAlphaEnabled = rows?.[0]?.alpha_enabled === true;
+        }
+      } catch {}
+    }
+    if (!dbAlphaEnabled) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/waiting';
+      return NextResponse.redirect(url);
+    }
+    // Admin has since enabled access — force a token refresh so the JWT claim updates.
+    if (session.refresh_token && !refreshedSession) {
+      refreshedSession = await refreshAccessToken(session.refresh_token);
+      if (refreshedSession) claims = decodeJwtClaims(refreshedSession.access_token) ?? claims;
+    }
   }
 
   const requestHeaders = new Headers(request.headers);
