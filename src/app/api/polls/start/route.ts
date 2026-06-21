@@ -61,6 +61,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Kunne ikke opprette poll' }, { status: 500 });
   }
 
+  // Log observable event — appears in System Events feed immediately
+  try {
+    await db.from('system_events').insert({
+      workspace_id: ws,
+      source:       'dashboard',
+      event_type:   'POLL_REQUESTED',
+      title:        `Poll forespurt fra dashboard: "${question.trim().slice(0, 80)}"`,
+      severity:     'info',
+      metadata:     { question, options, pollId: pollRow?.id ?? null, source: 'dashboard',
+                      note: 'Bot plukker opp innen 5 min — cooldown bypass er aktivt' },
+    });
+  } catch {}
+
   // Log to ai_agent_decisions so Creator Brain V2 can learn from user-initiated polls
   await logAgentDecision({
     agent_type:       'mission_queue',

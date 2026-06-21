@@ -26,7 +26,7 @@ import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, 
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle, tildeltRolleKonfigurert } from './lib/roleManager';
-import { startDataApi } from './lib/dataApi';
+import { startDataApi, registerTwitchChat } from './lib/dataApi';
 import { addToMemory, getBotSettings, getPersonalityPrompt } from '@/lib/botMemory';
 import { addContent } from '@/lib/contentLibrary';
 import { logBotAgentEvent, upsertBotMemory, logChatMessage } from './lib/agentLogger';
@@ -1923,6 +1923,7 @@ function writeHeartbeats(): void {
 
 client.once('clientReady', () => {
   startTwitchBot();
+  registerTwitchChat(sendTwitchChatMessage); // wire dashboard /twitch-chat → bot chat
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
   startLearningAggregator();

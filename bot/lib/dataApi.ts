@@ -5,6 +5,12 @@ import { triggerClipNow, forceKlippHighlight, getWorkerStatus } from './clipWork
 import { logBotEvent, updateStreamSyklus } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 
+// Registered by bot/index.ts after Twitch bot starts — avoids circular deps
+let _sendTwitchChat: ((msg: string) => void) | null = null;
+export function registerTwitchChat(fn: (msg: string) => void): void {
+  _sendTwitchChat = fn;
+}
+
 const DATA_DIR = path.join(process.cwd(), 'data');
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
@@ -514,6 +520,35 @@ export function startDataApi(port = 4242) {
       })().catch((err: any) => {
         res.writeHead(500);
         res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // ── Twitch chat: send melding fra dashboard ──────────────────────────────
+    // Called by Next.js /api/partners/promote (channel=twitch) and similar.
+    if (url === '/twitch-chat' && method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const { message, source } = JSON.parse(body) as { message: string; source?: string };
+          if (!message?.trim()) {
+            res.writeHead(400); res.end(JSON.stringify({ error: 'message required' })); return;
+          }
+          if (!_sendTwitchChat) {
+            logSystemEvent({ source: 'data_api', event_type: 'TWITCH_CHAT_NOT_READY',
+              title: 'Twitch bot ikke klar — kan ikke sende chatmelding', severity: 'warning',
+              metadata: { requestedMessage: message.slice(0, 100), source } });
+            res.writeHead(503); res.end(JSON.stringify({ error: 'bot_offline', reason: 'Twitch bot ikke koblet til ennå' })); return;
+          }
+          _sendTwitchChat(message.trim());
+          logSystemEvent({ source: source ?? 'dashboard', event_type: 'TWITCH_CHAT_MESSAGE_SENT',
+            title: `Twitch chat sendt: ${message.trim().slice(0, 80)}`,
+            severity: 'info', metadata: { message: message.trim(), source } });
+          res.writeHead(200); res.end(JSON.stringify({ ok: true }));
+        } catch (err: any) {
+          res.writeHead(500); res.end(JSON.stringify({ error: err.message }));
+        }
       });
       return;
     }

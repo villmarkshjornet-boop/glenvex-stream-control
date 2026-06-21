@@ -95,3 +95,24 @@ export async function logSystemEventNow(event: SystemEvent): Promise<void> {
 export function startSystemEventsFlusher(): void {
   setInterval(flush, 5_000);
 }
+
+/**
+ * Log a MISSION_COMPLETED event from the bot side.
+ * Used by poll manager, partner promo, raid, etc. to auto-complete missions
+ * without requiring the user to click "Gjort ✓" manually.
+ */
+export function completeMission(
+  workspaceId: string,
+  missionId: string,
+  reason: string,
+  metadata: Record<string, unknown> = {},
+): void {
+  logSystemEvent({
+    workspaceId,
+    source: 'bot',
+    event_type: 'MISSION_COMPLETED',
+    title: `Mission auto-fullført: ${missionId}`,
+    severity: 'info',
+    metadata: { missionId, reason, ...metadata },
+  });
+}

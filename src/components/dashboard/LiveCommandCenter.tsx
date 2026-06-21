@@ -826,6 +826,9 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
   const [copied, setCopied]             = useState<string | null>(null);
   const [raidTargets, setRaidTargets]   = useState<RaidTarget[]>([]);
   const [pollQueued, setPollQueued]     = useState(false);
+  const [pollError, setPollError]       = useState<string | null>(null);
+  const [sponsorQueued, setSponsorQueued] = useState(false);
+  const [sponsorError, setSponsorError]   = useState<string | null>(null);
   const missionStateLoadedRef           = useRef(false);
 
   // Viewer drop tracking across renders (refs don't trigger re-render)
@@ -967,13 +970,44 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
 
   const startPoll = async (question: string, options: string[]) => {
     setPollQueued(true);
+    setPollError(null);
     try {
-      await fetch('/api/polls/start', {
+      const res = await fetch('/api/polls/start', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ question, options }),
       });
-    } catch {}
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        setPollError(d.error ?? `HTTP ${res.status}`);
+        setPollQueued(false);
+      }
+    } catch {
+      setPollError('bot_offline');
+      setPollQueued(false);
+    }
+  };
+
+  const promoteSponsor = async () => {
+    setSponsorQueued(true);
+    setSponsorError(null);
+    try {
+      const res = await fetch('/api/partners/promote', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ channel: 'both' }),
+      });
+      if (res.ok) {
+        markDone('sponsor', 'Nevn sponsor/partner');
+      } else {
+        const d = await res.json().catch(() => ({})) as { errors?: string[]; error?: string };
+        setSponsorError((d.errors?.[0] ?? d.error) ?? `HTTP ${res.status}`);
+        setSponsorQueued(false);
+      }
+    } catch {
+      setSponsorError('bot_offline');
+      setSponsorQueued(false);
+    }
   };
 
   const copyToClipboard = async (text: string, id: string) => {
@@ -1133,7 +1167,7 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                       {copied === nextMission.id ? '✓ Kopiert' : 'Kopier'}
                     </button>
                     {/* One-click poll start — sends directly to bot queue */}
-                    {nextMission.id === 'poll' && !pollQueued && (
+                    {nextMission.id === 'poll' && !pollQueued && !pollError && (
                       <button
                         onClick={() => startPoll(
                           nextMission.draftText!.split('\n')[0] ?? nextMission.draftText!,
@@ -1146,7 +1180,12 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                     )}
                     {nextMission.id === 'poll' && pollQueued && (
                       <span className="px-3 py-1.5 text-[10px] font-bold text-g-green/60">
-                        ✓ Poll i kø
+                        ✓ Poll i kø — boten kjører den snart
+                      </span>
+                    )}
+                    {nextMission.id === 'poll' && pollError && (
+                      <span className="px-3 py-1.5 text-[10px] font-bold text-red-400/70" title={pollError}>
+                        Feil: {pollError.split(':')[0]}
                       </span>
                     )}
                     {nextMission.isManual && nextMission.id !== 'poll' && (
@@ -1174,11 +1213,32 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
 
               {/* No draft — just action buttons */}
               {!nextMission.draftText && (
-                <div className="mt-3 flex items-center gap-2">
-                  <Link href={nextMission.href}
-                    className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all">
-                    Åpne →
-                  </Link>
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  {/* Sponsor: inline publish button — sends to Twitch + Discord via bot */}
+                  {nextMission.id === 'sponsor' && !sponsorQueued && !sponsorError && (
+                    <button
+                      onClick={promoteSponsor}
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all"
+                    >
+                      Publiser sponsor →
+                    </button>
+                  )}
+                  {nextMission.id === 'sponsor' && sponsorQueued && (
+                    <span className="px-3 py-1.5 text-[10px] font-bold text-g-green/60">
+                      ✓ Sponsor sendt
+                    </span>
+                  )}
+                  {nextMission.id === 'sponsor' && sponsorError && (
+                    <span className="px-3 py-1.5 text-[10px] font-bold text-red-400/70" title={sponsorError}>
+                      Feil: {sponsorError.split(':')[0]}
+                    </span>
+                  )}
+                  {nextMission.id !== 'sponsor' && (
+                    <Link href={nextMission.href}
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all">
+                      Åpne →
+                    </Link>
+                  )}
                   {nextMission.isManual && (
                     <button
                       onClick={() => markDone(nextMission.id, nextMission.label)}

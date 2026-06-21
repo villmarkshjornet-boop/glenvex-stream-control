@@ -16,7 +16,7 @@
  */
 
 import { getBotDb } from './supabase';
-import { logSystemEvent } from './systemEvents';
+import { logSystemEvent, completeMission } from './systemEvents';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -138,20 +138,8 @@ export class PollManager {
     const cooldownLeft = this.lastPollAt > 0 ? (this.lastPollAt + POLL_COOLDOWN_MS) - now : 0;
     const msgsPerMin   = this.cfg.chatMsgsPerMin();
 
-    // ── Guard: too early ─────────────────────────────────────────────────────
-    if (streamAgeMs < MIN_STREAM_DURATION_MS) {
-      this.logSkip('For tidlig i streamen (< 5 min)', { streamAgeMin: Math.round(streamAgeMs / 60_000) });
-      return;
-    }
-
-    // ── Guard: cooldown ──────────────────────────────────────────────────────
-    if (cooldownLeft > 0) {
-      this.logSkip(`Cooldown aktiv (${Math.round(cooldownLeft / 60_000)} min igjen)`, { cooldownLeftMin: Math.round(cooldownLeft / 60_000) });
-      return;
-    }
-
-    // ── Dashboard-requested poll — user explicitly clicked "Start poll" ───────
-    // Check first so explicit user action bypasses the AI rotation.
+    // ── Dashboard-requested poll — checked FIRST, bypasses cooldown + min-duration guards ──
+    // User explicitly clicked "Start poll" — don't block them with AI rotation rules.
     const requested = await this.pickRequestedPoll();
     if (requested) {
       const context = await this.buildContext(streamAgeMs, msgsPerMin);
@@ -161,12 +149,24 @@ export class PollManager {
         event_type: 'POLL_DASHBOARD_REQUEST_PICKED',
         title: `Dashboard-poll plukket: "${requested.question}"`,
         severity: 'info',
-        metadata: { streamId: this.cfg.streamId, question: requested.question, options: requested.options },
+        metadata: { streamId: this.cfg.streamId, question: requested.question, options: requested.options, cooldownLeftMin: Math.round(cooldownLeft / 60_000) },
       });
       this.pollInProgress = true;
       this.runPoll('STREAM_DIRECTION', requested.question, requested.options, 'Dashboard-anmodet poll', context)
         .catch(err => console.error('[PollManager] dashboard-poll error:', err?.message))
         .finally(() => { this.pollInProgress = false; });
+      return;
+    }
+
+    // ── Guard: too early (only applies to AI-initiated polls) ────────────────
+    if (streamAgeMs < MIN_STREAM_DURATION_MS) {
+      this.logSkip('For tidlig i streamen (< 5 min)', { streamAgeMin: Math.round(streamAgeMs / 60_000) });
+      return;
+    }
+
+    // ── Guard: cooldown (only applies to AI-initiated polls) ─────────────────
+    if (cooldownLeft > 0) {
+      this.logSkip(`Cooldown aktiv (${Math.round(cooldownLeft / 60_000)} min igjen)`, { cooldownLeftMin: Math.round(cooldownLeft / 60_000) });
       return;
     }
 
@@ -472,6 +472,27 @@ export class PollManager {
     if (totalVotes > 0 && winner) {
       const resultMsg = `📊 Resultat: ${options.map(o => `${o.label} ${o.twitchVotes + o.discordVotes}`).join(' | ')} — Vinner: ${winner.label}! (${totalVotes} stemmer)`;
       try { this.cfg.sendTwitchChat(resultMsg); } catch {}
+    }
+
+    // Auto-complete the 'poll' mission if at least one platform succeeded
+    const atLeastOneOk = twitchResult.status === 'fulfilled' || discordResult.status === 'fulfilled';
+    if (atLeastOneOk) {
+      completeMission(ws, 'poll', 'bot_ran_poll', {
+        streamId, pollType, question,
+        twitchOk: twitchResult.status === 'fulfilled',
+        discordOk: discordResult.status === 'fulfilled',
+        totalVotes,
+      });
+    } else {
+      logSystemEvent({
+        workspaceId: ws, source: 'poll_manager', event_type: 'POLL_FAILED',
+        title: `Poll feilet på alle plattformer: ${pollType}`,
+        severity: 'warning',
+        metadata: { streamId, pollType, question,
+          twitchError: twitchResult.status === 'rejected' ? String((twitchResult as PromiseRejectedResult).reason)?.slice(0, 150) : null,
+          discordError: discordResult.status === 'rejected' ? String((discordResult as PromiseRejectedResult).reason)?.slice(0, 150) : null,
+        },
+      });
     }
 
     logSystemEvent({
