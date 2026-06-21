@@ -468,7 +468,7 @@ Generer ${MAX_TIPS_PER_TICK} råd. Bruk alltid personlig stemme. Evaluer forrige
       const payload: TipPayload = {
         category:  tip.category ?? 'general',
         message:   String(tip.message).slice(0, 200),
-        reasoning: tip.reasoning ? String(tip.reasoning).slice(0, 500) : null,
+        reasoning: tip.reasoning ? String(tip.reasoning).slice(0, 500) : undefined,
         priority:  typeof tip.priority === 'number' ? Math.min(100, Math.max(0, tip.priority)) : 60,
         ttlMs:     8 * 60_000,
       };
