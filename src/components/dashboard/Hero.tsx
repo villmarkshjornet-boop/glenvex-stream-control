@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Eye, Users, MessageSquare, Clock, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Eye, Users, MessageSquare, Clock, AlertTriangle, ArrowRight, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
 import { tidSiden } from './helpers';
 import type { HeroStream } from './types';
 
@@ -81,6 +81,63 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
           Åpne Content Factory
         </Link>
       </div>
+
+      <DataIntegrityCard integrity={heroStream.dataIntegrity} />
+    </div>
+  );
+}
+
+function DataIntegrityCard({ integrity }: { integrity: HeroStream['dataIntegrity'] | undefined }) {
+  if (!integrity || integrity.status === 'full') return null;
+
+  const { status, botStatus, missingDataReasons } = integrity;
+
+  const BOT_STATUS_LABEL: Record<string, string> = {
+    crashed:     'Bot krasjet under streamen',
+    offline:     'Bot var offline — ikke koblet til Twitch',
+    auth_failed: 'Twitch API 401 — token ugyldig',
+    unknown:     'Bot-status ukjent for denne streamen',
+    ok:          'Bot OK',
+  };
+
+  const isBreaking = status === 'broken';
+  const borderColor = isBreaking ? 'border-red-500/30' : 'border-yellow-500/30';
+  const bgColor     = isBreaking ? 'bg-red-950/20'     : 'bg-yellow-950/20';
+  const Icon        = isBreaking ? ShieldX : ShieldAlert;
+  const iconColor   = isBreaking ? 'text-red-400'      : 'text-yellow-400';
+  const label       = isBreaking ? 'Ødelagt datagrunnlag' : 'Ufullstendig datagrunnlag';
+
+  return (
+    <div className={`mt-5 rounded-xl border ${borderColor} ${bgColor} p-4`}>
+      <div className="flex items-center gap-2 mb-3">
+        <Icon size={15} className={iconColor} />
+        <span className={`text-xs font-bold ${iconColor}`}>{label}</span>
+        {botStatus !== 'ok' && botStatus !== 'unknown' && (
+          <span className="ml-auto text-[11px] text-g-muted">{BOT_STATUS_LABEL[botStatus]}</span>
+        )}
+      </div>
+      <p className="text-[11px] text-g-muted mb-3">
+        Denne streamen har ufullstendig datagrunnlag fordi boten var {botStatus === 'crashed' ? 'krasjet' : botStatus === 'offline' ? 'offline' : botStatus === 'auth_failed' ? 'autentiseringsfeil (401)' : 'utilgjengelig'} under streamen.
+        Tallene som vises er det som ble fanget opp, ikke fullstendige stream-data.
+      </p>
+      {missingDataReasons.length > 0 && (
+        <div className="space-y-2">
+          {missingDataReasons.map((r, i) => (
+            <div key={i} className="bg-black/20 rounded-lg p-2.5 text-[11px]">
+              <div className="flex items-start gap-2">
+                <ShieldAlert size={11} className="text-g-muted mt-0.5 flex-shrink-0" />
+                <div>
+                  <span className="text-g-text font-medium">{r.source}</span>
+                  <span className="text-g-muted"> — forventet: </span>
+                  <span className="text-yellow-300 font-mono">{r.expected}</span>
+                  <p className="text-g-muted mt-0.5">{r.reason}</p>
+                  {r.lastSeen && <p className="text-g-muted/60 mt-0.5">Sist sett: {new Date(r.lastSeen).toLocaleString('no')}</p>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

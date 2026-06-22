@@ -369,29 +369,60 @@ export async function GET() {
 
   let heroStreamEventsRes: any = { data: [] };
   let heroAgentEventsRes: any = { data: [] };
-  if (sisteStream?.stream_id) {
-    [heroStreamEventsRes, heroAgentEventsRes] = await Promise.all([
-      db.from('system_events')
-        .select('event_type,metadata,created_at')
-        .eq('workspace_id', ws)
-        .in('event_type', ['COACH_REPORT_GENERATED', 'STREAM_COACH_FAILED', 'STREAM_HISTORY_UPSERT_FAILED'])
-        .contains('metadata', { streamId: sisteStream.stream_id })
-        .order('created_at', { ascending: false })
-        .limit(5),
-      db.from('ai_agent_events')
-        .select('event_type,metadata,created_at')
-        .eq('workspace_id', ws)
-        .in('event_type', ['AUDIENCE_SESSION_COMPLETE', 'RETENTION_CURVE'])
-        .contains('metadata', { stream_id: sisteStream.stream_id })
-        .order('created_at', { ascending: false })
-        .limit(5),
+  let heroBotDiagRes: any = { data: [] };
+  if (sisteStream) {
+    const streamStart = sisteStream.started_at ?? new Date(Date.now() - 4 * 3600_000).toISOString();
+    const streamEnd   = sisteStream.ended_at   ?? new Date().toISOString();
+    // Extend window ±30 min to catch events that fire just before/after stream boundaries
+    const diagFrom = new Date(new Date(streamStart).getTime() - 30 * 60_000).toISOString();
+    const diagTo   = new Date(new Date(streamEnd).getTime()   + 30 * 60_000).toISOString();
+
+    const sysEvQ = sisteStream.stream_id
+      ? db.from('system_events')
+          .select('event_type,metadata,created_at')
+          .eq('workspace_id', ws)
+          .in('event_type', ['COACH_REPORT_GENERATED', 'STREAM_COACH_FAILED', 'STREAM_HISTORY_UPSERT_FAILED'])
+          .contains('metadata', { streamId: sisteStream.stream_id })
+          .order('created_at', { ascending: false })
+          .limit(5)
+      : null;
+
+    const agentEvQ = sisteStream.stream_id
+      ? db.from('ai_agent_events')
+          .select('event_type,metadata,created_at')
+          .eq('workspace_id', ws)
+          .in('event_type', ['AUDIENCE_SESSION_COMPLETE', 'RETENTION_CURVE'])
+          .contains('metadata', { stream_id: sisteStream.stream_id })
+          .order('created_at', { ascending: false })
+          .limit(5)
+      : null;
+
+    const botDiagQ = db.from('system_events')
+      .select('event_type,source,title,severity,created_at')
+      .eq('workspace_id', ws)
+      .in('event_type', [
+        'TWITCH_BOT_MISSING_OAUTH', 'TWITCH_CHAT_JOIN_FAILED', 'TWITCH_API_AUTH_FAILED',
+        'AUDIENCE_TRACKING_FAILED', 'AUDIENCE_TRACKING_STARTED', 'AUDIENCE_TRACKING_STOPPED',
+        'BOT_STARTED', 'BOT_CRASHED', 'LIVE_DETECTED', 'LIVE_AGENT_STARTED',
+        'STREAM_HISTORY_UPSERT_FAILED',
+      ])
+      .gte('created_at', diagFrom)
+      .lte('created_at', diagTo)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    [heroStreamEventsRes, heroAgentEventsRes, heroBotDiagRes] = await Promise.all([
+      sysEvQ    ?? Promise.resolve({ data: [] }),
+      agentEvQ  ?? Promise.resolve({ data: [] }),
+      botDiagQ,
     ]);
   }
 
   let heroStream: any = null;
   if (sisteStream) {
-    const heroEvents: any[] = heroStreamEventsRes.data ?? [];
+    const heroEvents: any[]  = heroStreamEventsRes.data ?? [];
     const agentEvents: any[] = heroAgentEventsRes.data ?? [];
+    const botDiagEvents: any[] = heroBotDiagRes.data ?? [];
 
     const audienceEvent = agentEvents.find(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
     const audienceMeta: any = heroFallbackUsed ? fallbackAudience : (audienceEvent?.metadata ?? null);
@@ -422,14 +453,75 @@ export async function GET() {
     const score = calcStreamScore({ ...sisteStream, chat_messages: enrichedChatMessages }, audienceMeta);
     const uniqueChatters = audienceMeta?.total ?? 0;
 
+    // ── Data Integrity Diagnostics ───────────────────────────────────────────
+    const hasMissingOAuth   = botDiagEvents.some(e => e.event_type === 'TWITCH_BOT_MISSING_OAUTH');
+    const hasChatJoinFailed = botDiagEvents.some(e => e.event_type === 'TWITCH_CHAT_JOIN_FAILED');
+    const hasAuthFailed     = botDiagEvents.some(e => e.event_type === 'TWITCH_API_AUTH_FAILED');
+    const hasAudienceFailed = botDiagEvents.some(e => e.event_type === 'AUDIENCE_TRACKING_FAILED');
+    const botWasLive        = botDiagEvents.some(e => ['LIVE_DETECTED', 'LIVE_AGENT_STARTED', 'AUDIENCE_TRACKING_STARTED'].includes(e.event_type));
+    const botCrashSignal    = botDiagEvents.some(e => e.event_type === 'BOT_CRASHED') ||
+                              (historyUpsertFailed && !botWasLive);
+
+    let botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown' = 'unknown';
+    if (hasAuthFailed || hasMissingOAuth)          botStatus = 'auth_failed';
+    else if (botCrashSignal)                        botStatus = 'crashed';
+    else if (!botWasLive && !hasAudienceData)       botStatus = 'offline';
+    else if (hasAudienceData && hasRetentionCurve)  botStatus = 'ok';
+
+    // Per-source reasons — what was expected, what was found, why it's missing
+    const missingDataReasons: Array<{ source: string; expected: string; reason: string; lastSeen: string | null }> = [];
+
+    if (!hasAudienceData) {
+      const lastAudienceEvent = botDiagEvents.find(e => e.event_type === 'AUDIENCE_TRACKING_STOPPED')
+        ?? botDiagEvents.find(e => e.event_type === 'AUDIENCE_TRACKING_STARTED');
+      missingDataReasons.push({
+        source:   'ai_agent_events',
+        expected: 'AUDIENCE_SESSION_COMPLETE',
+        reason:   hasAuthFailed     ? 'twitch_401 — Twitch API token ugyldig under streamen'
+                : hasMissingOAuth   ? 'bot_oauth_missing — TWITCH_BOT_OAUTH ikke satt på Railway'
+                : botCrashSignal    ? 'bot_crashed — boten krasjet og audience tracking ble aldri avsluttet'
+                : hasAudienceFailed ? 'audience_tracking_failed — se system_events'
+                : !botWasLive       ? 'bot_offline — ingen LIVE_DETECTED eller LIVE_AGENT_STARTED i stream-vinduet'
+                                    : 'ukjent — ingen AUDIENCE_SESSION_COMPLETE funnet for denne stream_id',
+        lastSeen: lastAudienceEvent?.created_at ?? null,
+      });
+    }
+
+    if (!hasRetentionCurve) {
+      missingDataReasons.push({
+        source:   'ai_agent_events',
+        expected: 'RETENTION_CURVE',
+        reason:   !hasAudienceData
+          ? 'avhenger av AUDIENCE_SESSION_COMPLETE — se rotårsak over'
+          : 'RETENTION_CURVE genereres av audienceTracker.stopAudienceTracking() — mangler fordi bot ikke avsluttet session normalt',
+        lastSeen: null,
+      });
+    }
+
+    if (!hasChatEvents) {
+      missingDataReasons.push({
+        source:   'stream_history.chat_messages + ai_agent_events',
+        expected: 'viewers[].messagesSent > 0',
+        reason:   !hasAudienceData
+          ? 'chat-data hentes fra AUDIENCE_SESSION_COMPLETE.viewers — mangler fordi audience-data mangler'
+          : 'ingen chat-meldinger registrert (kan være korrekt for stille streams)',
+        lastSeen: null,
+      });
+    }
+
+    const missingCount = [!hasAudienceData, !hasRetentionCurve, !hasChatEvents, heroFallbackUsed, coachFailed].filter(Boolean).length;
+    const integrityStatus: 'full' | 'partial' | 'broken' =
+      missingCount === 0  ? 'full'
+      : botStatus === 'crashed' || botStatus === 'offline' || missingCount >= 3 ? 'broken'
+      : 'partial';
+
     const failureReasons: string[] = [];
     if (heroFallbackUsed) failureReasons.push(historyMissingReason ?? 'Stream History-rad mangler – viser estimat fra ai_agent_events');
-    if (!hasAudienceData) failureReasons.push('Audience-data mangler');
-    if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler');
+    if (!hasAudienceData) failureReasons.push(`Audience-data mangler — ${botStatus === 'crashed' ? 'bot krasjet' : botStatus === 'offline' ? 'bot var offline' : botStatus === 'auth_failed' ? 'Twitch API 401' : 'ukjent årsak'}`);
+    if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler — audience-tracking ble ikke avsluttet normalt');
     if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
     if (coachFailed) failureReasons.push('Stream Coach feilet');
     if (historyUpsertFailed) failureReasons.push('Stream History-lagring feilet (delvis)');
-    // vodDetected is informational — not a stream failure
 
     heroStream = {
       streamId: sisteStream.stream_id,
@@ -457,6 +549,11 @@ export async function GET() {
       ok: failureReasons.length === 0,
       failureReasons,
       historyMissingReason: heroFallbackUsed ? historyMissingReason : null,
+      dataIntegrity: {
+        status: integrityStatus,
+        botStatus,
+        missingDataReasons,
+      },
     };
   }
 

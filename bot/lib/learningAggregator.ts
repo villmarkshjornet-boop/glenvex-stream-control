@@ -244,6 +244,36 @@ export async function kjørAggregering(): Promise<void> {
     })
     .join('\n');
 
+  // Gate: if bot was crashing or offline during this period, insights would be based on
+  // stale/missing data. Skip ai_agent_insights write and log why instead.
+  const criticalBotEvents = sysWarnings.filter((e: any) =>
+    ['error', 'critical'].includes(e.severity) &&
+    ['twitch_bot', 'stream_history', 'twitch_api', 'bot'].includes(e.source)
+  );
+  const hasPartialData = criticalBotEvents.length > 0 || events.length < 3;
+
+  if (hasPartialData) {
+    logSystemEvent({
+      source: 'learning_aggregator',
+      event_type: 'LEARNING_SKIPPED_PARTIAL_DATA',
+      title: `AI-læring utsatt — ufullstendig datagrunnlag (${criticalBotEvents.length} kritiske bot-feil, ${events.length} events)`,
+      severity: 'warning',
+      metadata: {
+        reason: criticalBotEvents.length > 0 ? 'bot_errors_detected' : 'too_few_events',
+        criticalEvents: criticalBotEvents.slice(0, 3).map((e: any) => ({ source: e.source, event_type: e.event_type, title: e.title })),
+        eventCount: events.length,
+      },
+    });
+    logSystemEvent({
+      source: 'learning_aggregator',
+      event_type: 'LEARNING_AGGREGATION_COMPLETED',
+      title: 'Aggregering avbrutt: partial data gate aktivert',
+      severity: 'info',
+      metadata: { eventsAnalysert: events.length, executionTime: Date.now() - aggrStart, partialDataGate: true },
+    });
+    return;
+  }
+
   const sysKontekst = sysWarnings.length > 0
     ? `\nSYSTEMSTATUS (ikke la dette dominere analysen):\n${sysWarnings.map((e: any) => `[${e.severity.toUpperCase()}] ${e.source}: ${e.title}`).join('\n')}`
     : '';

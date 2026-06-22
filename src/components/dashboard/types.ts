@@ -87,6 +87,11 @@ export interface HeroStream {
   ok: boolean;
   failureReasons: string[];
   historyMissingReason: string | null;
+  dataIntegrity: {
+    status: 'full' | 'partial' | 'broken';
+    botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown';
+    missingDataReasons: Array<{ source: string; expected: string; reason: string; lastSeen: string | null }>;
+  };
 }
 
 export interface ActionCenterItem {

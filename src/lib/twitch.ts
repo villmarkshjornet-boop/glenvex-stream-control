@@ -84,6 +84,23 @@ async function helixGet(clientId: string, url: string, isRetry = false): Promise
       cachedToken = null;           // invalidate stale token
       return helixGet(clientId, url, true);
     }
+    // Log to system_events as critical — this surfaces in dashboard system health
+    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    const ws    = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    if (sbUrl && sbKey) {
+      fetch(`${sbUrl}/rest/v1/system_events`, {
+        method: 'POST',
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          workspace_id: ws, source: 'twitch_api', event_type: 'TWITCH_API_AUTH_FAILED',
+          title: 'Twitch API 401 — app access token ugyldig etter retry',
+          description: 'TWITCH_CLIENT_SECRET kan være feil eller utløpt. Sjekk Railway/Vercel env vars.',
+          severity: 'critical',
+          metadata: { endpoint: url.replace(/\?.*$/, ''), tokenType: 'app_access_token', clientId },
+        }),
+      }).catch(() => {});
+    }
     throw new TwitchApiError(401, 'auth_failed',
       'Twitch Helix autentisering feilet etter retry (401) — sjekk TWITCH_CLIENT_SECRET i Railway');
   }
