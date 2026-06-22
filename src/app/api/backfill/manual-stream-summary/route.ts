@@ -30,6 +30,7 @@ interface Body {
   avg_viewers: number;
   unique_chatters: number;
   followers_gained: number;
+  duration_minutes?: number;
   source?: string;
 }
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
   if (!db) return NextResponse.json({ error: 'Database ikke tilgjengelig' }, { status: 503 });
 
   const ws = getWorkspaceId();
-  const { unique_viewers, peak_viewers, avg_viewers, unique_chatters, followers_gained } = body;
+  const { unique_viewers, peak_viewers, avg_viewers, unique_chatters, followers_gained, duration_minutes } = body;
   const source = body.source ?? 'manual';
 
   // ── Find the row ─────────────────────────────────────────────────────────────
@@ -95,26 +96,26 @@ export async function POST(req: NextRequest) {
   const stream_id = row.stream_id ?? body.stream_id ?? 'unknown';
 
   const before = {
-    peak_viewers:    row.peak_viewers    ?? 0,
-    avg_viewers:     row.avg_viewers     ?? 0,
+    peak_viewers:     row.peak_viewers     ?? 0,
+    avg_viewers:      row.avg_viewers      ?? 0,
     followers_gained: row.followers_gained ?? 0,
-    chat_messages:   row.chat_messages   ?? 0,
+    chat_messages:    row.chat_messages    ?? 0,
+    duration_minutes: row.duration_minutes ?? 0,
   };
 
-  const after = {
-    peak_viewers,
-    avg_viewers,
-    followers_gained,
-    // chat_messages untouched — unique_chatters goes into ai_agent_events instead
-  };
+  const historyUpdate: Record<string, number> = { peak_viewers, avg_viewers, followers_gained };
+  if (duration_minutes !== undefined) historyUpdate.duration_minutes = duration_minutes;
 
-  const diff = {
-    peak_viewers:     { before: before.peak_viewers,    after: peak_viewers },
-    avg_viewers:      { before: before.avg_viewers,     after: avg_viewers },
+  const diff: Record<string, unknown> = {
+    peak_viewers:     { before: before.peak_viewers,     after: peak_viewers },
+    avg_viewers:      { before: before.avg_viewers,      after: avg_viewers },
     followers_gained: { before: before.followers_gained, after: followers_gained },
     unique_chatters:  { before: 'ukjent (fra ai_agent_events)', after: unique_chatters, note: 'Skrives til ai_agent_events som AUDIENCE_SESSION_COMPLETE' },
     unique_viewers:   { before: 'ukjent', after: unique_viewers, note: 'Ingen kolonne i stream_history — lagres kun i system_events metadata' },
   };
+  if (duration_minutes !== undefined) {
+    diff.duration_minutes = { before: before.duration_minutes, after: duration_minutes };
+  }
 
   if (dryRun) {
     return NextResponse.json({
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
   // ── 1. Oppdater stream_history — matcher på UUID (row.id) for å unngå null stream_id-problemer ──
   const { error: updateErr } = await db
     .from('stream_history')
-    .update({ peak_viewers, avg_viewers, followers_gained })
+    .update(historyUpdate)
     .eq('id', row.id);
 
   if (updateErr) return NextResponse.json({ error: `Kunne ikke oppdatere stream_history: ${updateErr.message}` }, { status: 500 });
@@ -166,7 +167,7 @@ export async function POST(req: NextRequest) {
         stream_id,
         source,
         before,
-        after: { ...after, unique_viewers, unique_chatters },
+        after: { ...historyUpdate, unique_viewers, unique_chatters },
       },
     });
   } catch {}
