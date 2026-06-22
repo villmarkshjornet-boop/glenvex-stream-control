@@ -226,10 +226,12 @@ export class PollManager {
     if (error || !data) return null;
 
     // Claim the row (set active + real stream_id)
-    await db.from('poll_events').update({
-      status:    'active',
-      stream_id: this.cfg.streamId,
-    }).eq('id', data.id).catch(() => {});
+    try {
+      await db.from('poll_events').update({
+        status:    'active',
+        stream_id: this.cfg.streamId,
+      }).eq('id', data.id);
+    } catch {}
 
     const options = ((data.options ?? []) as any[])
       .map((o: any) => (typeof o === 'string' ? o : (o?.label ?? '')))
@@ -634,13 +636,15 @@ export class PollManager {
 
     // Close poll record
     if (opts.pollId) {
-      await db.from('poll_events').update({
-        status:       'closed',
-        winner:       opts.winner?.label ?? null,
-        total_votes:  opts.totalVotes,
-        options:      opts.options.map(o => ({ label: o.label, twitchVotes: o.twitchVotes, discordVotes: o.discordVotes })),
-        closed_at:    now,
-      }).eq('id', opts.pollId).catch(() => {});
+      try {
+        await db.from('poll_events').update({
+          status:       'closed',
+          winner:       opts.winner?.label ?? null,
+          total_votes:  opts.totalVotes,
+          options:      opts.options.map(o => ({ label: o.label, twitchVotes: o.twitchVotes, discordVotes: o.discordVotes })),
+          closed_at:    now,
+        }).eq('id', opts.pollId);
+      } catch {}
     }
 
     if (opts.totalVotes === 0 || !opts.winner) return;
@@ -650,21 +654,23 @@ export class PollManager {
     const summary     = `Poll '${opts.question}': "${opts.winner.label}" vant med ${winnerVotes}/${opts.totalVotes} stemmer. Grunn: ${opts.reason}`;
 
     // Write learning to ai_agent_memory
-    await db.from('ai_agent_memory').upsert({
-      workspace_id:     ws,
-      agent_type:       'poll_learning',
-      memory_type:      'audience_preference',
-      key:              `poll_${opts.pollType}_latest`,
-      summary,
-      confidence_score: confidence,
-      metadata: {
-        pollType: opts.pollType, question: opts.question,
-        winner: opts.winner.label, winnerVotes, totalVotes: opts.totalVotes,
-        options: opts.options.map(o => ({ label: o.label, votes: o.twitchVotes + o.discordVotes })),
-        streamId: this.cfg.streamId,
-      },
-      updated_at: now,
-    }, { onConflict: 'workspace_id,key' }).catch(() => {});
+    try {
+      await db.from('ai_agent_memory').upsert({
+        workspace_id:     ws,
+        agent_type:       'poll_learning',
+        memory_type:      'audience_preference',
+        key:              `poll_${opts.pollType}_latest`,
+        summary,
+        confidence_score: confidence,
+        metadata: {
+          pollType: opts.pollType, question: opts.question,
+          winner: opts.winner.label, winnerVotes, totalVotes: opts.totalVotes,
+          options: opts.options.map(o => ({ label: o.label, votes: o.twitchVotes + o.discordVotes })),
+          streamId: this.cfg.streamId,
+        },
+        updated_at: now,
+      }, { onConflict: 'workspace_id,key' });
+    } catch {}
 
     logSystemEvent({
       workspaceId: ws, source: 'poll_manager', event_type: 'POLL_LEARNING_SAVED',
@@ -682,21 +688,23 @@ export class PollManager {
 
     // Write question to dedup history in ai_agent_memory (Creator Brain V2 input)
     // This lets Creator Brain V2 read poll_question_history without scanning poll_events.
-    await db.from('ai_agent_memory').upsert({
-      workspace_id:     ws,
-      agent_type:       'poll_manager',
-      memory_type:      'poll_question',
-      key:              'poll_question_history',
-      summary:          `Siste poll-spørsmål (dedup + Creator Brain V2 input)`,
-      confidence_score: 0.9,
-      metadata: {
-        lastQuestion: opts.question,
-        lastType:     opts.pollType,
-        lastWinner:   opts.winner.label,
-        lastRunAt:    now,
-      },
-      updated_at: now,
-    }, { onConflict: 'workspace_id,key' }).catch(() => {});
+    try {
+      await db.from('ai_agent_memory').upsert({
+        workspace_id:     ws,
+        agent_type:       'poll_manager',
+        memory_type:      'poll_question',
+        key:              'poll_question_history',
+        summary:          `Siste poll-spørsmål (dedup + Creator Brain V2 input)`,
+        confidence_score: 0.9,
+        metadata: {
+          lastQuestion: opts.question,
+          lastType:     opts.pollType,
+          lastWinner:   opts.winner.label,
+          lastRunAt:    now,
+        },
+        updated_at: now,
+      }, { onConflict: 'workspace_id,key' });
+    } catch {}
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
