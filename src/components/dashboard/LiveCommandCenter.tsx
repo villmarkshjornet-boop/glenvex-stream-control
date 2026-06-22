@@ -826,6 +826,12 @@ function buildRaidNowMission(
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
+interface XPostVariant {
+  id: string; label: string; text: string; hashtags: string[];
+  hookScore: number; urgencyScore: number; relevanceScore: number;
+  expectedViewerLift: number; aiReason: string;
+}
+
 export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowData }) {
   const [doneManual, setDoneManual]     = useState<Set<string>>(new Set());
   const [copied, setCopied]             = useState<string | null>(null);
@@ -836,9 +842,22 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
   const [sponsorError, setSponsorError]   = useState<string | null>(null);
   const missionStateLoadedRef           = useRef(false);
 
+  // X Post Intelligence state
+  const [xPostVariants,  setXPostVariants]  = useState<XPostVariant[] | null>(null);
+  const [xPostRecommIdx, setXPostRecommIdx] = useState(0);
+  const [xPostActiveIdx, setXPostActiveIdx] = useState(0);
+  const [xPostLoading,   setXPostLoading]   = useState(false);
+  const [xPostError,     setXPostError]     = useState<string | null>(null);
+  const [xPostPosted,    setXPostPosted]    = useState<{ id: string; postedAt: number } | null>(null);
+  const xPostFetchedRef                     = useRef<string | null>(null);
+  const currentViewersRef                   = useRef(0);
+
   // Viewer drop tracking across renders (refs don't trigger re-render)
   const prevViewersRef = useRef<number | null>(null);
   const viewerDropRef  = useRef<ViewerDrop>({ dropped: false, magnitude: 0 });
+
+  // Keep viewers ref up-to-date for x_post performance callbacks
+  currentViewersRef.current = slow.streamStatus.viewers ?? 0;
 
   const status   = slow.streamStatus;
   // startIso: prefer bot's LIVE_DETECTED event (authoritative), fall back to Twitch API startedAt.
@@ -919,6 +938,66 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // X Post suggestions — fetch once per stream when we go live
+  useEffect(() => {
+    if (!startIso || xPostFetchedRef.current === startIso) return;
+    xPostFetchedRef.current = startIso;
+
+    // Grab current values for the request
+    const game         = slow.streamStatus.game  ?? '';
+    const title        = slow.streamStatus.title ?? '';
+    const viewer_count = slow.streamStatus.viewers ?? 0;
+    const thumb        = slow.streamStatus.thumbnailUrl ?? '';
+    const login        = thumb.match(/live_user_(\w+)-/)?.[1] ?? '';
+    const elapsed_min  = Math.round((Date.now() - new Date(startIso).getTime()) / 60_000);
+
+    setXPostLoading(true);
+    fetch('/api/x-post/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game, title, viewer_count, elapsed_min, twitch_login: login }),
+    })
+      .then(r => r.json())
+      .then((d: { variants?: XPostVariant[]; recommended?: number; error?: string }) => {
+        if (d.error) { setXPostError(d.error); return; }
+        if (d.variants?.length) {
+          setXPostVariants(d.variants);
+          setXPostRecommIdx(d.recommended ?? 0);
+          setXPostActiveIdx(d.recommended ?? 0);
+        }
+      })
+      .catch(() => setXPostError('Kunne ikke hente X-post forslag'))
+      .finally(() => setXPostLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startIso]);
+
+  // X Post performance tracking — fire at 5min and 10min after posting
+  useEffect(() => {
+    if (!xPostPosted) return;
+    const { id, postedAt } = xPostPosted;
+
+    const delay5  = Math.max(0, (postedAt + 5 * 60_000)  - Date.now());
+    const delay10 = Math.max(0, (postedAt + 10 * 60_000) - Date.now());
+
+    const t5 = setTimeout(() => {
+      fetch('/api/x-post/performance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: id, type: '5min', viewer_count: currentViewersRef.current }),
+      }).catch(() => {});
+    }, delay5);
+
+    const t10 = setTimeout(() => {
+      fetch('/api/x-post/performance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: id, type: '10min', viewer_count: currentViewersRef.current }),
+      }).catch(() => {});
+    }, delay10);
+
+    return () => { clearTimeout(t5); clearTimeout(t10); };
+  }, [xPostPosted]);
 
   // Raid context — computed from live systemEvents (single source of truth for all modules)
   const raidEvent = live.systemEvents?.find(e =>
@@ -1027,6 +1106,48 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
       setSponsorError('bot_offline');
       setSponsorQueued(false);
     }
+  };
+
+  const markXPostPosted = async (postId: string) => {
+    const vc = currentViewersRef.current;
+    const res = await fetch('/api/x-post/mark-posted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ post_id: postId, viewer_count: vc }),
+    }).catch(() => null);
+    if (res?.ok) {
+      setXPostPosted({ id: postId, postedAt: Date.now() });
+      markDone('x_post', 'Post på X');
+    }
+  };
+
+  const regenerateXPost = () => {
+    if (!startIso) return;
+    xPostFetchedRef.current = null; // reset cache so next effect fires
+    setXPostVariants(null);
+    setXPostError(null);
+    setXPostLoading(true);
+    const game         = slow.streamStatus.game  ?? '';
+    const title        = slow.streamStatus.title ?? '';
+    const viewer_count = slow.streamStatus.viewers ?? 0;
+    const thumb        = slow.streamStatus.thumbnailUrl ?? '';
+    const login        = thumb.match(/live_user_(\w+)-/)?.[1] ?? '';
+    const elapsed_min  = Math.round((Date.now() - new Date(startIso).getTime()) / 60_000);
+    fetch('/api/x-post/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game, title, viewer_count, elapsed_min, twitch_login: login }),
+    })
+      .then(r => r.json())
+      .then((d: { variants?: XPostVariant[]; recommended?: number; error?: string }) => {
+        if (d.variants?.length) {
+          setXPostVariants(d.variants);
+          setXPostRecommIdx(d.recommended ?? 0);
+          setXPostActiveIdx(d.recommended ?? 0);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { setXPostLoading(false); xPostFetchedRef.current = startIso; });
   };
 
   const copyToClipboard = async (text: string, id: string) => {
@@ -1172,8 +1293,26 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
                 <p className="text-[11px] text-red-400/55 mt-0.5">✗ Hopper du over: {nextMission.kostnadVedSkip}</p>
               )}
 
-              {/* Draft text + copy */}
-              {nextMission.draftText && (
+              {/* X Post Intelligence — replaces generic draft when variants are loaded */}
+              {nextMission.id === 'x_post' && (
+                <XPostMissionCard
+                  variants={xPostVariants}
+                  loading={xPostLoading}
+                  error={xPostError}
+                  activeIdx={xPostActiveIdx}
+                  recommendedIdx={xPostRecommIdx}
+                  posted={!!xPostPosted}
+                  copied={copied}
+                  onSelectVariant={setXPostActiveIdx}
+                  onCopy={(text, id) => copyToClipboard(text, id)}
+                  onMarkPosted={markXPostPosted}
+                  onRegenerate={regenerateXPost}
+                  fallbackDraft={nextMission.draftText ?? ''}
+                />
+              )}
+
+              {/* Draft text + copy — for all missions except x_post (which has its own card) */}
+              {nextMission.draftText && nextMission.id !== 'x_post' && (
                 <div className="mt-3">
                   {nextMission.draftTitle && (
                     <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold mb-1.5">{nextMission.draftTitle}</p>
@@ -1622,6 +1761,144 @@ function StreamPhaseBadge({ phase, elapsedMin }: { phase: StreamPhaseResult; ela
         </div>
       </div>
       <p className="text-[11px] text-g-muted/50 mt-1.5">{phase.description}</p>
+    </div>
+  );
+}
+
+// ── X Post Mission Card ────────────────────────────────────────────────────────
+
+const VARIANT_LABEL: Record<string, string> = {
+  aggressive: '🔥 Hype',
+  drama:      '🎭 Drama',
+  community:  '🤝 Community',
+};
+
+function ScoreBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.min(100, Math.max(0, value));
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] text-g-muted/50 w-16 flex-shrink-0">{label}</span>
+      <div className="flex-1 h-1 bg-g-border/30 rounded-full">
+        <div className="h-1 rounded-full bg-g-green/60" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[9px] text-g-muted/50 w-5 text-right">{pct}</span>
+    </div>
+  );
+}
+
+function XPostMissionCard({
+  variants, loading, error, activeIdx, recommendedIdx, posted,
+  copied, onSelectVariant, onCopy, onMarkPosted, onRegenerate, fallbackDraft,
+}: {
+  variants:         XPostVariant[] | null;
+  loading:          boolean;
+  error:            string | null;
+  activeIdx:        number;
+  recommendedIdx:   number;
+  posted:           boolean;
+  copied:           string | null;
+  onSelectVariant:  (i: number) => void;
+  onCopy:           (text: string, id: string) => void;
+  onMarkPosted:     (id: string) => void;
+  onRegenerate:     () => void;
+  fallbackDraft:    string;
+}) {
+  if (posted) {
+    return (
+      <div className="mt-3 px-3 py-2.5 bg-g-green/5 border border-g-green/20 rounded-xl">
+        <p className="text-[11px] text-g-green font-bold">✓ X-post markert postet — sporer viewer-effekt i 10 min</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="mt-3 px-3 py-3 bg-g-bg/40 border border-g-border/30 rounded-xl">
+        <p className="text-[11px] text-g-muted animate-pulse">AI lager X-post varianter...</p>
+      </div>
+    );
+  }
+
+  if (error || !variants || variants.length === 0) {
+    return (
+      <div className="mt-3">
+        <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold mb-1.5">Klar til posting:</p>
+        <div className="bg-g-bg/60 border border-g-border/30 rounded-xl px-3 py-2.5 text-[11px] text-g-muted font-mono leading-relaxed whitespace-pre-line">
+          {fallbackDraft}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <button onClick={() => onCopy(fallbackDraft, 'x_post')}
+            className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-green/30 transition-all">
+            {copied === 'x_post' ? '✓ Kopiert' : 'Kopier'}
+          </button>
+          <button onClick={onRegenerate}
+            className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+            Lag AI-variant →
+          </button>
+        </div>
+        {error && <p className="text-[10px] text-red-400/60 mt-1">{error}</p>}
+      </div>
+    );
+  }
+
+  const active = variants[activeIdx] ?? variants[0];
+
+  return (
+    <div className="mt-3 space-y-2">
+      {/* Variant tabs */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9px] text-g-muted/40 uppercase tracking-widest mr-1">Variant:</span>
+        {variants.map((v, i) => (
+          <button key={v.id} onClick={() => onSelectVariant(i)}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+              i === activeIdx
+                ? 'bg-g-green/20 border border-g-green/40 text-g-green'
+                : 'bg-g-bg/40 border border-g-border/30 text-g-muted/60 hover:text-g-muted'
+            }`}>
+            {VARIANT_LABEL[v.label] ?? v.label}
+            {i === recommendedIdx && <span className="ml-1 text-[8px] text-g-green/60">★</span>}
+          </button>
+        ))}
+        <button onClick={onRegenerate} title="Regenerer varianter"
+          className="ml-auto px-2 py-1 text-[9px] text-g-muted/40 hover:text-g-muted transition-colors">
+          ↺ Ny
+        </button>
+      </div>
+
+      {/* Active variant text */}
+      <div className="bg-g-bg/60 border border-g-green/20 rounded-xl px-3 py-2.5 text-[11px] text-g-text font-mono leading-relaxed whitespace-pre-line">
+        {active.text}
+      </div>
+
+      {/* AI reasoning */}
+      {active.aiReason && (
+        <p className="text-[10px] text-g-muted/50 leading-snug italic px-0.5">
+          {active.aiReason}
+        </p>
+      )}
+
+      {/* Scores */}
+      <div className="bg-g-bg/30 rounded-xl p-2.5 space-y-1">
+        <ScoreBar label="Hook"      value={active.hookScore} />
+        <ScoreBar label="Urgency"   value={active.urgencyScore} />
+        <ScoreBar label="Relevans"  value={active.relevanceScore} />
+        <div className="flex items-center justify-between pt-1 border-t border-g-border/20 mt-1">
+          <span className="text-[9px] text-g-muted/40">Forventet løft</span>
+          <span className="text-[10px] font-bold text-g-green">+{active.expectedViewerLift} seere (10 min)</span>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-2">
+        <button onClick={() => onCopy(active.text, `x_post_${active.id}`)}
+          className="px-3 py-1.5 bg-g-bg/50 border border-g-border/40 rounded-lg text-[10px] font-bold text-g-muted hover:text-g-text hover:border-g-green/30 transition-all">
+          {copied === `x_post_${active.id}` ? '✓ Kopiert' : 'Kopier'}
+        </button>
+        <button onClick={() => onMarkPosted(active.id)}
+          className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-all">
+          Marker postet ✓
+        </button>
+      </div>
     </div>
   );
 }
