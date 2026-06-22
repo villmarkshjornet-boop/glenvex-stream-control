@@ -14,7 +14,7 @@ export interface CachedPartner {
   prioritet: number;
 }
 
-export type StreamPhase = 'pre' | 'opening' | 'mid' | 'closing' | 'post' | null;
+export type StreamPhase = 'STARTUP' | 'EARLY_GROWTH' | 'PRIME_TIME' | 'WRAP_UP' | 'ENDING' | null;
 export type EnergyLevel = 'high' | 'normal' | 'low' | 'declining';
 export type ChatActivity = 'spike' | 'high' | 'normal' | 'low' | 'silent';
 export type ServiceStatus = 'ok' | 'degraded' | 'offline';

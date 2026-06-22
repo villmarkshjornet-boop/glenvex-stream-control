@@ -15,9 +15,10 @@
 import OpenAI from 'openai';
 import { getBotDb, WORKSPACE_ID } from './supabase';
 import { logSystemEvent } from './systemEvents';
-import { getCreatorState } from './creatorState';
+import { getCreatorState, updateCreatorState } from './creatorState';
 import { getRecentChatLines, getChatMsgsLastMinute } from './twitchBot';
 import { getAppAccessToken } from '@/lib/twitch';
+import { computeStreamPhase } from '@/lib/streamPhase';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,27 @@ async function getAiMemorySummary(ws: string): Promise<string> {
     ).join('\n');
   } catch {
     return '';
+  }
+}
+
+// ─── Avg historical stream duration ──────────────────────────────────────────
+
+async function getAvgHistoricalDuration(ws: string): Promise<number> {
+  try {
+    const db = getBotDb();
+    if (!db) return 0;
+    const { data } = await db
+      .from('stream_history')
+      .select('duration_minutes')
+      .eq('workspace_id', ws)
+      .gt('duration_minutes', 10)     // exclude crash stubs
+      .order('ended_at', { ascending: false })
+      .limit(10);
+    if (!data || data.length === 0) return 0;
+    const total = data.reduce((s, r) => s + (r.duration_minutes ?? 0), 0);
+    return Math.round(total / data.length);
+  } catch {
+    return 0;
   }
 }
 
@@ -354,12 +376,14 @@ async function runAiAnalysis(
   aiMemory: string,
   streamHistory: string,
   lastCtx: LastTickContext | null,
+  avgHistoricalMin: number,
 ): Promise<TipPayload | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
   const openai = new OpenAI({ apiKey });
   const { game, title, viewerCount, viewerPeak, durationMin, phase } = state.stream;
+  const phaseResult = computeStreamPhase(durationMin ?? 0, avgHistoricalMin);
 
   // Pre-compute game patterns here so we can pass current context
   const gamePatterns = await getGamePatterns(ws, game ?? null, viewerCount ?? null).catch(() => '');
@@ -393,6 +417,13 @@ async function runAiAnalysis(
         `Konklusjon: ${indication}`,
       ].join('\n');
 
+  const phaseRules = {
+    STARTUP:      'FASE-REGLER: Fokus på oppstart. IKKE foreslå raid, sponsor eller avslutning. Prioriter: aktiver chat, annonser live, si hei til alle.',
+    EARLY_GROWTH: 'FASE-REGLER: Vekstfase. IKKE foreslå raid. Sponsor kan nevnes naturlig. Prioriter: chat-aktivitet, poll, fellesskap.',
+    PRIME_TIME:   `FASE-REGLER: Primetime. IKKE foreslå raid (raid låses opp om ${Math.round(phaseResult.raidUnlocksAtMin - (durationMin ?? 0))} min). Prioriter: høy energi, sponsor, CTA, klippbare øyeblikk.`,
+    WRAP_UP:      'FASE-REGLER: Avslutningsfase. RAID ER NÅ KRITISK — velg mål og utfør. Minne om Discord. Siste sponsor. Avslutt sterkt.',
+  }[phaseResult.phase];
+
   const systemPrompt = `Du er GLENVEX AI-produsent — en senior streaming-konsulent som kjenner kanalen til bunns.
 
 DIN ROLLE:
@@ -403,6 +434,8 @@ Du har KUN LOV til å bruke tall og prosentandeler som er oppgitt i BEREGNET STA
 Finn ALDRI opp prosentandeler, snitt, retention-tall eller effektvurderinger som ikke er eksplisitt oppgitt.
 Hvis statistikken sier "for lite data" eller "tillit: lav" — bruk ALLTID "for lite historikk" og "Confidence: lav" i reasoning.
 Bruk aldri fraser som "X% bedre" eller "økte med Y%" med egne beregnede tall.
+
+${phaseRules}
 
 REGLER:
 1. EVALUER forrige anbefaling eksplisitt — se self-eval-blokken, bruk kun tallene der
@@ -425,7 +458,9 @@ FORMAT (JSON kun):
 
   const userPrompt = `SITUASJON NÅ:
 Spill: ${game ?? 'ukjent'} | Tittel: ${title ?? 'ukjent'}
-Seere: ${viewerNow} (topp: ${viewerPeak ?? 0}) | Varighet: ${durationMin ?? 0} min | Fase: ${phase ?? 'ukjent'}
+Seere: ${viewerNow} (topp: ${viewerPeak ?? 0}) | Varighet: ${durationMin ?? 0} min
+STREAM FASE: ${phaseResult.phase} (${phaseResult.label}) — ${phaseResult.description}
+Forventet total: ${phaseResult.expectedTotalMin} min | Raid låses opp: ${phaseResult.raidUnlocksAtMin} min | Raid tillatt: ${phaseResult.raidAllowed ? 'JA' : 'NEI'}
 Chat: ${msgsPerMin} meldinger/min
 
 SELF-EVALUATION (forrige anbefaling — tall beregnet i kode):
@@ -594,6 +629,9 @@ export class LiveAgent {
   private lastAiTickAt = 0;
   private lastRaidTickAt = 0;
 
+  // Cached historical avg stream duration — refreshed every AI tick
+  private cachedAvgHistMin = 0;
+
   // Viewer history for trend detection
   private viewerHistory: number[] = [];
 
@@ -699,25 +737,33 @@ export class LiveAgent {
       runViewerModule(ws, streamId, viewerCount, prevViewers)
     );
 
-    // ── Module: Duration-based tips ────────────────────────────────────────────
+    // ── Module: Duration-based tips + phase ───────────────────────────────────
     const durationMin = state.stream.durationMin ?? 0;
     await this.runSafe('duration', () =>
       runDurationModule(ws, streamId, durationMin)
     );
 
+    // ── Compute stream phase + update creatorState ────────────────────────────
+    const avgHistMin  = this.cachedAvgHistMin;
+    const phaseResult = computeStreamPhase(durationMin, avgHistMin);
+    updateCreatorState(ws, d => { d.stream.phase = phaseResult.phase; });
+
     // ── Module: AI Analysis (every 3 min) ─────────────────────────────────────
     if (now - this.lastAiTickAt >= AI_TICK_MS) {
       this.lastAiTickAt = now;
       const capturedCtx = this.lastAiCtx;
-      const [aiMemory, streamHistory] = await Promise.all([
+      const [aiMemory, streamHistory, freshAvgMin] = await Promise.all([
         getAiMemorySummary(ws).catch(() => ''),
         getStreamHistorySummary(ws).catch(() => ''),
+        getAvgHistoricalDuration(ws).catch(() => 0),
       ]);
+      // Refresh cached avg duration each AI tick (every 3 min is fine)
+      if (freshAvgMin > 0) this.cachedAvgHistMin = freshAvgMin;
       // Run directly (not through runSafe) to capture the returned tip for self-evaluation
       try {
         const firstTip = await runAiAnalysis(
           ws, streamId, state, chatLines, msgsPerMin,
-          aiMemory, streamHistory, capturedCtx
+          aiMemory, streamHistory, capturedCtx, this.cachedAvgHistMin,
         );
         this.errorCounts['ai_analysis'] = 0;
         if (firstTip) {
@@ -744,12 +790,21 @@ export class LiveAgent {
       }
     }
 
-    // ── Module: Raid Evaluator (every 5 min) ──────────────────────────────────
+    // ── Module: Raid Evaluator (every 5 min, phase-gated) ─────────────────────
     if (now - this.lastRaidTickAt >= RAID_TICK_MS) {
       this.lastRaidTickAt = now;
-      await this.runSafe('raid', () =>
-        runRaidEvaluator(ws, streamId, this.twitchLogin, state.stream.game, viewerCount)
-      );
+      if (phaseResult.raidAllowed) {
+        await this.runSafe('raid', () =>
+          runRaidEvaluator(ws, streamId, this.twitchLogin, state.stream.game, viewerCount)
+        );
+      } else {
+        logSystemEvent({
+          workspaceId: ws, source: 'live_agent', event_type: 'RAID_EVALUATION_SKIPPED',
+          title: `Raid-evaluering utsatt — fase: ${phaseResult.phase} (${durationMin}/${phaseResult.raidUnlocksAtMin} min)`,
+          severity: 'info',
+          metadata: { streamId, phase: phaseResult.phase, durationMin, raidUnlocksAtMin: phaseResult.raidUnlocksAtMin },
+        });
+      }
     }
   }
 

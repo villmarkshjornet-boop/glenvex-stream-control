@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Brain, Clock, Zap, ChevronRight, XCircle } from 'lucide-react';
 import type { LiveData, SlowData, RaidTarget } from './types';
+import { computeStreamPhase, type StreamPhaseResult } from '@/lib/streamPhase';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -343,9 +344,9 @@ function buildLearning(live: LiveData): string[] {
 // CEO Brain asks one question each tick: "What is the biggest bottleneck right now?"
 // The answer determines the entire queue — which changes per stream.
 
-// Trigger times (minutes elapsed) — used both in buildMissionQueue and the component
+// Trigger times (minutes elapsed) — raid is phase-gated, not time-gated
 const MISSION_TRIGGER_MIN: Record<string, number> = {
-  x_post: 0, discord_post: 0, chat_cta: 5, poll: 15, sponsor: 20, raid: 75,
+  x_post: 0, discord_post: 0, chat_cta: 5, poll: 15, sponsor: 20,
 };
 const MISSION_LABEL_MAP: Record<string, string> = {
   x_post: 'Post på X', discord_post: 'Post i Discord', chat_cta: 'Engasjer chatten',
@@ -528,6 +529,7 @@ function buildMissionQueue(
   doneManual: Set<string>,
   viewerDrop: ViewerDrop,
   raidCtx: RaidCtx,
+  streamPhase: StreamPhaseResult,
 ): StreamMission[] {
   const tips   = live.liveAgentTips ?? [];
   const hasCat = (cat: string) => tips.some(t => t.category === cat);
@@ -772,16 +774,18 @@ function buildMissionQueue(
       href: '/partner-hub', done: doneManual.has('sponsor') || sponsorDone, isManual: !sponsorDone,
       priority: 'normal',
     },
-    {
-      id: 'raid', label: 'Finn raid-kandidat',
+    ...(streamPhase.raidAllowed ? [{
+      id: 'raid', label: streamPhase.phase === 'WRAP_UP' ? 'Utfør raid NÅ' : 'Finn raid-kandidat',
       context: raidPlanDone
         ? 'Raid-analyse kjørt av Live Agent'
-        : 'Begynn å planlegge hvem du raider ved stream-slutt',
+        : streamPhase.phase === 'WRAP_UP'
+          ? 'Du er i avslutningsfasen — velg raid-mål og utfør'
+          : 'Begynn å planlegge hvem du raider',
       gevinst: 'Godt raid bygger nettverk og kan gi follow-backs',
-      kostnadVedSkip: raidPlanDone ? undefined : 'Sene raid-planer gir dårlige kandidater',
+      kostnadVedSkip: raidPlanDone ? undefined : streamPhase.phase === 'WRAP_UP' ? 'Raid-vinduet lukker seg snart' : 'Sene raid-planer gir dårlige kandidater',
       href: '/raid-manager', done: doneManual.has('raid') || raidPlanDone, isManual: !raidPlanDone,
-      priority: 'normal',
-    },
+      priority: streamPhase.phase === 'WRAP_UP' ? 'kritisk' as MissionPriority : 'normal' as MissionPriority,
+    }] : []),
   ];
 
   return all
@@ -799,9 +803,10 @@ function buildRaidNowMission(
   elapsedMin: number,
   raidCtx: RaidCtx,
   doneManual: Set<string>,
+  streamPhase: StreamPhaseResult,
 ): StreamMission | null {
-  // Only inject when: we have candidates, stream is ~65+ min in, no incoming raid active
-  if (targets.length === 0 || elapsedMin < 65 || raidCtx.tier || doneManual.has('raid_now')) return null;
+  // Only inject when: raid is phase-allowed, candidates exist, no incoming raid active
+  if (targets.length === 0 || !streamPhase.raidAllowed || raidCtx.tier || doneManual.has('raid_now')) return null;
   const top = targets[0];
   if (!top) return null;
   const expectedFollowers = Math.round((top.viewers ?? 0) * 0.10);
@@ -844,6 +849,14 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     )?.created_at
     ?? (slow.streamStatus.isLive ? slow.streamStatus.startedAt ?? null : null);
   const elapsedMin = startIso ? (Date.now() - new Date(startIso).getTime()) / 60_000 : 0;
+
+  // Phase — uses historical avg duration from recent streams (data-driven, not if(min>60))
+  const recentStreams    = live.recentStreams ?? [];
+  const durationsAbove10 = recentStreams.map(s => s.durationMinutes).filter(d => d > 10);
+  const avgHistoricalMin = durationsAbove10.length > 0
+    ? Math.round(durationsAbove10.reduce((a, b) => a + b, 0) / durationsAbove10.length)
+    : 0;
+  const streamPhase = computeStreamPhase(elapsedMin, avgHistoricalMin);
 
   // Detect 18%+ viewer drop; reset when viewers recover
   useEffect(() => {
@@ -926,8 +939,8 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
     fromChannel: raidFromChannel,
   };
 
-  const baseMissions    = buildMissionQueue(live, slow, elapsedMin, doneManual, viewerDropRef.current, raidCtx);
-  const raidNowMission  = buildRaidNowMission(raidTargets, elapsedMin, raidCtx, doneManual);
+  const baseMissions    = buildMissionQueue(live, slow, elapsedMin, doneManual, viewerDropRef.current, raidCtx, streamPhase);
+  const raidNowMission  = buildRaidNowMission(raidTargets, elapsedMin, raidCtx, doneManual, streamPhase);
   // Inject Raid NOW at front; suppress the generic "Finn raid-kandidat" when it's active
   const missions        = raidNowMission
     ? [raidNowMission, ...baseMissions.filter(m => m.id !== 'raid')]
@@ -938,9 +951,15 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
   const narrative    = buildProducerNarrative(nextMission, raidCtx, viewerDropRef.current, elapsedMin, slow);
 
   // Upcoming missions — not yet triggered, shown in "Neste" forward timeline
-  const upcomingMissions = Object.entries(MISSION_TRIGGER_MIN)
-    .filter(([id, min]) => elapsedMin < min && !doneManual.has(id) && !raidCtx.tier)
-    .map(([id, min]) => ({ id, label: MISSION_LABEL_MAP[id] ?? id, minutesAway: Math.round(min - elapsedMin) }))
+  const raidUpcoming = !streamPhase.raidAllowed && !doneManual.has('raid') && !raidCtx.tier
+    ? [{ id: 'raid', label: 'Finn raid-kandidat', minutesAway: Math.round(streamPhase.raidUnlocksAtMin - elapsedMin) }]
+    : [];
+  const upcomingMissions = [
+    ...Object.entries(MISSION_TRIGGER_MIN)
+      .filter(([id, min]) => elapsedMin < min && !doneManual.has(id) && !raidCtx.tier)
+      .map(([id, min]) => ({ id, label: MISSION_LABEL_MAP[id] ?? id, minutesAway: Math.round(min - elapsedMin) })),
+    ...raidUpcoming,
+  ]
     .sort((a, b) => a.minutesAway - b.minutesAway)
     .slice(0, 3);
 
@@ -1057,6 +1076,9 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
           {startIso && <LiveTimer startIso={startIso} />}
         </div>
       </div>
+
+      {/* ── Stream Phase Badge ───────────────────────────────────────────────── */}
+      {startIso && <StreamPhaseBadge phase={streamPhase} elapsedMin={elapsedMin} />}
 
       {/* ── CEO Brain / AI Producer ──────────────────────────────────────────── */}
       <div className="bg-g-card border border-g-green/30 rounded-2xl overflow-hidden">
@@ -1545,6 +1567,61 @@ export function LiveCommandCenter({ live, slow }: { live: LiveData; slow: SlowDa
         </div>
       </div>
 
+    </div>
+  );
+}
+
+// ── Stream Phase Badge ─────────────────────────────────────────────────────────
+
+const PHASE_DOT: Record<StreamPhaseResult['color'], string> = {
+  green:  'bg-green-400',
+  yellow: 'bg-yellow-400',
+  orange: 'bg-orange-400',
+  blue:   'bg-blue-400',
+};
+const PHASE_TEXT: Record<StreamPhaseResult['color'], string> = {
+  green:  'text-green-400',
+  yellow: 'text-yellow-400',
+  orange: 'text-orange-400',
+  blue:   'text-blue-400',
+};
+const PHASE_BORDER: Record<StreamPhaseResult['color'], string> = {
+  green:  'border-green-500/20',
+  yellow: 'border-yellow-500/20',
+  orange: 'border-orange-500/20',
+  blue:   'border-blue-500/20',
+};
+const PHASE_BG: Record<StreamPhaseResult['color'], string> = {
+  green:  'bg-green-950/20',
+  yellow: 'bg-yellow-950/20',
+  orange: 'bg-orange-950/20',
+  blue:   'bg-blue-950/20',
+};
+
+function StreamPhaseBadge({ phase, elapsedMin }: { phase: StreamPhaseResult; elapsedMin: number }) {
+  return (
+    <div className={`rounded-2xl border ${PHASE_BORDER[phase.color]} ${PHASE_BG[phase.color]} px-5 py-3`}>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${PHASE_DOT[phase.color]}`} />
+            <span className="text-[10px] text-g-muted/50 uppercase tracking-widest font-bold">STREAM FASE</span>
+          </div>
+          <span className={`text-sm font-black uppercase tracking-wide ${PHASE_TEXT[phase.color]}`}>
+            {phase.label}
+          </span>
+        </div>
+        <div className="flex items-center gap-4 text-[11px] text-g-muted/50">
+          <span>Forventet total: <span className="text-g-muted">{phase.expectedTotalMin} min</span></span>
+          {!phase.raidAllowed && (
+            <span>Raid åpner om: <span className="text-g-muted">{Math.max(0, Math.round(phase.raidUnlocksAtMin - elapsedMin))} min</span></span>
+          )}
+          {phase.raidAllowed && (
+            <span className={`font-bold ${PHASE_TEXT[phase.color]}`}>Raid åpnet</span>
+          )}
+        </div>
+      </div>
+      <p className="text-[11px] text-g-muted/50 mt-1.5">{phase.description}</p>
     </div>
   );
 }

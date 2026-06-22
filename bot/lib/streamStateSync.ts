@@ -30,7 +30,7 @@ export function onStreamLive(payload: StreamLivePayload, workspaceId?: string): 
     state.stream.viewerCount = payload.viewerCount ?? 0;
     state.stream.viewerPeak = payload.viewerCount ?? 0;
     state.stream.startedAt = new Date(payload.startedAt);
-    state.stream.phase = 'opening';
+    state.stream.phase = 'STARTUP';
     state.stream.durationMin = 0;
     state.stream.energy = 'high';
   });
@@ -83,17 +83,12 @@ export function onViewerUpdate(viewerCount: number, workspaceId?: string): void 
     ? Math.round((Date.now() - state.stream.startedAt.getTime()) / 60_000)
     : null;
 
-  const phase =
-    durationMin === null ? state.stream.phase
-    : durationMin < 15   ? 'opening'
-    : durationMin < 120  ? 'mid'
-    :                      'closing';
-
   updateCreatorState(ws, s => {
     s.stream.viewerCount = viewerCount;
     if (isNewPeak) s.stream.viewerPeak = viewerCount;
     s.stream.durationMin = durationMin;
-    s.stream.phase = phase;
+    // Phase is computed and written by liveAgent.ts on every data tick (30s).
+    // streamStateSync only resets it at stream start/end; don't overwrite here.
   });
 
   if (!isNewPeak) return;
@@ -111,7 +106,6 @@ export function onViewerUpdate(viewerCount: number, workspaceId?: string): void 
       viewerCount,
       prevPeak,
       durationMin,
-      phase,
     },
   });
 }
@@ -129,7 +123,7 @@ export function onStreamOffline(workspaceId?: string): void {
 
   updateCreatorState(ws, s => {
     s.stream.isLive = false;
-    s.stream.phase = 'post';
+    s.stream.phase = 'ENDING';
     s.stream.durationMin = durationMin;
     s.stream.energy = 'normal';
   });
