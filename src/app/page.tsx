@@ -18,6 +18,7 @@ import { AiStatusRow } from '@/components/dashboard/AiStatusRow';
 import { CollapseSection } from '@/components/ui';
 import { LiveCommandCenter } from '@/components/dashboard/LiveCommandCenter';
 import { NextStreamBrief } from '@/components/dashboard/NextStreamBrief';
+import { StorageHealthCard } from '@/components/dashboard/StorageHealthCard';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -28,25 +29,33 @@ export default function Dashboard() {
   const [visDebug, setVisDebug]       = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
 
+  const handleApiResponse = useCallback((res: Response) => {
+    if (res.status === 401) {
+      window.location.href = '/login';
+      return false;
+    }
+    return res.ok;
+  }, []);
+
   const hentLive = useCallback(async () => {
     try {
       const res = await fetch('/api/dashboard/live');
-      if (res.ok) {
+      if (handleApiResponse(res)) {
         const d: LiveData = await res.json();
         setLive(d);
         setSistOppdatert(d.ts);
       }
     } catch {}
     setLoadingLive(false);
-  }, []);
+  }, [handleApiResponse]);
 
   const hentSlow = useCallback(async () => {
     try {
       const res = await fetch('/api/dashboard');
-      if (res.ok) setSlow(await res.json());
+      if (handleApiResponse(res)) setSlow(await res.json());
     } catch {}
     setLoadingSlow(false);
-  }, []);
+  }, [handleApiResponse]);
 
   const hentAlt = useCallback(async () => {
     setRefreshing(true);
@@ -150,6 +159,7 @@ export default function Dashboard() {
                 hentLive();
               }}
             />
+            <StorageHealthCard />
 
             {live?.debug && (
               <div className="border border-g-border/30 rounded-xl overflow-hidden">

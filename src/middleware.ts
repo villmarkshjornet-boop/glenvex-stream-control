@@ -123,8 +123,12 @@ export async function middleware(request: NextRequest) {
   }
 
   const { session, cookieName } = parseCookieSession(request);
+  const isApiRoute = pathname.startsWith('/api/');
 
   if (!session || !cookieName) {
+    if (isApiRoute) {
+      return NextResponse.json({ error: 'Unauthorized', code: 'NO_SESSION' }, { status: 401 });
+    }
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
@@ -132,28 +136,39 @@ export async function middleware(request: NextRequest) {
 
   let claims = decodeJwtClaims(session.access_token);
   let refreshedSession: StoredSession | null = null;
+  const nowSec = Date.now() / 1000;
 
-  // JWT expired or expiring within 5 minutes — refresh proactively
-  const REFRESH_BUFFER_SECONDS = 5 * 60;
-  if (!claims || claims.exp < (Date.now() / 1000) + REFRESH_BUFFER_SECONDS) {
+  if (!claims || claims.exp < nowSec) {
+    // Token definitively expired
+    if (isApiRoute) {
+      // Never redirect API routes — race-condition-safe 401 so caller can handle gracefully
+      return NextResponse.json({ error: 'Session expired', code: 'SESSION_EXPIRED' }, { status: 401 });
+    }
     if (!session.refresh_token) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
-
     refreshedSession = await refreshAccessToken(session.refresh_token);
     if (!refreshedSession) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
-
     claims = decodeJwtClaims(refreshedSession.access_token);
     if (!claims) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       return NextResponse.redirect(url);
+    }
+  } else if (!isApiRoute && claims.exp < nowSec + 5 * 60) {
+    // Token expiring within 5 minutes — proactively refresh on page navigation only
+    // Skipping API routes avoids the parallel-request race condition that kicks users to login
+    if (session.refresh_token) {
+      refreshedSession = await refreshAccessToken(session.refresh_token);
+      if (refreshedSession) {
+        claims = decodeJwtClaims(refreshedSession.access_token) ?? claims;
+      }
     }
   }
 
