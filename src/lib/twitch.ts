@@ -170,6 +170,45 @@ export async function getTopClips(broadcasterId: string, count = 5): Promise<Cli
   }
 }
 
+export interface TwitchVod {
+  vodId:          string;
+  streamId:       string | null;
+  title:          string;
+  createdAt:      string;
+  durationMinutes: number;
+  viewCount:      number;
+  url:            string;
+}
+
+function parseTwitchDuration(d: string): number {
+  const h = parseInt(d.match(/(\d+)h/)?.[1] ?? '0', 10);
+  const m = parseInt(d.match(/(\d+)m/)?.[1] ?? '0', 10);
+  const s = parseInt(d.match(/(\d+)s/)?.[1] ?? '0', 10);
+  return h * 60 + m + Math.round(s / 60);
+}
+
+export async function getRecentVods(broadcasterId: string, count = 10): Promise<TwitchVod[]> {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  if (!clientId) return [];
+  try {
+    const data = await helixGet(
+      clientId,
+      `https://api.twitch.tv/helix/videos?user_id=${broadcasterId}&type=archive&first=${count}`,
+    ) as { data: any[] };
+    return (data.data ?? []).map((v: any) => ({
+      vodId:           v.id,
+      streamId:        v.stream_id ?? null,
+      title:           v.title ?? '',
+      createdAt:       v.created_at,
+      durationMinutes: parseTwitchDuration(v.duration ?? ''),
+      viewCount:       v.view_count ?? 0,
+      url:             v.url,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function getChannelStats(broadcasterId: string): Promise<ChannelStats> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   if (!clientId) return { followerCount: 0, clipCount: 0, topClips: [] };
