@@ -87,6 +87,20 @@ function ConnectButton({ href, icon, label, connected, connectedLabel, disabled 
   );
 }
 
+const OAUTH_ERRORS: Record<string, { heading: string; detail: string }> = {
+  twitch_cancelled:         { heading: 'Twitch-tilkobling avbrutt', detail: 'Du avbrøt tilkoblingen. Klikk "Koble til Twitch" og prøv igjen.' },
+  twitch_state_mismatch:    { heading: 'Twitch-tilkobling utløp', detail: 'Tilkoblingen tok for lang tid eller ble avbrutt. Prøv igjen.' },
+  twitch_token_failed:      { heading: 'Klarte ikke koble til Twitch', detail: 'Twitch returnerte ingen tilgangsnøkkel. Prøv igjen, eller kontakt support.' },
+  twitch_userinfo_failed:   { heading: 'Klarte ikke hente Twitch-profil', detail: 'Prøv å koble til på nytt.' },
+  twitch_db_failed:         { heading: 'Lagringsfeil (Twitch)', detail: 'Tilkoblingen ble godkjent, men vi klarte ikke lagre den. Prøv igjen.' },
+  discord_cancelled:        { heading: 'Discord-tilkobling avbrutt', detail: 'Du avbrøt invitasjonen av boten. Klikk "Legg til Discord-bot" og prøv igjen.' },
+  discord_state_mismatch:   { heading: 'Discord-tilkobling utløp', detail: 'Tilkoblingen tok for lang tid. Prøv igjen.' },
+  discord_config_missing:   { heading: 'Mangler Discord-konfigurasjon', detail: 'Noe er galt på serversiden. Kontakt support.' },
+  discord_token_failed:     { heading: 'Klarte ikke koble til Discord', detail: 'Discord returnerte ingen tilgangsnøkkel. Prøv å invitere boten på nytt.' },
+  discord_db_failed:        { heading: 'Lagringsfeil (Discord)', detail: 'Boten ble lagt til, men vi klarte ikke lagre det. Prøv igjen.' },
+  server_config:            { heading: 'Konfigurasjonsfeil på server', detail: 'Noe er galt i GLENVEX-oppsettet. Kontakt support.' },
+};
+
 function OnboardingInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
@@ -94,7 +108,7 @@ function OnboardingInner() {
   const [step,      setStep]      = useState(1);
   const [status,    setStatus]    = useState<OboardingStatus | null>(null);
   const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState('');
+  const [error,     setError]     = useState<{ heading: string; detail: string } | null>(null);
 
   // Step 1 state
   const [brandName,  setBrandName]  = useState('');
@@ -122,23 +136,39 @@ function OnboardingInner() {
       // URL param overrides DB step (for post-OAuth redirects)
       const urlStep = parseInt(searchParams.get('step') ?? '0', 10);
       const urlError = searchParams.get('error');
-      if (urlError) setError(`OAuth feil: ${urlError.replace(/_/g, ' ')}`);
+      if (urlError) {
+        setError(OAUTH_ERRORS[urlError] ?? { heading: 'Tilkoblingsfeil', detail: `Noe gikk galt (kode: ${urlError}). Prøv igjen, eller kontakt support.` });
+      }
       setStep(urlStep > 1 ? urlStep : d.currentStep);
     });
   }, [loadStatus, searchParams]);
 
-  // Load Discord channels when on step 4
-  useEffect(() => {
-    if (step !== 4 || !status?.discordConnected) return;
-    fetch('/api/channel-settings').then(r => r.json()).then(d => {
+  // Step 4 channel loading state
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelsLoaded,  setChannelsLoaded]  = useState(false);
+
+  const loadChannels = useCallback(async () => {
+    if (!status?.discordConnected) return;
+    setChannelsLoading(true);
+    try {
+      const r = await fetch('/api/channel-settings');
+      const d = await r.json();
       setChannels(d.kanaler ?? []);
       setPrefs(d.preferanser ?? {});
-    }).catch(() => {});
-  }, [step, status?.discordConnected]);
+    } catch {}
+    setChannelsLoading(false);
+    setChannelsLoaded(true);
+  }, [status?.discordConnected]);
+
+  // Load Discord channels when on step 4
+  useEffect(() => {
+    if (step !== 4) return;
+    loadChannels();
+  }, [step, loadChannels]);
 
   async function saveWorkspace() {
     if (!brandName || !wsSlug) return;
-    setLoading(true); setError('');
+    setLoading(true); setError(null);
     const res = await fetch('/api/onboarding/workspace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -146,7 +176,7 @@ function OnboardingInner() {
     });
     const d = await res.json();
     setLoading(false);
-    if (!res.ok) { setError(d.error ?? 'Feil ved opprettelse'); return; }
+    if (!res.ok) { setError({ heading: 'Feil ved opprettelse', detail: d.error ?? 'Prøv igjen.' }); return; }
     setStep1Saved(true);
     setStep(2);
   }
@@ -160,15 +190,15 @@ function OnboardingInner() {
     });
     setSavingCh(false);
     if (res.ok) { await loadStatus(); setStep(5); }
-    else { const d = await res.json(); setError(d.error ?? 'Feil ved kanallagring'); }
+    else { const d = await res.json(); setError({ heading: 'Feil ved kanallagring', detail: d.error ?? 'Prøv igjen.' }); }
   }
 
   async function activate() {
-    setLoading(true); setError('');
+    setLoading(true); setError(null);
     const res = await fetch('/api/onboarding/activate', { method: 'POST' });
     const d = await res.json();
     setLoading(false);
-    if (!res.ok) { setError(d.error ?? 'Feil ved aktivering'); return; }
+    if (!res.ok) { setError({ heading: 'Feil ved aktivering', detail: d.error ?? 'Prøv igjen.' }); return; }
     router.push('/waiting');
     router.refresh();
   }
@@ -192,7 +222,16 @@ function OnboardingInner() {
           <ProgressBar step={step} />
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5 space-y-1">
+              <p className="text-xs font-bold text-red-400">{error.heading}</p>
+              <p className="text-[11px] text-red-400/70">{error.detail}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-[10px] text-red-400/50 hover:text-red-400 underline underline-offset-2 transition-colors"
+              >
+                Lukk
+              </button>
+            </div>
           )}
 
           {/* ── Step 1: Workspace ── */}
@@ -302,8 +341,33 @@ function OnboardingInner() {
                   </div>
                 ))}
               </div>
-              {channels.length === 0 && (
-                <p className="text-[10px] text-g-muted">Laster kanaler fra Discord...</p>
+              {channelsLoading && (
+                <p className="text-[10px] text-g-muted">Henter kanaler fra Discord...</p>
+              )}
+              {!channelsLoading && channelsLoaded && channels.length === 0 && (
+                <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 space-y-3">
+                  <p className="text-xs font-bold text-yellow-400">Ingen kanaler funnet</p>
+                  <p className="text-[11px] text-g-muted/70 leading-snug">
+                    Dette kan skyldes at boten ikke er riktig invitert, mangler rettigheter til å lese kanaler, eller Discord-serveren har ingen tekstkanaler.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <a
+                      href="/api/auth/discord-bot"
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[11px] text-g-green font-bold hover:bg-g-green/20 transition-colors"
+                    >
+                      Inviter bot på nytt
+                    </a>
+                    <button
+                      onClick={loadChannels}
+                      className="px-3 py-1.5 border border-g-border rounded-lg text-[11px] text-g-muted font-bold hover:text-g-text hover:border-g-border/80 transition-colors"
+                    >
+                      Prøv å hente kanaler igjen
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-g-muted/40">
+                    Boten trenger: <span className="font-mono">Read Messages</span> og <span className="font-mono">Send Messages</span>
+                  </p>
+                </div>
               )}
               <button onClick={saveChannels} disabled={savingCh}
                 className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-50">

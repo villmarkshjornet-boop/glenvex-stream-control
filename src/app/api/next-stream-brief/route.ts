@@ -19,6 +19,7 @@ export interface NextStreamBriefData {
   actions: BriefAction[];
   basedOnStreams: number;
   avgStreamDurationMin: number | null;
+  isOnboarding: boolean;
   generatedAt: string;
 }
 
@@ -209,6 +210,7 @@ export async function GET() {
     actions,
     basedOnStreams: streams.length,
     avgStreamDurationMin: avgDuration,
+    isOnboarding: streams.length === 0,
     generatedAt: new Date().toISOString(),
   };
 
