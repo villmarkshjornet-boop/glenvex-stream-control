@@ -17,6 +17,7 @@ import { CreatorBrainLearning } from '@/components/dashboard/CreatorBrainLearnin
 import { AiStatusRow } from '@/components/dashboard/AiStatusRow';
 import { CollapseSection } from '@/components/ui';
 import { LiveCommandCenter } from '@/components/dashboard/LiveCommandCenter';
+import { NextStreamBrief } from '@/components/dashboard/NextStreamBrief';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -101,6 +102,9 @@ export default function Dashboard() {
         <>
           {/* Hero — siste stream */}
           <Hero heroStream={live?.heroStream} loading={loadingLive} />
+
+          {/* Hva gjør jeg nå? — viktigste kort på dashboardet */}
+          <NextStreamBrief />
 
           {/* Action Center */}
           <ActionCenter items={live?.actionCenter} loading={loadingLive} />
