@@ -11,7 +11,7 @@
  * Only updates title and duration_minutes — viewer stats that the bot failed
  * to capture cannot be recovered from the Twitch API.
  */
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { getBroadcasterId, getRecentVods } from '@/lib/twitch';
@@ -78,5 +78,23 @@ async function run(dryRun: boolean) {
   return NextResponse.json({ patched: results.length, results, skipped });
 }
 
-export async function GET() { return run(true); }
-export async function POST() { return run(false); }
+function checkAuth(req: NextRequest): boolean {
+  const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret');
+  const envSecret = process.env.CRON_SECRET;
+  // Allow if CRON_SECRET matches, OR if request comes from authenticated session
+  // (middleware already validated session and sets x-workspace-id)
+  if (req.headers.get('x-workspace-id')) return true;
+  if (envSecret && secret === envSecret) return true;
+  return false;
+}
+
+export async function GET(req: NextRequest) {
+  if (!checkAuth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const apply = req.nextUrl.searchParams.get('apply') === 'true';
+  return run(!apply);
+}
+
+export async function POST(req: NextRequest) {
+  if (!checkAuth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  return run(false);
+}
