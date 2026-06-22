@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Eye, Users, MessageSquare, Clock, AlertTriangle, ArrowRight, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
 import { tidSiden } from './helpers';
@@ -55,10 +56,17 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
           )}
         </div>
 
-        <div className={`flex flex-col items-center justify-center w-32 h-32 rounded-full ring-4 ${grade.ring} shadow-xl ${grade.glow} flex-shrink-0`}>
-          <p className={`text-5xl font-black leading-none ${grade.text}`}>{heroStream.streamScore}</p>
-          <p className={`text-xs font-bold mt-1 ${grade.text}`}>Grade {heroStream.grade}</p>
-        </div>
+        {heroStream.dataIntegrity?.status === 'broken' && heroStream.streamScore === 0 ? (
+          <div className="flex flex-col items-center justify-center w-32 h-32 rounded-full ring-4 ring-red-500/20 flex-shrink-0 bg-red-950/10">
+            <AlertTriangle size={22} className="text-red-400/50" />
+            <p className="text-[10px] text-red-400/60 font-bold mt-1.5 text-center leading-tight">Teknisk<br/>feil</p>
+          </div>
+        ) : (
+          <div className={`flex flex-col items-center justify-center w-32 h-32 rounded-full ring-4 ${grade.ring} shadow-xl ${grade.glow} flex-shrink-0`}>
+            <p className={`text-5xl font-black leading-none ${grade.text}`}>{heroStream.streamScore}</p>
+            <p className={`text-xs font-bold mt-1 ${grade.text}`}>Grade {heroStream.grade}</p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8">
@@ -88,77 +96,82 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
 }
 
 function DataIntegrityCard({ integrity }: { integrity: HeroStream['dataIntegrity'] | undefined }) {
+  const [showDetails, setShowDetails] = useState(false);
   if (!integrity || integrity.status === 'full') return null;
 
   const { status, botStatus, missingDataReasons, repairedSources = [] } = integrity;
-
   const isManualRepair = botStatus === 'manual_repair';
   const isBreaking     = status === 'broken';
 
-  const borderColor = isManualRepair ? 'border-blue-500/30'   : isBreaking ? 'border-red-500/30'  : 'border-yellow-500/30';
-  const bgColor     = isManualRepair ? 'bg-blue-950/20'        : isBreaking ? 'bg-red-950/20'      : 'bg-yellow-950/20';
-  const Icon        = isManualRepair ? ShieldCheck              : isBreaking ? ShieldX              : ShieldAlert;
-  const iconColor   = isManualRepair ? 'text-blue-400'          : isBreaking ? 'text-red-400'       : 'text-yellow-400';
-  const label       = isManualRepair ? 'Manuelt reparert med Twitch email summary'
-                    : isBreaking     ? 'Ødelagt datagrunnlag'
-                    :                  'Ufullstendig datagrunnlag';
+  const iconColor  = isManualRepair ? 'text-blue-400' : isBreaking ? 'text-red-400' : 'text-yellow-400';
+  const badge      = isManualRepair ? '∼ Delvis reparert'
+                   : isBreaking     ? '⚠ Delvis datagrunnlag'
+                   :                  '⚠ Delvis datagrunnlag';
+  const summary    = isManualRepair
+    ? 'Reparert manuelt med Twitch email summary.'
+    : isBreaking
+    ? `Boten ${botStatus === 'crashed' ? 'krasjet' : botStatus === 'offline' ? 'var offline' : botStatus === 'auth_failed' ? 'hadde autentiseringsfeil (401)' : 'var utilgjengelig'} under streamen. Denne rapporten er ikke komplett.`
+    : 'Noen data mangler for denne streamen.';
 
   return (
-    <div className={`mt-5 rounded-xl border ${borderColor} ${bgColor} p-4`}>
-      <div className="flex items-center gap-2 mb-3">
-        <Icon size={15} className={iconColor} />
-        <span className={`text-xs font-bold ${iconColor}`}>{label}</span>
+    <div className="mt-5 pt-4 border-t border-g-border/30">
+      <div className="flex items-center gap-2">
+        <span className={`text-[11px] font-bold ${iconColor}`}>{badge}</span>
+        <span className="text-[11px] text-g-muted/60">— {summary}</span>
+        <button
+          onClick={() => setShowDetails(v => !v)}
+          className="ml-auto text-[10px] text-g-muted/40 hover:text-g-muted transition-colors underline underline-offset-2 flex-shrink-0"
+        >
+          {showDetails ? 'Skjul detaljer' : 'Vis tekniske detaljer'}
+        </button>
       </div>
 
-      {isManualRepair ? (
-        <p className="text-[11px] text-g-muted mb-3">
-          Stream-statistikk er reparert manuelt med tall fra Twitch email summary.
-          Audience timeline, retention-kurve og chat-events er ikke tilgjengelig — kun summary-tallene er kjent.
-          AI Memory bruker disse tallene med lavere confidence og dikter ikke manglende detaljer.
-        </p>
-      ) : (
-        <p className="text-[11px] text-g-muted mb-3">
-          Denne streamen har ufullstendig datagrunnlag fordi boten var {botStatus === 'crashed' ? 'krasjet' : botStatus === 'offline' ? 'offline' : botStatus === 'auth_failed' ? 'autentiseringsfeil (401)' : 'utilgjengelig'} under streamen.
-          Tallene som vises er det som ble fanget opp, ikke fullstendige stream-data.
-        </p>
-      )}
-
-      {/* Repaired sources — shown first as confirmation */}
-      {repairedSources.length > 0 && (
-        <div className="space-y-1.5 mb-3">
-          {repairedSources.map((r, i) => (
-            <div key={i} className="bg-blue-950/30 border border-blue-500/20 rounded-lg p-2.5 text-[11px]">
-              <div className="flex items-start gap-2">
-                <ShieldCheck size={11} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                <div>
-                  <span className="text-blue-300 font-medium">✓ {r.source}</span>
-                  {r.note && <p className="text-blue-300/60 mt-0.5 font-mono">{r.note}</p>}
-                  <p className="text-g-muted/50 mt-0.5">Reparert {new Date(r.repairedAt).toLocaleString('no')}</p>
+      {showDetails && (
+        <div className={`mt-3 rounded-xl border p-4 space-y-3 ${
+          isManualRepair ? 'border-blue-500/30 bg-blue-950/10'
+          : isBreaking   ? 'border-red-500/30 bg-red-950/10'
+          :                'border-yellow-500/30 bg-yellow-950/10'
+        }`}>
+          {repairedSources.length > 0 && (
+            <div className="space-y-1.5">
+              {repairedSources.map((r, i) => (
+                <div key={i} className="bg-blue-950/30 border border-blue-500/20 rounded-lg p-2.5 text-[11px]">
+                  <div className="flex items-start gap-2">
+                    <ShieldCheck size={11} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="text-blue-300 font-medium">✓ {r.source}</span>
+                      {r.note && <p className="text-blue-300/60 mt-0.5 font-mono">{r.note}</p>}
+                      <p className="text-g-muted/40 mt-0.5">Reparert {new Date(r.repairedAt).toLocaleString('no')}</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Still-missing data — always shown even after repair */}
-      {missingDataReasons.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] text-g-muted/50 uppercase tracking-wider font-bold">Mangler fortsatt:</p>
-          {missingDataReasons.map((r, i) => (
-            <div key={i} className="bg-black/20 rounded-lg p-2.5 text-[11px]">
-              <div className="flex items-start gap-2">
-                <ShieldAlert size={11} className="text-g-muted mt-0.5 flex-shrink-0" />
-                <div>
-                  <span className="text-g-text font-medium">{r.source}</span>
-                  <span className="text-g-muted"> — forventet: </span>
-                  <span className="text-yellow-300 font-mono">{r.expected}</span>
-                  <p className="text-g-muted mt-0.5">{r.reason}</p>
-                  {r.lastSeen && <p className="text-g-muted/60 mt-0.5">Sist sett: {new Date(r.lastSeen).toLocaleString('no')}</p>}
+          {missingDataReasons.length > 0 && (
+            <div className="space-y-2">
+              {repairedSources.length > 0 && (
+                <p className="text-[10px] text-g-muted/40 uppercase tracking-wider font-bold">Mangler fortsatt:</p>
+              )}
+              {missingDataReasons.map((r, i) => (
+                <div key={i} className="bg-black/20 rounded-lg p-2.5 text-[11px]">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert size={11} className="text-g-muted/60 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="text-g-text/80 font-medium">{r.source}</span>
+                      <span className="text-g-muted/60"> — forventet: </span>
+                      <span className="text-yellow-300/80 font-mono">{r.expected}</span>
+                      <p className="text-g-muted/60 mt-0.5">{r.reason}</p>
+                      {r.lastSeen && (
+                        <p className="text-g-muted/40 mt-0.5">Sist sett: {new Date(r.lastSeen).toLocaleString('no')}</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>

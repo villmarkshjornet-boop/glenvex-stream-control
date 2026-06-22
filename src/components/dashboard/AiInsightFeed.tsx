@@ -1,18 +1,29 @@
 'use client';
 
 import Link from 'next/link';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, AlertTriangle } from 'lucide-react';
 import { tidSiden } from './helpers';
-import type { AiInnsikt, Lærdom } from './types';
+import type { AiInnsikt, HeroStream, Lærdom } from './types';
 
 const MIN_DATAPUNKTER = 5;
 
-export function AiInsightFeed({ innsikter, lærdom, loading }: { innsikter: AiInnsikt[]; lærdom?: Lærdom; loading: boolean }) {
+export function AiInsightFeed({
+  innsikter, lærdom, loading, heroIntegrity,
+}: {
+  innsikter: AiInnsikt[];
+  lærdom?: Lærdom;
+  loading: boolean;
+  heroIntegrity?: HeroStream['dataIntegrity'];
+}) {
   if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
 
   const totalDatapunkter = lærdom?.totalDatapunkter ?? 0;
   const harNokData = totalDatapunkter >= MIN_DATAPUNKTER;
   const siste = innsikter[0] ?? null;
+
+  // Broken stream: show honest message instead of potentially stale "live" insights
+  const streamBroken = heroIntegrity?.status === 'broken';
+  const botStatus    = heroIntegrity?.botStatus;
 
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-6 h-full flex flex-col">
@@ -21,7 +32,22 @@ export function AiInsightFeed({ innsikter, lærdom, loading }: { innsikter: AiIn
         <Link href="/ai-memory" className="text-xs text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
       </div>
 
-      {!siste && !harNokData ? (
+      {streamBroken ? (
+        <div className="flex gap-3 p-4 bg-red-900/10 border border-red-500/20 rounded-xl">
+          <AlertTriangle size={15} className="text-red-400/50 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-g-muted leading-snug">
+              Denne streamen ble ikke fullstendig analysert.
+            </p>
+            <p className="text-xs text-g-muted/50 mt-1.5">
+              Årsak: {botStatus === 'crashed' ? 'Boten krasjet under streamen'
+                     : botStatus === 'offline'  ? 'Boten var offline under streamen'
+                     : botStatus === 'auth_failed' ? 'Twitch API 401 — token ugyldig'
+                     : 'Boten var utilgjengelig'}. Ingen lærdom ble lagret fra denne streamen.
+            </p>
+          </div>
+        </div>
+      ) : !siste && !harNokData ? (
         <p className="text-sm text-g-muted">
           AI trenger flere datapunkter ({totalDatapunkter}/{MIN_DATAPUNKTER}) før den kan gi spesifikke innsikter.
         </p>

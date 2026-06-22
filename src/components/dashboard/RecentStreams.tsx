@@ -28,14 +28,26 @@ export function RecentStreams({ streams, loading }: { streams: RecentStream[] | 
           {streams.map(s => (
             <Link key={s.streamId} href={`/stream-coach?streamId=${encodeURIComponent(s.streamId)}`}
               className="border border-g-border/40 rounded-xl p-3 hover:border-g-border hover:bg-g-bg/40 transition-all">
-              <div className={`inline-flex items-center justify-center w-9 h-9 rounded-full border-2 text-sm font-black mb-2 ${GRADE_COLOR[s.grade]}`}>
-                {s.grade}
-              </div>
-              <p className="text-sm font-black text-g-text">{s.streamScore}</p>
+              {s.broken ? (
+                <div className="inline-flex items-center justify-center w-9 h-9 rounded-full border-2 border-red-500/20 text-base mb-2">
+                  ⚠
+                </div>
+              ) : (
+                <div className={`inline-flex items-center justify-center w-9 h-9 rounded-full border-2 text-sm font-black mb-2 ${GRADE_COLOR[s.grade]}`}>
+                  {s.grade}
+                </div>
+              )}
+              {s.broken ? (
+                <p className="text-xs text-red-400/50 font-bold">Teknisk feil</p>
+              ) : (
+                <p className="text-sm font-black text-g-text">{s.streamScore}</p>
+              )}
               <p className="text-xs text-g-text truncate mt-1">{s.title || s.game}</p>
               <p className="text-[11px] text-g-muted truncate">{s.game}</p>
               <p className="text-[11px] text-g-muted mt-1">{tidSiden(s.endedAt)}</p>
-              <p className="text-[11px] text-g-muted">Peak {s.peakViewers} · {s.retentionPct}% retention</p>
+              {!s.broken && (
+                <p className="text-[11px] text-g-muted">Peak {s.peakViewers} · {s.retentionPct}% retention</p>
+              )}
             </Link>
           ))}
         </div>

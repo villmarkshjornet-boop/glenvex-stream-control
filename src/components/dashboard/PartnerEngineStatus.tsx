@@ -90,7 +90,7 @@ export function PartnerEngineStatus() {
         {/* Sist vurdert */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
-            <Activity size={11} /> Sist vurdert
+            <Activity size={11} /> Siste vurdering
           </div>
           {v ? (
             <div className="space-y-1">
@@ -115,14 +115,17 @@ export function PartnerEngineStatus() {
               )}
             </div>
           ) : (
-            <p className="text-xs text-g-muted/50">Mangler data</p>
+            <div>
+              <p className="text-sm text-g-muted/60">Ingen aktive kjøringer</p>
+              <p className="text-[10px] text-g-muted/40 mt-0.5">Kjører kun under aktive streams</p>
+            </div>
           )}
         </div>
 
         {/* Sist sendt */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
-            <Send size={11} /> Sist sendt
+            <Send size={11} /> Siste utsendelse
           </div>
           {s ? (
             <div className="space-y-1">
@@ -135,7 +138,10 @@ export function PartnerEngineStatus() {
               {s.partnerName && <p className="text-xs text-g-muted">{s.partnerName}</p>}
             </div>
           ) : (
-            <p className="text-xs text-g-muted/50">Mangler data</p>
+            <div>
+              <p className="text-sm text-g-muted/60">Ingen utsendelser registrert</p>
+              <p className="text-[10px] text-g-muted/40 mt-0.5">Sender kun under aktive streams</p>
+            </div>
           )}
         </div>
       </div>

@@ -116,6 +116,7 @@ export interface RecentStream {
   streamScore: number;
   grade: 'S' | 'A' | 'B' | 'C' | 'D';
   retentionPct: number;
+  broken?: boolean;
 }
 
 export interface CoverageEntry {

@@ -610,6 +610,7 @@ export async function GET() {
       streamScore: score.total,
       grade: score.grade,
       retentionPct: peak > 0 ? Math.round((avg / peak) * 100) : 0,
+      broken: score.total === 0 && peak === 0 && avg === 0,
     };
   });
 

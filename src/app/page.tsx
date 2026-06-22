@@ -122,7 +122,7 @@ export default function Dashboard() {
           >
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <StreamCompletionCard heroStream={live?.heroStream} loading={loadingLive} />
-              <AiInsightFeed innsikter={live?.nyesteInnsikter ?? []} lærdom={live?.lærdom} loading={loadingLive} />
+              <AiInsightFeed innsikter={live?.nyesteInnsikter ?? []} lærdom={live?.lærdom} loading={loadingLive} heroIntegrity={live?.heroStream?.dataIntegrity} />
             </div>
 
             <PartnerEngineStatus />

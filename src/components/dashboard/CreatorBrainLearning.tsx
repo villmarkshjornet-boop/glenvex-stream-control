@@ -71,59 +71,29 @@ export function CreatorBrainLearning() {
   const shown = learnings.slice(0, 5);
 
   return (
-    <section className="bg-g-card border border-g-border rounded-2xl p-4 space-y-4">
+    <section className="bg-g-card border border-g-border rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-g-text tracking-wide">
-          Creator Brain — Hva har AI lært?
-        </h2>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Creator Brain — Lærdomme</p>
         {summary?.lastRun && (
           <span className="text-[10px] text-g-muted/40">
             Sist kjørt {tidSiden(summary.lastRun.ts)}
-            {summary.lastRun.proposalsAnalyzed != null && (
-              <> · {summary.lastRun.proposalsAnalyzed} forslag analysert</>
-            )}
           </span>
         )}
       </div>
 
-      {/* Key insight chips */}
-      {summary && (summary.topPartner || summary.bestTimingWindow || summary.bestPlatform) && (
-        <div className="flex flex-wrap gap-2">
-          {summary.topPartner?.approvalRate != null && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-900/20 border border-emerald-800/30 text-[11px] text-emerald-300">
-              ★ {summary.topPartner.name} godkjennes {summary.topPartner.approvalRate}%
-              <span className="text-emerald-600/60">({summary.topPartner.evidenceCount} forslag)</span>
-            </span>
-          )}
-          {summary.bestTimingWindow?.approvalRate != null && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-900/20 border border-blue-800/30 text-[11px] text-blue-300">
-              ⏱ Best tidspunkt: {summary.bestTimingWindow.label} → {summary.bestTimingWindow.approvalRate}%
-            </span>
-          )}
-          {summary.bestPlatform?.percentage != null && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-900/20 border border-purple-800/30 text-[11px] text-purple-300">
-              ⊞ {summary.bestPlatform.platform}: {summary.bestPlatform.percentage}% av promoer
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Learning list */}
       {shown.length > 0 ? (
         <ul className="space-y-2">
           {shown.map(l => (
             <li key={l.id} className="flex gap-2.5 items-start">
-              <span className="text-g-muted/30 text-xs mt-0.5 w-4 flex-shrink-0 text-center">
-                {TYPE_ICON[l.knowledgeType] ?? '·'}
+              <span className={`text-xs mt-0.5 flex-shrink-0 ${CONFIDENCE_COLOR(l.confidence)}`}>
+                ✓
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-g-muted/80 leading-snug">{l.finding}</p>
+                <p className="text-xs text-g-text/80 leading-snug">{l.finding}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-g-muted/40">{l.typeLabel}</span>
                   <span className={`text-[10px] ${CONFIDENCE_COLOR(l.confidence)}`}>
-                    {l.confidence}% {CONFIDENCE_LABEL(l.confidence)}
+                    {CONFIDENCE_LABEL(l.confidence)} ({l.evidenceCount} datapunkt)
                   </span>
-                  <span className="text-[10px] text-g-muted/30">{l.evidenceCount} datapunkt</span>
                 </div>
               </div>
             </li>
@@ -135,16 +105,7 @@ export function CreatorBrainLearning() {
         </p>
       ) : (
         <p className="text-xs text-g-muted/40">
-          Creator Brain samler data. Kjør 20–30 streams for å bygge opp kunnskap.
-        </p>
-      )}
-
-      {summary && summary.totalLearnings > 0 && (
-        <p className="text-[10px] text-g-muted/30">
-          {summary.totalLearnings} kunnskapsoppføringer totalt
-          {summary.avgConfidence != null && (
-            <> · gj.snitt {summary.avgConfidence}% konfidensgrad</>
-          )}
+          Creator Brain samler data. Innsikter dukker opp etter noen streams.
         </p>
       )}
     </section>
