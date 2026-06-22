@@ -23,7 +23,8 @@ import { getWorkspaceId } from '@/lib/workspace';
 export const dynamic = 'force-dynamic';
 
 interface Body {
-  stream_id: string;
+  stream_id?: string;
+  use_latest?: boolean;
   unique_viewers: number;
   peak_viewers: number;
   avg_viewers: number;
@@ -39,7 +40,7 @@ function checkAuth(req: NextRequest): boolean {
 }
 
 function validate(b: Body): string | null {
-  if (!b.stream_id?.trim()) return 'stream_id er påkrevd';
+  if (!b.stream_id?.trim() && !b.use_latest) return 'Enten stream_id eller use_latest:true er påkrevd';
   for (const k of ['unique_viewers','peak_viewers','avg_viewers','unique_chatters','followers_gained'] as const) {
     if (typeof b[k] !== 'number' || b[k] < 0 || !Number.isInteger(b[k])) return `${k} må være et ikke-negativt heltall`;
   }
@@ -65,21 +66,33 @@ export async function POST(req: NextRequest) {
   if (!db) return NextResponse.json({ error: 'Database ikke tilgjengelig' }, { status: 503 });
 
   const ws = getWorkspaceId();
-  const { stream_id, unique_viewers, peak_viewers, avg_viewers, unique_chatters, followers_gained } = body;
+  const { unique_viewers, peak_viewers, avg_viewers, unique_chatters, followers_gained } = body;
   const source = body.source ?? 'manual';
 
   // ── Find the row ─────────────────────────────────────────────────────────────
-  const { data: rows, error: fetchErr } = await db
+  let query = db
     .from('stream_history')
     .select('id, stream_id, title, game, duration_minutes, peak_viewers, avg_viewers, followers_gained, chat_messages, started_at, ended_at')
     .eq('workspace_id', ws)
-    .eq('stream_id', stream_id)
+    .order('ended_at', { ascending: false })
     .limit(1);
 
+  if (!body.use_latest && body.stream_id?.trim()) {
+    query = db
+      .from('stream_history')
+      .select('id, stream_id, title, game, duration_minutes, peak_viewers, avg_viewers, followers_gained, chat_messages, started_at, ended_at')
+      .eq('workspace_id', ws)
+      .eq('stream_id', body.stream_id.trim())
+      .limit(1);
+  }
+
+  const { data: rows, error: fetchErr } = await query;
+
   if (fetchErr) return NextResponse.json({ error: `DB-feil ved oppslag: ${fetchErr.message}` }, { status: 500 });
-  if (!rows?.length) return NextResponse.json({ error: `Ingen stream_history-rad funnet for stream_id: ${stream_id}` }, { status: 404 });
+  if (!rows?.length) return NextResponse.json({ error: body.use_latest ? 'Ingen stream_history-rader funnet for denne workspace' : `Ingen stream_history-rad funnet for stream_id: ${body.stream_id}` }, { status: 404 });
 
   const row = rows[0];
+  const stream_id = row.stream_id ?? body.stream_id ?? 'unknown';
 
   const before = {
     peak_viewers:    row.peak_viewers    ?? 0,
@@ -113,12 +126,11 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // ── 1. Oppdater stream_history ────────────────────────────────────────────────
+  // ── 1. Oppdater stream_history — matcher på UUID (row.id) for å unngå null stream_id-problemer ──
   const { error: updateErr } = await db
     .from('stream_history')
     .update({ peak_viewers, avg_viewers, followers_gained })
-    .eq('workspace_id', ws)
-    .eq('stream_id', stream_id);
+    .eq('id', row.id);
 
   if (updateErr) return NextResponse.json({ error: `Kunne ikke oppdatere stream_history: ${updateErr.message}` }, { status: 500 });
 
