@@ -370,6 +370,7 @@ export async function GET() {
   let heroStreamEventsRes: any = { data: [] };
   let heroAgentEventsRes: any = { data: [] };
   let heroBotDiagRes: any = { data: [] };
+  let heroManualBackfillRes: any = { data: [] };
   if (sisteStream) {
     const streamStart = sisteStream.started_at ?? new Date(Date.now() - 4 * 3600_000).toISOString();
     const streamEnd   = sisteStream.ended_at   ?? new Date().toISOString();
@@ -411,10 +412,28 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(20);
 
-    [heroStreamEventsRes, heroAgentEventsRes, heroBotDiagRes] = await Promise.all([
+    // Detect manual backfill — not time-windowed because it can run days after the stream
+    const manualBackfillQ = sisteStream.stream_id
+      ? db.from('system_events')
+          .select('event_type,metadata,created_at')
+          .eq('workspace_id', ws)
+          .eq('event_type', 'STREAM_HISTORY_MANUAL_BACKFILL')
+          .contains('metadata', { stream_id: sisteStream.stream_id })
+          .order('created_at', { ascending: false })
+          .limit(1)
+      : db.from('system_events')
+          .select('event_type,metadata,created_at')
+          .eq('workspace_id', ws)
+          .eq('event_type', 'STREAM_HISTORY_MANUAL_BACKFILL')
+          .gte('created_at', diagFrom)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+    [heroStreamEventsRes, heroAgentEventsRes, heroBotDiagRes, heroManualBackfillRes] = await Promise.all([
       sysEvQ    ?? Promise.resolve({ data: [] }),
       agentEvQ  ?? Promise.resolve({ data: [] }),
       botDiagQ,
+      manualBackfillQ,
     ]);
   }
 
@@ -462,11 +481,16 @@ export async function GET() {
     const botCrashSignal    = botDiagEvents.some(e => e.event_type === 'BOT_CRASHED') ||
                               (historyUpsertFailed && !botWasLive);
 
-    let botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown' = 'unknown';
-    if (hasAuthFailed || hasMissingOAuth)          botStatus = 'auth_failed';
-    else if (botCrashSignal)                        botStatus = 'crashed';
-    else if (!botWasLive && !hasAudienceData)       botStatus = 'offline';
-    else if (hasAudienceData && hasRetentionCurve)  botStatus = 'ok';
+    const manualBackfillEvents: any[] = heroManualBackfillRes.data ?? [];
+    const hasManualBackfill = manualBackfillEvents.length > 0;
+    const manualBackfillMeta: any = manualBackfillEvents[0]?.metadata ?? null;
+
+    let botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown' | 'manual_repair' = 'unknown';
+    if (hasManualBackfill)                         botStatus = 'manual_repair';
+    else if (hasAuthFailed || hasMissingOAuth)     botStatus = 'auth_failed';
+    else if (botCrashSignal)                       botStatus = 'crashed';
+    else if (!botWasLive && !hasAudienceData)      botStatus = 'offline';
+    else if (hasAudienceData && hasRetentionCurve) botStatus = 'ok';
 
     // Per-source reasons — what was expected, what was found, why it's missing
     const missingDataReasons: Array<{ source: string; expected: string; reason: string; lastSeen: string | null }> = [];
@@ -512,6 +536,7 @@ export async function GET() {
     const missingCount = [!hasAudienceData, !hasRetentionCurve, !hasChatEvents, heroFallbackUsed, coachFailed].filter(Boolean).length;
     const integrityStatus: 'full' | 'partial' | 'broken' =
       missingCount === 0  ? 'full'
+      : hasManualBackfill ? 'partial'   // manual repair always upgrades broken → partial
       : botStatus === 'crashed' || botStatus === 'offline' || missingCount >= 3 ? 'broken'
       : 'partial';
 
@@ -553,6 +578,17 @@ export async function GET() {
         status: integrityStatus,
         botStatus,
         missingDataReasons,
+        repairedSources: hasManualBackfill ? [{
+          source: 'Twitch email summary',
+          note: [
+            manualBackfillMeta?.after?.unique_viewers != null ? `unique_viewers: ${manualBackfillMeta.after.unique_viewers}` : null,
+            manualBackfillMeta?.after?.peak_viewers   != null ? `peak: ${manualBackfillMeta.after.peak_viewers}` : null,
+            manualBackfillMeta?.after?.avg_viewers    != null ? `avg: ${manualBackfillMeta.after.avg_viewers}` : null,
+            manualBackfillMeta?.after?.unique_chatters != null ? `chatters: ${manualBackfillMeta.after.unique_chatters}` : null,
+            manualBackfillMeta?.after?.followers_gained != null ? `følgere: +${manualBackfillMeta.after.followers_gained}` : null,
+          ].filter(Boolean).join(', '),
+          repairedAt: manualBackfillEvents[0]?.created_at ?? new Date().toISOString(),
+        }] : [],
       },
     };
   }

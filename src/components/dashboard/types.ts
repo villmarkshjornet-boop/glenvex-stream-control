@@ -89,8 +89,9 @@ export interface HeroStream {
   historyMissingReason: string | null;
   dataIntegrity: {
     status: 'full' | 'partial' | 'broken';
-    botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown';
+    botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown' | 'manual_repair';
     missingDataReasons: Array<{ source: string; expected: string; reason: string; lastSeen: string | null }>;
+    repairedSources?: Array<{ source: string; note: string; repairedAt: string }>;
   };
 }
 
