@@ -12,17 +12,19 @@ import { DetteVetGlenvex } from './DetteVetGlenvex';
 import { Sjekkliste } from './Sjekkliste';
 import { ActivityFeed } from './ActivityFeed';
 import { IntegrationStatus } from './IntegrationStatus';
+import { useI18n } from '@/contexts/I18nContext';
 
 export function SystemHealth({ live, loading, onResetSyklus }: {
   live: LiveData | null; loading: boolean; onResetSyklus: () => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
   return (
     <div className="border border-g-border/40 rounded-2xl overflow-hidden">
       <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-5 py-3 bg-g-bg/30 hover:bg-g-bg/50 transition-all text-left">
-        <span className="text-xs text-g-muted uppercase tracking-widest font-bold">Systemhelse</span>
+        <span className="text-xs text-g-muted uppercase tracking-widest font-bold">{t('systemHealth.title')}</span>
         {open ? <ChevronDown size={14} className="text-g-muted" /> : <ChevronRight size={14} className="text-g-muted" />}
       </button>
       {open && (

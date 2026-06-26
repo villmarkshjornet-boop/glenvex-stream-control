@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { BriefAction, NextStreamBriefData } from '@/app/api/next-stream-brief/route';
+import { useI18n } from '@/contexts/I18nContext';
 
 const STAR_COLOR: Record<1 | 2 | 3, string> = {
   3: 'text-g-green',
@@ -16,6 +17,7 @@ const CONFIDENCE_DOT: Record<BriefAction['confidence'], string> = {
 };
 
 export function NextStreamBrief() {
+  const { t } = useI18n();
   const [data, setData] = useState<NextStreamBriefData | null>(null);
 
   useEffect(() => {
@@ -27,47 +29,39 @@ export function NextStreamBrief() {
 
   if (!data) return null;
 
-  const durationLabel = data.avgStreamDurationMin
-    ? `${Math.floor(data.avgStreamDurationMin / 60)}t${data.avgStreamDurationMin % 60 > 0 ? ` ${data.avgStreamDurationMin % 60}m` : ''} snitt`
+  const avgMin = data.avgStreamDurationMin;
+  const durationLabel = avgMin
+    ? `${Math.floor(avgMin / 60)}t${avgMin % 60 > 0 ? ` ${avgMin % 60}m` : ''} ${t('nextBrief.basedOn', { count: '' }).replace('  ', '').trim()}`
     : null;
 
-  // New user with no stream history — show onboarding starter plan
+  // New user — show onboarding starter plan
   if (data.isOnboarding) {
-    const ONBOARDING_STEPS = [
-      { n: 1, action: 'Koble Twitch-kanalen din', timing: 'Nå', note: 'Innstillinger → Twitch OAuth' },
-      { n: 2, action: 'Koble Discord-serveren din', timing: 'Nå', note: 'Innstillinger → Discord bot' },
-      { n: 3, action: 'Velg live-kanal og notifikasjonskanal', timing: 'Nå', note: 'Innstillinger → Kanaler' },
-      { n: 4, action: 'Start din første stream', timing: 'Neste streamdag', note: 'Boten kobler til automatisk' },
-      { n: 5, action: 'Post på X 10 min etter streamstart', timing: 'Første stream', note: 'AI Producer foreslår tekst' },
-      { n: 6, action: 'Kjør første viewer-poll etter 20 min', timing: 'Første stream', note: 'Engasjerer chat tidlig' },
-    ];
+    const STEPS = [1, 2, 3, 4, 5, 6] as const;
 
     return (
       <section className="bg-g-card border border-g-green/10 rounded-2xl p-5">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <p className="text-base font-black text-g-text">Hva gjør jeg nå?</p>
-            <p className="text-xs text-amber-400/70 mt-0.5">
-              Lite historikk ennå — dette er standard oppstartsplan
-            </p>
+            <p className="text-base font-black text-g-text">{t('nextBrief.title')}</p>
+            <p className="text-xs text-amber-400/70 mt-0.5">{t('nextBrief.onboardingNote')}</p>
           </div>
           <span className="text-[10px] text-g-green/40 uppercase tracking-widest font-bold mt-0.5">
-            AI Produsent
+            {t('nextBrief.aiProducer')}
           </span>
         </div>
 
         <ol className="space-y-3">
-          {ONBOARDING_STEPS.map(s => (
-            <li key={s.n} className="flex gap-3 items-start">
+          {STEPS.map(n => (
+            <li key={n} className="flex gap-3 items-start">
               <span className="text-[11px] font-black text-g-muted/25 w-4 flex-shrink-0 mt-0.5 text-right select-none">
-                {s.n}
+                {n}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-g-text/80 leading-tight">{s.action}</p>
+                <p className="text-sm font-bold text-g-text/80 leading-tight">{t(`nextBrief.onboarding.${n}_action`)}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-g-muted/50">{s.timing}</span>
+                  <span className="text-[10px] text-g-muted/50">{t(`nextBrief.onboarding.${n}_timing`)}</span>
                   <span className="text-g-muted/20">·</span>
-                  <span className="text-[10px] text-g-muted/40">{s.note}</span>
+                  <span className="text-[10px] text-g-muted/40">{t(`nextBrief.onboarding.${n}_note`)}</span>
                 </div>
               </div>
             </li>
@@ -75,7 +69,7 @@ export function NextStreamBrief() {
         </ol>
 
         <p className="text-[10px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
-          Etter din første stream tilpasser AI Producer anbefalingene basert på din data.
+          {t('nextBrief.afterFirstStream')}
         </p>
       </section>
     );
@@ -83,14 +77,13 @@ export function NextStreamBrief() {
 
   return (
     <section className="bg-g-card border border-g-green/15 rounded-2xl p-5">
-      {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div>
-          <p className="text-base font-black text-g-text">Hva gjør jeg nå?</p>
+          <p className="text-base font-black text-g-text">{t('nextBrief.title')}</p>
           <p className="text-xs text-g-muted/50 mt-0.5">
-            For neste stream
+            {t('nextBrief.forNextStream')}
             {data.basedOnStreams >= 2 && (
-              <span className="ml-1">· basert på {data.basedOnStreams} streams</span>
+              <span className="ml-1">· {t('nextBrief.basedOn', { count: data.basedOnStreams })}</span>
             )}
             {durationLabel && (
               <span className="ml-1">· {durationLabel}</span>
@@ -98,11 +91,10 @@ export function NextStreamBrief() {
           </p>
         </div>
         <span className="text-[10px] text-g-green/50 uppercase tracking-widest font-bold mt-0.5">
-          AI Produsent
+          {t('nextBrief.aiProducer')}
         </span>
       </div>
 
-      {/* Action list */}
       <ol className="space-y-4">
         {data.actions.map((a, i) => (
           <li key={a.id} className="flex gap-3 items-start">
@@ -135,7 +127,9 @@ export function NextStreamBrief() {
 
       {data.basedOnStreams < 3 && (
         <p className="text-[10px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
-          Anbefalingene blir mer presise etter flere streams. Nå basert på {data.basedOnStreams === 1 ? '1 stream' : `${data.basedOnStreams} streams`}.
+          {t('nextBrief.becomesMorePrecise', {
+            streams: data.basedOnStreams === 1 ? '1 stream' : `${data.basedOnStreams} streams`,
+          })}
         </p>
       )}
     </section>

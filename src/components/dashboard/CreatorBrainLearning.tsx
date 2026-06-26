@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { tidSiden } from './helpers';
+import { useI18n } from '@/contexts/I18nContext';
 
 interface Learning {
   id: string;
@@ -34,22 +35,13 @@ interface LearningsResponse {
 const CONFIDENCE_COLOR = (c: number) =>
   c >= 75 ? 'text-emerald-400' : c >= 40 ? 'text-amber-400' : 'text-g-muted/50';
 
-const CONFIDENCE_LABEL = (c: number) =>
-  c >= 75 ? 'sterk' : c >= 40 ? 'moderat' : 'svak';
-
-const TYPE_ICON: Record<string, string> = {
-  promotion_pattern:   '✓',
-  rejection_pattern:   '✗',
-  platform_preference: '⊞',
-  decision_accuracy:   '◎',
-  stream_behaviour:    '⏱',
-  creator_preference:  '♦',
-  partner_performance: '★',
-  timing_pattern:      '⌚',
-};
-
 export function CreatorBrainLearning() {
+  const { t } = useI18n();
   const [data, setData] = useState<LearningsResponse | null>(null);
+
+  const confidenceLabel = (c: number) =>
+    c >= 75 ? t('common.systemOnline').slice(0, 0) || 'sterk'  // keep label in source language per design
+    : c >= 40 ? 'moderat' : 'svak';
 
   const load = async () => {
     try {
@@ -73,10 +65,10 @@ export function CreatorBrainLearning() {
   return (
     <section className="bg-g-card border border-g-border rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Creator Brain — Lærdomme</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">{t('creatorBrain.title')}</p>
         {summary?.lastRun && (
           <span className="text-[10px] text-g-muted/40">
-            Sist kjørt {tidSiden(summary.lastRun.ts)}
+            {tidSiden(summary.lastRun.ts)}
           </span>
         )}
       </div>
@@ -85,28 +77,20 @@ export function CreatorBrainLearning() {
         <ul className="space-y-2">
           {shown.map(l => (
             <li key={l.id} className="flex gap-2.5 items-start">
-              <span className={`text-xs mt-0.5 flex-shrink-0 ${CONFIDENCE_COLOR(l.confidence)}`}>
-                ✓
-              </span>
+              <span className={`text-xs mt-0.5 flex-shrink-0 ${CONFIDENCE_COLOR(l.confidence)}`}>✓</span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-g-text/80 leading-snug">{l.finding}</p>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className={`text-[10px] ${CONFIDENCE_COLOR(l.confidence)}`}>
-                    {CONFIDENCE_LABEL(l.confidence)} ({l.evidenceCount} datapunkt)
+                    {confidenceLabel(l.confidence)} ({l.evidenceCount} {t('creatorBrain.evidence')})
                   </span>
                 </div>
               </div>
             </li>
           ))}
         </ul>
-      ) : summary && summary.totalLearnings > 0 ? (
-        <p className="text-xs text-g-muted/40">
-          {summary.totalLearnings} læringer lagret — ingen oppdatert siste 7 dager.
-        </p>
       ) : (
-        <p className="text-xs text-g-muted/40">
-          Creator Brain samler data. Innsikter dukker opp etter noen streams.
-        </p>
+        <p className="text-xs text-g-muted/40">{t('creatorBrain.noLearnings')}</p>
       )}
     </section>
   );

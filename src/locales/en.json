@@ -1,0 +1,259 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "systemOnline": "System Online",
+    "refresh": "Refresh",
+    "refreshing": "Loading...",
+    "updatedAt": "Updated",
+    "noData": "No data",
+    "since": "ago",
+    "now": "Now",
+    "admin": "Admin"
+  },
+  "topbar": {
+    "systemOnline": "System Online",
+    "admin": "Admin",
+    "settings": "Settings",
+    "logout": "Log out"
+  },
+  "sidebar": {
+    "creatorOs": "Creator OS",
+    "dashboard": "Dashboard",
+    "systemOnline": "System Online",
+    "groups": {
+      "live": "Live",
+      "content": "Content",
+      "community": "Community",
+      "partners": "Partners",
+      "system": "System"
+    },
+    "nav": {
+      "streamplan": "Stream Plan",
+      "aiCoach": "AI Coach",
+      "streamCoach": "Stream Coach",
+      "viewerGoals": "Viewer Goals",
+      "raidManager": "Raid Manager",
+      "vekstanalyse": "Growth Analytics",
+      "contentFactory": "Content Factory",
+      "highlights": "Highlights",
+      "klipp": "Clips",
+      "publisering": "Publishing",
+      "discord": "Discord",
+      "communityManager": "Community Manager",
+      "moderator": "Moderator",
+      "partnerHub": "Partner Hub",
+      "sponsorManager": "Sponsor Manager",
+      "twitterDrafts": "Twitter Drafts",
+      "aiMemory": "AI Memory",
+      "creatorBrain": "Creator Brain",
+      "innstillinger": "Settings",
+      "team": "Team"
+    }
+  },
+  "dashboard": {
+    "titleLive": "Live Command Center",
+    "titleOffline": "Creator Command Center"
+  },
+  "hero": {
+    "noStream": "No completed streams registered yet.",
+    "viewStreamplan": "View stream plan →",
+    "lastStream": "Last stream",
+    "endedAgo": "ended {{ago}}",
+    "peakViewers": "Peak viewers",
+    "avgViewers": "Avg viewers",
+    "uniqueChatters": "Unique chatters",
+    "messages": "Messages",
+    "duration": "Duration",
+    "estimate": "Estimated from event log – Stream History row missing",
+    "brokenBadge": "Technical\nerror",
+    "openStreamCoach": "Open Stream Coach",
+    "openContentFactory": "Open Content Factory",
+    "shareX": "Share on X/Twitter →",
+    "copied": "Copied ✓",
+    "integrity": {
+      "partialRepaired": "∼ Partially repaired",
+      "partialData": "⚠ Partial data",
+      "repaired": "Manually repaired with Twitch email summary.",
+      "botCrashed": "crashed",
+      "botOffline": "was offline",
+      "botAuthFailed": "had auth error (401)",
+      "botUnavailable": "was unavailable",
+      "incomplete": "This report is incomplete.",
+      "someMissing": "Some data is missing for this stream.",
+      "missingStill": "Still missing:",
+      "expected": "expected",
+      "lastSeen": "Last seen",
+      "repairedAt": "Repaired"
+    }
+  },
+  "recentStreams": {
+    "title": "Recent streams",
+    "noStreams": "No completed streams registered yet.",
+    "streamCoach": "Stream Coach →",
+    "technicalError": "Technical error",
+    "peakRetention": "Peak {{peak}} · {{pct}}% retention"
+  },
+  "aiInsight": {
+    "title": "What did AI learn?",
+    "aiMemory": "AI Memory →",
+    "brokenStream": "This stream was not fully analyzed.",
+    "botCrashed": "Bot crashed during stream",
+    "botOffline": "Bot was offline during stream",
+    "botAuthFailed": "Twitch API 401 — token invalid",
+    "botUnavailable": "Bot was unavailable",
+    "noLearning": "No learning was stored from this stream.",
+    "needsMoreData": "AI needs more data points ({{count}}/{{min}}) before it can give specific insights.",
+    "notEnoughInsight": "AI has collected data, but doesn't have enough stream-relevant insights yet."
+  },
+  "creatorBrain": {
+    "title": "Creator Brain — Learnings",
+    "noLearnings": "No learnings yet. AI collects data after your first stream.",
+    "evidence": "data points",
+    "viewAll": "All learnings →"
+  },
+  "partnerEngine": {
+    "title": "Partner Engine",
+    "lastEvaluation": "Last evaluation",
+    "lastSent": "Last sent",
+    "noRuns": "No active runs",
+    "runsOnlyLive": "Runs only during active streams",
+    "partnerExposure": "Partner exposure",
+    "reasonCodes": {
+      "PROPOSAL_CREATED": "Proposal created",
+      "AUTO_SENT": "Auto-sent",
+      "BOT_DISABLED": "Bot disabled",
+      "NO_CHANNELS_ENABLED": "No channels enabled",
+      "MAX_POSTS_REACHED": "Max promos reached",
+      "COOLDOWN_ACTIVE": "Cooldown active",
+      "CHAT_TOO_ACTIVE": "Chat too active",
+      "RAID_COOLDOWN": "Raid cooldown",
+      "NO_ACTIVE_PARTNERS": "No active partners",
+      "LOW_SCORE": "Score too low"
+    },
+    "triggers": {
+      "chat_silence": "Chat silence",
+      "viewer_peak": "Viewer peak",
+      "context_match": "Context match",
+      "timer": "Timer",
+      "manual": "Manual",
+      "none": "—"
+    }
+  },
+  "nextStream": {
+    "title": "Next stream",
+    "noSchedule": "No stream schedule set up yet.",
+    "editSchedule": "Edit stream plan →",
+    "preHypeSent": "✓ Pre-hype sent",
+    "preHypePlanned": "⏳ Pre-hype scheduled",
+    "preHypeReady": "🔔 Pre-hype ready",
+    "preHypeNone": "Pre-hype not set up",
+    "in": "In {{time}}"
+  },
+  "quickActions": {
+    "title": "Quick actions",
+    "runTest": "Run stream test",
+    "testing": "Testing...",
+    "testSent": "Test message sent to Discord ✓",
+    "testFailed": "Test failed – check activity feed",
+    "streamCoach": "Open Stream Coach",
+    "highlight": "Create highlight",
+    "aiAnalysis": "Run AI analysis"
+  },
+  "actionCenter": {
+    "title": "What should I do now?",
+    "empty": "Nothing requires action right now."
+  },
+  "streamCompletion": {
+    "title": "Stream Completion",
+    "noData": "No data to show until the next stream is registered.",
+    "missingLabel": "Missing / deviations",
+    "checklist": {
+      "streamHistory": "Stream History",
+      "audienceData": "Audience data",
+      "retentionCurve": "Retention curve",
+      "chatEvents": "Chat events",
+      "streamCoach": "Stream Coach",
+      "vodDetected": "VOD",
+      "aiLearning": "AI learning"
+    }
+  },
+  "aiStatus": {
+    "title": "AI Status",
+    "noData": "No data",
+    "errors": "{{n}} errors",
+    "active": "Active",
+    "stale": "Stale",
+    "passive": "Passive",
+    "unknown": "Unknown",
+    "systems": {
+      "twitch_bot": "Twitch Bot",
+      "discord_bot": "Discord Bot",
+      "content_factory": "Content",
+      "ai_producer": "AI Producer",
+      "learning_engine": "Learning",
+      "partner_engine": "Partner Engine"
+    }
+  },
+  "systemHealth": {
+    "title": "System health"
+  },
+  "storage": {
+    "title": "Storage & system",
+    "showDetails": "Show technical details",
+    "hideDetails": "Hide details",
+    "totalRows": "{{n}} rows",
+    "totalFiles": "{{n}} files",
+    "warnings": "{{n}} warning",
+    "permanent": "Permanent",
+    "activeMedia": "Active media",
+    "ephemeral": "Ephemeral",
+    "supabaseStorage": "Supabase Storage",
+    "retentionPolicy": "Retention policy",
+    "noFiles": "No files",
+    "filesCount": "{{n}} files",
+    "unreachable": "Unreachable"
+  },
+  "nextBrief": {
+    "title": "What do I do now?",
+    "forNextStream": "For next stream",
+    "basedOn": "based on {{count}} streams",
+    "aiProducer": "AI Producer",
+    "onboardingNote": "Limited history yet — this is the standard starter plan",
+    "afterFirstStream": "After your first stream, AI Producer will tailor recommendations to your data.",
+    "becomesMorePrecise": "Recommendations become more precise after more streams. Now based on {{streams}}.",
+    "onboarding": {
+      "1_action": "Connect your Twitch channel",
+      "1_timing": "Now",
+      "1_note": "Settings → Twitch OAuth",
+      "2_action": "Connect your Discord server",
+      "2_timing": "Now",
+      "2_note": "Settings → Discord bot",
+      "3_action": "Select live channel and notification channel",
+      "3_timing": "Now",
+      "3_note": "Settings → Channels",
+      "4_action": "Start your first stream",
+      "4_timing": "Next stream day",
+      "4_note": "Bot connects automatically",
+      "5_action": "Post on X 10 min after stream start",
+      "5_timing": "First stream",
+      "5_note": "AI Producer suggests text",
+      "6_action": "Run first viewer poll after 20 min",
+      "6_timing": "First stream",
+      "6_note": "Engages chat early"
+    }
+  },
+  "raidWidget": {
+    "title": "Raid targets · {{game}}",
+    "viewAll": "All targets →"
+  },
+  "aiContext": {
+    "title": "AI context now",
+    "littleData": "Little data",
+    "confidence": "Confidence: {{level}}",
+    "analyser": "Analyses",
+    "utfort": "Done",
+    "avvist": "Rejected",
+    "raids": "Raids",
+    "lastActions": "Latest actions taken"
+  }
+}

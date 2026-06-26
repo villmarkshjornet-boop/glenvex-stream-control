@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { AlertCircle, AlertTriangle, Zap, ChevronRight } from 'lucide-react';
 import { tidSiden } from './helpers';
 import type { ActionCenterItem } from './types';
+import { useI18n } from '@/contexts/I18nContext';
 
 const PRIORITY_ICON: Record<ActionCenterItem['priority'], typeof AlertCircle> = {
   error: AlertCircle,
@@ -17,14 +18,15 @@ const PRIORITY_COLOR: Record<ActionCenterItem['priority'], string> = {
 };
 
 export function ActionCenter({ items, loading }: { items: ActionCenterItem[] | undefined; loading: boolean }) {
+  const { t } = useI18n();
   if (loading) return <div className="h-40 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
 
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-6">
-      <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Hva bør jeg gjøre nå?</p>
+      <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">{t('actionCenter.title')}</p>
 
       {!items || items.length === 0 ? (
-        <p className="text-sm text-g-muted">Ingenting krever handling akkurat nå.</p>
+        <p className="text-sm text-g-muted">{t('actionCenter.empty')}</p>
       ) : (
         <div className="space-y-2">
           {items.map((item, i) => {

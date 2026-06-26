@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Database, HardDrive, AlertTriangle, CheckCircle } from 'lucide-react';
 import type { StorageCategory, StorageHealthData } from '@/app/api/storage-health/route';
+import { useI18n } from '@/contexts/I18nContext';
 
 const STORAGE_BUCKET_LABEL = process.env.NEXT_PUBLIC_STORAGE_BUCKET ?? 'glenvex-assets';
 
@@ -18,12 +19,6 @@ const TIER_BADGE: Record<StorageCategory['tier'], string> = {
   ephemeral: 'bg-red-400/10 text-red-400/70 border-red-400/20',
 };
 
-const TIER_LABEL: Record<StorageCategory['tier'], string> = {
-  permanent: 'Permanent',
-  media:     'Aktiv media',
-  ephemeral: 'Flyktig',
-};
-
 function fmt(n: number): string {
   if (n < 0) return '?';
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -31,6 +26,7 @@ function fmt(n: number): string {
 }
 
 export function StorageHealthCard() {
+  const { t } = useI18n();
   const [data, setData] = useState<StorageHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -50,9 +46,14 @@ export function StorageHealthCard() {
   const totalRows = data.databaseCategories.reduce((s, c) => s + Math.max(0, c.rowCount), 0);
   const totalFiles = data.storageFiles.reduce((s, f) => s + f.fileCount, 0);
 
+  const tierLabel: Record<StorageCategory['tier'], string> = {
+    permanent: t('storage.permanent'),
+    media:     t('storage.activeMedia'),
+    ephemeral: t('storage.ephemeral'),
+  };
+
   return (
     <section className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
-      {/* Header — always visible */}
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-g-bg/30 transition-all"
         onClick={() => setExpanded(v => !v)}
@@ -60,11 +61,11 @@ export function StorageHealthCard() {
         <div className="flex items-center gap-3">
           <HardDrive size={14} className="text-g-muted/50 flex-shrink-0" />
           <div>
-            <p className="text-xs font-bold text-g-text/80">Storage Health</p>
+            <p className="text-xs font-bold text-g-text/80">{t('storage.title')}</p>
             <p className="text-[10px] text-g-muted/50 mt-0.5">
-              {fmt(totalRows)} DB-rader
-              {data.storageReachable && totalFiles > 0 && ` · ${totalFiles}+ filer i Storage`}
-              {!data.storageReachable && ' · Storage utilgjengelig'}
+              {t('storage.totalRows', { n: fmt(totalRows) })}
+              {data.storageReachable && totalFiles > 0 && ` · ${totalFiles}+ ${t('storage.filesCount', { n: '' }).replace('  ', ' ').trim()}`}
+              {!data.storageReachable && ` · ${t('storage.unreachable')}`}
             </p>
           </div>
         </div>
@@ -73,7 +74,7 @@ export function StorageHealthCard() {
           {warnings.length > 0 ? (
             <span className="flex items-center gap-1 text-amber-400/80 text-[10px] font-bold">
               <AlertTriangle size={11} />
-              {warnings.length} {warnings.length === 1 ? 'advarsel' : 'advarsler'}
+              {t('storage.warnings', { n: warnings.length })}
             </span>
           ) : (
             <span className="flex items-center gap-1 text-g-green/60 text-[10px]">
@@ -85,11 +86,9 @@ export function StorageHealthCard() {
         </div>
       </button>
 
-      {/* Expandable detail */}
       {expanded && (
         <div className="border-t border-g-border/40 p-5 space-y-5">
 
-          {/* Warnings first */}
           {warnings.length > 0 && (
             <div className="space-y-2">
               {warnings.map(c => (
@@ -104,7 +103,6 @@ export function StorageHealthCard() {
             </div>
           )}
 
-          {/* Database categories */}
           <div>
             <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold mb-3">
               <Database size={10} /> Database
@@ -116,7 +114,7 @@ export function StorageHealthCard() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-g-text/80 font-medium">{c.label}</span>
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${TIER_BADGE[c.tier]}`}>
-                        {TIER_LABEL[c.tier]}
+                        {tierLabel[c.tier]}
                       </span>
                     </div>
                     {c.note && (
@@ -131,14 +129,13 @@ export function StorageHealthCard() {
             </div>
           </div>
 
-          {/* Supabase Storage files */}
           {data.storageReachable && (
             <div>
               <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold mb-3">
-                <HardDrive size={10} /> Supabase Storage ({STORAGE_BUCKET_LABEL})
+                <HardDrive size={10} /> {t('storage.supabaseStorage')} ({STORAGE_BUCKET_LABEL})
               </div>
               {data.storageFiles.length === 0 ? (
-                <p className="text-xs text-g-muted/40">Ingen filer funnet i bucket.</p>
+                <p className="text-xs text-g-muted/40">{t('storage.noFiles')}</p>
               ) : (
                 <div className="space-y-3">
                   {data.storageFiles.map(g => (
@@ -169,17 +166,16 @@ export function StorageHealthCard() {
             </div>
           )}
 
-          {/* Retention policy summary */}
           <div className="pt-3 border-t border-g-border/30 space-y-1.5">
-            <p className="text-[10px] text-g-muted/50 font-bold uppercase tracking-wider">Lagringsregler</p>
+            <p className="text-[10px] text-g-muted/50 font-bold uppercase tracking-wider">{t('storage.retentionPolicy')}</p>
             <p className="text-[10px] text-g-muted/40">
-              <span className="text-g-green font-bold">Permanent:</span> Aldri slett — grunnlaget for AI-læring over tid
+              <span className="text-g-green font-bold">{t('storage.permanent')}:</span> Aldri slett — grunnlaget for AI-læring over tid
             </p>
             <p className="text-[10px] text-g-muted/40">
-              <span className="text-amber-400 font-bold">Aktiv media:</span> Hold klipp til bruker har lastet ned; flytt til kald lagring (R2) etter 60 dager
+              <span className="text-amber-400 font-bold">{t('storage.activeMedia')}:</span> Hold klipp til bruker har lastet ned; flytt til kald lagring (R2) etter 60 dager
             </p>
             <p className="text-[10px] text-g-muted/40">
-              <span className="text-red-400/70 font-bold">Railway-disk:</span> Ephemeral — raw VODs og lydfiler forsvinner ved restart
+              <span className="text-red-400/70 font-bold">Railway-disk:</span> {t('storage.ephemeral')} — raw VODs og lydfiler forsvinner ved restart
             </p>
           </div>
         </div>
@@ -187,4 +183,3 @@ export function StorageHealthCard() {
     </section>
   );
 }
-

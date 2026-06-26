@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Sparkles, AlertTriangle } from 'lucide-react';
 import { tidSiden } from './helpers';
 import type { AiInnsikt, HeroStream, Lærdom } from './types';
+import { useI18n } from '@/contexts/I18nContext';
 
 const MIN_DATAPUNKTER = 5;
 
@@ -15,44 +16,44 @@ export function AiInsightFeed({
   loading: boolean;
   heroIntegrity?: HeroStream['dataIntegrity'];
 }) {
+  const { t } = useI18n();
   if (loading) return <div className="h-64 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
 
   const totalDatapunkter = lærdom?.totalDatapunkter ?? 0;
   const harNokData = totalDatapunkter >= MIN_DATAPUNKTER;
   const siste = innsikter[0] ?? null;
 
-  // Broken stream: show honest message instead of potentially stale "live" insights
   const streamBroken = heroIntegrity?.status === 'broken';
   const botStatus    = heroIntegrity?.botStatus;
+
+  const botDesc = botStatus === 'crashed'    ? t('aiInsight.botCrashed')
+                : botStatus === 'offline'    ? t('aiInsight.botOffline')
+                : botStatus === 'auth_failed'? t('aiInsight.botAuthFailed')
+                : t('aiInsight.botUnavailable');
 
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-6 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Hva lærte AI?</p>
-        <Link href="/ai-memory" className="text-xs text-g-muted hover:text-g-green transition-colors">AI Memory →</Link>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold">{t('aiInsight.title')}</p>
+        <Link href="/ai-memory" className="text-xs text-g-muted hover:text-g-green transition-colors">{t('aiInsight.aiMemory')}</Link>
       </div>
 
       {streamBroken ? (
         <div className="flex gap-3 p-4 bg-red-900/10 border border-red-500/20 rounded-xl">
           <AlertTriangle size={15} className="text-red-400/50 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm text-g-muted leading-snug">
-              Denne streamen ble ikke fullstendig analysert.
-            </p>
+            <p className="text-sm text-g-muted leading-snug">{t('aiInsight.brokenStream')}</p>
             <p className="text-xs text-g-muted/50 mt-1.5">
-              Årsak: {botStatus === 'crashed' ? 'Boten krasjet under streamen'
-                     : botStatus === 'offline'  ? 'Boten var offline under streamen'
-                     : botStatus === 'auth_failed' ? 'Twitch API 401 — token ugyldig'
-                     : 'Boten var utilgjengelig'}. Ingen lærdom ble lagret fra denne streamen.
+              {botDesc}. {t('aiInsight.noLearning')}
             </p>
           </div>
         </div>
       ) : !siste && !harNokData ? (
         <p className="text-sm text-g-muted">
-          AI trenger flere datapunkter ({totalDatapunkter}/{MIN_DATAPUNKTER}) før den kan gi spesifikke innsikter.
+          {t('aiInsight.needsMoreData', { count: totalDatapunkter, min: MIN_DATAPUNKTER })}
         </p>
       ) : !siste ? (
-        <p className="text-sm text-g-muted">AI har samlet data, men har ikke nok stream-relevant innsikt ennå.</p>
+        <p className="text-sm text-g-muted">{t('aiInsight.notEnoughInsight')}</p>
       ) : (
         <>
           <div className="flex gap-3 p-4 bg-g-green/5 border border-g-green/20 rounded-xl">

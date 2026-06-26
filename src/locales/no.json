@@ -1,0 +1,259 @@
+{
+  "common": {
+    "loading": "Laster...",
+    "systemOnline": "System Online",
+    "refresh": "Oppdater",
+    "refreshing": "Laster...",
+    "updatedAt": "Oppdatert",
+    "noData": "Ingen data",
+    "since": "siden",
+    "now": "Nå",
+    "admin": "Admin"
+  },
+  "topbar": {
+    "systemOnline": "System Online",
+    "admin": "Admin",
+    "settings": "Innstillinger",
+    "logout": "Logg ut"
+  },
+  "sidebar": {
+    "creatorOs": "Creator OS",
+    "dashboard": "Dashboard",
+    "systemOnline": "System Online",
+    "groups": {
+      "live": "Live",
+      "content": "Content",
+      "community": "Community",
+      "partners": "Partners",
+      "system": "System"
+    },
+    "nav": {
+      "streamplan": "Streamplan",
+      "aiCoach": "AI Coach",
+      "streamCoach": "Stream Coach",
+      "viewerGoals": "Viewer Goals",
+      "raidManager": "Raid Manager",
+      "vekstanalyse": "Vekstanalyse",
+      "contentFactory": "Content Factory",
+      "highlights": "Highlights",
+      "klipp": "Klipp",
+      "publisering": "Publisering",
+      "discord": "Discord",
+      "communityManager": "Community Manager",
+      "moderator": "Moderator",
+      "partnerHub": "Partner Hub",
+      "sponsorManager": "Sponsor Manager",
+      "twitterDrafts": "Twitter Utkast",
+      "aiMemory": "AI Memory",
+      "creatorBrain": "Creator Brain",
+      "innstillinger": "Innstillinger",
+      "team": "Team"
+    }
+  },
+  "dashboard": {
+    "titleLive": "Live Command Center",
+    "titleOffline": "Creator Command Center"
+  },
+  "hero": {
+    "noStream": "Ingen avsluttet stream registrert ennå.",
+    "viewStreamplan": "Se streamplan →",
+    "lastStream": "Siste stream",
+    "endedAgo": "avsluttet {{ago}}",
+    "peakViewers": "Peak seere",
+    "avgViewers": "Snitt seere",
+    "uniqueChatters": "Unike chattere",
+    "messages": "Meldinger",
+    "duration": "Varighet",
+    "estimate": "Estimert fra hendelseslogg – Stream History-rad mangler",
+    "brokenBadge": "Teknisk\nfeil",
+    "openStreamCoach": "Åpne Stream Coach",
+    "openContentFactory": "Åpne Content Factory",
+    "shareX": "Del på X/Twitter →",
+    "copied": "Kopiert ✓",
+    "integrity": {
+      "partialRepaired": "∼ Delvis reparert",
+      "partialData": "⚠ Delvis datagrunnlag",
+      "repaired": "Reparert manuelt med Twitch email summary.",
+      "botCrashed": "krasjet",
+      "botOffline": "var offline",
+      "botAuthFailed": "hadde autentiseringsfeil (401)",
+      "botUnavailable": "var utilgjengelig",
+      "incomplete": "Denne rapporten er ikke komplett.",
+      "someMissing": "Noen data mangler for denne streamen.",
+      "missingStill": "Mangler fortsatt:",
+      "expected": "forventet",
+      "lastSeen": "Sist sett",
+      "repairedAt": "Reparert"
+    }
+  },
+  "recentStreams": {
+    "title": "Siste streams",
+    "noStreams": "Ingen avsluttede streams registrert ennå.",
+    "streamCoach": "Stream Coach →",
+    "technicalError": "Teknisk feil",
+    "peakRetention": "Peak {{peak}} · {{pct}}% retention"
+  },
+  "aiInsight": {
+    "title": "Hva lærte AI?",
+    "aiMemory": "AI Memory →",
+    "brokenStream": "Denne streamen ble ikke fullstendig analysert.",
+    "botCrashed": "Boten krasjet under streamen",
+    "botOffline": "Boten var offline under streamen",
+    "botAuthFailed": "Twitch API 401 — token ugyldig",
+    "botUnavailable": "Boten var utilgjengelig",
+    "noLearning": "Ingen lærdom ble lagret fra denne streamen.",
+    "needsMoreData": "AI trenger flere datapunkter ({{count}}/{{min}}) før den kan gi spesifikke innsikter.",
+    "notEnoughInsight": "AI har samlet data, men har ikke nok stream-relevant innsikt ennå."
+  },
+  "creatorBrain": {
+    "title": "Creator Brain — Lærdomme",
+    "noLearnings": "Ingen lærdomme ennå. AI samler data etter første stream.",
+    "evidence": "datapunkt",
+    "viewAll": "Alle lærdomme →"
+  },
+  "partnerEngine": {
+    "title": "Partner Engine",
+    "lastEvaluation": "Siste vurdering",
+    "lastSent": "Siste utsendelse",
+    "noRuns": "Ingen aktive kjøringer",
+    "runsOnlyLive": "Kjører kun under aktive streams",
+    "partnerExposure": "Partner-eksponering",
+    "reasonCodes": {
+      "PROPOSAL_CREATED": "Forslag opprettet",
+      "AUTO_SENT": "Auto-sendt",
+      "BOT_DISABLED": "Bot deaktivert",
+      "NO_CHANNELS_ENABLED": "Ingen kanaler aktivert",
+      "MAX_POSTS_REACHED": "Maks promoer nådd",
+      "COOLDOWN_ACTIVE": "Cooldown aktiv",
+      "CHAT_TOO_ACTIVE": "Chat for aktiv",
+      "RAID_COOLDOWN": "Raid-cooldown",
+      "NO_ACTIVE_PARTNERS": "Ingen aktive partnere",
+      "LOW_SCORE": "For lav score"
+    },
+    "triggers": {
+      "chat_silence": "Chat-stillhet",
+      "viewer_peak": "Seer-topp",
+      "context_match": "Konteksttreff",
+      "timer": "Timer",
+      "manual": "Manuell",
+      "none": "—"
+    }
+  },
+  "nextStream": {
+    "title": "Neste stream",
+    "noSchedule": "Ingen streamplan satt opp ennå.",
+    "editSchedule": "Rediger streamplan →",
+    "preHypeSent": "✓ Pre-hype sendt",
+    "preHypePlanned": "⏳ Pre-hype planlagt",
+    "preHypeReady": "🔔 Pre-hype klar",
+    "preHypeNone": "Pre-hype ikke satt opp",
+    "in": "Om {{time}}"
+  },
+  "quickActions": {
+    "title": "Hurtighandlinger",
+    "runTest": "Start stream test",
+    "testing": "Tester...",
+    "testSent": "Test-melding sendt til Discord ✓",
+    "testFailed": "Testen feilet – se aktivitetsfeed",
+    "streamCoach": "Åpne Stream Coach",
+    "highlight": "Lag highlight",
+    "aiAnalysis": "Kjør AI-analyse"
+  },
+  "actionCenter": {
+    "title": "Hva bør jeg gjøre nå?",
+    "empty": "Ingenting krever handling akkurat nå."
+  },
+  "streamCompletion": {
+    "title": "Stream Completion",
+    "noData": "Ingen data å vise før neste stream er registrert.",
+    "missingLabel": "Mangler / avvik",
+    "checklist": {
+      "streamHistory": "Stream History",
+      "audienceData": "Audience-data",
+      "retentionCurve": "Retention-kurve",
+      "chatEvents": "Chat-events",
+      "streamCoach": "Stream Coach",
+      "vodDetected": "VOD",
+      "aiLearning": "AI-læring"
+    }
+  },
+  "aiStatus": {
+    "title": "AI Status",
+    "noData": "Ingen data",
+    "errors": "{{n}} feil",
+    "active": "Aktiv",
+    "stale": "Inaktiv",
+    "passive": "Passiv",
+    "unknown": "Ukjent",
+    "systems": {
+      "twitch_bot": "Twitch Bot",
+      "discord_bot": "Discord Bot",
+      "content_factory": "Content",
+      "ai_producer": "AI Producer",
+      "learning_engine": "Learning",
+      "partner_engine": "Partner Engine"
+    }
+  },
+  "systemHealth": {
+    "title": "Systemhelse"
+  },
+  "storage": {
+    "title": "Lagring & system",
+    "showDetails": "Vis tekniske detaljer",
+    "hideDetails": "Skjul detaljer",
+    "totalRows": "{{n}} rader",
+    "totalFiles": "{{n}} filer",
+    "warnings": "{{n}} advarsel",
+    "permanent": "Permanent",
+    "activeMedia": "Aktiv media",
+    "ephemeral": "Flyktig",
+    "supabaseStorage": "Supabase Storage",
+    "retentionPolicy": "Oppbevaringspolicy",
+    "noFiles": "Ingen filer",
+    "filesCount": "{{n}} filer",
+    "unreachable": "Utilgjengelig"
+  },
+  "nextBrief": {
+    "title": "Hva gjør jeg nå?",
+    "forNextStream": "For neste stream",
+    "basedOn": "basert på {{count}} streams",
+    "aiProducer": "AI Produsent",
+    "onboardingNote": "Lite historikk ennå — dette er standard oppstartsplan",
+    "afterFirstStream": "Etter din første stream tilpasser AI Producer anbefalingene basert på din data.",
+    "becomesMorePrecise": "Anbefalingene blir mer presise etter flere streams. Nå basert på {{streams}}.",
+    "onboarding": {
+      "1_action": "Koble Twitch-kanalen din",
+      "1_timing": "Nå",
+      "1_note": "Innstillinger → Twitch OAuth",
+      "2_action": "Koble Discord-serveren din",
+      "2_timing": "Nå",
+      "2_note": "Innstillinger → Discord bot",
+      "3_action": "Velg live-kanal og notifikasjonskanal",
+      "3_timing": "Nå",
+      "3_note": "Innstillinger → Kanaler",
+      "4_action": "Start din første stream",
+      "4_timing": "Neste streamdag",
+      "4_note": "Boten kobler til automatisk",
+      "5_action": "Post på X 10 min etter streamstart",
+      "5_timing": "Første stream",
+      "5_note": "AI Producer foreslår tekst",
+      "6_action": "Kjør første viewer-poll etter 20 min",
+      "6_timing": "Første stream",
+      "6_note": "Engasjerer chat tidlig"
+    }
+  },
+  "raidWidget": {
+    "title": "Raid-mål · {{game}}",
+    "viewAll": "Alle mål →"
+  },
+  "aiContext": {
+    "title": "AI-kontekst nå",
+    "littleData": "Lite data",
+    "confidence": "Confidence: {{level}}",
+    "analyser": "Analyser",
+    "utfort": "Utført",
+    "avvist": "Avvist",
+    "raids": "Raids",
+    "lastActions": "Siste utførte tiltak"
+  }
+}

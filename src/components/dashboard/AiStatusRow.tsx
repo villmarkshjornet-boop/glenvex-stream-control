@@ -1,15 +1,15 @@
 'use client';
 
 import type { CoverageEntry } from './types';
+import { useI18n } from '@/contexts/I18nContext';
 
-// Keys we care about for the compact AI status row
-const AI_SYSTEMS: { key: string; label: string; warnMs: number }[] = [
-  { key: 'twitch_bot',         label: 'Twitch Bot',       warnMs: 15 * 60 * 1000 },
-  { key: 'discord_bot',        label: 'Discord Bot',       warnMs: 15 * 60 * 1000 },
-  { key: 'content_factory',    label: 'Content',           warnMs: 30 * 60 * 1000 },
-  { key: 'ai_producer',        label: 'AI Producer',       warnMs: 60 * 60 * 1000 },
-  { key: 'learning_engine',    label: 'Learning',          warnMs: 24 * 60 * 60 * 1000 },
-  { key: 'partner_engine',     label: 'Partner Engine',    warnMs: 60 * 60 * 1000 },
+const AI_SYSTEM_KEYS = [
+  { key: 'twitch_bot',      tKey: 'aiStatus.systems.twitch_bot',      warnMs: 15 * 60 * 1000 },
+  { key: 'discord_bot',     tKey: 'aiStatus.systems.discord_bot',     warnMs: 15 * 60 * 1000 },
+  { key: 'content_factory', tKey: 'aiStatus.systems.content_factory', warnMs: 30 * 60 * 1000 },
+  { key: 'ai_producer',     tKey: 'aiStatus.systems.ai_producer',     warnMs: 60 * 60 * 1000 },
+  { key: 'learning_engine', tKey: 'aiStatus.systems.learning_engine', warnMs: 24 * 60 * 60 * 1000 },
+  { key: 'partner_engine',  tKey: 'aiStatus.systems.partner_engine',  warnMs: 60 * 60 * 1000 },
 ];
 
 function coverageDot(entry: CoverageEntry | undefined): string {
@@ -21,29 +21,22 @@ function coverageDot(entry: CoverageEntry | undefined): string {
   return 'bg-g-muted/25';
 }
 
-function coverageLabel(entry: CoverageEntry | undefined): string {
-  if (!entry) return 'Ingen data';
-  if (entry.errors24h > 0) return `${entry.errors24h} feil`;
-  if (entry.status === 'active') return 'Aktiv';
-  if (entry.status === 'stale') return 'Inaktiv';
-  if (entry.passive) return 'Passiv';
-  return 'Ukjent';
-}
-
 interface Props {
   coverage: CoverageEntry[] | undefined;
   loading: boolean;
 }
 
 export function AiStatusRow({ coverage, loading }: Props) {
+  const { t } = useI18n();
+
   if (loading) {
     return (
       <div className="bg-g-card border border-g-border rounded-2xl px-5 py-4">
         <div className="flex items-center gap-6">
-          {AI_SYSTEMS.map(s => (
+          {AI_SYSTEM_KEYS.map(s => (
             <div key={s.key} className="flex items-center gap-1.5 animate-pulse">
               <div className="w-1.5 h-1.5 rounded-full bg-g-border" />
-              <span className="text-[10px] text-g-muted/30">{s.label}</span>
+              <span className="text-[10px] text-g-muted/30">{t(s.tKey)}</span>
             </div>
           ))}
         </div>
@@ -54,18 +47,23 @@ export function AiStatusRow({ coverage, loading }: Props) {
   return (
     <div className="bg-g-card border border-g-border rounded-2xl px-5 py-4">
       <div className="flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold flex-shrink-0">AI Status</p>
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold flex-shrink-0">{t('aiStatus.title')}</p>
         <div className="flex items-center gap-5 flex-wrap">
-          {AI_SYSTEMS.map(sys => {
+          {AI_SYSTEM_KEYS.map(sys => {
             const entry = coverage?.find(c => c.key === sys.key);
             const dot   = coverageDot(entry);
-            const lbl   = coverageLabel(entry);
+            const lbl   = !entry ? t('aiStatus.noData')
+                        : entry.errors24h > 0 ? t('aiStatus.errors', { n: entry.errors24h })
+                        : entry.status === 'active' ? t('aiStatus.active')
+                        : entry.status === 'stale'  ? t('aiStatus.stale')
+                        : entry.passive ? t('aiStatus.passive')
+                        : t('aiStatus.unknown');
             const isErr = entry && entry.errors24h > 0;
             return (
-              <div key={sys.key} className="flex items-center gap-1.5" title={`${sys.label}: ${lbl}`}>
+              <div key={sys.key} className="flex items-center gap-1.5" title={`${t(sys.tKey)}: ${lbl}`}>
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
                 <span className={`text-[10px] font-medium ${isErr ? 'text-red-400' : 'text-g-muted/70'}`}>
-                  {sys.label}
+                  {t(sys.tKey)}
                 </span>
               </div>
             );

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { useI18n } from '@/contexts/I18nContext';
+import { LOCALE_LABEL, type Locale } from '@/lib/i18n';
 
 interface WorkspaceMe {
   brandName:          string | null;
@@ -13,15 +15,17 @@ interface WorkspaceMe {
 
 export default function Topbar() {
   const router = useRouter();
-  const [time, setTime]       = useState('');
-  const [email, setEmail]     = useState('');
-  const [ws, setWs]           = useState<WorkspaceMe | null>(null);
+  const { t, locale, setLocale } = useI18n();
+  const [time, setTime]         = useState('');
+  const [email, setEmail]       = useState('');
+  const [ws, setWs]             = useState<WorkspaceMe | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin]   = useState(false);
 
   useEffect(() => {
+    const localeTag = locale === 'en' ? 'en-GB' : 'no-NO';
     const update = () => {
-      setTime(new Date().toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setTime(new Date().toLocaleTimeString(localeTag, { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     };
     update();
     const id = setInterval(update, 1000);
@@ -78,15 +82,33 @@ export default function Topbar() {
             onClick={() => router.push('/admin')}
             className="px-2.5 py-1 border border-g-green/30 rounded text-[10px] font-bold text-g-green hover:bg-g-green/10 transition-colors tracking-wider uppercase"
           >
-            Admin
+            {t('topbar.admin')}
           </button>
         )}
+
+        {/* Language switcher */}
+        <div className="flex items-center border border-g-border rounded overflow-hidden">
+          {(['no', 'en'] as Locale[]).map(l => (
+            <button
+              key={l}
+              onClick={() => setLocale(l)}
+              className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                locale === l
+                  ? 'bg-g-green/15 text-g-green'
+                  : 'text-g-muted/50 hover:text-g-muted'
+              }`}
+              title={LOCALE_LABEL[l]}
+            >
+              {l.toUpperCase()}
+            </button>
+          ))}
+        </div>
 
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-g-green animate-pulse-green"
             style={{ boxShadow: '0 0 6px #00ff41' }} />
           <span className="text-xs text-g-green font-semibold tracking-widest uppercase hidden sm:block">
-            System Online
+            {t('topbar.systemOnline')}
           </span>
         </div>
 
@@ -122,13 +144,13 @@ export default function Topbar() {
                 onClick={() => { setMenuOpen(false); router.push('/innstillinger'); }}
                 className="w-full text-left px-3 py-2 text-[11px] text-g-muted hover:text-g-text hover:bg-white/[0.03] transition-colors"
               >
-                Innstillinger
+                {t('topbar.settings')}
               </button>
               <button
                 onClick={loggUt}
                 className="w-full text-left px-3 py-2 text-[11px] text-red-400 hover:bg-red-500/5 transition-colors border-t border-g-border/50"
               >
-                Logg ut
+                {t('topbar.logout')}
               </button>
             </div>
           )}
