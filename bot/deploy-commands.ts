@@ -8,6 +8,7 @@ import { socialsCommand } from './commands/socials';
 import { clipCommand } from './commands/clip';
 import { kanalerCommand } from './commands/kanaler';
 import { innsendCommand } from './commands/innsend';
+import { profilCommand } from './commands/profil';
 
 const commands = [
   liveCommand.data.toJSON(),
@@ -19,6 +20,7 @@ const commands = [
   clipCommand.data.toJSON(),
   kanalerCommand.data.toJSON(),
   innsendCommand.data.toJSON(),
+  profilCommand.data.toJSON(),
 ];
 
 const token = process.env.DISCORD_BOT_TOKEN;

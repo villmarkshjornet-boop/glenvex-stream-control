@@ -22,6 +22,7 @@ import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
+import { profilCommand } from './commands/profil';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
@@ -88,7 +89,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
@@ -1399,7 +1400,7 @@ async function sjekkUkentligStats() {
 
     const topClipsTekst = stats.topClips.length > 0
       ? stats.topClips.slice(0, 3).map((c, i) => `${i + 1}. [${c.title}](${c.url}) — ${c.viewCount} visninger`).join('\n')
-      : 'Ingen clips denne uken';
+      : 'Ingen klipp denne uken';
 
     const apiKey = process.env.OPENAI_API_KEY;
     let kommentar = '';
@@ -1431,11 +1432,11 @@ async function sjekkUkentligStats() {
       .setDescription(kommentar || 'Enda en uke i boken!')
       .addFields(
         { name: '👥 Følgere', value: stats.followerCount.toLocaleString(), inline: true },
-        { name: '🎬 Clips', value: stats.clipCount.toString(), inline: true },
+        { name: '🎬 Klipp', value: stats.clipCount.toString(), inline: true },
         { name: '🔴 Status', value: stream?.isLive ? 'LIVE NÅ' : 'Offline', inline: true },
         { name: '🚨 Topp 3 raids', value: raidTekst, inline: false },
         { name: '🎁 Topp gift-givers', value: giftSubTekst, inline: false },
-        { name: '🏆 Topp clips', value: topClipsTekst, inline: false },
+        { name: '🏆 Topp klipp', value: topClipsTekst, inline: false },
       )
       .setFooter({ text: `Uke ${uke} • ${BOT_BRAND} Stream Control` })
       .setTimestamp();
@@ -2003,15 +2004,21 @@ client.once('clientReady', () => {
 
   const statusKanal = client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined;
   if (statusKanal) {
-    const meldinger = [
-      'Jeg ble oppdatert, jeg føler meg mye smartere 🧠',
-      'Oppdatering lastet inn – ny versjon, samme ego 😎',
-      'Er tilbake, og bedre enn noen gang. Jeg ble oppdatert 🚀',
-      'Oppdatert og klar. Prøv meg 👀',
-      'Ny versjon, hvem dis? Jeg ble oppdatert nettopp ⚡',
+    const PATCH_NOTES = [
+      '✅ `/profil` — sjekk XP, level og statistikk',
+      '✅ Idle-poll — @everyone + Discord-poll med reaksjoner når det er stille',
+      '✅ Community MVP — oppdatert med fallback og mer energi',
+      '✅ «clips» → «klipp» i ukentlig statistikk',
+      '✅ Hype-meldinger — mer energi og personlighet',
     ];
-    const tekst = meldinger[Math.floor(Math.random() * meldinger.length)];
-    statusKanal.send(tekst).catch(() => {});
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff41)
+      .setTitle('⚡ Bot restartet og oppdatert')
+      .setDescription('Her er hva som er nytt i denne versjonen:')
+      .addFields(PATCH_NOTES.map(note => ({ name: '​', value: note, inline: false })))
+      .setFooter({ text: `${BOT_BRAND} Bot • ${new Date().toLocaleDateString('no-NO', { timeZone: 'Europe/Oslo' })}` })
+      .setTimestamp();
+    statusKanal.send({ embeds: [embed] }).catch(() => {});
   }
 
   // I multi_tenant-mode kjører WorkspaceManager live-sjekk for andre workspaces.

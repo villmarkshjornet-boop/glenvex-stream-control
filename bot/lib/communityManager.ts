@@ -14,6 +14,8 @@ const MAX_HYPE_PER_DAY    = 2;
 const MAX_PROMPTS_PER_DAY = 2;
 const MIN_BETWEEN_POSTS_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+const DISCORD_REACTIONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+
 // ─── Module-level rate limiting state ────────────────────────────────────────
 
 interface CommunityDayState {
@@ -61,6 +63,28 @@ function getDb() {
   });
 }
 
+// ─── AI Memory reader (for poll context) ─────────────────────────────────────
+
+async function hentAiMemory(): Promise<string> {
+  try {
+    const db = getDb();
+    if (!db) return '';
+    const { data } = await db
+      .from('ai_agent_memory')
+      .select('memory_type, summary, content, occurrence_count')
+      .eq('workspace_id', WORKSPACE_ID)
+      .in('memory_type', ['game', 'viewer', 'topic', 'partner'])
+      .order('occurrence_count', { ascending: false })
+      .limit(8);
+    if (!data || data.length === 0) return '';
+    return data.map(m =>
+      `[${m.memory_type}] ${String(m.summary ?? m.content ?? '').slice(0, 150)} (${m.occurrence_count}x)`
+    ).join('\n');
+  } catch {
+    return '';
+  }
+}
+
 // ─── C1: Dagens MVP ───────────────────────────────────────────────────────────
 
 export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> {
@@ -82,6 +106,7 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
   let topUserId: string | null = null;
   let topXpToday = 0;
 
+  // Primary: read system_events for today's XP grants
   if (db) {
     try {
       const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
@@ -106,10 +131,25 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
     } catch {}
   }
 
+  // Fallback: use members.json — find most active member seen today
   if (!topUserId || topXpToday === 0) {
+    const today = osloDateISO();
+    const allMembers = getAllMembers();
+    const activeToday = allMembers
+      .filter(m => m.lastSeen && m.lastSeen.startsWith(today))
+      .sort((a, b) => (b.messages + b.streakDays * 10) - (a.messages + a.streakDays * 10));
+
+    if (activeToday.length > 0) {
+      const best = activeToday[0];
+      topUserId  = best.id;
+      topXpToday = 0; // unknown daily, will show streak instead
+    }
+  }
+
+  if (!topUserId) {
     logSystemEvent({
       source: 'community_manager', event_type: 'COMMUNITY_MVP_SKIPPED_NO_ACTIVITY',
-      title: 'MVP hoppet over – ingen COMMUNITY_XP_GRANTED-aktivitet siste 24t',
+      title: 'MVP hoppet over – ingen aktivitet å hylle i dag',
       severity: 'info',
       metadata: { workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
     });
@@ -128,21 +168,30 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
     return;
   }
 
+  const streakLine  = mvp.streakDays >= 2 ? `🔥 **Streak:** ${mvp.streakDays} dager på rad!\n` : '';
+  const xpLine      = topXpToday > 0
+    ? `⚡ **XP i dag:** +${topXpToday}\n💰 **Total XP:** ${mvp.xp}\n`
+    : `💰 **Total XP:** ${mvp.xp}\n`;
+  const hypeSlogan  = mvp.streakDays >= 7
+    ? '🏆 EN LEGENDE I COMMUNITYET! KLINK! 🍾'
+    : mvp.level >= 10
+    ? '👑 Høy-level spiller — vi vet hvem du er! 🎯'
+    : '⭐ Holde det gående, vi ser deg! 💪';
+
   const embed = new EmbedBuilder()
     .setColor(0xffd700)
-    .setTitle('🏆 Dagens Community MVP')
+    .setTitle('🏆 Dagens Community MVP!')
     .setDescription(
-      `Takk til **${mvp.displayName}** som har vært ekstra aktiv i dag!\n\n` +
-      `**Level:** ${mvp.level}\n` +
-      `**XP i dag:** +${topXpToday}\n` +
-      `**Total XP:** ${mvp.xp}\n` +
-      (mvp.streakDays >= 2 ? `**Streak:** ${mvp.streakDays} dager på rad 🔥\n` : '') +
-      `\nFortsett å holde communityet levende! 💪`
+      `## @${mvp.displayName} tok gullet i dag! 🥇\n\n` +
+      `🎮 **Level:** ${mvp.level}\n` +
+      xpLine +
+      streakLine +
+      `\n${hypeSlogan}`,
     )
     .setFooter({ text: `${BOT_BRAND} Community • ${new Date().toLocaleDateString('no-NO')}` })
     .setTimestamp();
 
-  await communityKanal.send({ embeds: [embed] }).catch(() => {});
+  await communityKanal.send({ content: `@everyone`, embeds: [embed], allowedMentions: { parse: ['everyone'] } }).catch(() => {});
 
   dayState.mvpSentToday = true;
   dayState.lastPostAt   = Date.now();
@@ -205,11 +254,11 @@ export async function sendCommunityHype(communityKanal: TextChannel): Promise<vo
         .limit(1);
 
       if (data && data.length > 0) {
-        const meta = data[0].metadata as any;
+        const meta        = data[0].metadata as any;
         const displayName = meta?.username ?? 'Noen';
         const newLevel    = meta?.newLevel ?? '?';
         hypeType = 'level_up';
-        melding = `⭐ **${displayName}** nådde nylig **Level ${newLevel}**! Imponerende fremgang 💪`;
+        melding = `⭐ YO! **${displayName}** gikk opp til **Level ${newLevel}**!! Det er IKKE hvem som helst 🔥 GRATZ! PogChamp`;
       }
     } catch {}
   }
@@ -223,7 +272,9 @@ export async function sendCommunityHype(communityKanal: TextChannel): Promise<vo
 
     if (streakStar) {
       hypeType = 'streak';
-      melding = `🔥 **${streakStar.displayName}** har vært aktiv **${streakStar.streakDays} dager på rad**! Hold det gående 🙌`;
+      const days = streakStar.streakDays;
+      const hype = days >= 14 ? '👑 EN LEGENDE!' : days >= 7 ? '🔥 USTOPPELIG!' : '💪 KEEP GOING!';
+      melding = `🔥 **${streakStar.displayName}** er aktiv **${days} dager på rad**! ${hype} Det communityet trenger er deg her! 🙌`;
     }
   }
 
@@ -252,10 +303,20 @@ export async function sendCommunityHype(communityKanal: TextChannel): Promise<vo
         if (xpMap.size > 0) {
           const [, topData] = [...xpMap.entries()].sort((a, b) => b[1].xp - a[1].xp)[0];
           hypeType = 'weekly_top';
-          melding = `📊 Ukens topp-bidragsyter er **${topData.name}** med **${topData.xp} XP** denne uken! Takk for at du holder communityet levende 🏅`;
+          melding = `📊 UKENS MVP: **${topData.name}** dominerte med **${topData.xp} XP** denne uken! 🏅 Communityet er på et annet nivå fordi du er der!`;
         }
       }
     } catch {}
+  }
+
+  // Priority 4: fallback — hype the most active member from members.json
+  if (!hypeType) {
+    const allMembers = getAllMembers().filter(m => m.messages > 0);
+    if (allMembers.length > 0) {
+      const top = allMembers.sort((a, b) => b.xp - a.xp)[0];
+      hypeType = 'weekly_top';
+      melding = `💥 Shoutout til **${top.displayName}** – Level ${top.level} og ${top.xp} XP totalt! Det er EKTE dedication 🙌 Takk for at du er her!`;
+    }
   }
 
   if (!hypeType) {
@@ -281,7 +342,7 @@ export async function sendCommunityHype(communityKanal: TextChannel): Promise<vo
   });
 }
 
-// ─── C3: Idle Detection + Context-Aware Prompt ───────────────────────────────
+// ─── C3: Idle Detection + Poll + @everyone ───────────────────────────────────
 
 export async function sjekkIdleOgPrompt(
   communityKanal: TextChannel,
@@ -336,79 +397,118 @@ export async function sjekkIdleOgPrompt(
 
   logSystemEvent({
     source: 'community_manager', event_type: 'COMMUNITY_IDLE_DETECTED',
-    title: `Community-kanal stille i ${Math.round(minutesSinceHuman)} min (terskel: ${idleThresholdMinutes} min)`,
+    title: `Community-kanal stille i ${Math.round(minutesSinceHuman)} min – sender poll`,
     severity: 'info',
     metadata: { minutesSinceLastMessage: Math.round(minutesSinceHuman), threshold: idleThresholdMinutes, kanalId: communityKanal.id, workspaceId: WORKSPACE_ID },
   });
 
-  const prompt = await genererAktivitetsPrompt(Math.round(minutesSinceHuman));
-  if (!prompt) return;
-
-  await communityKanal.send(prompt).catch(() => {});
+  const sent = await genererOgSendIdlePoll(communityKanal, Math.round(minutesSinceHuman));
+  if (!sent) return;
 
   dayState.promptCount++;
   dayState.lastPostAt = Date.now();
 
   logSystemEvent({
     source: 'community_manager', event_type: 'COMMUNITY_ACTIVITY_PROMPT_SENT',
-    title: `Aktivitetsprompt sendt til community-kanal`,
+    title: 'Idle-poll sendt til community-kanal med @everyone',
     severity: 'info',
-    metadata: { prompt: prompt.slice(0, 120), promptCount: dayState.promptCount, minutesIdle: Math.round(minutesSinceHuman), kanalId: communityKanal.id, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
+    metadata: { promptCount: dayState.promptCount, minutesIdle: Math.round(minutesSinceHuman), kanalId: communityKanal.id, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
   });
 }
 
-// ─── Context-Aware Prompt Generator ──────────────────────────────────────────
+// ─── Idle Poll Generator ──────────────────────────────────────────────────────
 
-async function genererAktivitetsPrompt(idleMinutes: number): Promise<string | null> {
-  // Gather context regardless of AI availability
-  const plan = await getStreamplan().catch(() => [] as Awaited<ReturnType<typeof getStreamplan>>);
-  const activeEntries = plan.filter(e => e.aktiv);
-  const sisteSpill    = [...new Set(activeEntries.map(e => e.spill).filter(Boolean))].slice(0, 3).join(', ') || 'stream';
+async function genererOgSendIdlePoll(
+  communityKanal: TextChannel,
+  idleMinutes: number,
+): Promise<boolean> {
+  const plan         = await getStreamplan().catch(() => [] as Awaited<ReturnType<typeof getStreamplan>>);
+  const activeGames  = [...new Set(plan.filter(e => e.aktiv).map(e => e.spill).filter(Boolean))].slice(0, 3);
+  const sisteSpill   = activeGames[0] || 'stream';
+  const aiMemory     = await hentAiMemory();
+  const apiKey       = process.env.OPENAI_API_KEY;
 
-  const topMembers = getAllMembers()
-    .slice(0, 5)
-    .map(m => m.displayName)
-    .join(', ');
+  interface PollData { question: string; options: string[] }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  let poll: PollData | null = null;
 
-  if (!apiKey) {
-    // Static fallbacks — specific to the game context
-    const FALLBACKS = [
-      `🎮 Hva var det beste øyeblikket fra siste ${sisteSpill}-stream?`,
-      `💬 Hvilken loadout/strategi burde testes i ${sisteSpill} neste gang?`,
-      `🏆 Hvem bør vi raida etter neste stream? Kom med forslag!`,
-      `🎯 Hva er det én ting i ${sisteSpill} du ønsker å se mer av?`,
-      `🔥 Del favorittklippet ditt fra de siste streamene!`,
-    ];
-    return FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
+  if (apiKey) {
+    try {
+      const openai = new OpenAI({ apiKey });
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        response_format: { type: 'json_object' },
+        messages: [{
+          role: 'user',
+          content:
+            `Du er community-bot for ${BOT_BRAND}. Discord har vært stille i ${idleMinutes} minutter.\n\n` +
+            `Streamers spill/innhold: ${activeGames.join(', ') || 'ukjent'}\n` +
+            `AI-læring om communityet:\n${aiMemory || '(ingen data ennå)'}\n\n` +
+            `Lag en ENGASJERENDE Discord-poll (norsk) som passet for dette communityet.\n` +
+            `Stil: energisk, direkte, gaming-fokusert, ikke generisk.\n\n` +
+            `Svar med JSON: { "question": "spørsmål maks 80 tegn med emoji", "options": ["svar1","svar2","svar3","svar4"] }\n` +
+            `Maks 4 alternativer, hvert maks 40 tegn. Bruk gjerne emojier i alternativene.`,
+        }],
+        max_tokens: 200,
+        temperature: 0.9,
+      });
+      const raw = res.choices[0]?.message?.content?.trim() ?? '';
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.question === 'string' && Array.isArray(parsed?.options) && parsed.options.length >= 2) {
+        poll = { question: parsed.question, options: parsed.options.slice(0, 4) };
+      }
+    } catch {}
   }
 
-  try {
-    const openai = new OpenAI({ apiKey });
+  // Static fallbacks based on game context
+  if (!poll) {
+    const FALLBACK_POLLS: PollData[] = [
+      {
+        question: `🎮 Hva vil du se i neste ${sisteSpill}-stream?`,
+        options: ['Ranked grind 💥', 'Chill og utforsk 🌍', 'Community-utfordring 🏆', 'Stream stemmer! 🗳️'],
+      },
+      {
+        question: `👀 Hvordan foretrekker du å følge streams?`,
+        options: ['Live på Twitch 🔴', 'VOD etterpå ⏪', 'Klipp på Discord 🎬', 'Alt av det! ✅'],
+      },
+      {
+        question: `🏆 Hva liker du BEST med dette communityet?`,
+        options: ['Streameren 🎮', 'Gode folk her 👥', 'Giveaways & events 🎁', 'Gaming-innholdet 🕹️'],
+      },
+      {
+        question: `⏰ Når streamer du / ser du på stream?`,
+        options: ['Ettermiddag 16-18 ☀️', 'Kveld 19-21 🌆', 'Sen kveld 22+ 🌙', 'Helg kun 📅'],
+      },
+    ];
+    poll = FALLBACK_POLLS[Math.floor(Math.random() * FALLBACK_POLLS.length)];
+  }
 
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'user',
-        content:
-          `Du er community-bot for ${BOT_BRAND}. Discord-kanalen har vært stille i ${idleMinutes} minutter.\n\n` +
-          `Streamers innhold/spill: ${sisteSpill}\n` +
-          `Aktive community-membres: ${topMembers || 'ukjent'}\n\n` +
-          `Skriv ETT engasjerende spørsmål på norsk (maks 2 setninger) som er SPESIFIKT for dette community-et og disse spillene.\n` +
-          `Eksempler på stil (ikke kopier ordrett):\n` +
-          `- "Hva var favorittøyeblikket fra siste ${sisteSpill}-stream?"\n` +
-          `- "Hvilken loadout burde testes i ${sisteSpill} neste gang?"\n` +
-          `- "Hva er det én ting i ${sisteSpill} du aldri gidder å gjøre igjen? 😅"\n\n` +
-          `Krav: Start med emoji. Ingen generiske gaming-spørsmål. Norsk.`,
-      }],
-      max_tokens: 100,
-      temperature: 0.9,
+  const description = poll.options
+    .map((o, i) => `${DISCORD_REACTIONS[i]} ${o}`)
+    .join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x00e676)
+    .setTitle(`📊 ${poll.question}`)
+    .setDescription(`${description}\n\n*Stem med emoji under! Hva sier communityet?* 👇`)
+    .setFooter({ text: `${BOT_BRAND} Community Poll` })
+    .setTimestamp();
+
+  try {
+    const msg = await communityKanal.send({
+      content: `@everyone 👋 Kanal er stille – vi trenger din mening! 🗣️`,
+      embeds: [embed],
+      allowedMentions: { parse: ['everyone'] },
     });
 
-    return res.choices[0]?.message?.content?.trim() ?? null;
+    for (const emoji of DISCORD_REACTIONS.slice(0, poll.options.length)) {
+      await msg.react(emoji).catch(() => {});
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
 
