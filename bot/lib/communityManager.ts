@@ -428,6 +428,21 @@ async function genererOgSendIdlePoll(
   const aiMemory     = await hentAiMemory();
   const apiKey       = process.env.OPENAI_API_KEY;
 
+  // Fetch recent Discord conversation to create context-aware polls
+  let recentChatContext = '';
+  try {
+    const msgs = await communityKanal.messages.fetch({ limit: 30 });
+    const humanMsgs = [...msgs.values()]
+      .filter(m => !m.author.bot && m.content.trim().length > 3)
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .slice(-20);
+    if (humanMsgs.length > 0) {
+      recentChatContext = humanMsgs
+        .map(m => `${m.author.username}: ${m.content.slice(0, 120)}`)
+        .join('\n');
+    }
+  } catch {}
+
   interface PollData { question: string; options: string[] }
 
   let poll: PollData | null = null;
@@ -444,8 +459,12 @@ async function genererOgSendIdlePoll(
             `Du er community-bot for ${BOT_BRAND}. Discord har vært stille i ${idleMinutes} minutter.\n\n` +
             `Streamers spill/innhold: ${activeGames.join(', ') || 'ukjent'}\n` +
             `AI-læring om communityet:\n${aiMemory || '(ingen data ennå)'}\n\n` +
-            `Lag en ENGASJERENDE Discord-poll (norsk) som passet for dette communityet.\n` +
-            `Stil: energisk, direkte, gaming-fokusert, ikke generisk.\n\n` +
+            (recentChatContext
+              ? `Hva som NYLIG ble diskutert i Discord (bruk dette til å lage en relevant poll!):\n${recentChatContext}\n\n`
+              : '') +
+            `Lag en ENGASJERENDE Discord-poll (norsk) basert på hva som ble diskutert.\n` +
+            `Hvis folk snakket om et spill eller et tema — lag poll om DET, ikke noe generisk.\n` +
+            `Stil: energisk, direkte, gaming-fokusert.\n\n` +
             `Svar med JSON: { "question": "spørsmål maks 80 tegn med emoji", "options": ["svar1","svar2","svar3","svar4"] }\n` +
             `Maks 4 alternativer, hvert maks 40 tegn. Bruk gjerne emojier i alternativene.`,
         }],

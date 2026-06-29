@@ -172,24 +172,87 @@ async function aiSvar(kontekst: string, discordCtx?: string): Promise<string> {
 // ─── Følger-detektor ──────────────────────────────────────────────────────────
 
 let forrigeFollowerAntall = -1;
-let followAppToken: string | null = null;
-let followAppTokenExpiry = 0;
 
-async function getAppToken(): Promise<string | null> {
-  if (followAppToken && Date.now() < followAppTokenExpiry) return followAppToken;
-  const clientId = process.env.TWITCH_CLIENT_ID;
+// /helix/channels/followers requires a broadcaster user token (not app token) since Aug 2023.
+// We read twitch_access_token from Supabase and auto-refresh via twitch_refresh_token on 401.
+let _cachedBroadcasterToken: string | null = null;
+
+export async function getBroadcasterUserToken(): Promise<string | null> {
+  if (_cachedBroadcasterToken) return _cachedBroadcasterToken;
+
+  const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+  const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const clientId     = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+
+  if (!sbUrl || !sbKey || !clientId || !clientSecret) return null;
+
   try {
-    const res = await fetch(
-      `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-      { method: 'POST', signal: AbortSignal.timeout(5000) }
-    );
-    const d = await res.json() as any;
-    followAppToken = d.access_token ?? null;
-    followAppTokenExpiry = Date.now() + (d.expires_in ?? 3600) * 1000 - 60_000;
-    return followAppToken;
-  } catch { return null; }
+    const { createClient } = require('@supabase/supabase-js');
+    const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
+
+    const { data: ws } = await sb
+      .from('workspaces')
+      .select('twitch_access_token,twitch_refresh_token')
+      .eq('id', wsId)
+      .single();
+
+    if (!ws?.twitch_access_token) return null;
+
+    // Validate via /oauth2/validate (lightweight, no quota cost)
+    const testRes = await fetch('https://id.twitch.tv/oauth2/validate', {
+      headers: { Authorization: `OAuth ${ws.twitch_access_token}` },
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null);
+
+    if (testRes?.ok) {
+      _cachedBroadcasterToken = ws.twitch_access_token;
+      return _cachedBroadcasterToken;
+    }
+
+    if (!ws.twitch_refresh_token) return null;
+
+    const refreshRes = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        refresh_token: ws.twitch_refresh_token,
+        client_id:     clientId,
+        client_secret: clientSecret,
+      }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+
+    if (refreshRes?.ok) {
+      const tokens = await refreshRes.json() as { access_token: string; refresh_token?: string };
+      await sb.from('workspaces').update({
+        twitch_access_token:  tokens.access_token,
+        ...(tokens.refresh_token ? { twitch_refresh_token: tokens.refresh_token } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq('id', wsId);
+
+      _cachedBroadcasterToken = tokens.access_token;
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'TWITCH_TOKEN_REFRESHED',
+        title: 'Twitch broadcaster token auto-refreshed og lagret',
+        severity: 'info',
+        metadata: { workspaceId: wsId },
+      });
+      return _cachedBroadcasterToken;
+    }
+
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'TWITCH_AUTH_ERROR',
+      title: 'Twitch token refresh feilet — koble til Twitch på nytt i innstillinger',
+      severity: 'critical',
+      metadata: { workspaceId: wsId, refreshStatus: refreshRes?.status ?? 'network_error' },
+    });
+  } catch {}
+  return null;
 }
 
 async function sjekkNyeFollowers() {
@@ -200,9 +263,7 @@ async function sjekkNyeFollowers() {
     const broadcasterId = await getBroadcasterId();
     if (!broadcasterId) return;
 
-    // Prøv med bruker-token (gir tilgang til enkeltfølgere), ellers app token
-    const userOauth = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
-    const token = userOauth || await getAppToken();
+    const token = await getBroadcasterUserToken();
     if (!token) return;
 
     const res = await fetch(
@@ -214,6 +275,8 @@ async function sjekkNyeFollowers() {
     ).catch(() => null);
 
     if (!res?.ok) {
+      // Invalidate cached token so next call re-fetches
+      if (res?.status === 401) _cachedBroadcasterToken = null;
       if (res) {
         logApiError({
           service: 'Twitch',
@@ -466,6 +529,43 @@ export function startTwitchBot() {
       const cur = getSettings().lastNotifiedStreamId;
       if (cur !== _prevStreamId) { _promoerDenneStream = 0; _sistePartnerPromo = 0; _prevStreamId = cur; }
     }, 60_000);
+
+    // Lurker engagement — every 18 min check if viewers >> chatters and ping lurkers
+    let _sisteLurkerPing = 0;
+    const LURKER_MIN_VIEWERS = 3;
+    const LURKER_MAX_CHAT_PER_MIN = 4;
+    const LURKER_COOLDOWN_MS = 22 * 60_000;
+
+    setInterval(async () => {
+      const streamSettings = getSettings();
+      if (!streamSettings.lastNotifiedStreamId) return;
+      if (Date.now() - _sisteLurkerPing < LURKER_COOLDOWN_MS) return;
+
+      const viewerCount = getBrainState().stream.viewerCount ?? 0;
+      if (viewerCount < LURKER_MIN_VIEWERS) return;
+      if (_chatMsgsLastMinute > LURKER_MAX_CHAT_PER_MIN) return;
+
+      const LURKER_MSGS = [
+        `Ser at det er ${viewerCount} her inne — ikke vær redd for å si hei! Lurking er helt ok, men chatten er hyggelig 👋`,
+        `Hei til alle ${viewerCount} seere! Vet at mange er stille — si gjerne hei om du vil, vi biter ikke 😊`,
+        `${viewerCount} av dere er her nå! Mange lurker — det er supert. Men om du vil snakke litt er det bare å skrive noe 🙌`,
+        `Hei alle som ser på! Lurking er en fin sport, men chatten er hyggelig å komme inn i — kom innom! PogChamp`,
+        `Ser vi har ${viewerCount} seere! Om du er ny: hei og velkommen! Skriv gjerne hva du heter 👀`,
+      ];
+      const msg = LURKER_MSGS[Math.floor(Math.random() * LURKER_MSGS.length)];
+
+      if (client) {
+        await chatSend(`#${KANAL}`, msg, { trigger: 'lurker_engagement', viewerCount, chatMsgsLastMin: _chatMsgsLastMinute });
+        _sisteLurkerPing = Date.now();
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'LURKER_ENGAGEMENT_SENT',
+          title: `Lurker-hilsen sendt (${viewerCount} seere, ${_chatMsgsLastMinute} msgs/min)`,
+          severity: 'info',
+          metadata: { viewerCount, chatMsgsLastMinute: _chatMsgsLastMinute, channel: KANAL },
+        });
+      }
+    }, 18 * 60_000);
   }).catch((err: Error) => {
     console.error('  ✗ Twitch chat feil:', err.message);
     logSystemEvent({

@@ -226,15 +226,30 @@ export async function getRecentVods(broadcasterId: string, count = 10): Promise<
   }
 }
 
-export async function getChannelStats(broadcasterId: string): Promise<ChannelStats> {
+// userToken: broadcaster's user access token (required for /helix/channels/followers since Aug 2023).
+// Clips use the app token (still allowed); followers are skipped gracefully when no userToken given.
+export async function getChannelStats(broadcasterId: string, userToken?: string): Promise<ChannelStats> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   if (!clientId) return { followerCount: 0, clipCount: 0, topClips: [] };
 
   try {
-    const [followersData, clipsData] = await Promise.all([
-      helixGet(clientId, `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`),
-      helixGet(clientId, `https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=5`),
-    ]) as [{ total: number }, { data: any[] }];
+    let followerCount = 0;
+
+    if (userToken) {
+      const followersRes = await fetch(
+        `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`,
+        { headers: { 'Client-ID': clientId, Authorization: `Bearer ${userToken}` } }
+      ).catch(() => null);
+      if (followersRes?.ok) {
+        const d = await followersRes.json() as { total?: number };
+        followerCount = d.total ?? 0;
+      }
+    }
+
+    const clipsData = await helixGet(
+      clientId,
+      `https://api.twitch.tv/helix/clips?broadcaster_id=${broadcasterId}&first=5`,
+    ) as { data: any[] };
 
     const topClips: ClipInfo[] = (clipsData.data ?? []).map((c: any) => ({
       id: c.id, title: c.title, url: c.url,
@@ -242,7 +257,7 @@ export async function getChannelStats(broadcasterId: string): Promise<ChannelSta
       createdAt: c.created_at, duration: c.duration,
     }));
 
-    return { followerCount: followersData.total ?? 0, clipCount: topClips.length, topClips };
+    return { followerCount, clipCount: topClips.length, topClips };
   } catch {
     return { followerCount: 0, clipCount: 0, topClips: [] };
   }

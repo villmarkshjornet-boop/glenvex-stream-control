@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { getBroadcasterId } from '@/lib/twitch';
+import { getValidBroadcasterToken } from '@/lib/twitchUserToken';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
@@ -16,31 +17,19 @@ interface RecentFollower {
   followed_at: string;
 }
 
-async function getTwitchToken(): Promise<string | null> {
-  const clientId = process.env.TWITCH_CLIENT_ID;
-  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
-  try {
-    const res = await fetch(
-      `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-      { method: 'POST', signal: AbortSignal.timeout(6000) }
-    );
-    const d = await res.json() as any;
-    return d.access_token ?? null;
-  } catch { return null; }
-}
-
 export async function GET() {
   const clientId = process.env.TWITCH_CLIENT_ID;
   if (!clientId) {
     return NextResponse.json({ error: 'TWITCH_CLIENT_ID mangler' }, { status: 500 });
   }
 
-  // Prøv bruker-token først (gir tilgang til enkeltfølgere), ellers app-token
-  const userOauth = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
-  const appToken = await getTwitchToken();
-  const token = userOauth || appToken;
-  if (!token) return NextResponse.json({ error: 'Ingen Twitch-token tilgjengelig' }, { status: 500 });
+  const wsId = getWorkspaceId();
+
+  // Broadcaster user token required for /helix/channels/followers since Aug 2023
+  const userToken = await getValidBroadcasterToken(wsId);
+  if (!userToken) {
+    return NextResponse.json({ error: 'Twitch-token mangler — koble til Twitch på nytt i innstillinger', harBrukertToken: false }, { status: 200 });
+  }
 
   const broadcasterId = await getBroadcasterId();
   if (!broadcasterId) return NextResponse.json({ error: 'Fant ikke Twitch-bruker' }, { status: 404 });
@@ -53,7 +42,7 @@ export async function GET() {
     const res = await fetch(
       `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}&first=20`,
       {
-        headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+        headers: { 'Client-ID': clientId, Authorization: `Bearer ${userToken}` },
         signal: AbortSignal.timeout(8000),
       }
     );
@@ -123,6 +112,6 @@ export async function GET() {
     gainUke,
     recentFollowers,
     chartData,
-    harBrukertToken: !!userOauth,
+    harBrukertToken: true,
   });
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { getValidBroadcasterToken } from '@/lib/twitchUserToken';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,30 +14,16 @@ interface Goal {
 }
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers',   label: 'Følgere',        mal: 1000, gjeldende: 0, aktiv: true  },
-  { type: 'subscribers', label: 'Subscribers',    mal: 50,   gjeldende: 0, aktiv: true  },
-  { type: 'viewers',     label: 'Seere (snitt)',  mal: 20,   gjeldende: 0, aktiv: false },
+  { type: 'followers',   label: 'Følgere',       mal: 400,  gjeldende: 0, aktiv: true  },
+  { type: 'subscribers', label: 'Subscribers',   mal: 10,   gjeldende: 0, aktiv: false },
+  { type: 'donations',   label: 'Donasjoner',    mal: 1000, gjeldende: 0, aktiv: false },
 ];
 
-async function getTwitchAppToken(): Promise<string | null> {
-  const clientId     = process.env.TWITCH_CLIENT_ID;
-  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
-  try {
-    const res = await fetch(
-      `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-      { method: 'POST' }
-    );
-    const data = await res.json() as any;
-    return data.access_token ?? null;
-  } catch { return null; }
-}
-
-async function getFollowers(token: string, broadcasterId: string): Promise<number> {
+async function getFollowers(token: string, broadcasterId: string, clientId: string): Promise<number> {
   try {
     const res = await fetch(
       `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`,
-      { headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, Authorization: `Bearer ${token}` } }
+      { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
     );
     if (!res.ok) return 0;
     const data = await res.json() as any;
@@ -44,13 +31,13 @@ async function getFollowers(token: string, broadcasterId: string): Promise<numbe
   } catch { return 0; }
 }
 
-async function getSubscribers(token: string, broadcasterId: string): Promise<number> {
+async function getSubscribers(token: string, broadcasterId: string, clientId: string): Promise<number> {
   try {
     const res = await fetch(
       `https://api.twitch.tv/helix/subscriptions?broadcaster_id=${broadcasterId}`,
-      { headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, Authorization: `Bearer ${token}` } }
+      { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
     );
-    if (!res.ok) return -1; // -1 = scope mangler
+    if (!res.ok) return -1;
     const data = await res.json() as any;
     return data.total ?? 0;
   } catch { return -1; }
@@ -59,8 +46,8 @@ async function getSubscribers(token: string, broadcasterId: string): Promise<num
 export async function GET() {
   const wsId = getWorkspaceId();
   const db   = getDb();
+  const clientId = process.env.TWITCH_CLIENT_ID ?? '';
 
-  // Load workspace Twitch identity — never use env-based fallback in SaaS context
   let broadcasterId: string | null = null;
   let goals = DEFAULT_GOALS;
 
@@ -71,50 +58,43 @@ export async function GET() {
     ]);
 
     broadcasterId = wsRes.data?.twitch_user_id ?? null;
-    goals         = goalsRes.data?.settings_json?.viewer_goals ?? DEFAULT_GOALS;
+    const savedGoals = goalsRes.data?.settings_json?.viewer_goals;
+    if (savedGoals?.length > 0) goals = savedGoals;
 
-    // Observability: log when Twitch is not connected
     if (!broadcasterId) {
-      void db.from('system_events').insert({
-        workspace_id: wsId,
-        source:       'goals_live',
-        event_type:   'WORKSPACE_MISSING_TWITCH',
-        title:        'Goals API: workspace mangler twitch_user_id — ingen Twitch-statistikk',
-        severity:     'warning',
-        metadata:     { wsId, twitchLogin: wsRes.data?.twitch_login ?? null, field: 'twitch_user_id' },
-      });
-
       return NextResponse.json({
         connected: false,
-        live:  { followers: 0, subscribers: -1, harSubData: false },
-        goals: goals.map(g => ({ ...g, gjeldende: 0 })),
+        live: { followers: 0, subscribers: -1, harSubData: false },
+        goals: goals.map(g => ({ ...g, gjeldende: g.type === 'donations' ? g.gjeldende : 0 })),
       });
     }
   }
 
-  if (!broadcasterId) {
+  if (!broadcasterId || !clientId) {
     return NextResponse.json({
       connected: false,
-      live:  { followers: 0, subscribers: -1, harSubData: false },
-      goals: goals.map(g => ({ ...g, gjeldende: 0 })),
+      live: { followers: 0, subscribers: -1, harSubData: false },
+      goals,
     });
   }
 
-  const token = await getTwitchAppToken();
+  // Use broadcaster user token (required for followers since Aug 2023)
+  const userToken = await getValidBroadcasterToken(wsId);
+
   let followers   = 0;
   let subscribers = -1;
 
-  if (token) {
+  if (userToken) {
     [followers, subscribers] = await Promise.all([
-      getFollowers(token, broadcasterId),
-      getSubscribers(token, broadcasterId),
+      getFollowers(userToken, broadcasterId, clientId),
+      getSubscribers(userToken, broadcasterId, clientId),
     ]);
   }
 
   const oppdatert = goals.map(g => {
     if (g.type === 'followers')                       return { ...g, gjeldende: followers };
     if (g.type === 'subscribers' && subscribers >= 0) return { ...g, gjeldende: subscribers };
-    return g;
+    return g; // donations and others keep their saved value
   });
 
   return NextResponse.json({

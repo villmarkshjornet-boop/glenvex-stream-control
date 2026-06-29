@@ -16,7 +16,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -51,13 +51,14 @@ import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/commu
 import OpenAI from 'openai';
 
 // Log + send Discord-melding
-async function discordSend(kanal: TextChannel, melding: string | object, kontekst?: Record<string, any>): Promise<void> {
+async function discordSend(kanal: TextChannel, melding: string | object, kontekst?: Record<string, any>): Promise<import('discord.js').Message | null> {
+  let sent: import('discord.js').Message | null = null;
   try {
     const payload = typeof melding === 'string' ? melding : melding;
     if (typeof payload === 'string') {
-      await kanal.send(payload);
+      sent = await kanal.send(payload);
     } else {
-      await kanal.send(payload as any);
+      sent = await kanal.send(payload as any);
     }
   } catch {}
   const preview = typeof melding === 'string' ? melding.slice(0, 100) : JSON.stringify(melding).slice(0, 100);
@@ -68,6 +69,28 @@ async function discordSend(kanal: TextChannel, melding: string | object, konteks
     severity: 'info',
     metadata: { channel: kanal.name, channelId: kanal.id, ...kontekst },
   });
+  return sent;
+}
+
+// Track last bot message per category so we can delete old ones before posting new
+const _lastBotMsg: Record<string, { kanalId: string; msgId: string }> = {};
+
+async function slettGammelBotMelding(kategori: string): Promise<void> {
+  const prev = _lastBotMsg[kategori];
+  if (!prev) return;
+  try {
+    const ch = client.channels.cache.get(prev.kanalId);
+    if (!(ch instanceof TextChannel)) return;
+    const msg = await ch.messages.fetch(prev.msgId).catch(() => null);
+    if (msg?.deletable) await msg.delete().catch(() => {});
+  } catch {}
+  delete _lastBotMsg[kategori];
+}
+
+async function discordSendMed(kategori: string, kanal: TextChannel, melding: string | object, kontekst?: Record<string, any>): Promise<void> {
+  await slettGammelBotMelding(kategori);
+  const sent = await discordSend(kanal, melding, kontekst);
+  if (sent) _lastBotMsg[kategori] = { kanalId: kanal.id, msgId: sent.id };
 }
 
 const token     = process.env.DISCORD_BOT_TOKEN;
@@ -1092,7 +1115,8 @@ async function sjekkGoals() {
     // Hent ekte tall
     const broadcasterId = await getBroadcasterId();
     if (!broadcasterId) return;
-    const stats = await getChannelStats(broadcasterId);
+    const userToken = await getBroadcasterUserToken();
+    const stats = await getChannelStats(broadcasterId, userToken ?? undefined);
     const nyeFollowers = stats.followerCount;
 
     // Post til Twitch chat hvis vesentlig endring
@@ -1221,7 +1245,7 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
     } catch {}
   }
 
-  await discordSend(kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
+  await discordSendMed('partner_promo', kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
 
   logPartnerPromoResult({
     partnerName: partner.navn,
@@ -1248,7 +1272,7 @@ async function dispatchApprovedProposalsRunner(): Promise<void> {
   await dispatchApprovedProposals({
     sendDiscord: async (msg) => {
       const kanal = await finnPartnerKanal();
-      if (kanal) await discordSend(kanal, msg, { trigger: 'approved_proposal' });
+      if (kanal) await discordSendMed('partner_promo', kanal, msg, { trigger: 'approved_proposal' });
     },
     sendTwitch: (msg) => sendTwitchPromoToChat(msg),
   });
@@ -1338,7 +1362,7 @@ async function sendProaktivMelding() {
 
         if (decision && decision.shouldPromote && decision.messageDiscord) {
           // Engine-generert melding — send direkte
-          await discordSend(partnerKanal, decision.messageDiscord, { trigger: 'partner_promotion_engine', partner: decision.partnerName });
+          await discordSendMed('partner_promo', partnerKanal, decision.messageDiscord, { trigger: 'partner_promotion_engine', partner: decision.partnerName });
           _discordSistePartnerPromo = Date.now();
           _discordPromoerDenneStream++;
           if (decision.partnerName) {
@@ -1395,7 +1419,8 @@ async function sjekkUkentligStats() {
     const broadcasterId = await getBroadcasterId();
     if (!broadcasterId) return;
 
-    const stats = await getChannelStats(broadcasterId);
+    const userToken = await getBroadcasterUserToken();
+    const stats = await getChannelStats(broadcasterId, userToken ?? undefined);
     const stream = await getStreamInfo().catch(() => null);
 
     const topClipsTekst = stats.topClips.length > 0
@@ -1512,7 +1537,7 @@ async function postTopClip() {
       .setFooter({ text: 'Stream Control • Auto Clip' })
       .setTimestamp();
 
-    await discordSend(kanal, { content: copy, embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
+    await discordSendMed('clip_post', kanal, { content: copy, embeds: [embed] }, { trigger: 'clip_post', clip: nyClip.title });
     addLog('success', `Clip postet: ${nyClip.title}`, 'OK');
   } catch (error) {
     addLog('error', `Clip-post feil: ${(error as Error).message}`, 'ERROR');

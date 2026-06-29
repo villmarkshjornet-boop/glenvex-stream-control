@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: PartnerBotSettings = {
   viewerPeakMultiplier: 1.5,
   chatSilenceMinutes: 8,
   allowBothChannels: false,
-  requireApproval: true,  // alpha default: require manual approval
+  requireApproval: false,
   tone: 'natural',
 };
 

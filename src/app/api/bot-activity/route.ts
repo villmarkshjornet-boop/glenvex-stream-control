@@ -48,12 +48,22 @@ export async function GET() {
     getGuildInfo(),
   ]);
 
-  // Hent live Twitch-data
+  // Hent live Twitch-data (followers requires broadcaster user token since Aug 2023)
   let followers = 0;
   try {
+    const db = isDbAvailable() ? getDb() : null;
     const broadcasterId = await getBroadcasterId();
     if (broadcasterId) {
-      const stats = await getChannelStats(broadcasterId);
+      let userToken: string | undefined;
+      if (db) {
+        const { data: ws } = await db
+          .from('workspaces')
+          .select('twitch_access_token')
+          .eq('id', getWorkspaceId())
+          .single();
+        userToken = ws?.twitch_access_token ?? undefined;
+      }
+      const stats = await getChannelStats(broadcasterId, userToken);
       followers = stats.followerCount;
     }
   } catch {}
