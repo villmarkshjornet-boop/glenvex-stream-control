@@ -14,336 +14,208 @@ interface Goal {
 }
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers',    label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false },
-  { type: 'subscribers',  label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#7b5ea7', manuell: false },
-  { type: 'donations',    label: 'Donasjoner',  icon: '♥', mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff6b35', manuell: true  },
+  { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false },
+  { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false },
+  { type: 'donations',   label: 'Donasjoner',  icon: '♥', mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', manuell: true  },
 ];
 
-function AnimatedCount({ value, farge }: { value: number; farge: string }) {
-  const [display, setDisplay] = useState(value);
-  const prevRef = useRef(value);
+/* ─── Segmented cinematic progress bar ─────────────────────────────────── */
+
+function SegmentBar({ pct, farge }: { pct: number; farge: string }) {
+  const [filled, setFilled] = useState(0);
+  const SEGS = 20;
 
   useEffect(() => {
-    const start = prevRef.current;
-    const end = value;
-    if (start === end) return;
-    const diff = end - start;
-    const steps = 30;
-    let i = 0;
-    const id = setInterval(() => {
-      i++;
-      setDisplay(Math.round(start + diff * (i / steps)));
-      if (i >= steps) { clearInterval(id); prevRef.current = end; }
-    }, 30);
-    return () => clearInterval(id);
-  }, [value]);
-
-  return (
-    <span style={{ color: farge, fontFamily: 'JetBrains Mono, monospace', fontWeight: 900 }}>
-      {display.toLocaleString('no-NO')}
-    </span>
-  );
-}
-
-function CinematicProgressBar({ pct, farge, label }: { pct: number; farge: string; label: string }) {
-  const [rendered, setRendered] = useState(0);
-
-  useEffect(() => {
-    const t = setTimeout(() => setRendered(pct), 200);
+    const t = setTimeout(() => setFilled(pct), 250);
     return () => clearTimeout(t);
   }, [pct]);
 
-  const glowColor = farge + '55';
-  const milestone = pct >= 100 ? '100%' : pct >= 75 ? '75%' : pct >= 50 ? '50%' : pct >= 25 ? '25%' : null;
+  const filledSegs = Math.round((filled / 100) * SEGS);
 
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      {/* Track */}
-      <div style={{
-        background: 'rgba(255,255,255,0.04)',
-        borderRadius: '4px',
-        height: '10px',
-        overflow: 'visible',
-        position: 'relative',
-        border: '1px solid rgba(255,255,255,0.06)',
-      }}>
-        {/* Fill */}
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0, bottom: 0,
-          width: `${rendered}%`,
-          borderRadius: '4px',
-          background: `linear-gradient(90deg, ${farge}99 0%, ${farge} 60%, ${farge}dd 100%)`,
-          boxShadow: `0 0 12px ${glowColor}, 0 0 24px ${glowColor}`,
-          transition: 'width 1.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-        }}>
-          {/* Shimmer sweep */}
-          <div style={{
-            position: 'absolute',
-            top: 0, right: 0, bottom: 0,
-            width: '40%',
-            background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)`,
-            animation: 'shimmerSweep 2.5s ease-in-out infinite',
-          }} />
-          {/* Bright tip */}
-          {rendered > 0 && (
-            <div style={{
-              position: 'absolute',
-              right: '-1px', top: '-2px', bottom: '-2px',
-              width: '4px',
-              background: farge,
-              borderRadius: '2px',
-              boxShadow: `0 0 8px ${farge}, 0 0 16px ${farge}`,
-            }} />
-          )}
-        </div>
-
-        {/* Milestone ticks */}
-        {[25, 50, 75].map(tick => (
-          <div key={tick} style={{
-            position: 'absolute',
-            left: `${tick}%`,
-            top: '-2px', bottom: '-2px',
-            width: '1px',
-            background: rendered >= tick ? farge + '80' : 'rgba(255,255,255,0.1)',
-            transition: 'background 0.5s',
-          }} />
-        ))}
-      </div>
-
-      {/* Milestone badge */}
-      {milestone && (
-        <div style={{
-          position: 'absolute',
-          right: 0,
-          top: '-22px',
-          background: farge,
-          color: '#000',
-          fontSize: '9px',
-          fontWeight: 900,
-          fontFamily: 'monospace',
-          padding: '1px 5px',
-          borderRadius: '3px',
-          letterSpacing: '0.05em',
-          animation: 'milestoneGlow 2s ease-in-out infinite',
-        }}>
-          {milestone}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes shimmerSweep {
-          0% { transform: translateX(-100%); opacity: 0.3; }
-          50% { opacity: 0.6; }
-          100% { transform: translateX(200%); opacity: 0.3; }
-        }
-        @keyframes milestoneGlow {
-          0%, 100% { box-shadow: 0 0 4px currentColor; }
-          50% { box-shadow: 0 0 12px currentColor; }
-        }
-      `}</style>
+    <div style={{ display: 'flex', gap: '3px', alignItems: 'stretch', height: '14px' }}>
+      {Array.from({ length: SEGS }, (_, i) => {
+        const segPct = ((i + 1) / SEGS) * 100;
+        const isFilled = i < filledSegs;
+        const isActive = i === filledSegs - 1;
+        return (
+          <div key={i} style={{
+            flex: 1,
+            borderRadius: '2px',
+            background: isFilled
+              ? isActive
+                ? farge
+                : farge + 'cc'
+              : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${isFilled ? farge + '60' : 'rgba(255,255,255,0.07)'}`,
+            boxShadow: isActive
+              ? `0 0 8px ${farge}, 0 0 16px ${farge}60`
+              : isFilled
+              ? `0 0 4px ${farge}40`
+              : 'none',
+            transition: `all 0.08s ease ${i * 0.04}s`,
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            {/* Shimmer on filled */}
+            {isFilled && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 100%)',
+              }} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+/* ─── Goal card ─────────────────────────────────────────────────────────── */
+
 function GoalCard({ goal, index, onUpdate, liveFollowers, liveSubscribers }: {
   goal: Goal;
   index: number;
-  onUpdate: (i: number, updates: Partial<Goal>) => void;
+  onUpdate: (i: number, u: Partial<Goal>) => void;
   liveFollowers: number | null;
   liveSubscribers: number | null;
 }) {
-  const [editingMal, setEditingMal] = useState(false);
-  const [malInput, setMalInput] = useState(String(goal.mal));
+  const gjeldende =
+    goal.type === 'followers' && liveFollowers !== null ? liveFollowers :
+    goal.type === 'subscribers' && liveSubscribers !== null ? liveSubscribers :
+    goal.gjeldende;
 
-  const gjeldende = goal.type === 'followers' && liveFollowers !== null
-    ? liveFollowers
-    : goal.type === 'subscribers' && liveSubscribers !== null
-    ? liveSubscribers
-    : goal.gjeldende;
-
-  const pct = goal.mal > 0 ? Math.min(100, Math.round((gjeldende / goal.mal) * 100)) : 0;
+  const pct  = goal.mal > 0 ? Math.min(100, Math.round((gjeldende / goal.mal) * 100)) : 0;
   const igjen = Math.max(0, goal.mal - gjeldende);
 
   return (
     <div style={{
       background: goal.aktiv
-        ? `linear-gradient(135deg, #0d1117 0%, #0d1117 60%, ${goal.farge}08 100%)`
-        : '#0d1117',
-      border: `1px solid ${goal.aktiv ? goal.farge + '30' : '#1a2f1a'}`,
-      borderRadius: '12px',
-      padding: '20px 22px',
-      transition: 'all 0.3s ease',
-      position: 'relative',
+        ? `linear-gradient(135deg, #0d1117 0%, ${goal.farge}06 100%)`
+        : '#0a0e0a',
+      border: `1px solid ${goal.aktiv ? goal.farge + '28' : '#141f14'}`,
+      borderRadius: '10px',
       overflow: 'hidden',
+      transition: 'all 0.25s ease',
     }}>
-      {/* Background glow when active */}
-      {goal.aktiv && (
+      {/* Left accent bar */}
+      <div style={{ display: 'flex' }}>
         <div style={{
-          position: 'absolute', inset: 0,
-          background: `radial-gradient(ellipse at top right, ${goal.farge}06, transparent 60%)`,
-          pointerEvents: 'none',
+          width: '3px',
+          background: goal.aktiv
+            ? `linear-gradient(180deg, ${goal.farge}, ${goal.farge}40)`
+            : '#1a2f1a',
+          flexShrink: 0,
+          transition: 'background 0.3s',
         }} />
-      )}
 
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: goal.aktiv ? '16px' : '0' }}>
-        {/* Toggle */}
-        <button
-          onClick={() => onUpdate(index, { aktiv: !goal.aktiv })}
-          style={{
-            width: '20px', height: '20px',
-            borderRadius: '4px',
-            border: `2px solid ${goal.aktiv ? goal.farge : '#1a2f1a'}`,
-            background: goal.aktiv ? goal.farge + '20' : 'transparent',
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '11px',
-            color: goal.aktiv ? goal.farge : '#4a6a4a',
-            transition: 'all 0.2s',
-            flexShrink: 0,
-          }}
-        >
-          {goal.aktiv ? '✓' : ''}
-        </button>
+        <div style={{ flex: 1, padding: '16px 18px' }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: goal.aktiv ? '14px' : '0' }}>
+            <button
+              onClick={() => onUpdate(index, { aktiv: !goal.aktiv })}
+              style={{
+                width: '18px', height: '18px', borderRadius: '3px', flexShrink: 0,
+                border: `1.5px solid ${goal.aktiv ? goal.farge : '#2a3d2a'}`,
+                background: goal.aktiv ? goal.farge + '18' : 'transparent',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '10px', color: goal.aktiv ? goal.farge : '#2a3d2a',
+                transition: 'all 0.2s',
+              }}
+            >{goal.aktiv ? '✓' : ''}</button>
 
-        {/* Icon + Label */}
-        <span style={{ fontSize: '16px', color: goal.aktiv ? goal.farge : '#4a6a4a' }}>{goal.icon}</span>
-        <span style={{
-          fontSize: '13px', fontWeight: 700,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          color: goal.aktiv ? '#c8f5c8' : '#4a6a4a',
-          flex: 1,
-        }}>{goal.label}</span>
-
-        {/* Current count (large) */}
-        {goal.aktiv && (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '28px', lineHeight: 1 }}>
-              <AnimatedCount value={gjeldende} farge={goal.farge} />
-            </div>
-            <div style={{ fontSize: '10px', color: '#4a6a4a', fontFamily: 'monospace', marginTop: '2px' }}>
-              av {goal.mal.toLocaleString('no-NO')}
-            </div>
-          </div>
-        )}
-
-        {/* Pct badge */}
-        {goal.aktiv && (
-          <div style={{
-            fontFamily: 'monospace', fontWeight: 900, fontSize: '15px',
-            color: pct >= 100 ? goal.farge : '#c8f5c8',
-            minWidth: '46px', textAlign: 'right',
-          }}>
-            {pct}%
-          </div>
-        )}
-      </div>
-
-      {/* Progress section */}
-      {goal.aktiv && (
-        <>
-          <CinematicProgressBar pct={pct} farge={goal.farge} label={goal.label} />
-
-          {/* Stats row */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', marginBottom: '14px' }}>
-            <span style={{ fontSize: '11px', color: '#4a6a4a', fontFamily: 'monospace' }}>
-              {igjen.toLocaleString('no-NO')} igjen
+            <span style={{ color: goal.aktiv ? goal.farge : '#2a3d2a', fontSize: '13px', transition: 'color 0.2s' }}>
+              {goal.icon}
             </span>
-            {goal.type === 'followers' && liveFollowers !== null && (
-              <span style={{ fontSize: '10px', color: '#4a6a4a' }}>● Live</span>
-            )}
-            {goal.manuell && (
-              <span style={{ fontSize: '10px', color: '#4a6a4a' }}>Manuell</span>
+
+            <span style={{
+              fontSize: '12px', fontWeight: 800, letterSpacing: '0.1em',
+              textTransform: 'uppercase', fontFamily: 'monospace',
+              color: goal.aktiv ? '#c8f5c8' : '#2a3d2a',
+              transition: 'color 0.2s', flex: 1,
+            }}>{goal.label}</span>
+
+            {goal.aktiv && (
+              <>
+                <span style={{
+                  fontFamily: 'monospace', fontWeight: 900, fontSize: '26px',
+                  color: goal.farge, lineHeight: 1,
+                }}>
+                  {gjeldende.toLocaleString('no-NO')}
+                </span>
+                <span style={{
+                  fontFamily: 'monospace', fontSize: '13px',
+                  color: '#4a6a4a', alignSelf: 'flex-end', paddingBottom: '2px',
+                }}>/ {goal.mal.toLocaleString('no-NO')}</span>
+                <span style={{
+                  fontFamily: 'monospace', fontWeight: 900, fontSize: '16px',
+                  color: pct >= 100 ? goal.farge : 'rgba(200,245,200,0.6)',
+                  minWidth: '42px', textAlign: 'right',
+                }}>{pct}%</span>
+              </>
             )}
           </div>
 
-          {/* Edit row */}
-          <div style={{ display: 'flex', gap: '12px' }}>
-            {/* Gjeldende — editable only for manual */}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '9px', color: '#4a6a4a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px' }}>
-                {goal.manuell ? 'Gjeldende (rediger)' : 'Gjeldende (auto)'}
-              </div>
-              <input
-                type="number"
-                value={gjeldende}
-                disabled={!goal.manuell}
-                onChange={e => goal.manuell && onUpdate(index, { gjeldende: +e.target.value })}
-                style={{
-                  width: '100%',
-                  background: goal.manuell ? '#050505' : '#080c08',
-                  border: `1px solid ${goal.manuell ? goal.farge + '30' : '#1a2f1a'}`,
-                  borderRadius: '6px',
-                  padding: '6px 10px',
-                  fontSize: '12px',
-                  color: goal.manuell ? '#c8f5c8' : '#4a6a4a',
-                  fontFamily: 'monospace',
-                  outline: 'none',
-                  cursor: goal.manuell ? 'text' : 'not-allowed',
-                }}
-              />
-            </div>
+          {goal.aktiv && (
+            <>
+              <SegmentBar pct={pct} farge={goal.farge} />
 
-            {/* Mål */}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '9px', color: '#4a6a4a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px' }}>
-                Mål
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', marginBottom: '14px' }}>
+                <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>
+                  {igjen.toLocaleString('no-NO')} igjen til mål
+                </span>
+                <span style={{ fontSize: '10px', color: goal.manuell ? '#4a6a4a' : '#00ff4140', fontFamily: 'monospace' }}>
+                  {goal.manuell ? 'Manuell' : '● Live'}
+                </span>
               </div>
-              {editingMal ? (
-                <input
-                  type="number"
-                  value={malInput}
-                  autoFocus
-                  onChange={e => setMalInput(e.target.value)}
-                  onBlur={() => {
-                    const v = Math.max(1, parseInt(malInput) || goal.mal);
-                    onUpdate(index, { mal: v });
-                    setMalInput(String(v));
-                    setEditingMal(false);
-                  }}
-                  onKeyDown={e => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                  style={{
-                    width: '100%',
-                    background: '#050505',
-                    border: `1px solid ${goal.farge}60`,
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                    fontSize: '12px',
-                    color: '#c8f5c8',
-                    fontFamily: 'monospace',
-                    outline: 'none',
-                  }}
-                />
-              ) : (
-                <button
-                  onClick={() => { setMalInput(String(goal.mal)); setEditingMal(true); }}
-                  style={{
-                    width: '100%',
-                    background: '#050505',
-                    border: `1px solid #1a2f1a`,
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                    fontSize: '12px',
-                    color: '#c8f5c8',
-                    fontFamily: 'monospace',
-                    textAlign: 'left',
-                    cursor: 'text',
-                    transition: 'border-color 0.2s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = goal.farge + '40')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2f1a')}
-                >
-                  {goal.mal.toLocaleString('no-NO')}
-                </button>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+
+              {/* Edit row */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px', fontFamily: 'monospace' }}>
+                    {goal.manuell ? 'Gjeldende' : 'Gjeldende (auto)'}
+                  </div>
+                  <input
+                    type="number" value={gjeldende} disabled={!goal.manuell}
+                    onChange={e => goal.manuell && onUpdate(index, { gjeldende: +e.target.value })}
+                    style={{
+                      width: '100%', background: '#050505',
+                      border: `1px solid ${goal.manuell ? goal.farge + '30' : '#141f14'}`,
+                      borderRadius: '5px', padding: '6px 10px',
+                      fontSize: '13px', color: goal.manuell ? '#c8f5c8' : '#3a5a3a',
+                      fontFamily: 'monospace', outline: 'none',
+                      cursor: goal.manuell ? 'text' : 'default',
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px', fontFamily: 'monospace' }}>
+                    Mål
+                  </div>
+                  <input
+                    type="number" value={goal.mal}
+                    onChange={e => onUpdate(index, { mal: Math.max(1, +e.target.value || 1) })}
+                    style={{
+                      width: '100%', background: '#050505',
+                      border: `1px solid #1a2f1a`,
+                      borderRadius: '5px', padding: '6px 10px',
+                      fontSize: '13px', color: '#c8f5c8',
+                      fontFamily: 'monospace', outline: 'none',
+                    }}
+                    onFocus={e => e.target.style.borderColor = goal.farge + '50'}
+                    onBlur={e => e.target.style.borderColor = '#1a2f1a'}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
+
+/* ─── Page ──────────────────────────────────────────────────────────────── */
 
 export default function ViewerGoalsPage() {
   const [goals, setGoals] = useState<Goal[]>(DEFAULT_GOALS);
@@ -353,31 +225,31 @@ export default function ViewerGoalsPage() {
   const [posting, setPosting] = useState(false);
   const [postRes, setPostRes] = useState('');
   const [overlayUrl, setOverlayUrl] = useState('');
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [kopiert, setKopiert] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  function updateGoal(i: number, updates: Partial<Goal>) {
-    setGoals(prev => prev.map((g, idx) => idx === i ? { ...g, ...updates } : g));
+  function updateGoal(i: number, u: Partial<Goal>) {
+    setGoals(prev => prev.map((g, idx) => idx === i ? { ...g, ...u } : g));
   }
 
   useEffect(() => {
-    async function hent() {
+    const hent = async () => {
       try {
         const r = await fetch('/api/goals/live');
         const d = await r.json();
         if (d.live) {
-          setLiveFollowers(d.live.followers ?? null);
-          if (d.live.harSubData) setLiveSubscribers(d.live.subscribers);
+          if (typeof d.live.followers === 'number') setLiveFollowers(d.live.followers);
+          if (d.live.harSubData && typeof d.live.subscribers === 'number') setLiveSubscribers(d.live.subscribers);
         }
         if (d.goals?.length > 0) {
-          setGoals(prev => d.goals.map((g: any) => ({
-            ...DEFAULT_GOALS.find(dg => dg.type === g.type) ?? prev.find(pg => pg.type === g.type) ?? g,
+          setGoals(d.goals.map((g: any) => ({
+            ...DEFAULT_GOALS.find(dg => dg.type === g.type) ?? {},
             ...g,
           })));
         }
         setLastRefresh(new Date());
       } catch {}
-    }
+    };
     hent();
     const id = setInterval(hent, 30_000);
     return () => clearInterval(id);
@@ -388,12 +260,8 @@ export default function ViewerGoalsPage() {
   }, []);
 
   async function lagre() {
-    const toSave = goals.map(g => ({ type: g.type, label: g.label, mal: g.mal, gjeldende: g.gjeldende, aktiv: g.aktiv }));
-    await fetch('/api/goals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(toSave),
-    });
+    const toSave = goals.map(({ type, label, mal, gjeldende, aktiv }) => ({ type, label, mal, gjeldende, aktiv }));
+    await fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toSave) });
     setLagret(true);
     setTimeout(() => setLagret(false), 2000);
   }
@@ -409,68 +277,73 @@ export default function ViewerGoalsPage() {
       });
       const data = await res.json();
       setPostRes(data.ok ? '✓ Postet til Discord' : `✗ ${data.error}`);
-    } catch (e) {
-      setPostRes(`✗ ${(e as Error).message}`);
-    }
+    } catch (e) { setPostRes(`✗ ${(e as Error).message}`); }
     setPosting(false);
   }
 
-  const aktiveGoals = goals.filter(g => g.aktiv && g.mal > 0);
+  const followerGoal = goals.find(g => g.type === 'followers' && g.aktiv);
+  const followerPct  = followerGoal && followerGoal.mal > 0
+    ? Math.min(100, Math.round(((liveFollowers ?? followerGoal.gjeldende) / followerGoal.mal) * 100))
+    : null;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-3xl mx-auto space-y-4">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 style={{
-            fontSize: '22px', fontWeight: 900, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: '#c8f5c8', fontFamily: 'monospace',
-          }}>
+          <h1 style={{ fontSize: '20px', fontWeight: 900, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c8f5c8', fontFamily: 'monospace' }}>
             <span style={{ color: '#00ff41' }}>◈</span> Viewer Goals
           </h1>
-          <p style={{ fontSize: '11px', color: '#4a6a4a', letterSpacing: '0.06em', marginTop: '2px' }}>
-            Progressbarer til OBS — automatisk oppdatering
+          <p style={{ fontSize: '10px', color: '#3a5a3a', letterSpacing: '0.06em', marginTop: '2px', fontFamily: 'monospace' }}>
+            Progressbarer til OBS — automatisk oppdatering hvert 30s
           </p>
         </div>
         {lastRefresh && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff41', boxShadow: '0 0 6px #00ff41', animation: 'pulse 2s infinite' }} />
-            <span style={{ fontSize: '10px', color: '#4a6a4a', fontFamily: 'monospace' }}>
-              Live · {lastRefresh.toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#00ff41', boxShadow: '0 0 6px #00ff41', animation: 'livePulse 2s infinite' }} />
+            <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>
+              {lastRefresh.toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           </div>
         )}
       </div>
 
-      {/* Live stat cards */}
+      {/* Live summary */}
       {(liveFollowers !== null || liveSubscribers !== null) && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
           <div style={{
             background: 'linear-gradient(135deg, #0d1117, #00ff4108)',
-            border: '1px solid #00ff4120',
-            borderRadius: '12px',
-            padding: '16px 20px',
-            textAlign: 'center',
+            border: '1px solid #00ff4120', borderRadius: '10px', padding: '14px 18px',
           }}>
-            <div style={{ fontSize: '10px', color: '#4a6a4a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace' }}>Følgere nå</div>
-            <div style={{ fontSize: '40px', fontWeight: 900, color: '#00ff41', fontFamily: 'monospace', lineHeight: 1.1, marginTop: '4px' }}>
-              {(liveFollowers ?? 0).toLocaleString('no-NO')}
+            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '6px' }}>Følgere nå</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+              <span style={{ fontSize: '36px', fontWeight: 900, color: '#00ff41', fontFamily: 'monospace', lineHeight: 1 }}>
+                {(liveFollowers ?? 0).toLocaleString('no-NO')}
+              </span>
+              {followerPct !== null && (
+                <span style={{ fontSize: '13px', color: '#00ff4180', fontFamily: 'monospace', fontWeight: 700 }}>{followerPct}%</span>
+              )}
             </div>
+            {followerGoal && (
+              <div style={{ marginTop: '8px' }}>
+                <SegmentBar pct={followerPct ?? 0} farge="#00ff41" />
+                <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginTop: '4px' }}>
+                  Mål: {followerGoal.mal.toLocaleString('no-NO')} følgere
+                </div>
+              </div>
+            )}
           </div>
           <div style={{
-            background: 'linear-gradient(135deg, #0d1117, #7b5ea708)',
-            border: '1px solid #7b5ea720',
-            borderRadius: '12px',
-            padding: '16px 20px',
-            textAlign: 'center',
+            background: 'linear-gradient(135deg, #0d1117, #9b77cf08)',
+            border: '1px solid #9b77cf20', borderRadius: '10px', padding: '14px 18px',
           }}>
-            <div style={{ fontSize: '10px', color: '#4a6a4a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace' }}>Subscribers nå</div>
+            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '6px' }}>Subscribers nå</div>
             {liveSubscribers !== null ? (
-              <div style={{ fontSize: '40px', fontWeight: 900, color: '#7b5ea7', fontFamily: 'monospace', lineHeight: 1.1, marginTop: '4px' }}>
+              <span style={{ fontSize: '36px', fontWeight: 900, color: '#9b77cf', fontFamily: 'monospace', lineHeight: 1 }}>
                 {liveSubscribers.toLocaleString('no-NO')}
-              </div>
+              </span>
             ) : (
-              <div style={{ fontSize: '12px', color: '#4a6a4a', marginTop: '8px', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '11px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>
                 Krever Affiliate<br/>+ broadcaster-token
               </div>
             )}
@@ -479,179 +352,87 @@ export default function ViewerGoalsPage() {
       )}
 
       {/* Goal cards */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {goals.map((g, i) => (
-          <GoalCard
-            key={g.type}
-            goal={g}
-            index={i}
-            onUpdate={updateGoal}
-            liveFollowers={liveFollowers}
-            liveSubscribers={liveSubscribers}
-          />
+          <GoalCard key={g.type} goal={g} index={i} onUpdate={updateGoal}
+            liveFollowers={liveFollowers} liveSubscribers={liveSubscribers} />
         ))}
       </div>
 
-      {/* Action row */}
+      {/* Actions */}
       <div style={{ display: 'flex', gap: '10px' }}>
-        <button
-          onClick={lagre}
-          style={{
-            flex: 1,
-            padding: '12px',
-            background: lagret ? '#00ff4115' : '#00ff410a',
-            border: `1px solid ${lagret ? '#00ff41' : '#00ff4130'}`,
-            borderRadius: '8px',
-            color: lagret ? '#00ff41' : '#c8f5c8',
-            fontSize: '11px',
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            transition: 'all 0.2s',
-          }}
-        >
+        <button onClick={lagre} style={{
+          flex: 1, padding: '11px', fontFamily: 'monospace', fontWeight: 700,
+          fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase',
+          background: lagret ? '#00ff4115' : '#00ff410a',
+          border: `1px solid ${lagret ? '#00ff41' : '#00ff4130'}`,
+          color: lagret ? '#00ff41' : '#c8f5c8',
+          borderRadius: '7px', cursor: 'pointer', transition: 'all 0.2s',
+        }}>
           {lagret ? '✓ Lagret' : '◆ Lagre mål'}
         </button>
-        <button
-          onClick={postTilDiscord}
-          disabled={posting}
-          style={{
-            flex: 1,
-            padding: '12px',
-            background: '#0d1117',
-            border: '1px solid #1a2f1a',
-            borderRadius: '8px',
-            color: '#4a6a4a',
-            fontSize: '11px',
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            cursor: posting ? 'not-allowed' : 'pointer',
-            fontFamily: 'monospace',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={e => { if (!posting) { e.currentTarget.style.borderColor = '#00ff4130'; e.currentTarget.style.color = '#00ff41'; }}}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2f1a'; e.currentTarget.style.color = '#4a6a4a'; }}
-        >
+        <button onClick={postTilDiscord} disabled={posting} style={{
+          flex: 1, padding: '11px', fontFamily: 'monospace', fontWeight: 700,
+          fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase',
+          background: '#0d1117', border: '1px solid #1a2f1a',
+          color: '#4a6a4a', borderRadius: '7px', cursor: posting ? 'not-allowed' : 'pointer', transition: 'all 0.2s',
+        }}>
           {posting ? 'Poster...' : '↗ Post til Discord'}
         </button>
       </div>
 
       {postRes && (
         <div style={{
-          padding: '8px 12px',
+          padding: '8px 12px', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace',
           background: postRes.startsWith('✓') ? '#00ff4110' : '#ff003310',
           border: `1px solid ${postRes.startsWith('✓') ? '#00ff4130' : '#ff003330'}`,
-          borderRadius: '6px',
           color: postRes.startsWith('✓') ? '#00ff41' : '#ff6b6b',
-          fontSize: '11px',
-          fontFamily: 'monospace',
-        }}>
-          {postRes}
-        </div>
+        }}>{postRes}</div>
       )}
 
       {/* OBS Section */}
       {overlayUrl && (
-        <div style={{
-          background: '#0d1117',
-          border: '1px solid #1a2f1a',
-          borderRadius: '12px',
-          overflow: 'hidden',
-        }}>
-          {/* Header */}
-          <div style={{
-            padding: '14px 20px',
-            borderBottom: '1px solid #1a2f1a',
-            display: 'flex', alignItems: 'center', gap: '8px',
-          }}>
-            <span style={{ fontSize: '10px', color: '#00ff41', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>
-              OBS Browser Source
-            </span>
-            <span style={{ fontSize: '10px', color: '#4a6a4a' }}>—</span>
-            <span style={{ fontSize: '10px', color: '#4a6a4a', fontFamily: 'monospace' }}>
-              {aktiveGoals.length} aktive mål · oppdaterer hvert 30. sek
-            </span>
+        <div style={{ background: '#0d1117', border: '1px solid #1a2f1a', borderRadius: '10px', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid #1a2f1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '10px', color: '#00ff41', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>OBS Browser Source</span>
+            <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>— {goals.filter(g => g.aktiv && g.mal > 0).length} aktive mål</span>
           </div>
 
-          {/* Preview */}
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a2f1a' }}>
-            <div style={{ fontSize: '9px', color: '#4a6a4a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>
-              Forhåndsvisning
-            </div>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
+            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', fontFamily: 'monospace' }}>Forhåndsvisning</div>
             <div style={{
-              borderRadius: '8px',
-              overflow: 'hidden',
-              border: '1px solid #1a2f1a',
-              position: 'relative',
-              minHeight: '140px',
-              backgroundImage: 'repeating-conic-gradient(#101820 0% 25%, #0a1218 0% 50%) 0 0 / 16px 16px',
+              borderRadius: '6px', overflow: 'hidden', border: '1px solid #1a2f1a',
+              minHeight: '130px',
+              backgroundImage: 'repeating-conic-gradient(#0e1a0e 0% 25%, #080f08 0% 50%) 0 0 / 14px 14px',
             }}>
-              <iframe
-                src={overlayUrl}
-                style={{ width: '100%', minHeight: '140px', border: 'none', display: 'block', background: 'transparent' }}
-                title="Goals overlay preview"
-              />
+              <iframe src={overlayUrl} style={{ width: '100%', minHeight: '130px', border: 'none', display: 'block', background: 'transparent' }} title="Goals overlay preview" />
             </div>
-            <p style={{ fontSize: '9px', color: '#4a6a4a', marginTop: '6px' }}>
-              Rutemønster = transparent bakgrunn — slik det ser ut i OBS over din stream.
+            <p style={{ fontSize: '9px', color: '#3a5a3a', marginTop: '5px', fontFamily: 'monospace' }}>
+              Rutemønster = transparent — slik ser det ut i OBS over din stream.
             </p>
           </div>
 
-          {/* URL + settings */}
-          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <div style={{ fontSize: '9px', color: '#4a6a4a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '6px' }}>
-                Browser Source URL
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <code style={{
-                  flex: 1, fontSize: '11px', color: '#00ff41', fontFamily: 'monospace',
-                  background: '#050505', border: '1px solid #1a2f1a', borderRadius: '6px',
-                  padding: '8px 12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {overlayUrl}
-                </code>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(overlayUrl); setKopiert(true); setTimeout(() => setKopiert(false), 2000); }}
-                  style={{
-                    padding: '8px 14px',
-                    background: kopiert ? '#00ff4115' : '#0d1117',
-                    border: `1px solid ${kopiert ? '#00ff41' : '#1a2f1a'}`,
-                    borderRadius: '6px',
-                    color: kopiert ? '#00ff41' : '#4a6a4a',
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {kopiert ? '✓ Kopiert' : 'Kopier'}
-                </button>
-              </div>
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <code style={{
+                flex: 1, fontSize: '11px', color: '#00ff41', fontFamily: 'monospace',
+                background: '#050505', border: '1px solid #1a2f1a', borderRadius: '5px',
+                padding: '7px 11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{overlayUrl}</code>
+              <button onClick={() => { navigator.clipboard.writeText(overlayUrl); setKopiert(true); setTimeout(() => setKopiert(false), 2000); }} style={{
+                padding: '7px 14px', background: kopiert ? '#00ff4115' : '#0d1117',
+                border: `1px solid ${kopiert ? '#00ff41' : '#1a2f1a'}`, borderRadius: '5px',
+                color: kopiert ? '#00ff41' : '#4a6a4a', fontSize: '11px', fontFamily: 'monospace',
+                cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s',
+              }}>
+                {kopiert ? '✓ Kopiert' : 'Kopier'}
+              </button>
             </div>
-
-            <div style={{
-              background: '#050505',
-              border: '1px solid #1a2f1a',
-              borderRadius: '6px',
-              padding: '10px 14px',
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '6px',
-            }}>
-              {[
-                ['Bredde', '380px'],
-                ['Høyde', '200px (autojuster)'],
-                ['FPS', '30'],
-                ['Innstillinger', 'Huk av «Transparent bakgrunn»'],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <span style={{ fontSize: '9px', color: '#4a6a4a', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{k}: </span>
-                  <span style={{ fontSize: '10px', color: '#c8f5c8', fontFamily: 'monospace' }}>{v}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px' }}>
+              {[['Bredde', '380px'], ['Høyde', '200px'], ['FPS', '30'], ['Huk av', '«Transparent bakgrunn»']].map(([k, v]) => (
+                <div key={k} style={{ fontSize: '10px', fontFamily: 'monospace' }}>
+                  <span style={{ color: '#3a5a3a' }}>{k}: </span>
+                  <span style={{ color: '#c8f5c8' }}>{v}</span>
                 </div>
               ))}
             </div>
@@ -660,10 +441,7 @@ export default function ViewerGoalsPage() {
       )}
 
       <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
+        @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
       `}</style>
     </div>
   );

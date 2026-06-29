@@ -78,8 +78,13 @@ export async function GET() {
     });
   }
 
-  // Use broadcaster user token (required for followers since Aug 2023)
-  const userToken = await getValidBroadcasterToken(wsId);
+  // Broadcaster user token required for followers since Aug 2023.
+  // Try Supabase-stored token first; fall back to Railway env var.
+  let userToken = await getValidBroadcasterToken(wsId);
+  if (!userToken) {
+    const envToken = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '');
+    if (envToken) userToken = envToken;
+  }
 
   let followers   = 0;
   let subscribers = -1;
@@ -89,6 +94,15 @@ export async function GET() {
       getFollowers(userToken, broadcasterId, clientId),
       getSubscribers(userToken, broadcasterId, clientId),
     ]);
+  }
+
+  // If still 0, try reading last snapshot from growth route data as fallback
+  if (followers === 0 && db) {
+    const { data: ws } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+    const snapshots: { ts: string; total: number }[] = ws?.settings_json?.follower_snapshots ?? [];
+    if (snapshots.length > 0) {
+      followers = snapshots[snapshots.length - 1].total;
+    }
   }
 
   const oppdatert = goals.map(g => {

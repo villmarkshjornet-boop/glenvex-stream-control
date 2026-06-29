@@ -1,209 +1,107 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
-interface Goal {
-  type: string;
-  label: string;
-  mal: number;
-  gjeldende: number;
-  aktiv: boolean;
+interface Goal { type: string; label: string; mal: number; gjeldende: number; aktiv: boolean; }
+
+const COLORS: Record<string, { main: string; dim: string }> = {
+  followers:   { main: '#00ff41', dim: '#00cc33' },
+  subscribers: { main: '#9b77cf', dim: '#7055aa' },
+  donations:   { main: '#ff7b47', dim: '#cc5522' },
+  viewers:     { main: '#00d4ff', dim: '#0099cc' },
+};
+const ICONS: Record<string, string> = {
+  followers: '◈', subscribers: '★', donations: '♥', viewers: '◉',
+};
+
+function SegBar({ pct, main, dim, segs = 16 }: { pct: number; main: string; dim: string; segs?: number }) {
+  const [rendered, setRendered] = useState(0);
+  useEffect(() => { const t = setTimeout(() => setRendered(pct), 400); return () => clearTimeout(t); }, [pct]);
+  const filled = Math.round((rendered / 100) * segs);
+
+  return (
+    <div style={{ display: 'flex', gap: '2px', height: '10px' }}>
+      {Array.from({ length: segs }, (_, i) => {
+        const f = i < filled;
+        const tip = i === filled - 1;
+        return (
+          <div key={i} style={{
+            flex: 1, borderRadius: '1.5px',
+            background: f ? (tip ? main : dim) : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${f ? main + '50' : 'rgba(255,255,255,0.05)'}`,
+            boxShadow: tip ? `0 0 6px ${main}, 0 0 12px ${main}60` : f ? `0 0 3px ${dim}40` : 'none',
+            transition: `all 0.06s ease ${i * 0.03}s`,
+            position: 'relative', overflow: 'hidden',
+          }}>
+            {f && <div style={{
+              position: 'absolute', inset: 0,
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 100%)',
+            }} />}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
-const ICONS: Record<string, string> = {
-  followers:   '◈',
-  subscribers: '★',
-  donations:   '♥',
-  viewers:     '◉',
-};
-
-const FARGER: Record<string, { fill: string; glow: string }> = {
-  followers:   { fill: '#00ff41', glow: 'rgba(0,255,65,0.6)' },
-  subscribers: { fill: '#9b77cf', glow: 'rgba(155,119,207,0.6)' },
-  donations:   { fill: '#ff7b47', glow: 'rgba(255,123,71,0.6)' },
-  viewers:     { fill: '#00d4ff', glow: 'rgba(0,212,255,0.6)' },
-};
-
-function GoalBar({ goal, visible }: { goal: Goal; visible: boolean }) {
-  const pct = goal.mal > 0 ? Math.min(100, (goal.gjeldende / goal.mal) * 100) : 0;
-  const [renderedPct, setRenderedPct] = useState(0);
-  const [counting, setCounting] = useState(false);
-  const prevGjeldende = useRef(goal.gjeldende);
-  const { fill, glow } = FARGER[goal.type] ?? { fill: '#00ff41', glow: 'rgba(0,255,65,0.6)' };
-  const icon = ICONS[goal.type] ?? '◈';
-
-  useEffect(() => {
-    if (!visible) return;
-    const t = setTimeout(() => {
-      setRenderedPct(pct);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [pct, visible]);
-
-  // Animate count on change
-  useEffect(() => {
-    if (prevGjeldende.current === goal.gjeldende) return;
-    setCounting(true);
-    const t = setTimeout(() => setCounting(false), 1200);
-    prevGjeldende.current = goal.gjeldende;
-    return () => clearTimeout(t);
-  }, [goal.gjeldende]);
-
-  const milestones = [25, 50, 75];
-  const reached100 = pct >= 100;
+function GoalRow({ g, visible, delay }: { g: Goal; visible: boolean; delay: number }) {
+  const pct = g.mal > 0 ? Math.min(100, Math.round((g.gjeldende / g.mal) * 100)) : 0;
+  const col = COLORS[g.type] ?? COLORS.followers;
+  const icon = ICONS[g.type] ?? '◈';
 
   return (
     <div style={{
-      position: 'relative',
-      padding: '10px 14px',
-      background: 'rgba(8, 10, 8, 0.82)',
-      backdropFilter: 'blur(8px)',
-      borderRadius: '6px',
-      borderLeft: `3px solid ${fill}`,
-      boxShadow: `inset 0 0 20px rgba(0,0,0,0.4), 0 2px 12px rgba(0,0,0,0.5)`,
-      overflow: 'hidden',
+      opacity: visible ? 1 : 0,
+      transform: visible ? 'translateX(0)' : 'translateX(-10px)',
+      transition: `opacity 0.5s ease ${delay}s, transform 0.5s ease ${delay}s`,
     }}>
-      {/* Subtle background gradient */}
       <div style={{
-        position: 'absolute', inset: 0,
-        background: `linear-gradient(135deg, ${fill}05 0%, transparent 60%)`,
-        pointerEvents: 'none',
-      }} />
-
-      {/* Top row */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'baseline',
-        marginBottom: '7px',
-        position: 'relative',
+        background: 'rgba(6, 10, 6, 0.85)',
+        backdropFilter: 'blur(10px)',
+        borderRadius: '5px',
+        borderLeft: `3px solid ${col.main}`,
+        padding: '9px 12px',
+        boxShadow: `0 2px 14px rgba(0,0,0,0.6), inset 0 0 24px rgba(0,0,0,0.3)`,
+        position: 'relative', overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-          <span style={{ fontSize: '11px', color: fill, fontFamily: 'monospace', fontWeight: 700 }}>{icon}</span>
-          <span style={{
-            fontSize: '11px',
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontWeight: 700,
-            color: 'rgba(200, 245, 200, 0.85)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.09em',
-          }}>
-            {goal.label}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-          <span style={{
-            fontSize: '18px',
-            fontFamily: '"JetBrains Mono", monospace',
-            fontWeight: 900,
-            color: fill,
-            textShadow: counting ? `0 0 12px ${fill}` : 'none',
-            transition: 'text-shadow 0.3s',
-          }}>
-            {goal.gjeldende.toLocaleString('no-NO')}
-          </span>
-          <span style={{
-            fontSize: '11px',
-            color: 'rgba(255,255,255,0.3)',
-            fontFamily: 'monospace',
-            fontWeight: 400,
-          }}>
-            / {goal.mal.toLocaleString('no-NO')}
-          </span>
-          <span style={{
-            fontSize: '11px',
-            fontFamily: 'monospace',
-            fontWeight: 900,
-            color: reached100 ? fill : 'rgba(255,255,255,0.5)',
-            marginLeft: '6px',
-          }}>
-            {Math.round(pct)}%
-          </span>
-        </div>
-      </div>
-
-      {/* Progress track */}
-      <div style={{
-        position: 'relative',
-        height: '8px',
-        background: 'rgba(255,255,255,0.05)',
-        borderRadius: '4px',
-        overflow: 'visible',
-        border: '1px solid rgba(255,255,255,0.05)',
-      }}>
-        {/* Fill bar */}
+        {/* Subtle bg tint */}
         <div style={{
-          position: 'absolute',
-          top: 0, left: 0, bottom: 0,
-          width: `${renderedPct}%`,
-          minWidth: renderedPct > 0 ? '6px' : '0',
-          borderRadius: '4px',
-          background: `linear-gradient(90deg, ${fill}80 0%, ${fill} 70%, #ffffff40 100%)`,
-          boxShadow: `0 0 10px ${glow}, 0 0 20px ${glow}50`,
-          transition: 'width 1.6s cubic-bezier(0.22, 1, 0.36, 1)',
-        }}>
-          {/* Shimmer */}
-          <div style={{
-            position: 'absolute',
-            top: 0, right: 0, bottom: 0,
-            width: '50%',
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)',
-            animation: 'sweep 3s ease-in-out infinite',
-          }} />
-
-          {/* Tip glow */}
-          {renderedPct > 2 && (
-            <div style={{
-              position: 'absolute',
-              right: '-2px', top: '-3px', bottom: '-3px',
-              width: '5px',
-              background: fill,
-              borderRadius: '3px',
-              boxShadow: `0 0 8px ${fill}, 0 0 16px ${fill}`,
-              animation: 'tipPulse 1.5s ease-in-out infinite',
-            }} />
-          )}
-        </div>
-
-        {/* Milestone ticks */}
-        {milestones.map(m => (
-          <div key={m} style={{
-            position: 'absolute',
-            left: `${m}%`,
-            top: '-3px', bottom: '-3px',
-            width: '1px',
-            background: renderedPct >= m ? fill + '60' : 'rgba(255,255,255,0.08)',
-            transition: 'background 0.5s 0.8s',
-          }} />
-        ))}
-      </div>
-
-      {/* 100% celebration overlay */}
-      {reached100 && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: `linear-gradient(90deg, transparent, ${fill}08, transparent)`,
-          animation: 'celebrate 2s ease-in-out infinite',
+          position: 'absolute', inset: 0,
+          background: `linear-gradient(110deg, ${col.main}04 0%, transparent 50%)`,
           pointerEvents: 'none',
         }} />
-      )}
 
-      <style>{`
-        @keyframes sweep {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(300%); }
-        }
-        @keyframes tipPulse {
-          0%, 100% { opacity: 1; box-shadow: 0 0 8px ${fill}, 0 0 16px ${fill}; }
-          50% { opacity: 0.7; box-shadow: 0 0 4px ${fill}, 0 0 8px ${fill}; }
-        }
-        @keyframes celebrate {
-          0%, 100% { opacity: 0; transform: translateX(-100%); }
-          50% { opacity: 1; transform: translateX(100%); }
-        }
-      `}</style>
+        {/* Row: icon + label + count */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '7px' }}>
+          <span style={{ fontSize: '10px', color: col.main, flexShrink: 0 }}>{icon}</span>
+          <span style={{
+            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.09em',
+            color: 'rgba(200,245,200,0.8)', fontFamily: '"JetBrains Mono", monospace', flex: 1,
+          }}>{g.label}</span>
+          <span style={{ fontSize: '20px', fontWeight: 900, color: col.main, fontFamily: 'monospace', lineHeight: 1 }}>
+            {g.gjeldende.toLocaleString('no-NO')}
+          </span>
+          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>
+            / {g.mal.toLocaleString('no-NO')}
+          </span>
+          <span style={{ fontSize: '11px', fontWeight: 900, color: pct >= 100 ? col.main : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', minWidth: '34px', textAlign: 'right' }}>
+            {pct}%
+          </span>
+        </div>
+
+        {/* Segmented bar */}
+        <SegBar pct={pct} main={col.main} dim={col.dim} />
+
+        {/* 100% flash overlay */}
+        {pct >= 100 && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: `linear-gradient(90deg, transparent, ${col.main}10, transparent)`,
+            animation: 'sweep 3s ease-in-out infinite',
+            pointerEvents: 'none',
+          }} />
+        )}
+      </div>
     </div>
   );
 }
@@ -213,13 +111,11 @@ export default function GoalsOverlay() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const hent = () => {
-      fetch('/api/goals/live').then(r => r.json()).then(d => {
-        const aktive = (d.goals ?? []).filter((g: Goal) => g.aktiv && g.mal > 0);
-        setGoals(aktive);
-        if (aktive.length > 0) setTimeout(() => setVisible(true), 100);
-      }).catch(() => {});
-    };
+    const hent = () => fetch('/api/goals/live').then(r => r.json()).then(d => {
+      const aktive = (d.goals ?? []).filter((g: Goal) => g.aktiv && g.mal > 0);
+      setGoals(aktive);
+      if (aktive.length > 0) setTimeout(() => setVisible(true), 80);
+    }).catch(() => {});
     hent();
     const id = setInterval(hent, 30_000);
     return () => clearInterval(id);
@@ -230,31 +126,12 @@ export default function GoalsOverlay() {
   return (
     <>
       <style>{`
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: transparent !important; }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:transparent!important}
+        @keyframes sweep{0%,100%{opacity:0;transform:translateX(-100%)}50%{opacity:1;transform:translateX(100%)}}
       `}</style>
-      <div style={{
-        width: '370px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '6px',
-        padding: '4px',
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(8px)',
-        transition: 'opacity 0.6s ease, transform 0.6s ease',
-      }}>
-        {goals.map((g, i) => (
-          <div
-            key={g.type}
-            style={{
-              opacity: visible ? 1 : 0,
-              transform: visible ? 'translateX(0)' : 'translateX(-12px)',
-              transition: `opacity 0.5s ease ${i * 0.12}s, transform 0.5s ease ${i * 0.12}s`,
-            }}
-          >
-            <GoalBar goal={g} visible={visible} />
-          </div>
-        ))}
+      <div style={{ width: '370px', display: 'flex', flexDirection: 'column', gap: '5px', padding: '3px' }}>
+        {goals.map((g, i) => <GoalRow key={g.type} g={g} visible={visible} delay={i * 0.1} />)}
       </div>
     </>
   );
