@@ -182,10 +182,11 @@ function TokenStatus({ status }: { status: 'ok' | 'missing' | 'snapshot' | null 
 
 /* ─── Page ─── */
 export default function ViewerGoalsPage() {
-  const [goals, setGoals]         = useState<Goal[]>(DEFAULT_GOALS);
-  const [liveF, setLiveF]         = useState<number | null>(null);
-  const [liveSub, setLiveSub]     = useState<number | null>(null);
-  const [tokenStatus, setToken]   = useState<'ok' | 'missing' | 'snapshot' | null>(null);
+  const [goals, setGoals]           = useState<Goal[]>(DEFAULT_GOALS);
+  const [liveF, setLiveF]           = useState<number | null>(null);
+  const [liveSub, setLiveSub]       = useState<number | null>(null);
+  const [canReadSub, setCanReadSub] = useState<boolean | null>(null);
+  const [tokenStatus, setToken]     = useState<'ok' | 'missing' | 'snapshot' | null>(null);
   const [overlayUrl, setOverlayUrl] = useState('');
   const [workspaceId, setWsId]    = useState('');
   const [lagret, setLagret]       = useState(false);
@@ -202,22 +203,14 @@ export default function ViewerGoalsPage() {
 
   useEffect(() => {
     fetch('/api/goals/live').then(r => r.json()).then(d => {
-      // Token status
-      if (d.live?.followers > 0) setToken('ok');
-      else if (d.live?.fromSnapshot) setToken('snapshot');
-      else if (d.connected === false) setToken(null);
-      else setToken('missing');
+      setToken(d.tokenStatus ?? null);
 
       if (d.live) {
         if (typeof d.live.followers === 'number' && d.live.followers > 0) setLiveF(d.live.followers);
-        if (d.live.harSubData) setLiveSub(d.live.subscribers);
+        setCanReadSub(d.live.canReadSubscribers ?? false);
+        if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
       }
-      if (d.goals?.length > 0) {
-        setGoals(d.goals.map((g: any) => ({
-          ...DEFAULT_GOALS.find(dg => dg.type === g.type) ?? { icon: '◆', farge: '#00ff41', manuell: true },
-          ...g,
-        })));
-      }
+      if (d.goals?.length > 0) setGoals(d.goals);
       setLast(new Date());
     }).catch(() => {});
 
@@ -233,8 +226,9 @@ export default function ViewerGoalsPage() {
   useEffect(() => {
     const id = setInterval(() => {
       fetch('/api/goals/live').then(r => r.json()).then(d => {
-        if (d.live?.followers > 0) { setLiveF(d.live.followers); setToken('ok'); }
-        if (d.live?.harSubData) setLiveSub(d.live.subscribers);
+        setToken(d.tokenStatus ?? null);
+        if (d.live?.followers > 0) setLiveF(d.live.followers);
+        if (d.live?.canReadSubscribers) setLiveSub(d.live.subscribers);
         setLast(new Date());
       }).catch(() => {});
     }, 30_000);
@@ -306,7 +300,9 @@ export default function ViewerGoalsPage() {
             <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Subscribers nå</div>
             {liveSub !== null
               ? <div style={{ fontSize: '36px', fontWeight: 900, color: '#9b77cf', fontFamily: 'monospace', lineHeight: 1 }}>{liveSub.toLocaleString('no-NO')}</div>
-              : <div style={{ fontSize: '11px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>Krever Affiliate<br/>+ broadcaster-token</div>}
+              : <div style={{ fontSize: '11px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>
+                  {canReadSub === false ? 'Krever Affiliate + broadcaster-token' : 'Laster...'}
+                </div>}
           </div>
         </div>
       )}

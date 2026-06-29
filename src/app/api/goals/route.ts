@@ -5,17 +5,18 @@ import { getWorkspaceId } from '@/lib/workspace';
 export const dynamic = 'force-dynamic';
 
 export interface Goal {
-  type: 'followers' | 'subscribers' | 'viewers';
+  type: string;
   label: string;
   mal: number;
   gjeldende: number;
   aktiv: boolean;
+  farge?: string;
 }
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers', label: 'Følgere', mal: 1000, gjeldende: 0, aktiv: true },
-  { type: 'subscribers', label: 'Subscribers', mal: 50, gjeldende: 0, aktiv: true },
-  { type: 'viewers', label: 'Seere (snitt)', mal: 20, gjeldende: 0, aktiv: false },
+  { type: 'followers',   label: 'Følgere',     mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41' },
+  { type: 'subscribers', label: 'Subscribers', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf' },
+  { type: 'donations',   label: 'Donasjoner',  mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47' },
 ];
 
 async function loadGoals(): Promise<Goal[]> {
