@@ -1,18 +1,29 @@
 import { getDb } from '@/lib/db';
 
 /**
- * Returns a valid broadcaster user token by reading twitch_access_token from Supabase.
- * Auto-refreshes using twitch_refresh_token if the stored token is expired (401).
- * Saves refreshed tokens back to Supabase.
+ * Returns a valid broadcaster user token. Tries 3 sources in order:
+ * 1. TWITCH_USER_OAUTH env var (Railway-set, fastest — no Supabase needed)
+ * 2. twitch_access_token from Supabase workspace (with auto-refresh on 401)
  *
- * Required since Aug 2023: /helix/channels/followers needs a broadcaster user token —
- * app access tokens (client credentials) no longer work for this endpoint.
+ * Required since Aug 2023: /helix/channels/followers needs a broadcaster
+ * user token — app access tokens (client credentials) no longer work.
  */
 export async function getValidBroadcasterToken(workspaceId: string): Promise<string | null> {
   const clientId     = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
 
+  // ── 1. Try TWITCH_USER_OAUTH env var (set in Railway) ─────────────────
+  const envToken = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '').trim();
+  if (envToken) {
+    const valid = await fetch('https://id.twitch.tv/oauth2/validate', {
+      headers: { Authorization: `OAuth ${envToken}` },
+      signal: AbortSignal.timeout(4000),
+    }).then(r => r.ok).catch(() => false);
+    if (valid) return envToken;
+  }
+
+  // ── 2. Try Supabase stored token, auto-refresh if expired ─────────────
   const db = getDb();
   if (!db) return null;
 
@@ -24,15 +35,13 @@ export async function getValidBroadcasterToken(workspaceId: string): Promise<str
 
   if (!ws?.twitch_access_token) return null;
 
-  // Validate the stored token
   const testRes = await fetch('https://id.twitch.tv/oauth2/validate', {
     headers: { Authorization: `OAuth ${ws.twitch_access_token}` },
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(4000),
   }).catch(() => null);
 
   if (testRes?.ok) return ws.twitch_access_token;
 
-  // Token invalid — try to refresh
   if (!ws.twitch_refresh_token) return null;
 
   const refreshRes = await fetch('https://id.twitch.tv/oauth2/token', {

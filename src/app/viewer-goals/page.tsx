@@ -13,6 +13,8 @@ interface Goal {
   manuell?: boolean;
 }
 
+const FARGE_OPTIONS = ['#00ff41', '#9b77cf', '#ff7b47', '#00d4ff', '#ffd700', '#ff4466', '#44ffcc'];
+
 const DEFAULT_GOALS: Goal[] = [
   { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false },
   { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false },
@@ -170,22 +172,23 @@ function GoalCard({ goal, index, onUpdate, liveFollowers, liveSubscribers }: {
               </div>
 
               {/* Edit row */}
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px', fontFamily: 'monospace' }}>
-                    {goal.manuell ? 'Gjeldende' : 'Gjeldende (auto)'}
+                    Tekst / Navn
                   </div>
                   <input
-                    type="number" value={gjeldende} disabled={!goal.manuell}
-                    onChange={e => goal.manuell && onUpdate(index, { gjeldende: +e.target.value })}
+                    type="text" value={goal.label}
+                    onChange={e => onUpdate(index, { label: e.target.value })}
                     style={{
                       width: '100%', background: '#050505',
-                      border: `1px solid ${goal.manuell ? goal.farge + '30' : '#141f14'}`,
+                      border: `1px solid #1a2f1a`,
                       borderRadius: '5px', padding: '6px 10px',
-                      fontSize: '13px', color: goal.manuell ? '#c8f5c8' : '#3a5a3a',
+                      fontSize: '12px', color: '#c8f5c8',
                       fontFamily: 'monospace', outline: 'none',
-                      cursor: goal.manuell ? 'text' : 'default',
                     }}
+                    onFocus={e => e.target.style.borderColor = goal.farge + '50'}
+                    onBlur={e => e.target.style.borderColor = '#1a2f1a'}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
@@ -205,6 +208,44 @@ function GoalCard({ goal, index, onUpdate, liveFollowers, liveSubscribers }: {
                     onFocus={e => e.target.style.borderColor = goal.farge + '50'}
                     onBlur={e => e.target.style.borderColor = '#1a2f1a'}
                   />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px', fontFamily: 'monospace' }}>
+                    {goal.manuell ? 'Gjeldende' : 'Gjeldende (auto-hentet)'}
+                  </div>
+                  <input
+                    type="number" value={gjeldende} disabled={!goal.manuell}
+                    onChange={e => goal.manuell && onUpdate(index, { gjeldende: +e.target.value })}
+                    style={{
+                      width: '100%', background: '#050505',
+                      border: `1px solid ${goal.manuell ? goal.farge + '30' : '#141f14'}`,
+                      borderRadius: '5px', padding: '6px 10px',
+                      fontSize: '13px', color: goal.manuell ? '#c8f5c8' : '#3a5a3a',
+                      fontFamily: 'monospace', outline: 'none',
+                      cursor: goal.manuell ? 'text' : 'default',
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px', fontFamily: 'monospace' }}>
+                    Farge
+                  </div>
+                  <div style={{ display: 'flex', gap: '5px', paddingTop: '4px' }}>
+                    {FARGE_OPTIONS.map(f => (
+                      <button key={f} onClick={() => onUpdate(index, { farge: f })}
+                        title={f}
+                        style={{
+                          width: '22px', height: '22px', borderRadius: '4px',
+                          background: f, border: `2px solid ${goal.farge === f ? '#fff' : 'transparent'}`,
+                          cursor: 'pointer', flexShrink: 0,
+                          boxShadow: goal.farge === f ? `0 0 6px ${f}` : 'none',
+                          transition: 'all 0.15s',
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </>
@@ -354,9 +395,37 @@ export default function ViewerGoalsPage() {
       {/* Goal cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {goals.map((g, i) => (
-          <GoalCard key={g.type} goal={g} index={i} onUpdate={updateGoal}
+          <GoalCard key={g.type + i} goal={g} index={i} onUpdate={updateGoal}
             liveFollowers={liveFollowers} liveSubscribers={liveSubscribers} />
         ))}
+
+        {/* Add custom goal */}
+        <button
+          onClick={() => setGoals(prev => [...prev, {
+            type: `custom_${Date.now()}`,
+            label: 'Nytt mål',
+            icon: '◆',
+            mal: 100,
+            gjeldende: 0,
+            aktiv: true,
+            farge: FARGE_OPTIONS[prev.length % FARGE_OPTIONS.length],
+            manuell: true,
+          }])}
+          style={{
+            padding: '11px',
+            background: 'transparent',
+            border: '1px dashed #1a2f1a',
+            borderRadius: '10px',
+            color: '#3a5a3a',
+            fontSize: '11px', fontFamily: 'monospace', fontWeight: 700,
+            letterSpacing: '0.1em', textTransform: 'uppercase',
+            cursor: 'pointer', transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#00ff4140'; e.currentTarget.style.color = '#00ff41'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2f1a'; e.currentTarget.style.color = '#3a5a3a'; }}
+        >
+          + Legg til eget mål
+        </button>
       </div>
 
       {/* Actions */}

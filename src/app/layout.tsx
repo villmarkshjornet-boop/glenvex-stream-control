@@ -11,16 +11,21 @@ export const metadata: Metadata = {
   description: 'Twitch + Discord command center for GLENVEX',
 };
 
-const FULL_PAGE_PATHS = ['/login', '/onboarding'];
+const FULL_PAGE_PATHS = ['/login', '/onboarding', '/overlay'];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = headers().get('x-pathname') ?? '';
   const isFullPage = FULL_PAGE_PATHS.some(p => pathname.startsWith(p));
 
-  if (isFullPage) {
+  const isOverlay = pathname.startsWith('/overlay');
+
+  if (isFullPage || isOverlay) {
     return (
       <html lang="no">
-        <body className="bg-g-bg text-g-text">{children}</body>
+        <body style={isOverlay ? { margin: 0, padding: 0, background: 'transparent', overflow: 'hidden' } : undefined}
+              className={isOverlay ? '' : 'bg-g-bg text-g-text'}>
+          {children}
+        </body>
       </html>
     );
   }
