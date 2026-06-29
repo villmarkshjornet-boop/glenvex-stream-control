@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { getValidBroadcasterToken } from '@/lib/twitchUserToken';
@@ -43,8 +43,10 @@ async function getSubscribers(token: string, broadcasterId: string, clientId: st
   } catch { return -1; }
 }
 
-export async function GET() {
-  const wsId = getWorkspaceId();
+export async function GET(req: NextRequest) {
+  // Allow unauthenticated OBS requests to specify their workspace via ?ws=
+  const wsParam = req.nextUrl.searchParams.get('ws');
+  const wsId    = wsParam || getWorkspaceId();
   const db   = getDb();
   const clientId = process.env.TWITCH_CLIENT_ID ?? '';
 
