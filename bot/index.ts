@@ -2,6 +2,7 @@ import {
   Client, GatewayIntentBits, Collection, Interaction,
   TextChannel, EmbedBuilder, ActionRowBuilder, ButtonBuilder,
   ButtonStyle, ThreadChannel, ButtonInteraction,
+  REST, Routes,
 } from 'discord.js';
 import { liveCommand } from './commands/live';
 import { twitchCommand } from './commands/twitch';
@@ -1964,27 +1965,72 @@ client.once('clientReady', () => {
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
 
-  // Post startup changelog to admin channel (delayed 15s to let channels populate)
+  // ── Auto-registrer slash-kommandoer ved oppstart ──────────────────────────
+  (async () => {
+    try {
+      const rest = new REST({ version: '10' }).setToken(token);
+      const commandData = [
+        liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand,
+        socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand,
+      ].map(c => c.data.toJSON());
+
+      const clientId = process.env.DISCORD_CLIENT_ID ?? '';
+      const guildId  = process.env.DISCORD_GUILD_ID ?? '';
+      if (!clientId) { console.warn('[deploy] DISCORD_CLIENT_ID mangler — hopper over slash-registrering'); return; }
+
+      if (guildId) {
+        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandData });
+        console.log(`[deploy] ✓ ${commandData.length} slash-kommandoer registrert på guild ${guildId}`);
+      } else {
+        await rest.put(Routes.applicationCommands(clientId), { body: commandData });
+        console.log(`[deploy] ✓ ${commandData.length} globale slash-kommandoer registrert (effektiv om ~1 time)`);
+      }
+    } catch (e) {
+      console.error('[deploy] ✗ Slash-registrering feilet:', e);
+    }
+  })();
+
+  // ── Rydd bot-logs-kanalen og post nytt startup-embed ─────────────────────
   setTimeout(async () => {
     try {
       const adminKanal = await finnAdminKanal();
       if (!adminKanal) return;
-      const { EmbedBuilder: StartEmbed } = await import('discord.js');
-      const embed = new StartEmbed()
+
+      // Slett ALLE tidligere meldinger i kanalen (kun siste startup skal vises)
+      let slettet = 0;
+      let fortsett = true;
+      while (fortsett) {
+        const meldinger = await adminKanal.messages.fetch({ limit: 100 });
+        if (meldinger.size === 0) { fortsett = false; break; }
+        // bulkDelete fungerer kun for meldinger < 14 dager gamle
+        const bulk = meldinger.filter(m => Date.now() - m.createdTimestamp < 13 * 24 * 60 * 60 * 1000);
+        const gamle = meldinger.filter(m => Date.now() - m.createdTimestamp >= 13 * 24 * 60 * 60 * 1000);
+        if (bulk.size > 0) await adminKanal.bulkDelete(bulk).catch(() => {});
+        for (const m of gamle.values()) await m.delete().catch(() => {});
+        slettet += meldinger.size;
+        if (meldinger.size < 100) fortsett = false;
+      }
+      console.log(`[startup] Ryddet bot-logs: ${slettet} meldinger slettet`);
+
+      // Post nytt startup-embed som eneste melding i kanalen
+      const embed = new EmbedBuilder()
         .setColor(0x00ff41)
         .setTitle(`🤖 ${BOT_BRAND} er klar`)
         .setDescription(
-          '**Siste oppdateringer:**\n' +
-          '• Poll Learning Engine V1 — GLENVEX kjører nå polls automatisk under stream\n' +
-          '• Live Agent V2 — kontinuerlig AI-produsent starter når du går live\n' +
-          '• Clip-copy roterer — norske tekster, aldri samme to ganger\n' +
-          '• Twitch auth retry — automatisk fornyer token ved 401\n' +
-          '• FutureRP/GTA-spam fjernet\n' +
-          '\n_Alle moduler er aktive. BOT_STARTED loggett._'
+          '**Aktive moduler:**\n' +
+          '• Slash-kommandoer registrert automatisk ved oppstart\n' +
+          '• Live Agent V2 — AI-produsent starter når du går live\n' +
+          '• Poll Manager — kontekst-baserte polls under stream\n' +
+          '• Partner promo — automatisk rotasjon Twitch + Discord\n' +
+          '• Lurker-engasjement — aktiverer ved stille chat\n' +
+          '• Broadcaster-token — auto-refresh ved utløp\n' +
+          '\n_Alle moduler aktive. Denne kanalen nullstilles ved hver restart._'
         )
         .setFooter({ text: `GLENVEX Creator OS • ${new Date().toLocaleString('no-NO', { timeZone: 'Europe/Oslo' })}` });
       await adminKanal.send({ embeds: [embed] });
-    } catch {}
+    } catch (e) {
+      console.error('[startup] Feil ved rydding av bot-logs:', e);
+    }
   }, 15_000);
   lasterMedlemmerFraSupabase().catch(() => {});
 
