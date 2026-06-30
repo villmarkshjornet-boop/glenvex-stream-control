@@ -18,18 +18,16 @@ import {
   byggPersonaEmbed,
   REROLL_XP_COST,
   RARITY_COLOR,
-  PersonaCard,
+  RARITY_BANNER,
 } from '../lib/personaService';
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
 
-// ── Helper: bygg knapperaden ───────────────────────────────────────────────────
-
-function lagKnappeRad(kortId: string, harNokXP: boolean, xp: number): ActionRowBuilder<ButtonBuilder> {
+function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`persona_reroll_${kortId}`)
-      .setLabel(`🔁 Reroll persona (${REROLL_XP_COST} XP)`)
+      .setLabel(`🔁 Reroll (${REROLL_XP_COST} XP)`)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!harNokXP),
     new ButtonBuilder()
@@ -39,15 +37,13 @@ function lagKnappeRad(kortId: string, harNokXP: boolean, xp: number): ActionRowB
   );
 }
 
-// ── Kommando ───────────────────────────────────────────────────────────────────
-
 export const personaCommand = {
   data: new SlashCommandBuilder()
     .setName('persona')
-    .setDescription('Generer din AI Persona Card — din unike GLENVEX-karakter.')
+    .setDescription('Generer din AI Persona Card — ditt unike GLENVEX samlekort.')
     .addBooleanOption(opt =>
       opt.setName('reroll')
-        .setDescription(`Reroll persona for ${REROLL_XP_COST} XP? (kun hvis du har eksisterende)`)
+        .setDescription(`Reroll persona for ${REROLL_XP_COST} XP?`)
         .setRequired(false),
     ),
 
@@ -63,38 +59,41 @@ export const personaCommand = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    // Vis eksisterende persona hvis bruker ikke ber om reroll
+    // Vis eksisterende persona
     if (!erReroll) {
       const eksisterende = await hentSistePersona(user.id);
       if (eksisterende) {
-        const embed = byggPersonaEmbed(eksisterende.card, eksisterende.imageUrl, user.username, eksisterende.rerollCount);
-        const harNokXP  = member.xp >= REROLL_XP_COST;
-        const knappeRad = lagKnappeRad(user.id, harNokXP, member.xp);
+        const embed     = byggPersonaEmbed(eksisterende.card, eksisterende.imageUrl, user.username, eksisterende.rerollCount, member!, eksisterende.collectionNumber);
+        const harNokXP  = member!.xp >= REROLL_XP_COST;
+        const knappeRad = lagKnappeRad(user.id, harNokXP);
+
+        const rarityFarge = RARITY_COLOR[eksisterende.card.rarity];
+        const rarityBanner = RARITY_BANNER[eksisterende.card.rarity];
 
         const infoEmbed = new EmbedBuilder()
-          .setColor(0x1a1a2e)
+          .setColor(rarityFarge)
           .setDescription(
-            `Dette er din eksisterende **${eksisterende.card.rarity}**-persona for denne sesongen.\n` +
-            `Du har **${member.xp} XP**. Reroll koster **${REROLL_XP_COST} XP**.`
+            `Ditt aktive ${rarityBanner}-kort for denne sesongen.\n` +
+            `**${member!.xp} XP** · Reroll koster **${REROLL_XP_COST} XP**`
           );
 
-        await interaction.editReply({ embeds: [infoEmbed, embed], components: [knappeRad] });
+        await interaction.editReply({ embeds: [infoEmbed, embed as any], components: [knappeRad] });
         return;
       }
     }
 
-    // Generer ny persona
+    // Ventemelding
     const venteEmbed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('🎭 AI Persona Generator')
+      .setTitle('🎴 GLENVEX Persona Generator')
       .setDescription(
         erReroll
-          ? `Regenererer din persona... Dette tar 10–30 sekunder ⏳`
-          : `Analyserer din Discord-aktivitet og genererer din unike persona...\n\nDette tar 10–30 sekunder ⏳`
+          ? `Regenererer samlekort... **${REROLL_XP_COST} XP** trekkes. ⏳`
+          : `Analyserer din Discord-aktivitet og genererer ditt unike samlekort...\n\n10–30 sekunder ⏳`
       );
     await interaction.editReply({ embeds: [venteEmbed] });
 
-    const resultat = await genererPersona(member, erReroll);
+    const resultat = await genererPersona(member!, erReroll);
 
     if ('feil' in resultat) {
       const feilEmbed = new EmbedBuilder()
@@ -105,25 +104,24 @@ export const personaCommand = {
       return;
     }
 
-    const embed     = byggPersonaEmbed(resultat.card, resultat.imageUrl, user.username, resultat.rerollCount);
-    const harNokXP  = (member.xp - resultat.xpCost) >= REROLL_XP_COST;
-    const knappeRad = lagKnappeRad(user.id, harNokXP, member.xp - resultat.xpCost);
+    const embed     = byggPersonaEmbed(resultat.card, resultat.imageUrl, user.username, resultat.rerollCount, member!, resultat.collectionNumber);
+    const harNokXP  = (member!.xp - resultat.xpCost) >= REROLL_XP_COST;
+    const knappeRad = lagKnappeRad(user.id, harNokXP);
 
     let toppTekst = '';
     if (resultat.ersteGang) {
-      toppTekst = `🎉 **${user.username}** — din første GLENVEX Persona Card er her!`;
+      toppTekst = `🎴 **${user.username}** — ditt første GLENVEX Persona Card er generert! Card #${String(resultat.collectionNumber).padStart(3, '0')}`;
     } else if (erReroll) {
-      toppTekst = `🔁 **${user.username}** rerollet persona (-${REROLL_XP_COST} XP). Ny sjeldenhet: **${resultat.card.rarity}**!`;
+      toppTekst = `🔁 Rerollet! Ny sjeldenhet: **${resultat.card.rarity}** · Card #${String(resultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`;
     }
 
     await interaction.editReply({
       content:    toppTekst || undefined,
-      embeds:     [embed],
+      embeds:     [embed as any],
       components: [knappeRad],
     });
 
-    // Lytt til knappetrykk (60s vindu)
-    const msg = await interaction.fetchReply();
+    const msg       = await interaction.fetchReply();
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       time: 60_000,
@@ -133,47 +131,40 @@ export const personaCommand = {
     collector.on('collect', async (btn: ButtonInteraction) => {
       await btn.deferUpdate();
 
-      // ── Reroll ────────────────────────────────────────────────────────────────
       if (btn.customId.startsWith('persona_reroll_')) {
         const oppdatertMedlem = getMember(user.id) ?? member!;
 
         const venteRe = new EmbedBuilder()
           .setColor(0x00ff41)
-          .setTitle('🔁 Regenererer persona...')
-          .setDescription(`Koster ${REROLL_XP_COST} XP. Vennligst vent... ⏳`);
+          .setTitle('🔁 Regenererer kort...')
+          .setDescription(`Koster ${REROLL_XP_COST} XP · Vennligst vent... ⏳`);
         await btn.editReply({ embeds: [venteRe], components: [] });
 
         const nyResultat = await genererPersona(oppdatertMedlem, true);
 
         if ('feil' in nyResultat) {
-          const feilEmbed = new EmbedBuilder()
-            .setColor(0xff3333)
-            .setDescription(nyResultat.feil);
-          await btn.editReply({ embeds: [feilEmbed], components: [] });
+          await btn.editReply({ embeds: [new EmbedBuilder().setColor(0xff3333).setDescription(nyResultat.feil)], components: [] });
           return;
         }
 
-        const nyEmbed    = byggPersonaEmbed(nyResultat.card, nyResultat.imageUrl, user.username, nyResultat.rerollCount);
+        const nyEmbed   = byggPersonaEmbed(nyResultat.card, nyResultat.imageUrl, user.username, nyResultat.rerollCount, oppdatertMedlem, nyResultat.collectionNumber);
         const nyHarNokXP = (oppdatertMedlem.xp - nyResultat.xpCost) >= REROLL_XP_COST;
-        const nyKnapper  = lagKnappeRad(user.id, nyHarNokXP, oppdatertMedlem.xp - nyResultat.xpCost);
 
         await btn.editReply({
-          content:    `🔁 Rerollet! Ny sjeldenhet: **${nyResultat.card.rarity}** (-${REROLL_XP_COST} XP)`,
-          embeds:     [nyEmbed],
-          components: [nyKnapper],
+          content:    `🔁 Rerollet! Ny sjeldenhet: **${nyResultat.card.rarity}** · Card #${String(nyResultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
+          embeds:     [nyEmbed as any],
+          components: [lagKnappeRad(user.id, nyHarNokXP)],
         });
         return;
       }
 
-      // ── Del i showcase ─────────────────────────────────────────────────────────
       if (btn.customId.startsWith('persona_share_')) {
         try {
           if (!SHOWCASE_KANAL_ID) {
             await btn.followUp({ content: '⚠️ Showcase-kanal er ikke satt opp (DISCORD_PERSONA_SHOWCASE_CHANNEL_ID).', ephemeral: true });
             return;
           }
-          const guild   = btn.guild;
-          const kanal   = guild?.channels.cache.get(SHOWCASE_KANAL_ID) as any;
+          const kanal = btn.guild?.channels.cache.get(SHOWCASE_KANAL_ID) as any;
           if (!kanal?.isTextBased?.()) {
             await btn.followUp({ content: '⚠️ Fant ikke showcase-kanalen.', ephemeral: true });
             return;
@@ -182,13 +173,14 @@ export const personaCommand = {
           const sistePersona = await hentSistePersona(user.id);
           if (!sistePersona) return;
 
-          const shareEmbed = byggPersonaEmbed(sistePersona.card, sistePersona.imageUrl, user.username, sistePersona.rerollCount);
+          const currentMember = getMember(user.id) ?? member!;
+          const shareEmbed = byggPersonaEmbed(sistePersona.card, sistePersona.imageUrl, user.username, sistePersona.rerollCount, currentMember, sistePersona.collectionNumber);
           await kanal.send({
-            content: `🎭 <@${user.id}> deler sin **${sistePersona.card.rarity}** Persona Card!`,
-            embeds:  [shareEmbed],
+            content: `🎴 <@${user.id}> deler sitt **${sistePersona.card.rarity}** Persona Card!  ${RARITY_BANNER[sistePersona.card.rarity]}`,
+            embeds:  [shareEmbed as any],
           });
 
-          await btn.followUp({ content: '✅ Persona delt i showcase-kanalen!', ephemeral: true });
+          await btn.followUp({ content: '✅ Persona Card delt i showcase!', ephemeral: true });
         } catch (e: any) {
           await btn.followUp({ content: `⚠️ Klarte ikke å dele: ${e.message}`, ephemeral: true });
         }

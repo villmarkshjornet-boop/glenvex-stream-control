@@ -288,7 +288,7 @@ export function addMessageXP(
   content: string,
   cooldownMs = DEFAULT_COOLDOWN_MS,
   minLength = 4,
-): { leveledUp: boolean; newLevel: number; xpGitt: number; dagligBonus: boolean } | null {
+): { leveledUp: boolean; newLevel: number; xpGitt: number; dagligBonus: boolean; nyeBadges: string[] } | null {
 
   // Bot command filter
   if (content.startsWith('/') || content.startsWith('!')) {
@@ -366,7 +366,7 @@ export function addMessageXP(
   m.level = levelFromXP(m.xp);
   m.lastSeen = new Date().toISOString();
 
-  checkAllBadges(m);
+  const nyeBadges = checkAllBadges(m);
   updateStreak(m);
 
   members[id] = m;
@@ -393,7 +393,65 @@ export function addMessageXP(
     });
   }
 
-  return { leveledUp, newLevel: m.level, xpGitt: xpTildelt, dagligBonus };
+  return { leveledUp, newLevel: m.level, xpGitt: xpTildelt, dagligBonus, nyeBadges };
+}
+
+// ─── Twitch XP (bruker tw_-prefiks for å unngå kollisjon med Discord snowflakes) ──
+
+export function addTwitchMessageXP(
+  twitchUserId: string,
+  twitchUsername: string,
+  content: string,
+): { leveledUp: boolean; newLevel: number; xpGitt: number; dagligBonus: boolean; nyeBadges: string[] } | null {
+
+  if (!content || content.length < 2) return null;
+
+  const id          = `tw_${twitchUserId}`;
+  const displayName = twitchUsername;
+  const normalized  = content.trim().toLowerCase();
+
+  const last = messageCooldowns.get(id);
+  if (last && Date.now() - last < DEFAULT_COOLDOWN_MS) return null;
+  messageCooldowns.set(id, Date.now());
+
+  const members = load();
+  const m: MemberProfile = members[id] ?? {
+    id, username: twitchUsername, displayName,
+    twitchId: twitchUserId, xp: 0, level: 1,
+    messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
+    subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
+    streakDays: 0, lastStreakDate: null,
+    joinedAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
+    lastWelcomed: null, badges: [],
+  };
+
+  const oldLevel = m.level;
+
+  let xpTildelt = XP_PER_MESSAGE;
+  if (normalized.length > 60) xpTildelt += XP_LANG_MELDING;
+
+  const i_dag        = new Date().toISOString().slice(0, 10);
+  const dagligBonus  = m.lastSeen?.slice(0, 10) !== i_dag;
+  if (dagligBonus) xpTildelt += XP_DAGLIG_BONUS;
+
+  const streakBonus = Math.min(0.5, m.streakDays * XP_STREAK_MULT);
+  xpTildelt = Math.round(xpTildelt * (1 + streakBonus));
+
+  m.xp       += xpTildelt;
+  m.messages += 1;
+  m.level     = levelFromXP(m.xp);
+  m.lastSeen  = new Date().toISOString();
+
+  const nyeBadges = checkAllBadges(m);
+  updateStreak(m);
+
+  members[id] = m;
+  computeScores(m);
+  save(members);
+  syncToSupabase(m);
+
+  const leveledUp = m.level > oldLevel;
+  return { leveledUp, newLevel: m.level, xpGitt: xpTildelt, dagligBonus, nyeBadges };
 }
 
 // ─── Other XP actions ─────────────────────────────────────────────────────────

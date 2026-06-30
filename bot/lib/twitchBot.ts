@@ -13,6 +13,7 @@ import { logSystemEvent } from './systemEvents';
 import { logApiError } from './observability';
 import { getBrainState } from './creatorBrain';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
+import { addTwitchMessageXP } from './memberTracker';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
@@ -749,6 +750,26 @@ export function startTwitchBot() {
     chatActivity.set(brukernavn, (chatActivity.get(brukernavn) ?? 0) + 1);
     recordViewerActivity(tags.username, tags);
     incrementChatMessages();
+
+    // ── XP-tracking for Twitch-chattere ──────────────────────────────────────
+    const twitchUid = (tags as any)['user-id'] ?? tags.username ?? brukernavn;
+    const xpRes = addTwitchMessageXP(twitchUid, tags.username ?? brukernavn, tekst);
+    if (xpRes) {
+      if (xpRes.leveledUp) {
+        const lvlEmoji = xpRes.newLevel >= 20 ? '👑' : xpRes.newLevel >= 10 ? '⭐' : '🎉';
+        setTimeout(() => chatSend(channel,
+          `${lvlEmoji} @${tags.username} gikk opp til Level ${xpRes.newLevel}! KomodoHype`,
+          { trigger: 'level_up', username: tags.username }
+        ).catch(() => {}), 800);
+      }
+      if (xpRes.nyeBadges.length > 0) {
+        const badgeTekst = xpRes.nyeBadges.join(', ');
+        setTimeout(() => chatSend(channel,
+          `🏅 @${tags.username} låste opp: ${badgeTekst}! PogChamp`,
+          { trigger: 'badge_unlock', username: tags.username }
+        ).catch(() => {}), xpRes.leveledUp ? 2000 : 800);
+      }
+    }
 
     // Promotion engine: per-minutt teller + rullende buffer
     _chatMsgsLastMinute++;
