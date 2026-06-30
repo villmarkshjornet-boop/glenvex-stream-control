@@ -2,30 +2,36 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { GoalBarsPreview, type GoalBar } from '@/components/GoalBars';
+import { GoalBarsPreview, GoalBarSingle, FxStyles, type GoalBar, type OverlayFx, DEFAULT_FX } from '@/components/GoalBars';
 
 export default function GoalsOverlay() {
-  const params     = useSearchParams();
-  const wsParam    = params.get('ws') ?? '';
+  const params    = useSearchParams();
+  const wsParam   = params.get('ws')   ?? '';
+  const goalParam = params.get('goal') ?? ''; // enkelt bar hvis satt
+
   const [goals, setGoals] = useState<GoalBar[]>([]);
-  const [visible, setVisible] = useState(false);
+  const [fx, setFx]       = useState<OverlayFx>(DEFAULT_FX);
 
   const hent = useCallback(() => {
     const url = wsParam ? `/api/goals/live?ws=${encodeURIComponent(wsParam)}` : '/api/goals/live';
     fetch(url).then(r => r.json()).then(d => {
       const aktive = (d.goals ?? []).filter((g: GoalBar) => g.aktiv && g.mal > 0);
       setGoals(aktive);
-      if (aktive.length > 0) setTimeout(() => setVisible(true), 80);
+      if (d.fx) setFx({ ...DEFAULT_FX, ...d.fx });
     }).catch(() => {});
   }, [wsParam]);
 
   useEffect(() => {
     hent();
-    const id = setInterval(hent, 30_000);
+    const id = setInterval(hent, 20_000);
     return () => clearInterval(id);
   }, [hent]);
 
-  if (goals.length === 0) return null;
+  const visGoals = goalParam
+    ? goals.filter(g => g.type === goalParam)
+    : goals;
+
+  if (visGoals.length === 0) return null;
 
   return (
     <>
@@ -33,13 +39,12 @@ export default function GoalsOverlay() {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: transparent !important; }
       `}</style>
-      <div style={{
-        width: '370px', padding: '3px',
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(8px)',
-        transition: 'opacity 0.5s ease, transform 0.5s ease',
-      }}>
-        <GoalBarsPreview goals={goals} />
+      <FxStyles />
+      <div style={{ width: '370px', padding: '3px' }}>
+        {goalParam
+          ? <GoalBarSingle goal={visGoals[0]} fx={fx} />
+          : <GoalBarsPreview goals={visGoals} fx={fx} />
+        }
       </div>
     </>
   );

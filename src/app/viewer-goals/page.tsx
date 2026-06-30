@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { GoalBarsPreview } from '@/components/GoalBars';
+import { GoalBarsPreview, GoalBarSingle, FxStyles, DEFAULT_FX, PRESETS, type OverlayFx } from '@/components/GoalBars';
 
 interface Goal {
   type: string;
@@ -180,6 +180,28 @@ function TokenStatus({ status }: { status: 'ok' | 'missing' | 'snapshot' | null 
   );
 }
 
+/* ─── URL rad-komponent ─── */
+function UrlRad({ url, kopiert, onKopier, small }: { url: string; kopiert: boolean; onKopier: () => void; small?: boolean }) {
+  return (
+    <div style={{ display: 'flex', gap: '6px' }}>
+      <code style={{
+        flex: 1, fontSize: small ? '9px' : '10px', color: '#00ff41', fontFamily: 'monospace',
+        background: '#050505', border: '1px solid #1a2f1a', borderRadius: '5px',
+        padding: small ? '5px 9px' : '7px 11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {url}
+      </code>
+      <button onClick={onKopier} style={{
+        padding: small ? '5px 10px' : '7px 14px',
+        background: kopiert ? '#00ff4115' : '#0d1117',
+        border: `1px solid ${kopiert ? '#00ff41' : '#1a2f1a'}`,
+        borderRadius: '5px', color: kopiert ? '#00ff41' : '#4a6a4a',
+        fontSize: '11px', fontFamily: 'monospace', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s',
+      }}>{kopiert ? '✓' : 'Kopier'}</button>
+    </div>
+  );
+}
+
 /* ─── Page ─── */
 export default function ViewerGoalsPage() {
   const [goals, setGoals]           = useState<Goal[]>(DEFAULT_GOALS);
@@ -192,6 +214,9 @@ export default function ViewerGoalsPage() {
   const [lagret, setLagret]       = useState(false);
   const [posting, setPosting]     = useState(false);
   const [postRes, setPostRes]      = useState('');
+  const [fx, setFx]               = useState<OverlayFx>(DEFAULT_FX);
+  const [fxLagret, setFxLagret]   = useState(false);
+  const [kopierteUrls, setKopierteUrls] = useState<Record<string, boolean>>({});
   const [kopiert, setKopiert]     = useState(false);
   const [lastRefresh, setLast]    = useState<Date | null>(null);
 
@@ -211,6 +236,7 @@ export default function ViewerGoalsPage() {
         if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
       }
       if (d.goals?.length > 0) setGoals(d.goals);
+      if (d.fx) setFx(prev => ({ ...prev, ...d.fx }));
       setLast(new Date());
     }).catch(() => {});
 
@@ -251,6 +277,22 @@ export default function ViewerGoalsPage() {
     await fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toSave) });
     setLagret(true);
     setTimeout(() => setLagret(false), 2000);
+  }
+
+  async function lagreFx(nyFx: OverlayFx) {
+    setFx(nyFx);
+    await fetch('/api/goals', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ _fxOnly: true, fx: nyFx, goals: goals.map(({ type, label, mal, gjeldende, aktiv, farge }) => ({ type, label, mal, gjeldende, aktiv, farge })) }),
+    }).catch(() => {});
+    setFxLagret(true);
+    setTimeout(() => setFxLagret(false), 1800);
+  }
+
+  function kopierUrl(key: string, url: string) {
+    navigator.clipboard.writeText(url).catch(() => {});
+    setKopierteUrls(prev => ({ ...prev, [key]: true }));
+    setTimeout(() => setKopierteUrls(prev => ({ ...prev, [key]: false })), 2000);
   }
 
   async function postTilDiscord() {
@@ -352,14 +394,96 @@ export default function ViewerGoalsPage() {
         </div>
       )}
 
-      {/* OBS Section — live React preview (not iframe) */}
+      {/* OBS Section */}
       <div style={{ background: '#0d1117', border: '1px solid #1a2f1a', borderRadius: '10px', overflow: 'hidden' }}>
         <div style={{ padding: '12px 18px', borderBottom: '1px solid #1a2f1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '10px', color: '#00ff41', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>OBS Browser Source</span>
-          <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>— live forhåndsvisning</span>
+          <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>— live forhåndsvisning + effekter</span>
         </div>
 
-        {/* Live preview — renders actual component, updates instantly */}
+        {/* ── Effekter-panel ── */}
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
+          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Animasjons-effekter</span>
+            {fxLagret && <span style={{ color: '#00ff41' }}>✓ Lagret</span>}
+          </div>
+
+          {/* Preset-velger */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '6px', marginBottom: '12px' }}>
+            {(['classic','neon','cinematic','minimal'] as const).map(p => (
+              <button key={p} onClick={() => lagreFx({ ...DEFAULT_FX, ...PRESETS[p], preset: p })} style={{
+                padding: '7px', border: `1px solid ${fx.preset === p ? '#00ff41' : '#1a2f1a'}`,
+                background: fx.preset === p ? '#00ff4112' : 'transparent',
+                borderRadius: '6px', color: fx.preset === p ? '#00ff41' : '#4a6a4a',
+                fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase',
+                cursor: 'pointer', letterSpacing: '0.06em', transition: 'all 0.2s',
+              }}>
+                {p === 'classic' ? 'Classic' : p === 'neon' ? '⚡ Neon' : p === 'cinematic' ? '🎬 Cinematic' : '○ Minimal'}
+              </button>
+            ))}
+          </div>
+
+          {/* Enkelt-toggles */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            {([
+              ['glow',       '✦ Glød'],
+              ['scan',       '→ Scan-linje'],
+              ['pulse',      '◉ Puls'],
+              ['numberAnim', '↑ Tall-animasjon'],
+              ['slideIn',    '◁ Glide inn'],
+              ['milestone',  '★ Milepæl-burst'],
+            ] as const).map(([key, label]) => (
+              <button key={key} onClick={() => lagreFx({ ...fx, preset: 'custom' as any, [key]: !fx[key as keyof OverlayFx] })} style={{
+                display: 'flex', alignItems: 'center', gap: '7px',
+                padding: '6px 10px', border: `1px solid ${fx[key as keyof OverlayFx] ? '#00ff4140' : '#1a2f1a'}`,
+                background: fx[key as keyof OverlayFx] ? '#00ff4108' : 'transparent',
+                borderRadius: '5px', cursor: 'pointer', transition: 'all 0.18s',
+              }}>
+                <div style={{
+                  width: '10px', height: '10px', borderRadius: '2px',
+                  background: fx[key as keyof OverlayFx] ? '#00ff41' : 'transparent',
+                  border: `1px solid ${fx[key as keyof OverlayFx] ? '#00ff41' : '#3a5a3a'}`,
+                  flexShrink: 0,
+                }} />
+                <span style={{ fontSize: '10px', color: fx[key as keyof OverlayFx] ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace' }}>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Glow intensitet + scan interval */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+            <div>
+              <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Glow-styrke</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {(['low','medium','high'] as const).map(v => (
+                  <button key={v} onClick={() => lagreFx({ ...fx, glowIntensity: v })} style={{
+                    flex: 1, padding: '5px', fontSize: '9px', fontFamily: 'monospace',
+                    border: `1px solid ${fx.glowIntensity === v ? '#00ff41' : '#1a2f1a'}`,
+                    background: fx.glowIntensity === v ? '#00ff4112' : 'transparent',
+                    color: fx.glowIntensity === v ? '#00ff41' : '#4a6a4a',
+                    borderRadius: '4px', cursor: 'pointer', textTransform: 'uppercase',
+                  }}>{v === 'low' ? 'Lav' : v === 'medium' ? 'Mid' : 'Høy'}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Scan-interval (sek)</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {[5,7,10,15].map(v => (
+                  <button key={v} onClick={() => lagreFx({ ...fx, scanInterval: v })} style={{
+                    flex: 1, padding: '5px', fontSize: '9px', fontFamily: 'monospace',
+                    border: `1px solid ${fx.scanInterval === v ? '#00ff41' : '#1a2f1a'}`,
+                    background: fx.scanInterval === v ? '#00ff4112' : 'transparent',
+                    color: fx.scanInterval === v ? '#00ff41' : '#4a6a4a',
+                    borderRadius: '4px', cursor: 'pointer',
+                  }}>{v}s</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Live preview ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
           <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace' }}>
             Forhåndsvisning — oppdaterer i sanntid
@@ -369,33 +493,53 @@ export default function ViewerGoalsPage() {
             backgroundImage: 'repeating-conic-gradient(#0e1a0e 0% 25%, #080f08 0% 50%) 0 0 / 14px 14px',
             border: '1px solid #1a2f1a',
           }}>
-            <GoalBarsPreview goals={previewGoals} compact />
+            <FxStyles />
+            <GoalBarsPreview goals={previewGoals} compact fx={fx} />
           </div>
           <p style={{ fontSize: '9px', color: '#3a5a3a', marginTop: '6px', fontFamily: 'monospace' }}>
             ↑ Slik ser det ut i OBS over din stream (transparent bakgrunn)
           </p>
         </div>
 
-        {/* URL */}
-        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div>
-            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '6px' }}>Browser Source URL (din personlige link)</div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <code style={{ flex: 1, fontSize: '10px', color: '#00ff41', fontFamily: 'monospace', background: '#050505', border: '1px solid #1a2f1a', borderRadius: '5px', padding: '7px 11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {fullOverlayUrl}
-              </code>
-              <button onClick={() => { navigator.clipboard.writeText(fullOverlayUrl); setKopiert(true); setTimeout(() => setKopiert(false), 2000); }} style={{
-                padding: '7px 14px', background: kopiert ? '#00ff4115' : '#0d1117', border: `1px solid ${kopiert ? '#00ff41' : '#1a2f1a'}`,
-                borderRadius: '5px', color: kopiert ? '#00ff41' : '#4a6a4a', fontSize: '11px', fontFamily: 'monospace', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s',
-              }}>{kopiert ? '✓ Kopiert' : 'Kopier'}</button>
-            </div>
+        {/* ── Alle mål — felles URL ── */}
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
+          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '8px' }}>
+            Felles URL — alle aktive mål
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px' }}>
-            {[['Bredde', '380px'], ['Høyde', '200px'], ['FPS', '30'], ['Huk av', '«Transparent bakgrunn»']].map(([k, v]) => (
+          <UrlRad url={fullOverlayUrl} kopiert={kopierteUrls['all'] ?? false} onKopier={() => kopierUrl('all', fullOverlayUrl)} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginTop: '8px' }}>
+            {[['Bredde', '380px'], ['Høyde', previewGoals.filter(g=>g.aktiv&&g.mal>0).length > 1 ? `${previewGoals.filter(g=>g.aktiv&&g.mal>0).length * 56}px` : '80px'], ['FPS', '30'], ['Huk av', '«Transparent bakgrunn»']].map(([k, v]) => (
               <div key={k} style={{ fontSize: '10px', fontFamily: 'monospace' }}>
                 <span style={{ color: '#3a5a3a' }}>{k}: </span><span style={{ color: '#c8f5c8' }}>{v}</span>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* ── Per-bar URLs ── */}
+        <div style={{ padding: '14px 18px' }}>
+          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '10px' }}>
+            Individuelle browser sources — én bar per kilde
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {previewGoals.filter(g => g.aktiv && g.mal > 0).map(g => {
+              const url = `${fullOverlayUrl}&goal=${encodeURIComponent(g.type)}`;
+              return (
+                <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.farge ?? '#00ff41'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', color: g.farge ?? '#00ff41' }}>{g.icon ?? '◆'}</span>
+                      <span style={{ fontSize: '10px', color: '#c8f5c8', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
+                    </div>
+                    <span style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace' }}>380×80px</span>
+                  </div>
+                  <UrlRad url={url} kopiert={kopierteUrls[g.type] ?? false} onKopier={() => kopierUrl(g.type, url)} small />
+                </div>
+              );
+            })}
+            {previewGoals.filter(g => g.aktiv && g.mal > 0).length === 0 && (
+              <p style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>Ingen aktive mål ennå</p>
+            )}
           </div>
         </div>
       </div>

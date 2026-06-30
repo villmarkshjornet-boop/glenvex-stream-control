@@ -144,10 +144,18 @@ export async function GET(req: NextRequest) {
     return g;
   });
 
+  // Hent fx-innstillinger fra settings_json
+  let fx: Record<string, unknown> | null = null;
+  if (db) {
+    const { data: fxRow } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+    fx = fxRow?.settings_json?.viewer_goals_fx ?? null;
+  }
+
   return NextResponse.json({
     connected: true,
     tokenStatus,
     live: { followers, subscribers: subscriberTotal, canReadSubscribers, harSubData: canReadSubscribers, fromSnapshot },
     goals: oppdatert,
+    fx,
   });
 }

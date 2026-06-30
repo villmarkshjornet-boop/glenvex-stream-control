@@ -44,7 +44,25 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const data = await req.json() as Goal[];
+  const body = await req.json();
+
+  // Fx-only update (effektinnstillinger) — mål-array kan følge med for konsistens
+  if (body._fxOnly && body.fx) {
+    if (!isDbAvailable()) return NextResponse.json({ ok: true });
+    const db = getDb();
+    if (!db) return NextResponse.json({ ok: true });
+    const wsId = getWorkspaceId();
+    const { data: existing } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+    const current = existing?.settings_json ?? {};
+    const goals = Array.isArray(body.goals) ? body.goals : (current.viewer_goals ?? []);
+    await db.from('workspaces').update({
+      settings_json: { ...current, viewer_goals: goals, viewer_goals_fx: body.fx },
+      updated_at: new Date().toISOString(),
+    }).eq('id', wsId);
+    return NextResponse.json({ ok: true });
+  }
+
+  const data = Array.isArray(body) ? body as Goal[] : (body.goals as Goal[] ?? []);
   await saveGoals(data);
   return NextResponse.json({ ok: true });
 }
