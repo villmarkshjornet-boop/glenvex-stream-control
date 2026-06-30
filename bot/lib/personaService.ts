@@ -316,24 +316,94 @@ Svar KUN med JSON (ingen annen tekst):
   } catch { return null; }
 }
 
-// ── DALL-E bilgenerering ──────────────────────────────────────────────────────
+// ── DALL-E — full trading card (hybrid V4) ───────────────────────────────────
+// AI generates the ENTIRE card: frame + character + atmosphere + rarity effects.
+// Canvas only overlays dynamic data (name, XP, badges, card#) afterwards.
+
+const RARITY_FRAME_STYLE: Record<PersonaRarity, string> = {
+  Common:
+    'matte dark steel frame with subtle engraved geometric patterns, deep charcoal and gunmetal tones, ' +
+    'no glow, dignified and restrained, industrial craft',
+  Rare:
+    'royal navy and cerulean blue crystal frame, glowing azure energy lines along frame edges, ' +
+    'cool cerulean particle wisps drifting at borders, elegant naval authority',
+  Epic:
+    'dark violet arcane frame carved with glowing runes, purple and magenta energy tendrils curling at ' +
+    'corners, mystical floating rune fragments, crackling arcane electricity',
+  Legendary:
+    'ornate 24-karat gold filigree frame with intricate scrollwork and baroque details, warm divine ' +
+    'light rays shooting from all four corners, particles of celestial golden light suspended mid-air, ' +
+    'radiant and majestic',
+  Mythic:
+    'blood-red and cosmic void obsidian frame, crimson lightning crackling at corners, swirling void ' +
+    'tendrils, dense particle storm, otherworldly light that defies physics, simultaneously terrifying ' +
+    'and magnificent, divine wrath incarnate',
+};
+
+const RARITY_COLOR_GRADE: Record<PersonaRarity, string> = {
+  Common:    'desaturated cool steel grays, subtle blue-gray shadows, matte finish',
+  Rare:      'cool azure and navy tones, cerulean highlights, crisp clarity',
+  Epic:      'deep purples, violet shadows, electric magenta highlights, arcane shimmer',
+  Legendary: 'warm gold color grade, amber god rays, rich contrast, divine warmth',
+  Mythic:    'blood red with cosmic desaturation, bursts of pure white-hot light, void black shadows',
+};
+
+const RARITY_MOOD: Record<PersonaRarity, string> = {
+  Common:    'gritty determination, grounded strength, earned respect',
+  Rare:      'noble strength, elemental mastery, quiet confidence',
+  Epic:      'mysterious arcane power, dark mastery, controlled danger',
+  Legendary: 'chosen one energy, mythical grandeur, destiny fulfilled',
+  Mythic:    'cosmic horror turned champion, divine wrath, power that reshapes reality',
+};
 
 async function genererBilde(card: PersonaCard, openai: OpenAI): Promise<string | null> {
-  // Pure character art — no card borders, no text, no card layout elements
-  const fullPrompt =
-    `Stylized fantasy character portrait. ${SEASON_SUFFIX} ` +
-    `${card.archetype} class character — ${card.class} archetype. ` +
-    `${card.imagePrompt}. ` +
-    `Dramatic cinematic lighting. Dynamic pose. Detailed illustration. ` +
-    `NO text, NO words, NO card frame, NO UI elements, NO realistic human face. ` +
-    `Semi-cartoon game art. Centered portrait composition. Square format.`;
+  const prompt = [
+    `Ultra-premium collectible trading card. Portrait orientation. Print-quality illustration. `,
+    `Art direction: Riot Games × Blizzard × Wizards of the Coast. This should look like official game art.`,
+    ``,
+    `SEASON VISUAL THEME: ${SEASON_SUFFIX}`,
+    ``,
+    `CHARACTER (the absolute hero of this card):`,
+    `${card.archetype} archetype — ${card.class} class. ${card.imagePrompt}`,
+    `This is a legendary game CHAMPION, not a real person. Epic heroic pose, dynamic and powerful.`,
+    `Cinematic rim lighting from behind. Volumetric atmospheric depth. Bokeh background.`,
+    `Rarity-appropriate particle effects surround them. They fill the frame and command total attention.`,
+    ``,
+    `RARITY: ${card.rarity.toUpperCase()}`,
+    `FRAME STYLE: ${RARITY_FRAME_STYLE[card.rarity]}`,
+    `COLOR GRADE: ${RARITY_COLOR_GRADE[card.rarity]}`,
+    `MOOD: ${RARITY_MOOD[card.rarity]}`,
+    ``,
+    `CARD LAYOUT (strictly portrait, tall):`,
+    `TOP 8%: Decorative rarity sigil banner — ornate metallic strip with rarity-appropriate embellishments. No text.`,
+    `CENTER 63%: THE CHAMPION fills this entire space. They are massive and powerful. No empty space. `,
+    `  Cinematic three-point lighting. Strong rim light on silhouette. Volumetric god rays or energy beams. `,
+    `  Depth of field — character crisp, background atmospheric. Bloom on bright elements. `,
+    `  Materials: ${card.rarity === 'Legendary' ? 'gold, polished brass, warm crystals' : card.rarity === 'Mythic' ? 'obsidian, crimson gems, crackling plasma' : card.rarity === 'Epic' ? 'dark amethyst, carved arcane stone' : card.rarity === 'Rare' ? 'polished sapphire, cerulean ice, naval steel' : 'brushed steel, dark pewter, engraved iron'}`,
+    `BOTTOM 29%: A premium dark info panel. Very dark charcoal/near-black, semi-opaque overlay aesthetic. `,
+    `  Subtle ornamental border lines and decorative frame elements within it — elegant divider at top of panel. `,
+    `  This panel is intentionally darker than the rest of the card — it is designed as a clean data zone. `,
+    `  Include only delicate decorative line work in this panel. Absolutely no text or numbers.`,
+    ``,
+    `ABSOLUTE REQUIREMENTS:`,
+    `- ZERO TEXT anywhere on the card. No letters, no numbers, no words. The art is purely visual.`,
+    `- The champion character DOMINATES the card. They are not small or background filler.`,
+    `- The dark bottom panel must be noticeably darker than the main art area.`,
+    `- This card must make someone say "wow" and want to keep it. It looks like official AAA game artwork.`,
+    `- Portrait format (tall, not wide) maintained throughout.`,
+  ].join('\n');
+
   try {
     const res = await openai.images.generate({
-      model: 'dall-e-3', prompt: fullPrompt, n: 1, size: '1024x1024', quality: 'standard',
+      model: 'dall-e-3',
+      prompt,
+      n: 1,
+      size: '1024x1792',
+      quality: 'hd',
     });
     return res.data?.[0]?.url ?? null;
   } catch (e: any) {
-    console.warn('[Persona] Bildegenerering feilet:', e?.message);
+    console.warn('[Persona] Kortgenerering feilet:', e?.message);
     return null;
   }
 }
