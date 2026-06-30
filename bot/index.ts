@@ -1332,7 +1332,18 @@ async function sendProaktivMelding() {
     getPauseDiscord().catch(() => false),
     getPauseProaktiv().catch(() => false),
   ]);
-  if (!aktiv || pauseDiscord || pauseProaktiv) return;
+  if (!aktiv || pauseDiscord || pauseProaktiv) {
+    const årsak = !aktiv ? 'BOT_DEAKTIVERT' : pauseDiscord ? 'DISCORD_PAUSE' : 'PROAKTIV_PAUSE';
+    logSystemEvent({
+      workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+      source: 'discord_bot',
+      event_type: 'PARTNER_PROMOTION_SKIPPED',
+      title: `Proaktiv runde hoppet over: ${årsak}`,
+      severity: 'info',
+      metadata: { årsak, aktiv, pauseDiscord, pauseProaktiv },
+    });
+    return;
+  }
 
   const runde = proaktivRunde % 3;
   proaktivRunde++;

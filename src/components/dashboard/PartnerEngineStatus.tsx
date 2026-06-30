@@ -1,9 +1,27 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Activity, Send, TrendingUp } from 'lucide-react';
+import { Activity, Send, TrendingUp, BarChart2, Share2, AlertTriangle } from 'lucide-react';
 import { tidSiden } from './helpers';
 import { useI18n } from '@/contexts/I18nContext';
+
+interface BotHendelse {
+  ts: string;
+  type: string;
+  tittel: string;
+  metadata: any;
+}
+
+interface Sammendrag {
+  promoSendt30d: number;
+  promoHoppet30d: number;
+  sistePromoTs: string | null;
+  dagSidenPromo: number | null;
+  foreslåXFor: string | null;
+  foreslåXAldri: boolean;
+  pollOpprettet30d: number;
+  pollResultater30d: number;
+}
 
 interface EngineStatus {
   sistVurdert: {
@@ -26,6 +44,8 @@ interface EngineStatus {
     sistePromotert: string | null;
     eksponering: number;
   }>;
+  botAktivitet: BotHendelse[];
+  sammendrag: Sammendrag | null;
 }
 
 function platformLabel(sentDiscord: boolean | null, sentTwitch: boolean | null, platform: string | null): string {
@@ -36,9 +56,43 @@ function platformLabel(sentDiscord: boolean | null, sentTwitch: boolean | null, 
   return '—';
 }
 
+const HENDELSE_IKON: Record<string, string> = {
+  PARTNER_PROMOTION_SENT_DISCORD: '🤝',
+  PARTNER_PROMOTION_SENT_TWITCH:  '🟣',
+  PARTNER_PROMOTION_SKIPPED:      '⏭',
+  POLL_CREATED:                   '📊',
+  POLL_RESULT_COLLECTED:          '✅',
+  POLL_SKIPPED:                   '—',
+};
+
+function hendelseLabel(type: string, meta: any): string {
+  switch (type) {
+    case 'PARTNER_PROMOTION_SENT_DISCORD': return `Discord: ${meta?.partnerName ?? ''}`;
+    case 'PARTNER_PROMOTION_SENT_TWITCH':  return `Twitch: ${meta?.partnerName ?? ''}`;
+    case 'PARTNER_PROMOTION_SKIPPED':      return `Hoppet over: ${meta?.årsak ?? meta?.reasonCode ?? ''}`;
+    case 'POLL_CREATED':                   return `Poll: ${meta?.question ?? meta?.topic ?? ''}`;
+    case 'POLL_RESULT_COLLECTED':          return `Poll-resultat: ${meta?.winner ?? meta?.resultat ?? ''}`;
+    default:                               return type.replace(/_/g, ' ');
+  }
+}
+
+function pollVinner(meta: any): string | null {
+  if (!meta) return null;
+  if (meta.winner) return `Vinner: ${meta.winner}`;
+  if (meta.resultat) return `Resultat: ${meta.resultat}`;
+  if (meta.votes && typeof meta.votes === 'object') {
+    const sorted = Object.entries(meta.votes as Record<string, number>).sort(([, a], [, b]) => b - a);
+    if (sorted.length > 0) return `Vinner: ${sorted[0][0]} (${sorted[0][1]} stemmer)`;
+  }
+  return null;
+}
+
 export function PartnerEngineStatus() {
   const { t } = useI18n();
   const [status, setStatus] = useState<EngineStatus | null>(null);
+  const [xForslag, setXForslag] = useState<string | null>(null);
+  const [lasterX, setLasterX] = useState(false);
+  const [xPartner, setXPartner] = useState<string | null>(null);
 
   const hent = useCallback(async () => {
     try {
@@ -53,20 +107,37 @@ export function PartnerEngineStatus() {
     return () => clearInterval(id);
   }, [hent]);
 
+  const genererXForslag = async (partnerNavn?: string) => {
+    setLasterX(true);
+    setXForslag(null);
+    setXPartner(partnerNavn ?? status?.sammendrag?.foreslåXFor ?? null);
+    try {
+      const res = await fetch('/api/partners/suggest-x-post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ partnerNavn: partnerNavn ?? null }),
+      });
+      const d = await res.json();
+      if (d.forslag) setXForslag(d.forslag);
+    } catch {}
+    setLasterX(false);
+  };
+
   if (!status) return null;
 
-  const { sistVurdert: v, sistSendt: s, partnerEksponering: exp } = status;
+  const { sistVurdert: v, sistSendt: s, partnerEksponering: exp, botAktivitet, sammendrag } = status;
   const maxExp = Math.max(...exp.map(p => p.eksponering), 1);
 
-  if (!v && !s && exp.length === 0) return null;
+  if (!v && !s && exp.length === 0 && botAktivitet.length === 0) return null;
+
+  const harIkkePromotert = sammendrag && (sammendrag.dagSidenPromo === null || sammendrag.dagSidenPromo >= 7);
 
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-5">
       <p className="text-xs text-g-muted uppercase tracking-widest font-bold">{t('partnerEngine.title')}</p>
 
+      {/* ─── Status-rad ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-        {/* Siste vurdering */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
             <Activity size={11} /> {t('partnerEngine.lastEvaluation')}
@@ -99,7 +170,6 @@ export function PartnerEngineStatus() {
           )}
         </div>
 
-        {/* Siste utsendelse */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
             <Send size={11} /> {t('partnerEngine.lastSent')}
@@ -123,6 +193,103 @@ export function PartnerEngineStatus() {
         </div>
       </div>
 
+      {/* ─── 30-dagers sammendrag ────────────────────────────────────────── */}
+      {sammendrag && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: 'Promoer sendt', verdi: sammendrag.promoSendt30d,     farge: 'text-g-green' },
+            { label: 'Hoppet over',   verdi: sammendrag.promoHoppet30d,    farge: 'text-yellow-400' },
+            { label: 'Polls opprettet', verdi: sammendrag.pollOpprettet30d, farge: 'text-blue-400' },
+            { label: 'Poll-resultater', verdi: sammendrag.pollResultater30d, farge: 'text-blue-300' },
+          ].map(item => (
+            <div key={item.label} className="bg-g-bg border border-g-border/40 rounded-lg p-2.5 text-center">
+              <div className={`text-xl font-black ${item.farge}`}>{item.verdi}</div>
+              <div className="text-[9px] text-g-muted mt-0.5">{item.label} (30d)</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─── X-innlegg forslag ───────────────────────────────────────────── */}
+      {sammendrag && (
+        <div className="border border-g-border/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Share2 size={13} className="text-sky-400" />
+              <span className="text-[10px] text-g-muted uppercase tracking-wider font-bold">Foreslå X-innlegg</span>
+              {harIkkePromotert && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-yellow-400 border border-yellow-400/30 bg-yellow-400/10">
+                  <AlertTriangle size={9} />
+                  {sammendrag.dagSidenPromo !== null ? `${sammendrag.dagSidenPromo}d siden` : 'aldri sendt'}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => genererXForslag()}
+              disabled={lasterX}
+              className="px-3 py-1 rounded text-[10px] border border-sky-400/30 text-sky-400 hover:bg-sky-400/10 transition-all disabled:opacity-50">
+              {lasterX ? '⟳ Genererer...' : `Foreslå for ${sammendrag.foreslåXFor ?? 'partner'}`}
+            </button>
+          </div>
+
+          {xForslag && (
+            <div className="space-y-2">
+              <div className="bg-g-bg border border-g-border rounded-lg p-3">
+                <p className="text-xs text-g-text leading-relaxed whitespace-pre-wrap">{xForslag}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-g-muted">For: {xPartner}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(xForslag).catch(() => {})}
+                    className="px-2 py-1 text-[9px] border border-g-border/40 rounded text-g-muted hover:text-g-text transition-colors">
+                    Kopier
+                  </button>
+                  <button
+                    onClick={() => genererXForslag(xPartner ?? undefined)}
+                    disabled={lasterX}
+                    className="px-2 py-1 text-[9px] border border-g-border/40 rounded text-g-muted hover:text-g-green transition-colors disabled:opacity-50">
+                    Nytt forslag
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Bot-aktivitetsfeed ──────────────────────────────────────────── */}
+      {botAktivitet.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
+            <BarChart2 size={11} /> Bot-aktivitet (siste 30 dager)
+          </div>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {botAktivitet.map((h, i) => {
+              const er_poll_resultat = h.type === 'POLL_RESULT_COLLECTED';
+              const vinner = er_poll_resultat ? pollVinner(h.metadata) : null;
+              const er_hoppet = h.type === 'PARTNER_PROMOTION_SKIPPED';
+
+              return (
+                <div key={i} className={`flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0 ${er_hoppet ? 'opacity-50' : ''}`}>
+                  <span className="flex-shrink-0 w-5 text-center text-sm">{HENDELSE_IKON[h.type] ?? '·'}</span>
+                  <span className="text-[9px] text-g-muted flex-shrink-0 w-20 mt-0.5">
+                    {new Date(h.ts).toLocaleDateString('no-NO', { day: '2-digit', month: '2-digit' })}
+                    {' '}
+                    {new Date(h.ts).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[9px] text-g-text truncate">{hendelseLabel(h.type, h.metadata)}</p>
+                    {vinner && <p className="text-[9px] text-g-green">{vinner}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Partner-eksponering ─────────────────────────────────────────── */}
       {exp.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold">
@@ -132,11 +299,19 @@ export function PartnerEngineStatus() {
             {exp.map(p => (
               <div key={p.navn} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-g-text font-medium truncate max-w-[60%]">{p.navn}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-g-text font-medium truncate max-w-[55%]">{p.navn}</span>
+                    <button
+                      onClick={() => genererXForslag(p.navn)}
+                      disabled={lasterX}
+                      className="flex-shrink-0 text-[8px] px-1.5 py-0.5 border border-sky-400/30 text-sky-400/70 hover:text-sky-400 hover:bg-sky-400/10 rounded transition-all disabled:opacity-30">
+                      X-post
+                    </button>
+                  </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {p.sistePromotert
                       ? <span className="text-g-muted/60">{tidSiden(p.sistePromotert)}</span>
-                      : <span className="text-g-muted/40">aldri sendt</span>
+                      : <span className="text-yellow-400/60 text-[9px]">aldri sendt</span>
                     }
                     <span className="text-g-green font-black w-6 text-right">{p.eksponering}</span>
                   </div>

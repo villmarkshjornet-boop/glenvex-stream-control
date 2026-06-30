@@ -3,7 +3,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
 } from 'discord.js';
-import { getMember, getAllMembers } from '../lib/memberTracker';
+import { getMember, getAllMembers, upsertMember } from '../lib/memberTracker';
 
 function levelProgress(xp: number): { level: number; progress: number; xpInLevel: number; xpForNext: number } {
   const XP_PER_LEVEL = 500;
@@ -38,13 +38,13 @@ export const profilCommand = {
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply({ ephemeral: false });
 
-    const target      = interaction.options.getUser('bruker') ?? interaction.user;
-    const member      = getMember(target.id);
+    const target = interaction.options.getUser('bruker') ?? interaction.user;
+    let member   = getMember(target.id);
 
+    // Opprett stub-profil hvis spilleren er i guilden men ennå ikke registrert
     if (!member) {
-      return interaction.editReply(
-        `❌ **${target.displayName}** har ingen profil ennå. Send en melding i kanalen for å starte!`,
-      );
+      const displayName = (target as any).displayName ?? target.username;
+      member = upsertMember(target.id, target.username, displayName);
     }
 
     const { level, progress, xpInLevel, xpForNext } = levelProgress(member.xp);

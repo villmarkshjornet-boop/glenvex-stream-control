@@ -98,13 +98,21 @@ function syncToSupabase(m: MemberProfile): void {
       Prefer:           'resolution=merge-duplicates',
     },
     body: JSON.stringify(payload),
-  }).catch(() => {});
+  }).then(async (r) => {
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      console.warn(`[MemberTracker] syncToSupabase feilet for ${m.username}: ${r.status} ${body.slice(0, 200)}`);
+    }
+  }).catch((err: any) => {
+    console.warn(`[MemberTracker] syncToSupabase nettverksfeil for ${m.username}:`, err?.message);
+  });
 }
 
 // ─── Startup recovery ─────────────────────────────────────────────────────────
 
 export async function lasterMedlemmerFraSupabase(): Promise<void> {
-  if (fs.existsSync(FILE)) return;
+  // Alltid last fra Supabase ved oppstart — Railway-disken er ephemeral, filen kan eksistere
+  // fra tidligere i samme container men er utdatert. Merge inn Supabase-data i lokal fil.
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!sbUrl || !sbKey) return;
@@ -114,11 +122,19 @@ export async function lasterMedlemmerFraSupabase(): Promise<void> {
       `${sbUrl}/rest/v1/community_members?workspace_id=eq.${WORKSPACE_ID}&select=*`,
       { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
     );
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.warn(`[MemberTracker] Supabase-henting feilet: ${res.status}`);
+      return;
+    }
     const rows = await res.json() as any[];
-    if (!rows || rows.length === 0) return;
+    if (!rows || rows.length === 0) {
+      console.log('[MemberTracker] Ingen members i Supabase — starter fra scratch');
+      return;
+    }
 
-    const members: Record<string, MemberProfile> = {};
+    // Merge: Supabase er autoritativ. Behold lokal data som Supabase ikke kjenner.
+    const existing = fs.existsSync(FILE) ? load() : {};
+    const members: Record<string, MemberProfile> = { ...existing };
     for (const r of rows) {
       members[r.discord_id] = {
         id:               r.discord_id,
