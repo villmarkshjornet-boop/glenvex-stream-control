@@ -1989,6 +1989,17 @@ client.once('clientReady', () => {
   logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
 
+  // ── Canvas/Railway startup-sjekk ─────────────────────────────────────────
+  try {
+    const { createCanvas } = require('@napi-rs/canvas');
+    const testCanvas = createCanvas(1, 1);
+    testCanvas.getContext('2d');
+    console.log('[startup] @napi-rs/canvas OK');
+  } catch (e: any) {
+    console.error('[startup] @napi-rs/canvas FEILET — Persona PNG vil ikke fungere:', e?.message);
+    logSystemEvent({ source: 'discord_bot', event_type: 'PERSONA_CARD_IMAGE_FAILED', title: 'Canvas ikke tilgjengelig på Railway', severity: 'error', metadata: { error: e?.message } });
+  }
+
   // ── Auto-registrer slash-kommandoer ved oppstart ──────────────────────────
   (async () => {
     try {

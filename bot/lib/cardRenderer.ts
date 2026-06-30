@@ -69,36 +69,52 @@ function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: numbe
   ctx.closePath();
 }
 
-function statBar(ctx: SKRSContext2D, x: number, y: number, value: number, accent: string) {
-  const BAR_W = 140, BAR_H = 10;
+function statBar(ctx: SKRSContext2D, x: number, y: number, value: number, accent: string, barW = 140) {
+  const BAR_H = 9;
   // Background
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, x, y, BAR_W, BAR_H, 5);
+  roundRect(ctx, x, y, barW, BAR_H, 4);
   ctx.fill();
   // Fill
-  const pct = Math.max(0, Math.min(1, value / 100));
-  const fillGrad = ctx.createLinearGradient(x, 0, x + BAR_W * pct, 0);
+  const pct      = Math.max(0, Math.min(1, value / 100));
+  const fillW    = Math.max(BAR_H, barW * pct);
+  const fillGrad = ctx.createLinearGradient(x, 0, x + fillW, 0);
   fillGrad.addColorStop(0, accent);
   fillGrad.addColorStop(1, accent + 'aa');
   ctx.fillStyle = fillGrad;
-  roundRect(ctx, x, y, Math.max(BAR_H, BAR_W * pct), BAR_H, 5);
+  roundRect(ctx, x, y, fillW, BAR_H, 4);
   ctx.fill();
 }
 
-function wrapText(ctx: SKRSContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number) {
+function truncateToWidth(ctx: SKRSContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(s + '…').width > maxWidth) {
+    s = s.slice(0, -1);
+  }
+  return s + '…';
+}
+
+function wrapText(ctx: SKRSContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines = 3): number {
   const words = text.split(' ');
   let line = '';
+  let lines = 0;
   for (const word of words) {
     const test = line ? line + ' ' + word : word;
     if (ctx.measureText(test).width > maxWidth && line) {
+      if (lines >= maxLines - 1) {
+        ctx.fillText(truncateToWidth(ctx, line, maxWidth), x, y);
+        return y;
+      }
       ctx.fillText(line, x, y);
       line = word;
       y += lineHeight;
+      lines++;
     } else {
       line = test;
     }
   }
-  if (line) ctx.fillText(line, x, y);
+  if (line) ctx.fillText(truncateToWidth(ctx, line, maxWidth), x, y);
   return y;
 }
 
@@ -179,23 +195,33 @@ export async function renderPersonaCard(
   ctx.fillText(theme.banner, W / 2, 38);
   ctx.shadowBlur = 0;
 
-  // ── Title (large) ────────────────────────────────────────────────────────────
+  // ── Title (large, with truncation guard) ─────────────────────────────────────
   ctx.fillStyle    = '#ffffff';
-  ctx.font         = 'bold 28px sans-serif';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'alphabetic';
 
-  const titleFits  = ctx.measureText(card.title).width < W - 60;
-  if (!titleFits) ctx.font = 'bold 22px sans-serif';
+  const MAX_TITLE_W = W - 60;
+  let titleFont = 'bold 28px sans-serif';
+  ctx.font = titleFont;
+  if (ctx.measureText(card.title).width > MAX_TITLE_W) {
+    titleFont = 'bold 22px sans-serif';
+    ctx.font  = titleFont;
+  }
+  if (ctx.measureText(card.title).width > MAX_TITLE_W) {
+    titleFont = 'bold 18px sans-serif';
+    ctx.font  = titleFont;
+  }
+  const titleText = truncateToWidth(ctx, card.title, MAX_TITLE_W);
   ctx.shadowColor = theme.accent;
   ctx.shadowBlur  = 16;
-  ctx.fillText(card.title, W / 2, 84);
+  ctx.fillText(titleText, W / 2, 84);
   ctx.shadowBlur = 0;
 
-  // Class · Archetype
+  // Class · Archetype — truncated to fit
   ctx.fillStyle = theme.accent;
   ctx.font      = '13px sans-serif';
-  ctx.fillText(`${card.class}  ·  ${card.archetype}`, W / 2, 104);
+  const classLine = truncateToWidth(ctx, `${card.class}  ·  ${card.archetype}`, W - 60);
+  ctx.fillText(classLine, W / 2, 104);
 
   // ── Character image ──────────────────────────────────────────────────────────
   const IMG_X = 30, IMG_Y = 115, IMG_W = W - 60, IMG_H = 280;
@@ -281,36 +307,41 @@ export async function renderPersonaCard(
 
   ctx.fillStyle = '#ffffff';
   ctx.font      = 'bold 17px sans-serif';
-  ctx.fillText(card.signatureMove, 24, curY + 32);
+  ctx.fillText(truncateToWidth(ctx, card.signatureMove, W - 48), 24, curY + 32);
 
-  ctx.fillStyle = theme.text;
-  ctx.font      = '11px sans-serif';
-  const descShort = (card.signatureMoveDesc || '').slice(0, 80);
-  ctx.fillText(descShort, 24, curY + 48);
+  ctx.fillStyle    = theme.text;
+  ctx.font         = '11px sans-serif';
+  ctx.textBaseline = 'alphabetic';
+  wrapText(ctx, card.signatureMoveDesc || '', 24, curY + 48, W - 48, 14, 2);
 
   curY += 60;
   divider(curY);
   curY += 10;
 
   // ── Stats (two columns of 5) ─────────────────────────────────────────────────
+  // Emoji-free labels for guaranteed consistent canvas width measurement
   const statEntries: [string, number][] = [
-    ['🔥 Hype',      card.stats.hype],
-    ['😂 Humor',     card.stats.humor],
-    ['⚡ Chaos',     card.stats.chaos],
-    ['🤝 Community', card.stats.community],
-    ['🎯 Focus',     card.stats.focus],
-    ['💬 Aktivitet', card.stats.activity],
-    ['💡 Kreativitet',card.stats.kreativitet],
-    ['❤️ Lojalitet',  card.stats.loyalitet],
-    ['🧠 Lederskap', card.stats.lederskap],
-    ['🙌 Hjelpsom',  card.stats.helpfulness],
+    ['HYPE',        card.stats.hype],
+    ['HUMOR',       card.stats.humor],
+    ['CHAOS',       card.stats.chaos],
+    ['COMMUNITY',   card.stats.community],
+    ['FOCUS',       card.stats.focus],
+    ['AKTIVITET',   card.stats.activity],
+    ['KREATIVITET', card.stats.kreativitet],
+    ['LOJALITET',   card.stats.loyalitet],
+    ['LEDERSKAP',   card.stats.lederskap],
+    ['HJELPSOM',    card.stats.helpfulness],
   ];
 
-  const COL1_X = 24, COL2_X = W / 2 + 10;
-  const STAT_ROW_H = 24;
+  const COL1_X     = 24;
+  const COL2_X     = W / 2 + 10;
+  const LABEL_W    = 88;   // max label width before bar
+  const BAR_W_STAT = 120;
+  const STAT_ROW_H = 23;
 
-  ctx.font      = '11px sans-serif';
-  ctx.textAlign = 'left';
+  ctx.font         = 'bold 9px sans-serif';
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'middle';
 
   for (let i = 0; i < statEntries.length; i++) {
     const [label, val] = statEntries[i];
@@ -319,17 +350,19 @@ export async function renderPersonaCard(
     const sx   = col === 0 ? COL1_X : COL2_X;
     const sy   = curY + row * STAT_ROW_H;
 
-    ctx.fillStyle    = theme.text;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, sx, sy + 6);
+    // Label (truncated to LABEL_W)
+    ctx.fillStyle = theme.text + 'cc';
+    ctx.fillText(truncateToWidth(ctx, label, LABEL_W - 4), sx, sy + 6);
 
-    const BAR_X = col === 0 ? COL1_X + 100 : COL2_X + 100;
-    statBar(ctx, BAR_X, sy, val, theme.accent);
+    // Bar starts after LABEL_W gap
+    const BAR_X = sx + LABEL_W;
+    statBar(ctx, BAR_X, sy, val, theme.accent, BAR_W_STAT);
 
+    // Value number
     ctx.fillStyle = theme.accent;
-    ctx.font      = 'bold 10px sans-serif';
-    ctx.fillText(String(val), BAR_X + 146, sy + 6);
-    ctx.font      = '11px sans-serif';
+    ctx.font      = 'bold 9px sans-serif';
+    ctx.fillText(String(val), BAR_X + BAR_W_STAT + 4, sy + 6);
+    ctx.font      = 'bold 9px sans-serif';
   }
 
   curY += 5 * STAT_ROW_H + 10;
@@ -393,17 +426,17 @@ export async function renderPersonaCard(
     ctx.font         = 'italic 11px sans-serif';
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'alphabetic';
-    const ft = card.flavorText.length > 100 ? card.flavorText.slice(0, 97) + '...' : card.flavorText;
-    wrapText(ctx, `"${ft}"`, W / 2, curY + 12, W - 60, 16);
-    curY += 30;
+    wrapText(ctx, `"${card.flavorText}"`, W / 2, curY + 12, W - 60, 15, 2);
+    curY += 34;
   }
 
   // ── Footer: collection number + season ───────────────────────────────────────
   ctx.fillStyle    = theme.border + '88';
-  ctx.font         = '10px sans-serif';
+  ctx.font         = '9px sans-serif';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`Card #${String(collectionNumber).padStart(3, '0')}  ·  GLENVEX PERSONA  ·  Season: ${process.env.PERSONA_SEASON ?? 'default'}`, W / 2, H - 16);
+  const footerText = `Card #${String(collectionNumber).padStart(3, '0')}  ·  GLENVEX PERSONA  ·  Season: ${process.env.PERSONA_SEASON ?? 'default'}`;
+  ctx.fillText(truncateToWidth(ctx, footerText, W - 40), W / 2, H - 14);
 
   return canvas.toBuffer('image/png');
 }

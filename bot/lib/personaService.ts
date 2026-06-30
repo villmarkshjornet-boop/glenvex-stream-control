@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { MemberProfile } from './memberTracker';
 import { deductXP, ALLE_BADGES } from './memberTracker';
 import { renderPersonaCard } from './cardRenderer';
+import { logSystemEvent } from './systemEvents';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const REROLL_XP_COST = 250;
@@ -187,7 +188,16 @@ export async function hentSistePersona(discordId: string): Promise<{ card: Perso
     .single();
   if (!data) return null;
 
-  const collectionNumber = data.reroll_count ?? 0;
+  // Hent faktisk posisjon i samlingen (antall historikk-rader)
+  let collectionNumber = (data.reroll_count ?? 0) + 1;
+  try {
+    const { count } = await sb
+      .from('community_persona_history')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', WORKSPACE_ID)
+      .eq('discord_id', discordId);
+    if (count !== null) collectionNumber = count;
+  } catch {}
 
   return {
     card: {
@@ -309,13 +319,14 @@ Svar KUN med JSON (ingen annen tekst):
 // ── DALL-E bilgenerering ──────────────────────────────────────────────────────
 
 async function genererBilde(card: PersonaCard, openai: OpenAI): Promise<string | null> {
+  // Pure character art — no card borders, no text, no card layout elements
   const fullPrompt =
-    `Collectible trading card art style. Stylized illustrated character portrait. ` +
-    `${SEASON_SUFFIX} ` +
-    `${card.archetype} — ${card.class}. ` +
+    `Stylized fantasy character portrait. ${SEASON_SUFFIX} ` +
+    `${card.archetype} class character — ${card.class} archetype. ` +
     `${card.imagePrompt}. ` +
-    `Dramatic fantasy lighting. Card border frame with glowing rarity effects. ` +
-    `No text overlay. No realistic human face. Semi-cartoon illustration. 1:1 portrait composition.`;
+    `Dramatic cinematic lighting. Dynamic pose. Detailed illustration. ` +
+    `NO text, NO words, NO card frame, NO UI elements, NO realistic human face. ` +
+    `Semi-cartoon game art. Centered portrait composition. Square format.`;
   try {
     const res = await openai.images.generate({
       model: 'dall-e-3', prompt: fullPrompt, n: 1, size: '1024x1024', quality: 'standard',
@@ -510,12 +521,18 @@ export async function genererPersona(member: MemberProfile, erReroll: boolean): 
   const collectionNumber = await hentCollectionNumber(member.id);
   await lagrePersona(member, card, imageUrl, xpCost, rerollCount);
 
-  // Render PNG-samlekort
+  // Render PNG-samlekort (fallback til V2 embed hvis dette feiler)
   let cardPng: Buffer | null = null;
   try {
     cardPng = await renderPersonaCard(card, imageUrl, member, collectionNumber);
   } catch (e: any) {
     console.warn('[Persona] PNG-rendering feilet:', e?.message);
+    logSystemEvent({
+      source: 'discord_bot', event_type: 'PERSONA_CARD_IMAGE_FAILED',
+      title: `Persona PNG-rendering feilet for ${member.username}`,
+      severity: 'warning',
+      metadata: { userId: member.id, username: member.username, error: e?.message, rarity: card.rarity },
+    });
   }
 
   return { card, imageUrl, cardPng, xpCost, rerollCount, collectionNumber, ersteGang: !eksisterende };
