@@ -78,11 +78,42 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Step 3: Siste utvei — bruk JWT workspace_id direkte hvis DB-søk feiler
-  // (f.eks. Supabase utilgjengelig) men middleware allerede har validert tokenet
+  // Step 3: JWT workspace_id direkte (f.eks. Supabase utilgjengelig men JWT er gyldig)
   if (!wsId && metadataWorkspaceId) {
     wsId = metadataWorkspaceId;
     dbWorkspaceFound = false;
+  }
+
+  // Step 4: Hent første workspace fra DB — fallback når JWT mangler workspace_id
+  // og owner_user_id ikke er satt (enkelt-bruker-system, alltid én workspace).
+  // Synkroniserer JWT og owner_user_id automatisk etter suksess.
+  if (!wsId && db) {
+    const { data } = await db
+      .from('workspaces')
+      .select('id, owner_user_id')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (data) {
+      wsId = data.id;
+      dbWorkspaceFound = true;
+
+      // Self-heal: skriv owner_user_id og synk JWT workspace_id
+      const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+      if (userId && sbUrl && sbKey) {
+        const admin = createClient(sbUrl, sbKey, { auth: { autoRefreshToken: false, persistSession: false } });
+        if (!data.owner_user_id) {
+          db.from('workspaces').update({ owner_user_id: userId, updated_at: new Date().toISOString() })
+            .eq('id', wsId).then(() => {}, () => {});
+        }
+        void admin.auth.admin.updateUserById(userId, {
+          user_metadata: { workspace_id: wsId },
+        }).catch(() => {});
+        syncedMetadata = true;
+      }
+    }
   }
 
   if (!wsId) {
