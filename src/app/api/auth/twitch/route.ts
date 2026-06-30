@@ -29,22 +29,28 @@ export async function GET(req: NextRequest) {
   let dbWorkspaceFound = false;
   let syncedMetadata = false;
 
-  // Step 1: JWT workspace_id — verify it exists AND belongs to this user
-  if (metadataWorkspaceId && userId && db) {
+  // Step 1: JWT workspace_id — sjekk at workspace eksisterer i DB.
+  // Middleware har allerede autentisert JWT, så vi stoler på x-workspace-id
+  // uten å kreve owner_user_id-match (owner_user_id kan mangle på eldre workspaces).
+  if (metadataWorkspaceId && db) {
     const { data } = await db
       .from('workspaces')
       .select('id, owner_user_id')
       .eq('id', metadataWorkspaceId)
       .single();
 
-    if (data?.owner_user_id === userId) {
+    if (data) {
       wsId = data.id;
       dbWorkspaceFound = true;
+      // Self-heal: sett owner_user_id hvis det mangler
+      if (!data.owner_user_id && userId) {
+        void db.from('workspaces').update({ owner_user_id: userId, updated_at: new Date().toISOString() })
+          .eq('id', wsId).then(() => {}).catch?.(() => {});
+      }
     }
-    // If null or owner mismatch: fall through to step 2
   }
 
-  // Step 2: Fallback — look up workspace by owner_user_id
+  // Step 2: Fallback — søk etter workspace via owner_user_id
   if (!wsId && userId && db) {
     const { data } = await db
       .from('workspaces')
@@ -57,7 +63,7 @@ export async function GET(req: NextRequest) {
       wsId = data.id;
       dbWorkspaceFound = true;
 
-      // Self-heal: JWT had wrong or missing workspace_id — sync it back so next request is fast
+      // Self-heal: JWT hadde feil workspace_id — synk tilbake
       if (wsId !== metadataWorkspaceId) {
         const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
         const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -70,6 +76,13 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+  }
+
+  // Step 3: Siste utvei — bruk JWT workspace_id direkte hvis DB-søk feiler
+  // (f.eks. Supabase utilgjengelig) men middleware allerede har validert tokenet
+  if (!wsId && metadataWorkspaceId) {
+    wsId = metadataWorkspaceId;
+    dbWorkspaceFound = false;
   }
 
   if (!wsId) {
