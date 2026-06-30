@@ -1,6 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import { logSystemEvent } from './systemEvents';
+import { createClient } from '@supabase/supabase-js';
+
+function getSb() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ws = require('ws');
+  return createClient(url, key, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
+}
 
 const FILE = path.join(process.cwd(), 'data', 'members.json');
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
@@ -57,14 +67,13 @@ function save(data: Record<string, MemberProfile>) {
   } catch {}
 }
 
-// ─── Supabase sync ───────────────────────────────────────────────────────────
+// ─── Supabase sync (JS-klient — håndterer schema-feil riktig) ────────────────
 
 function syncToSupabase(m: MemberProfile): void {
-  const sbUrl = process.env.SUPABASE_URL;
-  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!sbUrl || !sbKey) return;
+  const sb = getSb();
+  if (!sb) return;
 
-  const payload = {
+  sb.from('community_members').upsert({
     discord_id:       m.id,
     workspace_id:     WORKSPACE_ID,
     username:         m.username,
@@ -87,46 +96,30 @@ function syncToSupabase(m: MemberProfile): void {
     last_seen:        m.lastSeen,
     last_welcomed:    m.lastWelcomed,
     joined_at:        m.joinedAt,
-  };
-
-  fetch(`${sbUrl}/rest/v1/community_members`, {
-    method: 'POST',
-    headers: {
-      apikey:           sbKey,
-      Authorization:    `Bearer ${sbKey}`,
-      'Content-Type':   'application/json',
-      Prefer:           'resolution=merge-duplicates',
-    },
-    body: JSON.stringify(payload),
-  }).then(async (r) => {
-    if (!r.ok) {
-      const body = await r.text().catch(() => '');
-      console.warn(`[MemberTracker] syncToSupabase feilet for ${m.username}: ${r.status} ${body.slice(0, 200)}`);
-    }
-  }).catch((err: any) => {
-    console.warn(`[MemberTracker] syncToSupabase nettverksfeil for ${m.username}:`, err?.message);
+    updated_at:       new Date().toISOString(),
+  }, { onConflict: 'workspace_id,discord_id' })
+  .then(({ error }) => {
+    if (error) console.warn(`[MemberTracker] sync feilet for ${m.username}: ${error.message}`);
+  }, (err: any) => {
+    console.warn(`[MemberTracker] sync nettverksfeil:`, err?.message);
   });
 }
 
 // ─── Startup recovery ─────────────────────────────────────────────────────────
 
 export async function lasterMedlemmerFraSupabase(): Promise<void> {
-  // Alltid last fra Supabase ved oppstart — Railway-disken er ephemeral, filen kan eksistere
-  // fra tidligere i samme container men er utdatert. Merge inn Supabase-data i lokal fil.
-  const sbUrl = process.env.SUPABASE_URL;
-  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!sbUrl || !sbKey) return;
+  // Alltid last fra Supabase ved oppstart — Railway-disken er ephemeral.
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return;
 
   try {
-    const res = await fetch(
-      `${sbUrl}/rest/v1/community_members?workspace_id=eq.${WORKSPACE_ID}&select=*`,
-      { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
-    );
-    if (!res.ok) {
-      console.warn(`[MemberTracker] Supabase-henting feilet: ${res.status}`);
-      return;
-    }
-    const rows = await res.json() as any[];
+    const sb = getSb();
+    if (!sb) return;
+    const { data: rows, error } = await sb
+      .from('community_members')
+      .select('*')
+      .eq('workspace_id', WORKSPACE_ID);
+    if (error) { console.warn(`[MemberTracker] Supabase-henting feilet: ${error.message}`); return; }
+    if (!rows) return;
     if (!rows || rows.length === 0) {
       console.log('[MemberTracker] Ingen members i Supabase — starter fra scratch');
       return;
@@ -333,9 +326,7 @@ export function addMessageXP(
   m.level = levelFromXP(m.xp);
   m.lastSeen = new Date().toISOString();
 
-  if (m.messages === 1)   addBadge(m, 'Første melding');
-  if (m.messages === 100) addBadge(m, '100 Meldinger');
-  if (m.messages === 500) addBadge(m, '500 Meldinger');
+  checkAllBadges(m);
 
   // Streak
   updateStreak(m);
@@ -373,7 +364,7 @@ export function addSub(id: string, username: string, displayName: string) {
   const members = load();
   const m = upsertMember(id, username, displayName);
   members[id] = { ...m, subs: (m.subs || 0) + 1, xp: m.xp + 200 };
-  if (members[id].subs === 1) addBadge(members[id], 'Første Sub');
+  checkAllBadges(members[id]);
   computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
@@ -473,4 +464,111 @@ export function setLastWelcomed(id: string) {
 
 function addBadge(m: MemberProfile, badge: string) {
   if (!m.badges.includes(badge)) m.badges.push(badge);
+}
+
+// ─── Badge-system (komplett) ─────────────────────────────────────────────────
+
+export interface BadgeDef {
+  id: string;
+  emoji: string;
+  navn: string;
+  beskrivelse: string;
+  sjekk: (m: MemberProfile) => boolean;
+}
+
+export const ALLE_BADGES: BadgeDef[] = [
+  // Meldinger
+  { id: 'første_melding',   emoji: '💬', navn: 'Første melding',   beskrivelse: 'Send din første melding',          sjekk: m => m.messages >= 1   },
+  { id: '10_meldinger',     emoji: '📣', navn: '10 Meldinger',      beskrivelse: '10 meldinger sendt',               sjekk: m => m.messages >= 10  },
+  { id: '100_meldinger',    emoji: '🗨️', navn: '100 Meldinger',    beskrivelse: '100 meldinger sendt',              sjekk: m => m.messages >= 100 },
+  { id: '500_meldinger',    emoji: '📢', navn: '500 Meldinger',     beskrivelse: '500 meldinger sendt',              sjekk: m => m.messages >= 500 },
+  { id: '1000_meldinger',   emoji: '🏆', navn: '1000 Meldinger',    beskrivelse: '1000 meldinger sendt',             sjekk: m => m.messages >= 1000 },
+  // Voice
+  { id: 'voice_start',      emoji: '🎙️', navn: 'Voice-deltaker',   beskrivelse: 'Første 5 min i voice-kanal',       sjekk: m => m.voiceMinutes >= 5   },
+  { id: 'voice_veteran',    emoji: '🎧', navn: 'Voice Veteran',      beskrivelse: '60 minutter i voice totalt',       sjekk: m => m.voiceMinutes >= 60  },
+  { id: 'voice_legend',     emoji: '🎵', navn: 'Voice Legend',       beskrivelse: '300 minutter i voice totalt',      sjekk: m => m.voiceMinutes >= 300 },
+  // Streams
+  { id: 'stream_fan',       emoji: '📺', navn: 'Stream-fan',         beskrivelse: 'Første stream du deltok i',        sjekk: m => m.streamsAttended >= 1  },
+  { id: 'stream_supporter', emoji: '⭐', navn: 'Stream Supporter',   beskrivelse: '5 streams deltatt',                sjekk: m => m.streamsAttended >= 5  },
+  { id: 'stream_fanatic',   emoji: '🌟', navn: 'Stream Fanatic',     beskrivelse: '20 streams deltatt',               sjekk: m => m.streamsAttended >= 20 },
+  // Subs & support
+  { id: 'subscriber',       emoji: '💜', navn: 'Subscriber',         beskrivelse: 'Første gang du subbet',            sjekk: m => m.subs >= 1       },
+  { id: 'gifter',           emoji: '🎁', navn: 'Gifter',             beskrivelse: 'Første gang du giftet en sub',     sjekk: m => m.giftSubs >= 1   },
+  { id: 'generøs_gifter',   emoji: '💝', navn: 'Generøs Gifter',    beskrivelse: '10 gifted subs totalt',             sjekk: m => m.giftSubs >= 10  },
+  // Raids
+  { id: 'raider',           emoji: '🚀', navn: 'Raider',             beskrivelse: 'Deltatt i første raid',            sjekk: m => m.raids >= 1  },
+  { id: 'warlord',          emoji: '⚔️', navn: 'Warlord',           beskrivelse: '5 raids gjennomført',               sjekk: m => m.raids >= 5  },
+  // Streak
+  { id: 'på_rekke',         emoji: '🔥', navn: 'På Rekke',           beskrivelse: '7 dager aktiv på rad',             sjekk: m => m.streakDays >= 7  },
+  { id: 'ustoppelig',       emoji: '⚡', navn: 'Ustoppelig',         beskrivelse: '30 dager aktiv på rad',             sjekk: m => m.streakDays >= 30 },
+  // XP milepæler
+  { id: 'veteran',          emoji: '🥉', navn: 'Veteran',            beskrivelse: '1 000 XP opptjent',                sjekk: m => m.xp >= 1000  },
+  { id: 'elite',            emoji: '🥈', navn: 'Elite',              beskrivelse: '5 000 XP opptjent',                sjekk: m => m.xp >= 5000  },
+  { id: 'legend',           emoji: '🥇', navn: 'Legend',             beskrivelse: '10 000 XP opptjent',               sjekk: m => m.xp >= 10000 },
+  { id: 'champion',         emoji: '👑', navn: 'Champion',           beskrivelse: '25 000 XP opptjent',               sjekk: m => m.xp >= 25000 },
+];
+
+export function checkAllBadges(m: MemberProfile): string[] {
+  const nye: string[] = [];
+  for (const b of ALLE_BADGES) {
+    if (b.sjekk(m) && !m.badges.includes(b.navn)) {
+      m.badges.push(b.navn);
+      nye.push(b.emoji + ' ' + b.navn);
+    }
+  }
+  return nye;
+}
+
+export function nesteBadge(m: MemberProfile): { badge: BadgeDef; pct: number; mangler: string } | null {
+  for (const b of ALLE_BADGES) {
+    if (b.sjekk(m)) continue; // allerede oppnådd
+    // Beregn progresjon mot denne badgen basert på nøkkeltype
+    const pct = badgeProsent(m, b);
+    const mangler = badgeMangler(m, b);
+    return { badge: b, pct, mangler };
+  }
+  return null;
+}
+
+function badgeProsent(m: MemberProfile, b: BadgeDef): number {
+  const id = b.id;
+  if (id.includes('melding'))    return Math.min(99, (m.messages   / badgeTerskel(id, 'melding'))   * 100);
+  if (id.includes('voice'))      return Math.min(99, (m.voiceMinutes / badgeTerskel(id, 'voice'))   * 100);
+  if (id.includes('stream'))     return Math.min(99, (m.streamsAttended / badgeTerskel(id,'stream'))* 100);
+  if (id.includes('raid'))       return Math.min(99, (m.raids / badgeTerskel(id, 'raid'))           * 100);
+  if (id.includes('streak') || id === 'på_rekke' || id === 'ustoppelig')
+                                  return Math.min(99, (m.streakDays / badgeTerskel(id, 'streak'))   * 100);
+  if (id === 'veteran')          return Math.min(99, (m.xp / 1000)  * 100);
+  if (id === 'elite')            return Math.min(99, (m.xp / 5000)  * 100);
+  if (id === 'legend')           return Math.min(99, (m.xp / 10000) * 100);
+  if (id === 'champion')         return Math.min(99, (m.xp / 25000) * 100);
+  return 0;
+}
+
+function badgeTerskel(id: string, type: string): number {
+  const t: Record<string, number> = {
+    første_melding: 1, '10_meldinger': 10, '100_meldinger': 100, '500_meldinger': 500, '1000_meldinger': 1000,
+    voice_start: 5, voice_veteran: 60, voice_legend: 300,
+    stream_fan: 1, stream_supporter: 5, stream_fanatic: 20,
+    raider: 1, warlord: 5,
+    på_rekke: 7, ustoppelig: 30,
+  };
+  return t[id] ?? 1;
+}
+
+function badgeMangler(m: MemberProfile, b: BadgeDef): string {
+  const id = b.id;
+  if (id.includes('melding')) { const t = badgeTerskel(id,'melding'); return `${t - m.messages} meldinger til`; }
+  if (id.includes('voice'))   { const t = badgeTerskel(id,'voice');   return `${t - m.voiceMinutes} min voice til`; }
+  if (id.includes('stream'))  { const t = badgeTerskel(id,'stream');  return `${t - m.streamsAttended} streams til`; }
+  if (id.includes('raid'))    { const t = badgeTerskel(id,'raid');    return `${t - m.raids} raids til`; }
+  if (id === 'på_rekke')      return `${7  - m.streakDays} dager til`;
+  if (id === 'ustoppelig')    return `${30 - m.streakDays} dager til`;
+  if (id === 'veteran')       return `${1000  - m.xp} XP til`;
+  if (id === 'elite')         return `${5000  - m.xp} XP til`;
+  if (id === 'legend')        return `${10000 - m.xp} XP til`;
+  if (id === 'champion')      return `${25000 - m.xp} XP til`;
+  if (id === 'subscriber')    return 'Subskriber for første gang';
+  if (id === 'gifter')        return 'Gift en sub';
+  return '?';
 }
