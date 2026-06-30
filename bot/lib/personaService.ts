@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import type { MemberProfile } from './memberTracker';
 import { deductXP, ALLE_BADGES } from './memberTracker';
+import { renderPersonaCard } from './cardRenderer';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const REROLL_XP_COST = 250;
@@ -479,6 +480,7 @@ export function byggPersonaEmbed(
 export interface PersonaResult {
   card:             PersonaCard;
   imageUrl:         string | null;
+  cardPng:          Buffer | null;   // ferdig PNG-samlekort
   xpCost:           number;
   rerollCount:      number;
   collectionNumber: number;
@@ -499,16 +501,25 @@ export async function genererPersona(member: MemberProfile, erReroll: boolean): 
     trekkFraXP(member, REROLL_XP_COST);
   }
 
-  const openai          = new OpenAI({ apiKey });
-  const rarity          = trekkSjeldenhet(member);
-  const card            = await genererPersonaJson(member, rarity, openai);
+  const openai           = new OpenAI({ apiKey });
+  const rarity           = trekkSjeldenhet(member);
+  const card             = await genererPersonaJson(member, rarity, openai);
   if (!card) return { feil: 'AI klarte ikke å generere persona. Prøv igjen om litt.' };
 
-  const imageUrl        = await genererBilde(card, openai);
+  const imageUrl         = await genererBilde(card, openai);
   const collectionNumber = await hentCollectionNumber(member.id);
   await lagrePersona(member, card, imageUrl, xpCost, rerollCount);
 
-  return { card, imageUrl, xpCost, rerollCount, collectionNumber, ersteGang: !eksisterende };
+  // Render PNG-samlekort
+  let cardPng: Buffer | null = null;
+  try {
+    cardPng = await renderPersonaCard(card, imageUrl, member, collectionNumber);
+  } catch (e: any) {
+    console.warn('[Persona] PNG-rendering feilet:', e?.message);
+  }
+
+  return { card, imageUrl, cardPng, xpCost, rerollCount, collectionNumber, ersteGang: !eksisterende };
 }
 
+export { renderPersonaCard } from './cardRenderer';
 export { RARITY_STARS, RARITY_BANNER, REROLL_XP_COST };

@@ -7,6 +7,7 @@ import {
   ButtonStyle,
   ButtonInteraction,
   ComponentType,
+  AttachmentBuilder,
 } from 'discord.js';
 import {
   getMember,
@@ -15,13 +16,22 @@ import {
 import {
   genererPersona,
   hentSistePersona,
-  byggPersonaEmbed,
+  renderPersonaCard,
   REROLL_XP_COST,
   RARITY_COLOR,
   RARITY_BANNER,
 } from '../lib/personaService';
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
+
+// ── Enkel wrapper-embed som peker på PNG-bildet ────────────────────────────────
+
+function lagEmbedWrapper(rarity: string, rarityColor: number) {
+  return new EmbedBuilder()
+    .setColor(rarityColor)
+    .setImage('attachment://persona-card.png')
+    .setFooter({ text: `${RARITY_BANNER[rarity as keyof typeof RARITY_BANNER] ?? rarity}` });
+}
 
 function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -37,10 +47,28 @@ function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<Butto
   );
 }
 
+// ── Hent og render eksisterende persona som PNG ───────────────────────────────
+
+async function hentOgRenderEksisterende(userId: string, username: string) {
+  const eksisterende = await hentSistePersona(userId);
+  if (!eksisterende) return null;
+  const member = getMember(userId);
+  if (!member) return null;
+
+  let png: Buffer | null = null;
+  try {
+    png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber);
+  } catch {}
+
+  return { eksisterende, member, png };
+}
+
+// ── Kommando ──────────────────────────────────────────────────────────────────
+
 export const personaCommand = {
   data: new SlashCommandBuilder()
     .setName('persona')
-    .setDescription('Generer din AI Persona Card — ditt unike GLENVEX samlekort.')
+    .setDescription('Generer ditt AI Persona Card — et unikt GLENVEX samlekort.')
     .addBooleanOption(opt =>
       opt.setName('reroll')
         .setDescription(`Reroll persona for ${REROLL_XP_COST} XP?`)
@@ -59,68 +87,87 @@ export const personaCommand = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    // Vis eksisterende persona
+    // ── Vis eksisterende kort ──────────────────────────────────────────────────
     if (!erReroll) {
-      const eksisterende = await hentSistePersona(user.id);
-      if (eksisterende) {
-        const embed     = byggPersonaEmbed(eksisterende.card, eksisterende.imageUrl, user.username, eksisterende.rerollCount, member!, eksisterende.collectionNumber);
-        const harNokXP  = member!.xp >= REROLL_XP_COST;
+      const res = await hentOgRenderEksisterende(user.id, user.username);
+      if (res) {
+        const { eksisterende, member: m, png } = res;
+        const harNokXP  = m.xp >= REROLL_XP_COST;
         const knappeRad = lagKnappeRad(user.id, harNokXP);
 
-        const rarityFarge = RARITY_COLOR[eksisterende.card.rarity];
-        const rarityBanner = RARITY_BANNER[eksisterende.card.rarity];
-
-        const infoEmbed = new EmbedBuilder()
-          .setColor(rarityFarge)
-          .setDescription(
-            `Ditt aktive ${rarityBanner}-kort for denne sesongen.\n` +
-            `**${member!.xp} XP** · Reroll koster **${REROLL_XP_COST} XP**`
-          );
-
-        await interaction.editReply({ embeds: [infoEmbed, embed as any], components: [knappeRad] });
+        if (png) {
+          const fil   = new AttachmentBuilder(png, { name: 'persona-card.png' });
+          const embed = lagEmbedWrapper(eksisterende.card.rarity, RARITY_COLOR[eksisterende.card.rarity]);
+          await interaction.editReply({
+            content:    `🎴 Ditt aktive kort · **${m.xp} XP** · Reroll koster **${REROLL_XP_COST} XP**`,
+            embeds:     [embed],
+            files:      [fil],
+            components: [knappeRad],
+          });
+        } else {
+          // Fallback: vis uten bilde
+          await interaction.editReply({
+            content:    `🎴 ${eksisterende.card.title} · ${eksisterende.card.rarity} · **${m.xp} XP**`,
+            components: [knappeRad],
+          });
+        }
         return;
       }
     }
 
-    // Ventemelding
+    // ── Generer nytt kort ──────────────────────────────────────────────────────
     const venteEmbed = new EmbedBuilder()
       .setColor(0x00ff41)
-      .setTitle('🎴 GLENVEX Persona Generator')
+      .setTitle('🎴 GLENVEX Persona Card Generator')
       .setDescription(
         erReroll
-          ? `Regenererer samlekort... **${REROLL_XP_COST} XP** trekkes. ⏳`
-          : `Analyserer din Discord-aktivitet og genererer ditt unike samlekort...\n\n10–30 sekunder ⏳`
+          ? `Regenererer samlekort — **${REROLL_XP_COST} XP** trekkes. Vennligst vent... ⏳\n*Ca. 20–40 sekunder*`
+          : `Analyserer Discord-aktivitet og genererer ditt unike samlekort...\n\n*Ca. 20–40 sekunder — bildegenerering inkludert* ⏳`
       );
     await interaction.editReply({ embeds: [venteEmbed] });
 
     const resultat = await genererPersona(member!, erReroll);
 
     if ('feil' in resultat) {
-      const feilEmbed = new EmbedBuilder()
-        .setColor(0xff3333)
-        .setTitle('❌ Feil')
-        .setDescription(resultat.feil);
-      await interaction.editReply({ embeds: [feilEmbed], components: [] });
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setColor(0xff3333).setTitle('❌ Feil').setDescription(resultat.feil)],
+        components: [],
+      });
       return;
     }
 
-    const embed     = byggPersonaEmbed(resultat.card, resultat.imageUrl, user.username, resultat.rerollCount, member!, resultat.collectionNumber);
     const harNokXP  = (member!.xp - resultat.xpCost) >= REROLL_XP_COST;
     const knappeRad = lagKnappeRad(user.id, harNokXP);
 
-    let toppTekst = '';
-    if (resultat.ersteGang) {
-      toppTekst = `🎴 **${user.username}** — ditt første GLENVEX Persona Card er generert! Card #${String(resultat.collectionNumber).padStart(3, '0')}`;
-    } else if (erReroll) {
-      toppTekst = `🔁 Rerollet! Ny sjeldenhet: **${resultat.card.rarity}** · Card #${String(resultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`;
+    const toppTekst = resultat.ersteGang
+      ? `🎴 **${user.username}** — ditt første GLENVEX Persona Card! Card #${String(resultat.collectionNumber).padStart(3, '0')}`
+      : erReroll
+        ? `🔁 Rerollet! **${resultat.card.rarity}** · Card #${String(resultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`
+        : undefined;
+
+    if (resultat.cardPng) {
+      const fil   = new AttachmentBuilder(resultat.cardPng, { name: 'persona-card.png' });
+      const embed = lagEmbedWrapper(resultat.card.rarity, RARITY_COLOR[resultat.card.rarity]);
+      await interaction.editReply({
+        content:    toppTekst,
+        embeds:     [embed],
+        files:      [fil],
+        components: [knappeRad],
+      });
+    } else {
+      // Fallback: embed-only hvis PNG-rendering feilet
+      await interaction.editReply({
+        content:    toppTekst,
+        embeds:     [new EmbedBuilder()
+          .setColor(RARITY_COLOR[resultat.card.rarity])
+          .setTitle(resultat.card.title)
+          .setDescription(`**${resultat.card.class}** · ${resultat.card.rarity}\n\n*${resultat.card.quote}*`)
+          .setImage(resultat.imageUrl || null as any)],
+        components: [knappeRad],
+      });
     }
 
-    await interaction.editReply({
-      content:    toppTekst || undefined,
-      embeds:     [embed as any],
-      components: [knappeRad],
-    });
-
+    // ── Button collector ──────────────────────────────────────────────────────
     const msg       = await interaction.fetchReply();
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.Button,
@@ -131,37 +178,46 @@ export const personaCommand = {
     collector.on('collect', async (btn: ButtonInteraction) => {
       await btn.deferUpdate();
 
+      // Reroll
       if (btn.customId.startsWith('persona_reroll_')) {
         const oppdatertMedlem = getMember(user.id) ?? member!;
 
-        const venteRe = new EmbedBuilder()
-          .setColor(0x00ff41)
-          .setTitle('🔁 Regenererer kort...')
-          .setDescription(`Koster ${REROLL_XP_COST} XP · Vennligst vent... ⏳`);
-        await btn.editReply({ embeds: [venteRe], components: [] });
+        await btn.editReply({
+          content: `🔁 Regenererer kort... **${REROLL_XP_COST} XP** trekkes ⏳`,
+          embeds: [], files: [], components: [],
+        });
 
-        const nyResultat = await genererPersona(oppdatertMedlem, true);
+        const ny = await genererPersona(oppdatertMedlem, true);
 
-        if ('feil' in nyResultat) {
-          await btn.editReply({ embeds: [new EmbedBuilder().setColor(0xff3333).setDescription(nyResultat.feil)], components: [] });
+        if ('feil' in ny) {
+          await btn.editReply({ content: `❌ ${ny.feil}`, embeds: [], files: [], components: [] });
           return;
         }
 
-        const nyEmbed   = byggPersonaEmbed(nyResultat.card, nyResultat.imageUrl, user.username, nyResultat.rerollCount, oppdatertMedlem, nyResultat.collectionNumber);
-        const nyHarNokXP = (oppdatertMedlem.xp - nyResultat.xpCost) >= REROLL_XP_COST;
-
-        await btn.editReply({
-          content:    `🔁 Rerollet! Ny sjeldenhet: **${nyResultat.card.rarity}** · Card #${String(nyResultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
-          embeds:     [nyEmbed as any],
-          components: [lagKnappeRad(user.id, nyHarNokXP)],
-        });
+        const nyHarNokXP = (oppdatertMedlem.xp - ny.xpCost) >= REROLL_XP_COST;
+        if (ny.cardPng) {
+          const fil   = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
+          const embed = lagEmbedWrapper(ny.card.rarity, RARITY_COLOR[ny.card.rarity]);
+          await btn.editReply({
+            content:    `🔁 Rerollet! **${ny.card.rarity}** · Card #${String(ny.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
+            embeds:     [embed],
+            files:      [fil],
+            components: [lagKnappeRad(user.id, nyHarNokXP)],
+          });
+        } else {
+          await btn.editReply({
+            content:    `🔁 Rerollet! **${ny.card.rarity}** · Card #${String(ny.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
+            components: [lagKnappeRad(user.id, nyHarNokXP)],
+          });
+        }
         return;
       }
 
+      // Del i showcase
       if (btn.customId.startsWith('persona_share_')) {
         try {
           if (!SHOWCASE_KANAL_ID) {
-            await btn.followUp({ content: '⚠️ Showcase-kanal er ikke satt opp (DISCORD_PERSONA_SHOWCASE_CHANNEL_ID).', ephemeral: true });
+            await btn.followUp({ content: '⚠️ Showcase-kanal ikke satt opp (DISCORD_PERSONA_SHOWCASE_CHANNEL_ID).', ephemeral: true });
             return;
           }
           const kanal = btn.guild?.channels.cache.get(SHOWCASE_KANAL_ID) as any;
@@ -170,15 +226,23 @@ export const personaCommand = {
             return;
           }
 
-          const sistePersona = await hentSistePersona(user.id);
-          if (!sistePersona) return;
+          const res2 = await hentOgRenderEksisterende(user.id, user.username);
+          if (!res2) return;
 
-          const currentMember = getMember(user.id) ?? member!;
-          const shareEmbed = byggPersonaEmbed(sistePersona.card, sistePersona.imageUrl, user.username, sistePersona.rerollCount, currentMember, sistePersona.collectionNumber);
-          await kanal.send({
-            content: `🎴 <@${user.id}> deler sitt **${sistePersona.card.rarity}** Persona Card!  ${RARITY_BANNER[sistePersona.card.rarity]}`,
-            embeds:  [shareEmbed as any],
-          });
+          const { eksisterende, member: m2, png } = res2;
+          const banner = RARITY_BANNER[eksisterende.card.rarity];
+
+          if (png) {
+            const fil   = new AttachmentBuilder(png, { name: 'persona-card.png' });
+            const embed = lagEmbedWrapper(eksisterende.card.rarity, RARITY_COLOR[eksisterende.card.rarity]);
+            await kanal.send({
+              content: `🎴 <@${user.id}> deler sitt **${eksisterende.card.rarity}** Persona Card!  ${banner}`,
+              embeds:  [embed],
+              files:   [fil],
+            });
+          } else {
+            await kanal.send(`🎴 <@${user.id}> — **${eksisterende.card.title}** (${eksisterende.card.rarity})`);
+          }
 
           await btn.followUp({ content: '✅ Persona Card delt i showcase!', ephemeral: true });
         } catch (e: any) {

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@discordjs/rest": "^2.4.0",
+    "@napi-rs/canvas": "^1.0.2",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.107.0",
     "discord-api-types": "^0.37.100",
