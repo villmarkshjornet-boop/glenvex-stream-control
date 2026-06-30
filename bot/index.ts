@@ -1996,6 +1996,7 @@ client.once('clientReady', () => {
       const commandData = [
         liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand,
         socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand,
+        personaCommand,
       ].map(c => c.data.toJSON());
 
       const clientId = process.env.DISCORD_CLIENT_ID ?? '';
