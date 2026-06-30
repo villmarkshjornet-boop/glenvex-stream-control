@@ -574,6 +574,16 @@ export function deductXP(id: string, antall: number): void {
   syncToSupabase(members[id]);
 }
 
+export function setXP(id: string, xp: number): MemberProfile | null {
+  const members = load();
+  if (!members[id]) return null;
+  members[id].xp    = Math.max(0, xp);
+  members[id].level = levelFromXP(members[id].xp);
+  save(members);
+  syncToSupabase(members[id]);
+  return members[id];
+}
+
 function addBadge(m: MemberProfile, badge: string) {
   if (!m.badges.includes(badge)) m.badges.push(badge);
 }
