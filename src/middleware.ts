@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron', '/api/backfill'];
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron', '/api/backfill', '/api/admin/run-migration'];
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 dager
 
 interface StoredSession {
