@@ -462,6 +462,21 @@ export function setLastWelcomed(id: string) {
   }
 }
 
+export function syncMember(m: MemberProfile): void {
+  const members = load();
+  members[m.id] = m;
+  save(members);
+  syncToSupabase(m);
+}
+
+export function deductXP(id: string, antall: number): void {
+  const members = load();
+  if (!members[id]) return;
+  members[id].xp = Math.max(0, members[id].xp - antall);
+  save(members);
+  syncToSupabase(members[id]);
+}
+
 function addBadge(m: MemberProfile, badge: string) {
   if (!m.badges.includes(badge)) m.badges.push(badge);
 }

@@ -24,6 +24,7 @@ import { topRaids, topGiftSubs } from './lib/eventTracker';
 import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { profilCommand } from './commands/profil';
+import { personaCommand } from './commands/persona';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
@@ -113,7 +114,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
