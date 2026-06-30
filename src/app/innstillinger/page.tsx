@@ -289,6 +289,106 @@ function TwitchBotAdminPanel() {
   );
 }
 
+// ─── Twitch Broadcaster Token ────────────────────────────────────────────────
+
+function TwitchBroadcasterPanel() {
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/auth/twitch/status').then(r => r.json()).then(d => { setStatus(d); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const ok       = status?.connected === true;
+  const expired  = status?.reason === 'token_expired';
+  const missing  = !ok && !expired;
+  const hasF     = status?.hasFollowerScope;
+  const hasSub   = status?.hasSubScope;
+  const wsId     = status?.workspaceId;
+
+  const connectUrl = `/api/auth/twitch?returnUrl=${encodeURIComponent('/innstillinger?tab=integrasjoner')}`;
+
+  return (
+    <div style={{ background: '#0d1117', border: `1px solid ${ok ? '#00ff4125' : '#ff444420'}`, borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '12px 18px', borderBottom: '1px solid #1a2f1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', color: '#c8f5c8' }}>
+            Twitch Broadcaster Token
+          </span>
+          <p style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginTop: '2px' }}>
+            Kreves for følgere, subscribers og kanaldata
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${ok ? '#00ff4125' : expired ? '#ffd70025' : '#ff444425'}`, background: ok ? '#00ff4108' : expired ? '#ffd70008' : '#ff444408', fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, color: ok ? '#00ff41' : expired ? '#ffd700' : '#ff6b6b' }}>
+          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: ok ? '#00ff41' : expired ? '#ffd700' : '#ff6b6b', display: 'inline-block', boxShadow: ok ? '0 0 6px #00ff41' : 'none' }} />
+          {loading ? 'Sjekker...' : ok ? 'Tilkoblet' : expired ? 'Token utløpt' : 'Ikke tilkoblet'}
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
+        {/* Status */}
+        {!loading && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            {[
+              { label: 'Workspace ID', value: wsId ?? '—', mono: true },
+              { label: 'Twitch-konto', value: status?.twitchLogin ? `@${status.twitchLogin}` : '—', mono: true },
+              {
+                label: 'moderator:read:followers',
+                value: hasF === true ? '✓ OK' : hasF === false ? '✗ Mangler' : '—',
+                color: hasF === true ? '#00ff41' : '#ff6b6b',
+              },
+              {
+                label: 'channel:read:subscriptions',
+                value: hasSub === true ? '✓ OK' : hasSub === false ? '✗ Mangler (Affiliate)' : '—',
+                color: hasSub === true ? '#00ff41' : '#ffd700',
+              },
+            ].map(r => (
+              <div key={r.label} style={{ background: '#070d07', border: '1px solid #141f14', borderRadius: '6px', padding: '8px 12px' }}>
+                <div style={{ fontSize: '8px', color: '#3a5a3a', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: 'monospace', marginBottom: '3px' }}>{r.label}</div>
+                <div style={{ fontSize: '11px', fontFamily: 'monospace', color: (r as any).color ?? '#c8f5c8', fontWeight: 700 }}>{r.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Forklaring */}
+        {!ok && !loading && (
+          <div style={{ padding: '10px 12px', background: '#ff444408', border: '1px solid #ff444420', borderRadius: '7px', fontSize: '10px', color: '#ff9999', fontFamily: 'monospace', lineHeight: 1.6 }}>
+            {expired
+              ? '⚠ Tokenet ditt er utløpt. Klikk "Koble til Twitch" for å fornye det — dette tar 10 sekunder og fikser følgere og subscribers.'
+              : `✗ Ingen broadcaster-token funnet for workspace "${wsId}". Boten bruker et eget Railway-token for chat, men followers/subs krever et personlig brukertoken. Koble til nedenfor.`
+            }
+          </div>
+        )}
+
+        {ok && !hasF && (
+          <div style={{ padding: '10px 12px', background: '#ffd70008', border: '1px solid #ffd70020', borderRadius: '7px', fontSize: '10px', color: '#ffd700', fontFamily: 'monospace' }}>
+            ⚠ Tokenet mangler <strong>moderator:read:followers</strong>-scope. Koble til på nytt nedenfor for å gi riktig tilgang.
+          </div>
+        )}
+
+        {/* Koble til-knapp */}
+        <a href={connectUrl} style={{
+          display: 'block', textAlign: 'center', padding: '11px',
+          background: ok ? '#00ff4108' : '#9147ff18',
+          border: `1px solid ${ok ? '#00ff4130' : '#9147ff40'}`,
+          borderRadius: '7px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 700,
+          letterSpacing: '0.1em', textTransform: 'uppercase', color: ok ? '#00ff41' : '#bf94ff',
+          textDecoration: 'none', transition: 'all 0.2s',
+        }}>
+          {ok ? '↻ Forny Twitch-token' : '⚡ Koble til Twitch (broadcaster)'}
+        </a>
+
+        <p style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', textAlign: 'center' }}>
+          Dette er <strong style={{ color: '#4a6a4a' }}>ikke</strong> bot-tilkoblingen — dette er broadcaster-token for å lese kanalstatistikk.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Integrasjons-helse ───────────────────────────────────────────────────────
 
 function HelsePanel() {
@@ -749,6 +849,10 @@ export default function InnstillingerSide() {
         {/* ── INTEGRASJONER ────────────────────────────────────────────────── */}
         {aktivFane === 'integrasjoner' && (
           <div className="space-y-5">
+
+            {/* Twitch Broadcaster Token — full bredde, alltid synlig */}
+            <TwitchBroadcasterPanel />
+
             {settings ? (
               <div className="grid grid-cols-2 gap-5 items-start">
                 {/* Venstre kolonne */}
