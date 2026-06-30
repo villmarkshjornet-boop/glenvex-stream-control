@@ -39,59 +39,52 @@ export async function POST(req: NextRequest) {
   }
 
   const sbUrl = process.env.SUPABASE_URL ?? '';
-  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-  if (!sbUrl || !sbKey) {
-    return NextResponse.json({ error: 'Supabase env-variabler mangler på serveren' }, { status: 500 });
-  }
+  if (!sbUrl) return NextResponse.json({ error: 'SUPABASE_URL mangler' }, { status: 500 });
 
   // Ekstraher project_ref fra https://{ref}.supabase.co
-  const refMatch = sbUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
-  if (!refMatch) {
-    return NextResponse.json({ error: `Klarte ikke parse project_ref fra SUPABASE_URL: ${sbUrl}` }, { status: 500 });
+  const projectRef = sbUrl.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1];
+  if (!projectRef) return NextResponse.json({ error: `Klarte ikke parse project_ref fra ${sbUrl}` }, { status: 500 });
+
+  // Bruk pg direkte mot Supabase Transaction Pooler
+  // Supabase støtter pg-tilkobling via: postgresql://postgres.{ref}:{serviceRoleKey}@{region}.pooler.supabase.com:6543/postgres
+  // Prøv begge region-konvensjoner
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const dbPassword = encodeURIComponent(sbKey);
+
+  // Finn region fra Supabase REST API (OPTIONS-kall avslører region i headers)
+  let region = 'aws-0-eu-central-1'; // vanlig norsk region
+  try {
+    const optRes = await fetch(`${sbUrl}/rest/v1/`, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+    const server = optRes.headers.get('server') ?? '';
+    if (server.includes('us-east')) region = 'aws-0-us-east-1';
+    else if (server.includes('us-west')) region = 'aws-0-us-west-1';
+  } catch {}
+
+  const pgUrls = [
+    `postgresql://postgres.${projectRef}:${dbPassword}@${region}.pooler.supabase.com:6543/postgres?sslmode=require`,
+    `postgresql://postgres:${dbPassword}@db.${projectRef}.supabase.co:5432/postgres?sslmode=require`,
+  ];
+
+  const { Client } = require('pg');
+
+  for (const connStr of pgUrls) {
+    const client = new Client({ connectionString: connStr, connectionTimeoutMillis: 8000 });
+    try {
+      await client.connect();
+      await client.query(SQL);
+      await client.end();
+      return NextResponse.json({ ok: true, melding: 'community_personas tabell opprettet!', connectionUsed: connStr.split('@')[1] });
+    } catch (err: any) {
+      try { await client.end(); } catch {}
+      console.warn(`[Migration] Forsøk feilet: ${err.message?.slice(0, 100)}`);
+    }
   }
-  const projectRef = refMatch[1];
-
-  // Supabase Management API — krever Supabase personal access token, IKKE service role key
-  // Prøv likevel (kjenner ikke til om Railway-prosjektet har dette satt opp)
-  const mgmtRes = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${sbKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query: SQL }),
-  });
-
-  if (mgmtRes.ok) {
-    const data = await mgmtRes.json();
-    return NextResponse.json({ ok: true, melding: 'Migrasjon kjørt via Management API', data });
-  }
-
-  const mgmtErr = await mgmtRes.text().catch(() => mgmtRes.statusText);
-
-  // Fallback: prøv via Supabase SQL-endepunkt (Supabase v2 har dette som intern rute)
-  const sqlRes = await fetch(`${sbUrl}/rest/v1/rpc/exec_sql`, {
-    method: 'POST',
-    headers: {
-      'apikey': sbKey,
-      'Authorization': `Bearer ${sbKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ sql: SQL }),
-  });
-
-  if (sqlRes.ok) {
-    return NextResponse.json({ ok: true, melding: 'Migrasjon kjørt via exec_sql RPC' });
-  }
-
-  const sqlErr = await sqlRes.text().catch(() => sqlRes.statusText);
 
   return NextResponse.json({
     ok: false,
     projectRef,
-    mgmtFeil: mgmtErr.slice(0, 300),
-    sqlFeil: sqlErr.slice(0, 300),
-    melding: 'Automatisk migrasjon støttes ikke uten Supabase Personal Access Token. Kjør SQL manuelt i Supabase SQL Editor.',
+    melding: 'Direkte pg-tilkobling feilet. Kjør SQL manuelt i Supabase SQL Editor.',
+    supabaseUrl: `https://supabase.com/dashboard/project/${projectRef}/sql/new`,
     sql: SQL,
   }, { status: 422 });
 }
