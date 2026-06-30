@@ -498,7 +498,11 @@ export interface PersonaResult {
   ersteGang:        boolean;
 }
 
-export async function genererPersona(member: MemberProfile, erReroll: boolean): Promise<PersonaResult | { feil: string }> {
+export async function genererPersona(
+  member: MemberProfile,
+  erReroll: boolean,
+  avatarUrl?: string | null,
+): Promise<PersonaResult | { feil: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { feil: 'OPENAI_API_KEY mangler på Railway.' };
 
@@ -524,7 +528,7 @@ export async function genererPersona(member: MemberProfile, erReroll: boolean): 
   // Render PNG-samlekort (fallback til V2 embed hvis dette feiler)
   let cardPng: Buffer | null = null;
   try {
-    cardPng = await renderPersonaCard(card, imageUrl, member, collectionNumber);
+    cardPng = await renderPersonaCard(card, imageUrl, member, collectionNumber, avatarUrl);
   } catch (e: any) {
     console.warn('[Persona] PNG-rendering feilet:', e?.message);
     logSystemEvent({

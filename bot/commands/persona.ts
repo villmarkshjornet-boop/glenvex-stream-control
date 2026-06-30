@@ -49,7 +49,7 @@ function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<Butto
 
 // ── Hent og render eksisterende persona som PNG ───────────────────────────────
 
-async function hentOgRenderEksisterende(userId: string, username: string) {
+async function hentOgRenderEksisterende(userId: string, username: string, avatarUrl?: string | null) {
   const eksisterende = await hentSistePersona(userId);
   if (!eksisterende) return null;
   const member = getMember(userId);
@@ -57,7 +57,7 @@ async function hentOgRenderEksisterende(userId: string, username: string) {
 
   let png: Buffer | null = null;
   try {
-    png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber);
+    png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber, avatarUrl);
   } catch {}
 
   return { eksisterende, member, png };
@@ -78,6 +78,7 @@ export const personaCommand = {
   async execute(interaction: ChatInputCommandInteraction) {
     const erReroll = interaction.options.getBoolean('reroll') ?? false;
     const user     = interaction.user;
+    const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
 
     let member = getMember(user.id);
     if (!member) {
@@ -89,7 +90,7 @@ export const personaCommand = {
 
     // ── Vis eksisterende kort ──────────────────────────────────────────────────
     if (!erReroll) {
-      const res = await hentOgRenderEksisterende(user.id, user.username);
+      const res = await hentOgRenderEksisterende(user.id, user.username, avatarUrl);
       if (res) {
         const { eksisterende, member: m, png } = res;
         const harNokXP  = m.xp >= REROLL_XP_COST;
@@ -126,7 +127,7 @@ export const personaCommand = {
       );
     await interaction.editReply({ embeds: [venteEmbed] });
 
-    const resultat = await genererPersona(member!, erReroll);
+    const resultat = await genererPersona(member!, erReroll, avatarUrl);
 
     if ('feil' in resultat) {
       await interaction.editReply({
@@ -226,7 +227,7 @@ export const personaCommand = {
             return;
           }
 
-          const res2 = await hentOgRenderEksisterende(user.id, user.username);
+          const res2 = await hentOgRenderEksisterende(user.id, user.username, avatarUrl);
           if (!res2) return;
 
           const { eksisterende, member: m2, png } = res2;
