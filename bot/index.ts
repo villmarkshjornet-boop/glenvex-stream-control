@@ -1999,13 +1999,18 @@ client.once('clientReady', () => {
       // Slett ALLE tidligere meldinger i kanalen (kun siste startup skal vises)
       let slettet = 0;
       let fortsett = true;
+      const fjorten = 13 * 24 * 60 * 60 * 1000;
       while (fortsett) {
         const meldinger = await adminKanal.messages.fetch({ limit: 100 });
         if (meldinger.size === 0) { fortsett = false; break; }
-        // bulkDelete fungerer kun for meldinger < 14 dager gamle
-        const bulk = meldinger.filter(m => Date.now() - m.createdTimestamp < 13 * 24 * 60 * 60 * 1000);
-        const gamle = meldinger.filter(m => Date.now() - m.createdTimestamp >= 13 * 24 * 60 * 60 * 1000);
-        if (bulk.size > 0) await adminKanal.bulkDelete(bulk).catch(() => {});
+        const bulk  = meldinger.filter(m => Date.now() - m.createdTimestamp < fjorten);
+        const gamle = meldinger.filter(m => Date.now() - m.createdTimestamp >= fjorten);
+        // bulkDelete krever minst 2 meldinger
+        if (bulk.size >= 2) {
+          await adminKanal.bulkDelete(bulk).catch(() => {});
+        } else {
+          for (const m of bulk.values()) await m.delete().catch(() => {});
+        }
         for (const m of gamle.values()) await m.delete().catch(() => {});
         slettet += meldinger.size;
         if (meldinger.size < 100) fortsett = false;

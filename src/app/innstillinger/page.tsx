@@ -76,6 +76,8 @@ function TwitchBotAdminPanel() {
   const [botOnline, setBotOnline] = useState<boolean | null>(null);
   const [events, setEvents] = useState<BotEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [clearingLogs, setClearingLogs] = useState(false);
+  const [clearResult, setClearResult] = useState<{ ok: boolean; tekst: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/bot-settings').then(r => r.json()).then(d => setSettings(d.settings)).catch(() => {});
@@ -253,6 +255,30 @@ function TwitchBotAdminPanel() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Tøm Discord bot-logs */}
+          <div className="flex items-center justify-between p-3 rounded-lg border border-g-border bg-g-bg">
+            <div>
+              <p className="text-xs text-g-text">Tøm Discord bot-logs</p>
+              <p className="text-[9px] text-g-muted">Sletter alle meldinger i admin-kanalen. Kun siste oppstartsmelding beholdes.</p>
+              {clearResult && (
+                <p className={`text-[9px] mt-1 ${clearResult.ok ? 'text-g-green' : 'text-red-400'}`}>{clearResult.tekst}</p>
+              )}
+            </div>
+            <button
+              onClick={async () => {
+                setClearingLogs(true); setClearResult(null);
+                const res = await fetch('/api/bot/clear-logs', { method: 'POST' }).then(r => r.json()).catch(() => ({ ok: false, error: 'Nettverksfeil' }));
+                setClearResult(res.ok
+                  ? { ok: true,  tekst: `✓ ${res.slettet} meldinger slettet` }
+                  : { ok: false, tekst: `✗ ${res.error}` });
+                setClearingLogs(false);
+              }}
+              disabled={clearingLogs}
+              className="px-3 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-red-400 hover:border-red-500/30 transition-all disabled:opacity-50 flex-shrink-0">
+              {clearingLogs ? '⟳ Sletter...' : '🗑 Tøm nå'}
+            </button>
           </div>
 
           {/* Live aktivitetsfeed */}
