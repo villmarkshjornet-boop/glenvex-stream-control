@@ -44,8 +44,8 @@ export async function GET(req: NextRequest) {
       dbWorkspaceFound = true;
       // Self-heal: sett owner_user_id hvis det mangler
       if (!data.owner_user_id && userId) {
-        void db.from('workspaces').update({ owner_user_id: userId, updated_at: new Date().toISOString() })
-          .eq('id', wsId).then(() => {}).catch?.(() => {});
+        db.from('workspaces').update({ owner_user_id: userId, updated_at: new Date().toISOString() })
+          .eq('id', wsId).then(() => {}, () => {});
       }
     }
   }
