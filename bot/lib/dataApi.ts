@@ -32,7 +32,7 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (sbUrl && sbKey) {
-    const update: any = { status_message: melding };
+    const update: any = { status_message: melding, updated_at: new Date().toISOString() };
     if (status === 'FAILED') {
       update.status = 'FAILED';
       update.error_message = melding;
@@ -42,7 +42,6 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
       update.status = 'ANALYZING';
       update.current_step = 'DOWNLOAD';
       update.progress_percent = ekstra?.progress ?? 15;
-      update.updated_at = new Date().toISOString();
     } else if (status === 'TRANSCRIBING') {
       update.status = 'ANALYZING';
       update.current_step = 'TRANSCRIBING';
@@ -53,16 +52,19 @@ function oppdaterJobbStatus(vodId: string, status: string, melding: string, ekst
       update.progress_percent = 0;
       update.current_step = 'DOWNLOAD';
     }
-    fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${vodId}`, {
-      method: 'PATCH',
-      headers: {
-        'apikey': sbKey,
-        'Authorization': `Bearer ${sbKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify(update),
-    }).catch(() => {});
+    // Bruk Supabase JS-klient for pålitelig oppdatering (håndterer auth riktig)
+    try {
+      const { createClient } = require('@supabase/supabase-js');
+      const ws = require('ws');
+      const sb = createClient(sbUrl, sbKey, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
+      sb.from('content_vods').update(update).eq('id', vodId).then(({ error }: any) => {
+        if (error) console.warn(`[CF] Supabase status-oppdatering feilet for ${vodId}: ${error.message}`);
+      }, (err: any) => {
+        console.warn(`[CF] Supabase status-oppdatering nettverksfeil:`, err?.message);
+      });
+    } catch (e: any) {
+      console.warn(`[CF] Supabase klient feil:`, e?.message);
+    }
   }
 }
 
@@ -461,9 +463,36 @@ export function startDataApi(port = 4242) {
       const statusFil = path.join(DATA_DIR, 'content-factory', `status_${vodId}.json`);
       if (fs.existsSync(statusFil)) {
         res.writeHead(200); res.end(fs.readFileSync(statusFil, 'utf-8'));
-      } else {
-        res.writeHead(200); res.end(JSON.stringify({ jobId: vodId, status: 'UNKNOWN' }));
+        return;
       }
+      // Lokal fil mangler (Railway restartet) — sjekk Supabase som fallback
+      const sbUrl = process.env.SUPABASE_URL;
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      void (async () => {
+        if (sbUrl && sbKey) {
+          try {
+            const sbRes = await fetch(`${sbUrl}/rest/v1/content_vods?id=eq.${encodeURIComponent(vodId)}&select=id,status,status_message,error_message,updated_at`, {
+              headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+              signal: AbortSignal.timeout(3_000),
+            });
+            if (sbRes.ok) {
+              const rows = (await sbRes.json()) as any[];
+              if (rows?.[0]) {
+                const row = rows[0];
+                const inProgress = row.status === 'ANALYZING' || row.status === 'PENDING';
+                // Hvis Supabase sier den kjører og ble oppdatert de siste 60 min — ikke UNKNOWN
+                const updatedAt = new Date(row.updated_at ?? 0).getTime();
+                const gammelNok = Date.now() - updatedAt > 60 * 60 * 1000;
+                const status = inProgress && gammelNok ? 'UNKNOWN' : (row.status ?? 'UNKNOWN');
+                res.writeHead(200);
+                res.end(JSON.stringify({ jobId: vodId, status, melding: row.status_message ?? row.error_message, fraSupabase: true }));
+                return;
+              }
+            }
+          } catch {}
+        }
+        res.writeHead(200); res.end(JSON.stringify({ jobId: vodId, status: 'UNKNOWN' }));
+      })();
       return;
     }
 

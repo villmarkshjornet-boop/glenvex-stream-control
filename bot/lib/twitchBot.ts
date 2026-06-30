@@ -586,22 +586,41 @@ export function startTwitchBot() {
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_EVENT_RECEIVED', title: `Raid fra ${username}: ${viewers} seere`, severity: 'info', metadata: { type: 'raid', username, viewers } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Raidet kanalen med ${viewers} seere`, confidence_score: 0.8, metadata: { viewers, type: 'raider' } }).catch(() => {});
 
-    const twitchSvar = await aiSvar(`${username} raidet med ${viewers} seere. Lag en energisk takkemelding på norsk, nevn raid-størrelsen. Maks 1 setning.`);
-    const discordUrlRaid = await getDiscordInviteUrl();
-    const melding = twitchSvar || `RAID! Velkommen ${username} og alle ${viewers} raiders! PogChamp Dere er sjuke for å komme innom!${discordUrlRaid ? ` Sjekk Discord: ${discordUrlRaid}` : ''}`;
+    const profileUrl = `twitch.tv/${username}`;
+    const størrelse  = viewers >= 100 ? '🔥 MEGA-RAID' : viewers >= 50 ? '⚡ STOR RAID' : viewers >= 20 ? '🚀 RAID' : '🎮 Raid';
 
-    await chatSend(channel, melding, { trigger: 'raid', username, viewers });
+    // Melding 1 — umiddelbar hype
+    const hype1 = viewers >= 20
+      ? `${størrelse}!!! @${username} og ${viewers} raiders er i huset!!! KomodoHype KomodoHype KomodoHype`
+      : `${størrelse}! @${username} raidet oss med ${viewers} seere! KomodoHype`;
+    await chatSend(channel, hype1, { trigger: 'raid', username, viewers });
+
+    // Melding 2 — AI shoutout med lenke (400ms delay)
+    await new Promise(r => setTimeout(r, 400));
+    const aiShoutout = await aiSvar(
+      `${username} raidet kanalen med ${viewers} seere. Lag en kort, entusiastisk norsk shoutout (1 setning) som oppfordrer folk til å sjekke dem ut på ${profileUrl}. Nevn URL-en. Ikke bruk @-tegn.`
+    );
+    const shoutoutTekst = aiShoutout
+      || `Gi MASSE kjærlighet til ${username} — dere MÅ sjekke dem ut på ${profileUrl} PogChamp`;
+    await chatSend(channel, shoutoutTekst, { trigger: 'raid_shoutout', username, viewers });
+
+    // Melding 3 — native Twitch /shoutout-kommando (800ms delay)
+    await new Promise(r => setTimeout(r, 800));
+    await chatSend(channel, `/shoutout ${username}`, { trigger: 'raid_so', username }).catch(() => {});
 
     await postTilDiscord(await getBotRaidKanalId() || liveKanalId(), {
+      content: viewers >= 50 ? `@everyone 🚨 **MASSIVT RAID** innkommende!` : undefined,
       embeds: [{
-        title: `🚨 RAID – ${username}`,
-        description: `**${username}** raidet med **${viewers} seere!**\n\nGi dem en varm velkomst! PogChamp`,
-        color: 0x9146ff,
+        title: `${størrelse} fra ${username}!`,
+        description:
+          `**[${username}](https://twitch.tv/${username})** raidet oss med **${viewers} seere!** KomodoHype\n\n` +
+          `Vis litt kjærlighet og følg dem: **[${profileUrl}](https://twitch.tv/${username})**`,
+        color: viewers >= 50 ? 0xff6b00 : 0x9146ff,
         fields: [
-          { name: '👥 Raid-størrelse', value: viewers.toString(), inline: true },
-          { name: '🎮 Raider', value: `[twitch.tv/${username}](https://twitch.tv/${username})`, inline: true },
+          { name: '👥 Raiders', value: `**${viewers}**`, inline: true },
+          { name: '🔗 Profil', value: `[twitch.tv/${username}](https://twitch.tv/${username})`, inline: true },
         ],
-        footer: { text: 'Stream Control • Raid' },
+        footer: { text: 'Stream Control • Twitch Raid' },
         timestamp: new Date().toISOString(),
       }],
     });
@@ -613,8 +632,8 @@ export function startTwitchBot() {
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på ${BOT_BRAND}`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
-    const svar = await aiSvar(`${username} har nettopp subscripet! Lag en kort, entusiastisk takkemelding på norsk. Maks 1 setning.`);
-    await chatSend(channel, svar || `@${username} TAKK for sub! Du er legen! FeelsGoodMan`, { trigger: 'sub', username });
+    const svar = await aiSvar(`${username} har nettopp subscripet for første gang! Lag en veldig entusiastisk, personlig norsk takkemelding. Maks 2 setninger.`);
+    await chatSend(channel, svar || `@${username} TUSEN TAKK for subben! 💜 Du er absolutt en legende! FeelsGoodMan PartyTime`, { trigger: 'sub', username });
     _onSubCallback?.(username).catch(() => {});
 
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
