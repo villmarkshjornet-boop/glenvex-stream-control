@@ -981,7 +981,19 @@ async function handleLevelUp(
 
   // Gratulasjon i community-kanal (aldri fallback til public chat)
   if (communityKanal && settings?.levelUpMeldingerAktiv !== false) {
-    await communityKanal.send(`🎉 **${displayName}** nådde **Level ${newLevel}**! PogChamp`).catch(() => {});
+    const titler: Record<number, string> = {
+      2: 'Nybegynner',
+      5: 'Vanlig Delta',
+      10: 'Aktiv Supporter',
+      15: 'Community Heltinne',
+      20: 'Veteran',
+      30: 'Elite',
+      50: 'GLENVEX Legend',
+    };
+    const milestoneOver = Object.keys(titler).map(Number).filter(n => n <= newLevel).sort((a,b) => b-a)[0];
+    const tittel = milestoneOver ? ` — **${titler[milestoneOver]}**` : '';
+    const emoji  = newLevel >= 20 ? '👑' : newLevel >= 10 ? '⭐' : '🎉';
+    await communityKanal.send(`${emoji} **${displayName}** nådde **Level ${newLevel}**${tittel}! PogChamp`).catch(() => {});
   }
 
   // Tildel rolle
@@ -2029,21 +2041,38 @@ client.once('clientReady', () => {
       }
       console.log(`[startup] Ryddet bot-logs: ${slettet} meldinger slettet`);
 
-      // Post nytt startup-embed som eneste melding i kanalen
+      // Post dynamisk startup-embed med faktisk systeminfo
+      let gitHash = 'ukjent';
+      try {
+        const { execSync } = require('child_process');
+        gitHash = execSync('git rev-parse --short HEAD', { stdio: ['pipe','pipe','ignore'] }).toString().trim();
+      } catch {}
+
+      const alleMembers = getAllMembers();
+      const medXP       = alleMembers.filter(m => m.xp > 0);
+      const topMedlem   = medXP.sort((a, b) => b.xp - a.xp)[0];
+
+      const moduler: string[] = [
+        '✅ Discord bot — kommandoer aktive',
+        process.env.OPENAI_API_KEY        ? '✅ AI-assistent (OpenAI)' : '⚠️ AI-assistent — OPENAI_API_KEY mangler',
+        process.env.TWITCH_BOT_OAUTH      ? '✅ Twitch bot — chat aktiv' : '⚠️ Twitch bot — TWITCH_BOT_OAUTH mangler',
+        process.env.SUPABASE_URL          ? '✅ Supabase — database tilkoblet' : '⚠️ Supabase — SUPABASE_URL mangler',
+        process.env.DEEPGRAM_API_KEY      ? '✅ Deepgram — transkripsjon klar' : '⚠️ Deepgram — nøkkel mangler',
+        process.env.CONTENT_FACTORY_ENABLED === 'true' ? '✅ Content Factory aktivert' : '○ Content Factory deaktivert',
+      ];
+
+      const stats = medXP.length > 0
+        ? `👥 ${alleMembers.length} membres · ${medXP.length} med XP · Topp: **${topMedlem.displayName}** (${topMedlem.xp} XP)`
+        : `👥 ${alleMembers.length} membres — ingen XP registrert ennå`;
+
       const embed = new EmbedBuilder()
         .setColor(0x00ff41)
-        .setTitle(`🤖 ${BOT_BRAND} er klar`)
-        .setDescription(
-          '**Aktive moduler:**\n' +
-          '• Slash-kommandoer registrert automatisk ved oppstart\n' +
-          '• Live Agent V2 — AI-produsent starter når du går live\n' +
-          '• Poll Manager — kontekst-baserte polls under stream\n' +
-          '• Partner promo — automatisk rotasjon Twitch + Discord\n' +
-          '• Lurker-engasjement — aktiverer ved stille chat\n' +
-          '• Broadcaster-token — auto-refresh ved utløp\n' +
-          '\n_Alle moduler aktive. Denne kanalen nullstilles ved hver restart._'
+        .setTitle(`🤖 ${BOT_BRAND} er klar — restart fullført`)
+        .addFields(
+          { name: '🔧 Systemstatus', value: moduler.join('\n'), inline: false },
+          { name: '📊 Community', value: stats, inline: false },
         )
-        .setFooter({ text: `GLENVEX Creator OS • ${new Date().toLocaleString('no-NO', { timeZone: 'Europe/Oslo' })}` });
+        .setFooter({ text: `Commit: ${gitHash} · ${new Date().toLocaleString('no-NO', { timeZone: 'Europe/Oslo' })}` });
       await adminKanal.send({ embeds: [embed] });
     } catch (e) {
       console.error('[startup] Feil ved rydding av bot-logs:', e);
@@ -2160,6 +2189,12 @@ client.on('messageCreate', async (message) => {
     }
     if (xpResult?.leveledUp) {
       handleLevelUp(message.author.id, displayName, xpResult.newLevel, message.guild, message.member).catch(() => {});
+    }
+    // Daglig velkomst-bonus
+    if (xpResult?.dagligBonus) {
+      finnCommunityKanal().then(k => {
+        k?.send(`☀️ **${displayName}** er tilbake — +50 XP daglig bonus! 🎯`).catch(() => {});
+      }).catch(() => {});
     }
     // Smart velkomst (sjelden, for aktive membres)
     if (Math.random() < 0.05) {

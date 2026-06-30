@@ -40,9 +40,12 @@ export interface MemberProfile {
   badges: string[];
 }
 
-const XP_PER_MESSAGE  = 5;
-const XP_PER_LEVEL    = 500;
-const DEFAULT_COOLDOWN_MS = 60_000;
+const XP_PER_MESSAGE  = 15;
+const XP_PER_LEVEL    = 250;
+const DEFAULT_COOLDOWN_MS = 30_000;
+const XP_DAGLIG_BONUS = 50;   // første melding per dag
+const XP_LANG_MELDING = 10;   // bonus for meldinger >60 tegn
+const XP_STREAK_MULT  = 0.1;  // 10% bonus per streak-dag (maks 50%)
 
 // Per-user cooldown timestamps
 const messageCooldowns = new Map<string, number>();
@@ -73,7 +76,7 @@ function syncToSupabase(m: MemberProfile): void {
   const sb = getSb();
   if (!sb) return;
 
-  sb.from('community_members').upsert({
+  const full = {
     discord_id:       m.id,
     workspace_id:     WORKSPACE_ID,
     username:         m.username,
@@ -97,11 +100,31 @@ function syncToSupabase(m: MemberProfile): void {
     last_welcomed:    m.lastWelcomed,
     joined_at:        m.joinedAt,
     updated_at:       new Date().toISOString(),
-  }, { onConflict: 'workspace_id,discord_id' })
+  };
+
+  sb.from('community_members').upsert(full, { onConflict: 'workspace_id,discord_id' })
   .then(({ error }) => {
-    if (error) console.warn(`[MemberTracker] sync feilet for ${m.username}: ${error.message}`);
+    if (!error) return;
+    // Fallback: prøv minimal upsert (bare kjerne-kolonner, garantert å eksistere)
+    console.warn(`[MemberTracker] Full sync feilet for ${m.username}: ${error.message} — prøver minimal`);
+    sb.from('community_members').upsert({
+      discord_id:   m.id,
+      workspace_id: WORKSPACE_ID,
+      username:     m.username,
+      display_name: m.displayName,
+      xp:           m.xp,
+      level:        m.level,
+      messages:     m.messages,
+      badges:       m.badges,
+      last_seen:    m.lastSeen,
+      joined_at:    m.joinedAt,
+      updated_at:   new Date().toISOString(),
+    }, { onConflict: 'workspace_id,discord_id' }).then(({ error: e2 }) => {
+      if (e2) console.error(`[MemberTracker] Minimal sync OGSÅ feilet for ${m.username}: ${e2.message}`);
+      else console.log(`[MemberTracker] Minimal sync OK for ${m.username} (XP: ${m.xp})`);
+    }, () => {});
   }, (err: any) => {
-    console.warn(`[MemberTracker] sync nettverksfeil:`, err?.message);
+    console.warn(`[MemberTracker] Sync nettverksfeil for ${m.username}:`, err?.message);
   });
 }
 
@@ -265,7 +288,7 @@ export function addMessageXP(
   content: string,
   cooldownMs = DEFAULT_COOLDOWN_MS,
   minLength = 4,
-): { leveledUp: boolean; newLevel: number } | null {
+): { leveledUp: boolean; newLevel: number; xpGitt: number; dagligBonus: boolean } | null {
 
   // Bot command filter
   if (content.startsWith('/') || content.startsWith('!')) {
@@ -321,14 +344,29 @@ export function addMessageXP(
   };
 
   const oldLevel = m.level;
-  m.xp += XP_PER_MESSAGE;
+
+  // Beregn XP med bonuser
+  let xpTildelt = XP_PER_MESSAGE;
+
+  // Lang melding-bonus
+  if (normalized.length > 60) xpTildelt += XP_LANG_MELDING;
+
+  // Daglig-bonus: første melding i dag
+  const i_dag = new Date().toISOString().slice(0, 10);
+  const sisteAktivDag = m.lastSeen?.slice(0, 10);
+  const dagligBonus = sisteAktivDag !== i_dag;
+  if (dagligBonus) xpTildelt += XP_DAGLIG_BONUS;
+
+  // Streak-multiplikator (maks 50% bonus)
+  const streakBonus = Math.min(0.5, m.streakDays * XP_STREAK_MULT);
+  xpTildelt = Math.round(xpTildelt * (1 + streakBonus));
+
+  m.xp += xpTildelt;
   m.messages += 1;
   m.level = levelFromXP(m.xp);
   m.lastSeen = new Date().toISOString();
 
   checkAllBadges(m);
-
-  // Streak
   updateStreak(m);
 
   members[id] = m;
@@ -339,9 +377,9 @@ export function addMessageXP(
   logSystemEvent({
     source:     'community_manager',
     event_type: 'COMMUNITY_XP_GRANTED',
-    title:      `XP tildelt: ${displayName} +${XP_PER_MESSAGE} XP (Total: ${m.xp}, Level ${m.level})`,
+    title:      `XP tildelt: ${displayName} +${xpTildelt} XP (Total: ${m.xp}, Level ${m.level})`,
     severity:   'info',
-    metadata:   { userId: id, username: displayName, xpGranted: XP_PER_MESSAGE, totalXp: m.xp, level: m.level, messages: m.messages },
+    metadata:   { userId: id, username: displayName, xpGranted: xpTildelt, totalXp: m.xp, level: m.level, messages: m.messages, dagligBonus },
   });
 
   const leveledUp = m.level > oldLevel;
@@ -355,7 +393,7 @@ export function addMessageXP(
     });
   }
 
-  return { leveledUp, newLevel: m.level };
+  return { leveledUp, newLevel: m.level, xpGitt: xpTildelt, dagligBonus };
 }
 
 // ─── Other XP actions ─────────────────────────────────────────────────────────
@@ -419,16 +457,17 @@ export function addReaction(id: string, username: string, displayName: string) {
 export function addVoiceMinutes(id: string, username: string, displayName: string, minutes: number) {
   const members = load();
   const m = upsertMember(id, username, displayName);
-  members[id] = { ...m, voiceMinutes: (m.voiceMinutes || 0) + minutes, xp: m.xp + minutes };
+  const voiceXP = minutes * 3;
+  members[id] = { ...m, voiceMinutes: (m.voiceMinutes || 0) + minutes, xp: m.xp + voiceXP };
   computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
   if (minutes >= 5) {
     logSystemEvent({
       source: 'community_manager', event_type: 'COMMUNITY_XP_GRANTED',
-      title: `XP tildelt (voice): ${displayName} +${minutes} XP (${minutes} min)`,
+      title: `XP tildelt (voice): ${displayName} +${voiceXP} XP (${minutes} min)`,
       severity: 'info',
-      metadata: { userId: id, username: displayName, xpGranted: minutes, reason: 'voice', minutes, totalXp: members[id].xp },
+      metadata: { userId: id, username: displayName, xpGranted: voiceXP, reason: 'voice', minutes, totalXp: members[id].xp },
     });
   }
 }
@@ -441,15 +480,15 @@ export function addStreamAttendance(id: string, username: string, displayName: s
   const lastAttendDate = (m as any)._lastAttendDate;
   if (lastAttendDate === today) return;
   (members[id] as any)._lastAttendDate = today;
-  members[id] = { ...members[id], streamsAttended: (m.streamsAttended || 0) + 1, xp: m.xp + 50 };
+  members[id] = { ...members[id], streamsAttended: (m.streamsAttended || 0) + 1, xp: m.xp + 100 };
   computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
   logSystemEvent({
     source: 'community_manager', event_type: 'COMMUNITY_XP_GRANTED',
-    title: `XP tildelt (stream-deltakelse): ${displayName} +50 XP`,
+    title: `XP tildelt (stream-deltakelse): ${displayName} +100 XP`,
     severity: 'info',
-    metadata: { userId: id, username: displayName, xpGranted: 50, reason: 'stream_attendance', totalXp: members[id].xp },
+    metadata: { userId: id, username: displayName, xpGranted: 100, reason: 'stream_attendance', totalXp: members[id].xp },
   });
 }
 

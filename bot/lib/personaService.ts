@@ -21,17 +21,30 @@ const SEASON_STYLE: Record<string, string> = {
 
 const SEASON_SUFFIX = SEASON_STYLE[SEASON] ?? SEASON_STYLE.default;
 
-// ── Sjeldenhet-loddtrekning ───────────────────────────────────────────────────
+// ── Sjeldenhet — deterministisk score-algoritme ───────────────────────────────
 
 export type PersonaRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
 
-function trekkSjeldenhet(xp: number, streakDays: number, rerollCount: number): PersonaRarity {
-  const boost = Math.min(20, Math.floor(xp / 500)) + Math.min(10, streakDays);
-  const roll  = Math.random() * 100 + boost;
-  if (roll >= 98) return 'Mythic';
-  if (roll >= 88) return 'Legendary';
-  if (roll >= 72) return 'Epic';
-  if (roll >= 50) return 'Rare';
+// Backend bestemmer alltid sjeldenhet — ikke GPT.
+// score = aktivitet + badges + streak + tilfeldighet
+function trekkSjeldenhet(member: MemberProfile): PersonaRarity {
+  // Aktivitetsscore: meldinger, voice, streams
+  const aktivitet   = Math.min(40, member.messages * 0.15 + member.voiceMinutes * 0.05 + member.streamsAttended * 2);
+  // XP-bonus: lang tid i community
+  const xpBonus     = Math.min(10, Math.floor(member.xp / 500));
+  // Badge-bonus: maks 15 poeng
+  const badgeBonus  = Math.min(15, member.badges.length * 3);
+  // Streak-bonus: maks 15 poeng
+  const streakBonus = Math.min(15, member.streakDays * 1.5);
+  // Tilfeldig komponent: 0–20 poeng (alltid en sjanse)
+  const tilfeldig   = Math.random() * 20;
+
+  const score = aktivitet + xpBonus + badgeBonus + streakBonus + tilfeldig;
+
+  if (score >= 96) return 'Mythic';
+  if (score >= 86) return 'Legendary';
+  if (score >= 71) return 'Epic';
+  if (score >= 51) return 'Rare';
   return 'Common';
 }
 
@@ -227,6 +240,10 @@ async function genererBilde(card: PersonaCard, openai: OpenAI): Promise<string |
 
 // ── Lagre i DB ────────────────────────────────────────────────────────────────
 
+const PERSONA_PROMPT_VERSION = 'v2';
+const PERSONA_MODEL           = 'gpt-4o-mini';
+const PERSONA_IMAGE_MODEL     = 'dall-e-3';
+
 async function lagrePersona(
   member: MemberProfile,
   card: PersonaCard,
@@ -236,28 +253,43 @@ async function lagrePersona(
 ): Promise<void> {
   const sb = getSb();
   if (!sb) return;
-  await sb.from('community_personas').insert({
-    workspace_id:   WORKSPACE_ID,
-    discord_id:     member.id,
-    username:       member.username,
-    display_name:   member.displayName,
-    season:         SEASON,
-    persona_title:  card.title,
-    persona_class:  card.class,
-    rarity:         card.rarity,
-    description:    card.description,
-    strengths:      card.strengths,
-    weaknesses:     card.weaknesses,
-    signature_move: card.signatureMove,
-    quote:          card.quote,
-    stats:          card.stats,
-    image_prompt:   card.imagePrompt,
-    image_url:      imageUrl,
-    xp_cost:        xpCost,
-    reroll_count:   rerollCount,
-    created_at:     new Date().toISOString(),
-    updated_at:     new Date().toISOString(),
+
+  const personaRow = {
+    workspace_id:     WORKSPACE_ID,
+    discord_id:       member.id,
+    username:         member.username,
+    display_name:     member.displayName,
+    season:           SEASON,
+    persona_title:    card.title,
+    persona_class:    card.class,
+    rarity:           card.rarity,
+    description:      card.description,
+    strengths:        card.strengths,
+    weaknesses:       card.weaknesses,
+    signature_move:   card.signatureMove,
+    quote:            card.quote,
+    stats:            card.stats,
+    image_prompt:     card.imagePrompt,
+    image_url:        imageUrl,
+    xp_cost:          xpCost,
+    reroll_count:     rerollCount,
+    // Generator metadata — gjør fremtidig regenerering mulig
+    generator_version: PERSONA_PROMPT_VERSION,
+    model:             PERSONA_MODEL,
+    image_model:       PERSONA_IMAGE_MODEL,
+    generated_at:      new Date().toISOString(),
+    created_at:        new Date().toISOString(),
+    updated_at:        new Date().toISOString(),
+  };
+
+  // Upsert som aktiv persona for denne sesongen
+  await sb.from('community_personas').upsert(personaRow, {
+    onConflict: 'workspace_id,discord_id,season',
   });
+
+  // Logg alltid i historikk-tabellen (insert, aldri upsert)
+  const { id: _omit, ...historikkRow } = personaRow as any;
+  await sb.from('community_persona_history').insert(historikkRow);
 }
 
 // ── Bygg Discord embed-data ──────────────────────────────────────────────────
@@ -341,7 +373,7 @@ export async function genererPersona(member: MemberProfile, erReroll: boolean): 
   }
 
   const openai  = new OpenAI({ apiKey });
-  const rarity  = trekkSjeldenhet(member.xp, member.streakDays, rerollCount + (erReroll ? 1 : 0));
+  const rarity  = trekkSjeldenhet(member);
   const card    = await genererPersonaJson(member, rarity, openai);
   if (!card) return { feil: 'AI klarte ikke å generere persona. Prøv igjen.' };
 
