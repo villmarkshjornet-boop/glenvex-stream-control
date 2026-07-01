@@ -8,7 +8,37 @@ import {
   ButtonInteraction,
   ComponentType,
   AttachmentBuilder,
+  GuildMember,
+  PermissionFlagsBits,
 } from 'discord.js';
+
+// ── Role detection ────────────────────────────────────────────────────────────
+
+function detectTopRole(gm: GuildMember): string {
+  if (gm.guild.ownerId === gm.id) return 'OWNER';
+  if (gm.permissions.has(PermissionFlagsBits.Administrator)) return 'ADMIN';
+  if (
+    gm.permissions.has(PermissionFlagsBits.ManageGuild) ||
+    gm.permissions.has(PermissionFlagsBits.ManageMessages)
+  ) return 'MODERATOR';
+
+  // Role name matching — check highest-position roles first
+  const roleNames = gm.roles.cache
+    .filter(r => r.name !== '@everyone')
+    .sort((a, b) => b.position - a.position)
+    .map(r => r.name.toLowerCase());
+
+  for (const name of roleNames) {
+    if (name.includes('owner') || name.includes('founder')) return 'FOUNDER';
+    if (name.includes('admin'))                              return 'ADMIN';
+    if (name.includes('mod'))                                return 'MODERATOR';
+    if (name.includes('vip'))                                return 'VIP';
+    if (name.includes('subscriber') || name === 'sub')       return 'SUBSCRIBER';
+    if (name.includes('booster') || name.includes('boost'))  return 'BOOSTER';
+    if (name.includes('supporter'))                          return 'SUPPORTER';
+  }
+  return 'MEMBER';
+}
 import {
   getMember,
   upsertMember,
@@ -89,14 +119,24 @@ export const personaCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
-    const erReroll  = interaction.options.getBoolean('reroll') ?? false;
-    const user      = interaction.user;
-    const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
+    const erReroll    = interaction.options.getBoolean('reroll') ?? false;
+    const user        = interaction.user;
+    const guildMember = interaction.member instanceof GuildMember ? interaction.member : null;
+    const avatarUrl   = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
+
+    // Extract guild-specific data (nickname, join date, role)
+    const guildNick      = guildMember?.nickname ?? null;
+    const guildJoinedAt  = guildMember?.joinedAt?.toISOString() ?? undefined;
+    const topRole        = guildMember ? detectTopRole(guildMember) : 'MEMBER';
+    // Name priority: server nickname > Discord global displayName > username
+    const bestName       = guildNick ?? (user as any).globalName ?? user.username;
 
     let member = getMember(user.id);
     if (!member) {
-      const dn = (user as any).displayName ?? user.username;
-      member = upsertMember(user.id, user.username, dn);
+      member = upsertMember(user.id, user.username, bestName, { guildJoinedAt, topRole, nickname: guildNick });
+    } else {
+      // Always refresh live Discord data on every interaction
+      member = upsertMember(user.id, user.username, bestName, { guildJoinedAt, topRole, nickname: guildNick });
     }
 
     await interaction.deferReply({ ephemeral: false });

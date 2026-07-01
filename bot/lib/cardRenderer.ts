@@ -58,16 +58,16 @@ const PW  = W - PAD * 2;  // 1000
 const PBR = 10;   // panel corner radius
 
 // ── Strict layout grid ────────────────────────────────────────────────────────
-const HDR_Y = 0,    HDR_H = 66;
-const TTL_Y = 66,   TTL_H = 122;
-const MET_Y = 188,  MET_H = 50;
-// Art window: 238 → 820 = 582px (character is dominant)
+const HDR_Y = 0,    HDR_H = 58;
+const TTL_Y = 58,   TTL_H = 155;   // 3 lines: display name → title → class
+const MET_Y = 213,  MET_H = 50;
+// Art window: 263 → 820 = 557px
 const LXP_Y = 820,  LXP_H = 104;
 const STA_Y = 932,  STA_H = 188;   // gap 8 before
 const BMV_Y = 1128, BMV_H = 188;   // gap 8 before
 const QOT_Y = 1324, QOT_H = 92;   // gap 8 before
 const FTR_Y = 1424, FTR_H = 112;  // gap 8 before
-// 66+122+50+582+104+8+188+8+188+8+92+8+112 = 1536 ✓
+// 58+155+50+557+104+8+188+8+188+8+92+8+112 = 1536 ✓
 
 // ── Rarity themes ─────────────────────────────────────────────────────────────
 interface Theme {
@@ -464,36 +464,49 @@ function drawHeader(ctx: SKRSContext2D, card: PersonaCard, cn: number, t: Theme)
   ctx.restore();
 }
 
-function drawTitle(ctx: SKRSContext2D, card: PersonaCard, t: Theme) {
-  // Semi-transparent — character art shows through, making char more dominant
+function drawTitle(ctx: SKRSContext2D, card: PersonaCard, member: MemberProfile, t: Theme) {
+  // Semi-transparent — character shows through this panel
   panel(ctx, PAD, TTL_Y, PW, TTL_H, t, 0.76, 0.5);
   const cx = W / 2, maxW = PW - IPX * 2;
 
-  // Large title
-  let px = 76;
-  const title = card.title.toUpperCase();
-  ctx.font = `bold ${px}px sans-serif`;
-  while (ctx.measureText(title).width > maxW && px > 32) { px -= 2; ctx.font = `bold ${px}px sans-serif`; }
+  // ── Line 1: Display name (server nickname > displayName > username) ──────
+  const heroName = (member.nickname ?? member.displayName ?? member.username).toUpperCase();
+  let npx = 58;
+  ctx.font = `bold ${npx}px sans-serif`;
+  while (ctx.measureText(heroName).width > maxW && npx > 28) { npx -= 2; ctx.font = `bold ${npx}px sans-serif`; }
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = 'rgba(0,0,0,0.98)'; ctx.shadowBlur = 28; ctx.shadowOffsetY = 4;
+  ctx.shadowColor = 'rgba(0,0,0,0.98)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 3;
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 88);
-  ctx.shadowColor = t.glow; ctx.shadowBlur = 55; ctx.shadowOffsetY = 0; ctx.globalAlpha = 0.45;
-  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 88);
+  ctx.fillText(trunc(ctx, heroName, maxW), cx, TTL_Y + 65);
   ctx.restore();
 
-  // Class subtitle
-  let cpx = 29;
-  const cls = card.class.toUpperCase();
-  ctx.font = `bold ${cpx}px sans-serif`;
-  while (ctx.measureText(cls).width > maxW - 60 && cpx > 14) { cpx--; ctx.font = `bold ${cpx}px sans-serif`; }
+  // ── Line 2: Persona title (THE CHATTY NINJA) ─────────────────────────────
+  const title = card.title.toUpperCase();
+  let tpx = 46;
+  ctx.font = `bold ${tpx}px sans-serif`;
+  while (ctx.measureText(title).width > maxW && tpx > 22) { tpx -= 2; ctx.font = `bold ${tpx}px sans-serif`; }
+
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = t.glow; ctx.shadowBlur = 18;
-  ctx.fillStyle = t.border;
-  ctx.fillText(trunc(ctx, cls, maxW - 60), cx, TTL_Y + 116);
+  ctx.shadowColor = 'rgba(0,0,0,0.95)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 2;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 118);
+  ctx.shadowColor = t.glow; ctx.shadowBlur = 40; ctx.shadowOffsetY = 0; ctx.globalAlpha = 0.5;
+  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 118);
+  ctx.restore();
+
+  // ── Line 3: Class / archetype ─────────────────────────────────────────────
+  const cls = card.class;
+  let cpx = 24;
+  ctx.font = `bold ${cpx}px sans-serif`;
+  while (ctx.measureText(cls.toUpperCase()).width > maxW - 60 && cpx > 12) { cpx--; ctx.font = `bold ${cpx}px sans-serif`; }
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = t.glow; ctx.shadowBlur = 14;
+  ctx.fillStyle = t.accent;
+  ctx.fillText(trunc(ctx, cls.toUpperCase(), maxW - 60), cx, TTL_Y + 148);
   ctx.restore();
 }
 
@@ -518,7 +531,7 @@ function drawMeta(ctx: SKRSContext2D, card: PersonaCard, member: MemberProfile, 
     ctx.restore();
   }
 
-  const role = ((member as any).roles?.[0] ?? (member as any).topRole ?? 'Member') as string;
+  const role = (member.topRole || 'MEMBER') as string;
   ctx.save();
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = t.accent;
@@ -748,7 +761,7 @@ function drawFooter(ctx: SKRSContext2D, member: MemberProfile, cn: number, t: Th
   const mid = FTR_Y + FTR_H / 2;
   const XPL = 250;
   const lvl = Math.floor(member.xp / XPL) + 1;
-  const nm  = (member.displayName || member.username).toUpperCase();
+  const nm  = (member.nickname ?? member.displayName ?? member.username).toUpperCase();
   const sea = process.env.PERSONA_SEASON ?? '1';
 
   // Person icon (drawn)
@@ -840,7 +853,7 @@ export async function renderPersonaCard(
 
   // Top panels (semi-transparent → character shows through)
   drawHeader(ctx, card, collectionNumber, t);
-  drawTitle(ctx, card, t);
+  drawTitle(ctx, card, member, t);
   drawMeta(ctx, card, member, t);
 
   // Data panels (opaque — all data always rendered)

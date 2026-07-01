@@ -19,6 +19,8 @@ export interface MemberProfile {
   id: string;
   username: string;
   displayName: string;
+  nickname: string | null;     // server-specific nickname (null = not set)
+  topRole: string;             // OWNER | ADMIN | MODERATOR | VIP | SUBSCRIBER | BOOSTER | MEMBER
   twitchId: string | null;
   xp: number;
   level: number;
@@ -156,6 +158,8 @@ export async function lasterMedlemmerFraSupabase(): Promise<void> {
         id:               r.discord_id,
         username:         r.username,
         displayName:      r.display_name,
+        nickname:         r.nickname ?? null,
+        topRole:          r.top_role ?? 'MEMBER',
         twitchId:         r.twitch_id ?? null,
         xp:               r.xp ?? 0,
         level:            r.level ?? 1,
@@ -224,20 +228,36 @@ export function xpToNextLevel(xp: number): number {
 
 // ─── Upsert ───────────────────────────────────────────────────────────────────
 
-export function upsertMember(id: string, username: string, displayName: string): MemberProfile {
+export function upsertMember(
+  id: string,
+  username: string,
+  displayName: string,
+  opts?: { guildJoinedAt?: string; topRole?: string; nickname?: string | null },
+): MemberProfile {
   const members = load();
   if (!members[id]) {
     members[id] = {
-      id, username, displayName, twitchId: null, xp: 0, level: 1,
+      id, username, displayName,
+      nickname:  opts?.nickname ?? null,
+      topRole:   opts?.topRole  ?? 'MEMBER',
+      twitchId: null, xp: 0, level: 1,
       messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
       subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
       streakDays: 0, lastStreakDate: null,
-      joinedAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
+      joinedAt: opts?.guildJoinedAt ?? new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
       lastWelcomed: null, badges: [],
     };
   } else {
-    members[id].lastSeen = new Date().toISOString();
+    members[id].lastSeen    = new Date().toISOString();
     members[id].displayName = displayName;
+    if (opts?.nickname  !== undefined) members[id].nickname  = opts.nickname;
+    if (opts?.topRole)                 members[id].topRole   = opts.topRole;
+    // Always update joinedAt if we receive the real Discord guild value
+    if (opts?.guildJoinedAt)           members[id].joinedAt  = opts.guildJoinedAt;
+    // Init missing fields on existing profiles (migration safety)
+    if (!members[id].nickname  && members[id].nickname  !== null) members[id].nickname  = null;
+    if (!members[id].topRole)                                      members[id].topRole   = 'MEMBER';
   }
   computeScores(members[id]);
   save(members);

@@ -52,6 +52,8 @@ const MEMBER: MemberProfile = {
   id:              'test-user-123',
   username:        'gkarlsen',
   displayName:     'GlennOve',
+  nickname:        'GKarlsen',
+  topRole:         'OWNER',
   twitchId:        null,
   xp:              1450,
   level:           6,
