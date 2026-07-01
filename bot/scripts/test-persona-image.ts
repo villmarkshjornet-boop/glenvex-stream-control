@@ -171,38 +171,62 @@ async function main() {
   console.log('────────────────────────────────────────────────────────────────\n');
   console.log('Kaller OpenAI...');
 
-  const t0 = Date.now();
+  let t0 = Date.now();
   let imageUrl: string | null = null;
 
-  try {
-    const res = await openai.images.generate({
-      model:   'dall-e-3',
-      prompt,
-      n:       1,
-      size:    '1024x1792',
-      quality: 'hd',
-    });
+  // Attempt 1: preferred (portrait HD)
+  const attempts = [
+    { size: '1024x1792' as const, quality: 'hd'       as const, label: 'Portrait HD  (1024×1792, hd)'       },
+    { size: '1024x1024' as const, quality: 'hd'       as const, label: 'Square HD    (1024×1024, hd)'       },
+    { size: '1024x1024' as const, quality: 'standard' as const, label: 'Square STD   (1024×1024, standard)' },
+  ];
 
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-    imageUrl = res.data?.[0]?.url ?? null;
-    const revisedPrompt = (res.data?.[0] as any)?.revised_prompt ?? null;
+  for (const attempt of attempts) {
+    console.log(`\nForsøk: ${attempt.label}`);
+    t0 = Date.now();
 
-    console.log(`✅  Svar mottatt på ${elapsed}s`);
-    console.log(`\nBilde-URL:\n  ${imageUrl}\n`);
+    try {
+      const res = await openai.images.generate({
+        model:   'dall-e-3',
+        prompt,
+        n:       1,
+        size:    attempt.size,
+        quality: attempt.quality,
+      });
 
-    if (revisedPrompt) {
-      console.log('── DALL-E revised prompt ───────────────────────────────────────');
-      console.log(revisedPrompt);
-      console.log('────────────────────────────────────────────────────────────────\n');
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      imageUrl = res.data?.[0]?.url ?? null;
+      const revisedPrompt = (res.data?.[0] as any)?.revised_prompt ?? null;
+
+      console.log(`✅  Svar mottatt på ${elapsed}s  [${attempt.label}]`);
+      console.log(`\nBilde-URL:\n  ${imageUrl}\n`);
+
+      if (revisedPrompt) {
+        console.log('── DALL-E revised_prompt (hva DALL-E faktisk tolket) ────────────');
+        console.log(revisedPrompt);
+        console.log('────────────────────────────────────────────────────────────────\n');
+      }
+      break; // success — no more attempts
+
+    } catch (err: any) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.error(`❌  Feilet etter ${elapsed}s:`);
+      console.error(`    message    : ${err?.message ?? err}`);
+      console.error(`    HTTP status: ${err?.status ?? '?'}`);
+      console.error(`    error.code : ${err?.code ?? '?'}`);
+      console.error(`    error.type : ${err?.type ?? '?'}`);
+      console.error(`    error.param: ${err?.param ?? '(ingen)'}`);
+      try {
+        const body = JSON.stringify(err?.error ?? err, null, 2);
+        if (body && body !== '{}') console.error(`    full error : ${body}`);
+      } catch {}
+
+      if (attempt === attempts[attempts.length - 1]) {
+        console.error('\n❌  Alle forsøk feilet. Sjekk API-nøkkelen, kontotilgang og billing på platform.openai.com');
+        process.exit(1);
+      }
+      console.log('    → Prøver neste konfigurasjon...');
     }
-
-  } catch (err: any) {
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-    console.error(`❌  OpenAI-kall feilet etter ${elapsed}s:`);
-    console.error(`    ${err?.message ?? err}`);
-    if (err?.status) console.error(`    HTTP status: ${err.status}`);
-    if (err?.code)   console.error(`    Error code:  ${err.code}`);
-    process.exit(1);
   }
 
   if (!imageUrl) {
