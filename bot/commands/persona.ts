@@ -24,14 +24,7 @@ import {
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
 
-// ── Enkel wrapper-embed som peker på PNG-bildet ────────────────────────────────
-
-function lagEmbedWrapper(rarity: string, rarityColor: number) {
-  return new EmbedBuilder()
-    .setColor(rarityColor)
-    .setImage('attachment://persona-card.png')
-    .setFooter({ text: `${RARITY_BANNER[rarity as keyof typeof RARITY_BANNER] ?? rarity}` });
-}
+// ── Knapper ───────────────────────────────────────────────────────────────────
 
 function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -47,7 +40,7 @@ function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<Butto
   );
 }
 
-// ── Hent og render eksisterende persona som PNG ───────────────────────────────
+// ── Hent og render eksisterende persona ───────────────────────────────────────
 
 async function hentOgRenderEksisterende(userId: string, username: string, avatarUrl?: string | null) {
   const eksisterende = await hentSistePersona(userId);
@@ -63,6 +56,13 @@ async function hentOgRenderEksisterende(userId: string, username: string, avatar
   return { eksisterende, member, png };
 }
 
+// ── Kortvisning — sendes alltid som direkte fil, ikke embed ──────────────────
+// Discord viser direktefiler større enn embed-bilder i chat-visningen.
+
+function kortTekst(rarity: string, title: string, klass: string, xp: number, level: number): string {
+  return `🎴 ${RARITY_BANNER[rarity as keyof typeof RARITY_BANNER] ?? rarity}  **${title}**  ·  *${klass}*  ·  Lv ${level}  ·  ${xp} XP`;
+}
+
 // ── Kommando ──────────────────────────────────────────────────────────────────
 
 export const personaCommand = {
@@ -76,8 +76,8 @@ export const personaCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
-    const erReroll = interaction.options.getBoolean('reroll') ?? false;
-    const user     = interaction.user;
+    const erReroll  = interaction.options.getBoolean('reroll') ?? false;
+    const user      = interaction.user;
     const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
 
     let member = getMember(user.id);
@@ -97,16 +97,13 @@ export const personaCommand = {
         const knappeRad = lagKnappeRad(user.id, harNokXP);
 
         if (png) {
-          const fil   = new AttachmentBuilder(png, { name: 'persona-card.png' });
-          const embed = lagEmbedWrapper(eksisterende.card.rarity, RARITY_COLOR[eksisterende.card.rarity]);
+          const fil = new AttachmentBuilder(png, { name: 'persona-card.png' });
           await interaction.editReply({
-            content:    `🎴 Ditt aktive kort · **${m.xp} XP** · Reroll koster **${REROLL_XP_COST} XP**`,
-            embeds:     [embed],
+            content:    kortTekst(eksisterende.card.rarity, eksisterende.card.title, eksisterende.card.class, m.xp, m.level),
             files:      [fil],
             components: [knappeRad],
           });
         } else {
-          // Fallback: vis uten bilde
           await interaction.editReply({
             content:    `🎴 ${eksisterende.card.title} · ${eksisterende.card.rarity} · **${m.xp} XP**`,
             components: [knappeRad],
@@ -140,25 +137,26 @@ export const personaCommand = {
     const harNokXP  = (member!.xp - resultat.xpCost) >= REROLL_XP_COST;
     const knappeRad = lagKnappeRad(user.id, harNokXP);
 
-    const toppTekst = resultat.ersteGang
-      ? `🎴 **${user.username}** — ditt første GLENVEX Persona Card! Card #${String(resultat.collectionNumber).padStart(3, '0')}`
-      : erReroll
-        ? `🔁 Rerollet! **${resultat.card.rarity}** · Card #${String(resultat.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`
-        : undefined;
-
     if (resultat.cardPng) {
-      const fil   = new AttachmentBuilder(resultat.cardPng, { name: 'persona-card.png' });
-      const embed = lagEmbedWrapper(resultat.card.rarity, RARITY_COLOR[resultat.card.rarity]);
+      const fil = new AttachmentBuilder(resultat.cardPng, { name: 'persona-card.png' });
+      const tekst = resultat.ersteGang
+        ? `🎴 **${user.username}** — ditt første GLENVEX Persona Card!  Card #${String(resultat.collectionNumber).padStart(3, '0')}\n` +
+          kortTekst(resultat.card.rarity, resultat.card.title, resultat.card.class, member!.xp - resultat.xpCost, member!.level)
+        : erReroll
+          ? `🔁 Rerollet!  Card #${String(resultat.collectionNumber).padStart(3, '0')}  (-${REROLL_XP_COST} XP)\n` +
+            kortTekst(resultat.card.rarity, resultat.card.title, resultat.card.class, member!.xp - resultat.xpCost, member!.level)
+          : kortTekst(resultat.card.rarity, resultat.card.title, resultat.card.class, member!.xp - resultat.xpCost, member!.level);
+
       await interaction.editReply({
-        content:    toppTekst,
-        embeds:     [embed],
+        content:    tekst,
+        embeds:     [],
         files:      [fil],
         components: [knappeRad],
       });
     } else {
-      // Fallback: embed-only hvis PNG-rendering feilet
+      // PNG-rendering feilet — vis embed-fallback med Supabase URL
       await interaction.editReply({
-        content:    toppTekst,
+        content:    undefined,
         embeds:     [new EmbedBuilder()
           .setColor(RARITY_COLOR[resultat.card.rarity])
           .setTitle(resultat.card.title)
@@ -196,12 +194,13 @@ export const personaCommand = {
         }
 
         const nyHarNokXP = (oppdatertMedlem.xp - ny.xpCost) >= REROLL_XP_COST;
+
         if (ny.cardPng) {
-          const fil   = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
-          const embed = lagEmbedWrapper(ny.card.rarity, RARITY_COLOR[ny.card.rarity]);
+          const fil = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
           await btn.editReply({
-            content:    `🔁 Rerollet! **${ny.card.rarity}** · Card #${String(ny.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
-            embeds:     [embed],
+            content:    `🔁 Rerollet!  Card #${String(ny.collectionNumber).padStart(3, '0')}  (-${REROLL_XP_COST} XP)\n` +
+              kortTekst(ny.card.rarity, ny.card.title, ny.card.class, oppdatertMedlem.xp - ny.xpCost, oppdatertMedlem.level),
+            embeds:     [],
             files:      [fil],
             components: [lagKnappeRad(user.id, nyHarNokXP)],
           });
@@ -231,15 +230,13 @@ export const personaCommand = {
           if (!res2) return;
 
           const { eksisterende, member: m2, png } = res2;
-          const banner = RARITY_BANNER[eksisterende.card.rarity];
 
           if (png) {
-            const fil   = new AttachmentBuilder(png, { name: 'persona-card.png' });
-            const embed = lagEmbedWrapper(eksisterende.card.rarity, RARITY_COLOR[eksisterende.card.rarity]);
+            const fil = new AttachmentBuilder(png, { name: 'persona-card.png' });
             await kanal.send({
-              content: `🎴 <@${user.id}> deler sitt **${eksisterende.card.rarity}** Persona Card!  ${banner}`,
-              embeds:  [embed],
-              files:   [fil],
+              content: `🎴 <@${user.id}> deler sitt Persona Card!\n` +
+                kortTekst(eksisterende.card.rarity, eksisterende.card.title, eksisterende.card.class, m2.xp, m2.level),
+              files: [fil],
             });
           } else {
             await kanal.send(`🎴 <@${user.id}> — **${eksisterende.card.title}** (${eksisterende.card.rarity})`);
