@@ -22,13 +22,13 @@ const PAD      = 52;   // horizontal padding
 
 // Data panel constants
 const PANEL_Y  = 820;  // gradient starts (transparent→dark)
-const NAME_Y   = 960;  // name baseline
-const XP_Y     = 1010; // XP section top
-const STATS_Y  = 1135; // stats section top (after XP bar)
-const BADGE_Y  = 1365; // badge row top
-const ULT_Y    = 1410; // ultimate section top
-const FLAVOR_Y = 1465; // flavor text top
-const FOOT_Y   = 1510; // footer baseline
+const NAME_Y   = 958;  // name baseline
+const XP_Y     = 1005; // XP section top
+const STATS_Y  = 1128; // stats section top (after XP bar + labels)
+const BADGE_Y  = 1318; // badge row top (3 stats × 60px = 180px → 1128+180+10=1318)
+const ULT_Y    = 1378; // ultimate section top (badges 40px + 20px gap)
+const FLAVOR_Y = 1448; // flavor text top (ultimate 22+20+gap)
+const FOOT_Y   = 1515; // footer baseline
 
 // ── Rarity accent palette ─────────────────────────────────────────────────────
 interface RarityAccent { accent: string; glow: string; dim: string; text: string; bg: string; }
@@ -50,17 +50,19 @@ const RARITY_HEADER: Record<PersonaRarity, string> = {
 };
 
 // ── Stat metadata ─────────────────────────────────────────────────────────────
+// Uses BMP Unicode geometric shapes — renders correctly on any platform
+// without requiring emoji fonts (avoids □ boxes on Linux / canvas renderers).
 const STAT_META: Record<keyof PersonaStats, { label: string; icon: string }> = {
-  hype:        { label: 'HYPE',      icon: '🔥' },
-  chaos:       { label: 'CHAOS',     icon: '⚡' },
-  community:   { label: 'COMMUNITY', icon: '🤝' },
-  focus:       { label: 'FOCUS',     icon: '🎯' },
-  humor:       { label: 'HUMOR',     icon: '😄' },
-  activity:    { label: 'ACTIVE',    icon: '🌀' },
-  helpfulness: { label: 'HELP',      icon: '💚' },
-  kreativitet: { label: 'CREATE',    icon: '🎨' },
-  loyalitet:   { label: 'LOYAL',     icon: '🛡' },
-  lederskap:   { label: 'LEADER',    icon: '👑' },
+  hype:        { label: 'HYPE',      icon: '▲' },
+  chaos:       { label: 'CHAOS',     icon: '◆' },
+  community:   { label: 'COMMUNITY', icon: '●' },
+  focus:       { label: 'FOCUS',     icon: '◎' },
+  humor:       { label: 'HUMOR',     icon: '◉' },
+  activity:    { label: 'ACTIVE',    icon: '◇' },
+  helpfulness: { label: 'HELP',      icon: '○' },
+  kreativitet: { label: 'CREATE',    icon: '✦' },
+  loyalitet:   { label: 'LOYAL',     icon: '◈' },
+  lederskap:   { label: 'LEADER',    icon: '★' },
 };
 
 function topStats(stats: PersonaStats, n = 3) {
@@ -356,7 +358,7 @@ function drawStats(ctx: SKRSContext2D, stats: PersonaStats, a: RarityAccent) {
     ctx.fill();
     ctx.restore();
 
-    y += 72; // next stat row
+    y += 60; // next stat row
   }
 }
 
@@ -424,23 +426,23 @@ function drawUltimate(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
 
   const cx = W / 2;
 
-  // "⚡ ULTIMATE  ·  [ABILITY NAME]"
-  const ultLabel = `⚡ ULTIMATE  ·  ${card.signatureMove.toUpperCase()}`;
+  // "◆ ULTIMATE  ·  [ABILITY NAME]"
+  const ultLabel = `◆ ULTIMATE  ·  ${card.signatureMove.toUpperCase()}`;
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 16;
-  ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = a.accent;
-  let px = 22;
-  while (ctx.measureText(ultLabel).width > W - PAD * 2 && px > 14) { px--; ctx.font = `bold ${px}px sans-serif`; }
-  ctx.fillText(trunc(ctx, ultLabel, W - PAD * 2), cx, ULT_Y + 18);
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 18;
+  ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = a.accent;
+  let px = 26;
+  while (ctx.measureText(ultLabel).width > W - PAD * 2 && px > 16) { px--; ctx.font = `bold ${px}px sans-serif`; }
+  ctx.fillText(trunc(ctx, ultLabel, W - PAD * 2), cx, ULT_Y + 24);
   ctx.restore();
 
   // Ability description (short)
   if (card.signatureMoveDesc) {
     ctx.save();
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.font = 'italic 18px sans-serif'; ctx.fillStyle = a.text + 'cc';
-    ctx.fillText(trunc(ctx, `"${card.signatureMoveDesc}"`, W - PAD * 2 - 20), cx, ULT_Y + 44);
+    ctx.font = 'italic 21px sans-serif'; ctx.fillStyle = a.text + 'cc';
+    ctx.fillText(trunc(ctx, `"${card.signatureMoveDesc}"`, W - PAD * 2 - 20), cx, ULT_Y + 54);
     ctx.restore();
   }
 }
@@ -453,8 +455,8 @@ function drawFlavor(ctx: SKRSContext2D, flavorText: string, a: RarityAccent) {
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font = 'italic 18px sans-serif'; ctx.fillStyle = a.text + '99';
-  wrap2(ctx, `"${flavorText}"`, W / 2, FLAVOR_Y + 16, W - PAD * 2 - 20, 22);
+  ctx.font = 'italic 21px sans-serif'; ctx.fillStyle = a.text + 'aa';
+  wrap2(ctx, `"${flavorText}"`, W / 2, FLAVOR_Y + 18, W - PAD * 2 - 20, 26);
   ctx.restore();
 }
 
@@ -468,7 +470,7 @@ function drawFooter(ctx: SKRSContext2D, collectionNumber: number, a: RarityAccen
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font = '15px sans-serif'; ctx.fillStyle = a.accent + '66';
+  ctx.font = '17px sans-serif'; ctx.fillStyle = a.accent + '77';
   ctx.fillText(trunc(ctx, text, W - PAD * 2), W / 2, FOOT_Y);
   ctx.restore();
 }

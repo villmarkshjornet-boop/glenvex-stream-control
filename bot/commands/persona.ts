@@ -186,7 +186,7 @@ export const personaCommand = {
           embeds: [], files: [], components: [],
         });
 
-        const ny = await genererPersona(oppdatertMedlem, true);
+        const ny = await genererPersona(oppdatertMedlem, true, avatarUrl);
 
         if ('feil' in ny) {
           await btn.editReply({ content: `❌ ${ny.feil}`, embeds: [], files: [], components: [] });

@@ -33,16 +33,16 @@ const CARD: PersonaCard = {
   quote:             'Hold my energy drink.',
   flavorText:        'Legenden sier at Discord fortsatt laster hans lengste melding.',
   stats: {
-    hype:        92,
-    chaos:       81,
-    community:   95,
-    focus:       60,
-    humor:       88,
-    activity:    78,
-    helpfulness: 72,
-    kreativitet: 65,
-    loyalitet:   70,
-    lederskap:   85,
+    hype:        92,   // top 2
+    chaos:       89,   // top 3
+    community:   95,   // top 1
+    focus:       62,
+    humor:       74,
+    activity:    68,
+    helpfulness: 71,
+    kreativitet: 60,
+    loyalitet:   65,
+    lederskap:   70,
   },
   imagePrompt: 'test',
 };
