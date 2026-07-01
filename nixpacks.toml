@@ -1,5 +1,7 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "ffmpeg", "python312Packages.yt-dlp", "fontconfig", "dejavu_fonts", "liberation_ttf"]
+nixPkgs = ["nodejs_20", "ffmpeg", "python312Packages.yt-dlp"]
+# apt puts fonts in /usr/share/fonts — the path fontconfig knows about by default
+aptPkgs = ["fonts-dejavu-core", "fonts-liberation", "libfontconfig1", "fontconfig"]
 
 [phases.install]
-cmds = ["npm install --no-audit --no-fund", "fc-cache -f || true"]
+cmds = ["npm install --no-audit --no-fund"]

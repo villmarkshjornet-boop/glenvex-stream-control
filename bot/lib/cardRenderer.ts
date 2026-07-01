@@ -18,42 +18,50 @@
 
 import { createCanvas, GlobalFonts, type SKRSContext2D } from '@napi-rs/canvas';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import type { MemberProfile } from './memberTracker';
 import type { PersonaCard, PersonaRarity, PersonaStats } from './personaService';
 import { loadPersonaImage } from './imageLoader';
 
 // ── Font loading — critical for text rendering on Railway (Linux) ──────────────
-// Use any-cast since loadSystemFonts() may not be in older @napi-rs/canvas types
-// but IS present at runtime in 1.x on Linux.
+// Fonts are installed via aptPkgs in nixpacks.toml → /usr/share/fonts/
+// fontconfig finds them there automatically via loadSystemFonts().
+
 const GF = GlobalFonts as any;
 try {
-  if (typeof GF.loadSystemFonts === 'function') {
-    GF.loadSystemFonts();
-    console.log(`[cardRenderer] loadSystemFonts → ${GlobalFonts.families.length} families`);
-  }
-} catch (e) {
-  console.warn('[cardRenderer] loadSystemFonts failed:', e);
-}
+  if (typeof GF.loadSystemFonts === 'function') GF.loadSystemFonts();
+} catch {}
 
-// Fallback: register a known font from the Nix-installed paths
-const KNOWN_FONT_PATHS = [
-  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-  '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-  '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
-  '/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf',
-  '/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf',
-];
+// Step 2: if loadSystemFonts found nothing, try known apt-installed paths
 if (GlobalFonts.families.length === 0) {
-  for (const fp of KNOWN_FONT_PATHS) {
+  const APT_FONT_PATHS = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+  ];
+  for (const fp of APT_FONT_PATHS) {
     if (fs.existsSync(fp)) {
-      try {
-        GlobalFonts.registerFromPath(fp, 'sans-serif');
-        console.log('[cardRenderer] Registered fallback font:', fp);
-      } catch {}
-      break;
+      try { GlobalFonts.registerFromPath(fp, 'sans-serif'); break; } catch {}
     }
   }
 }
+
+// Step 3: last resort — use find to locate any TTF on the filesystem
+if (GlobalFonts.families.length === 0) {
+  try {
+    const fp = execSync(
+      'find /usr/share/fonts /usr/local/share/fonts /nix -name "*.ttf" 2>/dev/null | head -1',
+      { encoding: 'utf8', timeout: 5000 },
+    ).trim();
+    if (fp) GlobalFonts.registerFromPath(fp, 'sans-serif');
+  } catch {}
+}
+
+console.log(`[cardRenderer] fonts: ${GlobalFonts.families.length} families`);
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const W = 1024, H = 1536;
