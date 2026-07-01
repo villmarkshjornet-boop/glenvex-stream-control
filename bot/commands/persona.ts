@@ -88,10 +88,12 @@ export const personaCommand = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    // ── Vis eksisterende kort ──────────────────────────────────────────────────
+    // ── Vis eksisterende kort (bare hvis det har et bilde) ────────────────────
+    // Hvis imageUrl er null (forrige generering feilet) faller vi gjennom til
+    // ny generering slik at brukeren får et ekte kort uten å måtte rerulle.
     if (!erReroll) {
       const res = await hentOgRenderEksisterende(user.id, user.username, avatarUrl);
-      if (res) {
+      if (res && res.eksisterende.imageUrl) {
         const { eksisterende, member: m, png } = res;
         const harNokXP  = m.xp >= REROLL_XP_COST;
         const knappeRad = lagKnappeRad(user.id, harNokXP);
