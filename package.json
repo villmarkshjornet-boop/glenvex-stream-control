@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "bot": "ts-node -r tsconfig-paths/register -r dotenv/config --project tsconfig.bot.json bot/index.ts",
-    "bot:deploy": "ts-node -r tsconfig-paths/register -r dotenv/config --project tsconfig.bot.json bot/deploy-commands.ts"
+    "bot:deploy": "ts-node -r tsconfig-paths/register -r dotenv/config --project tsconfig.bot.json bot/deploy-commands.ts",
+    "test:persona-image": "ts-node -r tsconfig-paths/register -r dotenv/config --project tsconfig.bot.json bot/scripts/test-persona-image.ts"
   },
   "dependencies": {
     "@discordjs/rest": "^2.4.0",
