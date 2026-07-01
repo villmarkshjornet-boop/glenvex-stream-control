@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.bot.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["**/*", "../src/types/**/*", "../src/lib/**/*"]
+}

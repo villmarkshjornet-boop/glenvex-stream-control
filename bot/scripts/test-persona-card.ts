@@ -1,0 +1,131 @@
+/**
+ * TEST: Complete Persona Card compositor — AI art + Canvas overlay
+ *
+ * Usage:  npm run test:persona-card
+ * Input:  data/test-persona-card.png  (raw AI art — run test:persona-image first)
+ * Output: data/test-persona-card-final.png  (full card with all data overlaid)
+ *
+ * This tests ONLY the Canvas overlay pipeline, no OpenAI calls.
+ * The final PNG must contain: name, rarity, level, XP bar, top-3 stats,
+ * badges, ultimate ability, flavor text, card number.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { renderPersonaCard } from '../lib/cardRenderer';
+import type { PersonaCard } from '../lib/personaService';
+import type { MemberProfile } from '../lib/memberTracker';
+
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const AI_ART   = path.join(DATA_DIR, 'test-persona-card.png');
+const OUT_FILE = path.join(DATA_DIR, 'test-persona-card-final.png');
+
+// ── Test data — realistic card matching a high-level Legendary Bard ───────────
+
+const CARD: PersonaCard = {
+  title:             'THE CHAOS HERALD',
+  class:             'Chat Champion',
+  archetype:         'Bard',
+  rarity:            'Legendary',
+  description:       'A living storm of chat energy.\nNever reads all messages.\nAlways writes more.',
+  signatureMove:     'CHAOS STORM',
+  signatureMoveDesc: 'Unleashes a storm of messages no one can keep up with',
+  quote:             'Hold my energy drink.',
+  flavorText:        'Legenden sier at Discord fortsatt laster hans lengste melding.',
+  stats: {
+    hype:        92,
+    chaos:       81,
+    community:   95,
+    focus:       60,
+    humor:       88,
+    activity:    78,
+    helpfulness: 72,
+    kreativitet: 65,
+    loyalitet:   70,
+    lederskap:   85,
+  },
+  imagePrompt: 'test',
+};
+
+const MEMBER: MemberProfile = {
+  id:              'test-user-123',
+  username:        'gkarlsen',
+  displayName:     'GlennOve',
+  twitchId:        null,
+  xp:              1450,
+  level:           6,
+  messages:        234,
+  reactions:       88,
+  voiceMinutes:    120,
+  streamsWatched:  10,
+  streamsAttended: 15,
+  subs:            1,
+  giftSubs:        2,
+  raids:           1,
+  engagementScore: 88,
+  communityScore:  95,
+  streakDays:      7,
+  lastStreakDate:  new Date().toISOString(),
+  joinedAt:        '2024-01-01T00:00:00Z',
+  lastSeen:        new Date().toISOString(),
+  lastWelcomed:    null,
+  badges:          ['🏆 Founder', '🎙 Voice', '🔥 Veteran', '👑 MVP', '⭐ Star', '🎯 Pro'],
+};
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+async function main() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  console.log('\n════════════════════════════════════════════════════════════════');
+  console.log('  GLENVEX — test:persona-card (Canvas compositor)');
+  console.log('════════════════════════════════════════════════════════════════\n');
+
+  // Load AI art — HARD FAIL if missing
+  if (!fs.existsSync(AI_ART)) {
+    console.error(`❌  AI art ikke funnet: ${AI_ART}`);
+    console.error('    Kjør "npm run test:persona-image" først for å generere AI-bildet.');
+    process.exit(1);
+  }
+
+  const aiArtBuf = fs.readFileSync(AI_ART);
+  console.log(`AI art    : ${AI_ART}`);
+  console.log(`AI art    : ${(aiArtBuf.length / 1024).toFixed(0)} KB`);
+  console.log(`Card      : ${CARD.rarity} ${CARD.class} — "${CARD.title}"`);
+  console.log(`Member    : ${MEMBER.displayName} · Level ${MEMBER.level} · ${MEMBER.xp} XP`);
+  console.log(`Stats     : HYPE ${CARD.stats.hype} · CHAOS ${CARD.stats.chaos} · COMMUNITY ${CARD.stats.community}`);
+  console.log(`Badges    : ${MEMBER.badges.length} total (viser 4)`);
+  console.log(`Ultimate  : ${CARD.signatureMove}`);
+  console.log(`Flavor    : "${CARD.flavorText}"`);
+  console.log(`\nKjører renderPersonaCard()...`);
+
+  const t0 = Date.now();
+
+  try {
+    const png = await renderPersonaCard(CARD, aiArtBuf, MEMBER, 4);
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+    fs.writeFileSync(OUT_FILE, png);
+
+    console.log(`\n✅  Ferdig på ${elapsed}s`);
+    console.log(`✅  Lagret til: ${OUT_FILE} (${(png.length / 1024).toFixed(0)} KB)`);
+    console.log('\n── Kort inneholder ─────────────────────────────────────────────');
+    console.log(`  Navn      : ${MEMBER.displayName}`);
+    console.log(`  Rarity    : ${CARD.rarity}`);
+    console.log(`  Level     : ${MEMBER.level}`);
+    console.log(`  XP        : ${MEMBER.xp} / 1750 (level ${MEMBER.level})`);
+    console.log(`  Stats     : COMMUNITY 95 · HYPE 92 · HUMOR 88 (topp 3)`);
+    console.log(`  Badges    : ${MEMBER.badges.slice(0, 4).join(', ')} +${MEMBER.badges.length - 4}`);
+    console.log(`  Ultimate  : ⚡ ULTIMATE · ${CARD.signatureMove}`);
+    console.log(`  Flavor    : "${CARD.flavorText}"`);
+    console.log(`  Footer    : Card #004 · Season 1 · GLENVEX PERSONA`);
+    console.log('────────────────────────────────────────────────────────────────\n');
+    process.exit(0);
+  } catch (e: any) {
+    console.error(`\n❌  renderPersonaCard() feilet: ${e.message}`);
+    console.error(e.stack);
+    process.exit(1);
+  }
+}
+
+main();

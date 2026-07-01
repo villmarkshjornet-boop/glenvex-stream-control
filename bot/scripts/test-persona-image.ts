@@ -122,27 +122,36 @@ async function main() {
 
   const prompt = buildPrompt(RARITY, ARCHETYPE, CLASS, IMAGE_PROMPT);
 
-  // Load test avatar if available — save your Discord avatar as data/test-avatar.png
-  // to test identity-preserving transformation (images.edit).
-  // Without it, the test falls back to images.generate.
+  // Avatar is REQUIRED — fail hard if missing (no silent fallback to generate)
   const avatarPath = path.join(outDir, 'test-avatar.png');
-  const avatarBuf  = fs.existsSync(avatarPath) ? fs.readFileSync(avatarPath) : null;
+  if (!fs.existsSync(avatarPath)) {
+    console.error('\n❌  data/test-avatar.png ikke funnet.');
+    console.error('    Lagre Discord-avataren din som data/test-avatar.png for å teste identity mode.');
+    console.error('    Hint: høyreklikk profilbilde i Discord → Kopier bildelenke, last ned.');
+    process.exit(1);
+  }
+  const avatarBuf = fs.readFileSync(avatarPath);
 
   console.log('\n════════════════════════════════════════════════════════════════');
-  console.log('  GLENVEX — test:persona-image');
+  console.log('  GLENVEX — test:persona-image (rå AI-bilde, ingen Canvas)');
   console.log('════════════════════════════════════════════════════════════════\n');
-  console.log(`Rarity    : ${RARITY}`);
-  console.log(`Archetype : ${ARCHETYPE}`);
-  console.log(`Class     : ${CLASS}`);
-  console.log(`Model     : gpt-image-1`);
-  console.log(`Size      : 1024x1536`);
-  console.log(`Quality   : high`);
-  console.log(`Season    : ${SEASON} — "${SEASON_SUFFIX}"`);
-  console.log(`Mode      : ${avatarBuf ? `images.edit (avatar: ${(avatarBuf.length/1024).toFixed(0)} KB)` : 'images.generate (no avatar — save Discord avatar to data/test-avatar.png to test identity mode)'}`);
+  console.log(`Rarity      : ${RARITY}`);
+  console.log(`Archetype   : ${ARCHETYPE}`);
+  console.log(`Class       : ${CLASS}`);
+  console.log(`Model       : gpt-image-1`);
+  console.log(`Size        : 1024x1536`);
+  console.log(`Quality     : high`);
+  console.log(`Season      : ${SEASON} — "${SEASON_SUFFIX}"`);
+  console.log(`\n── AVATAR DIAGNOSTICS ──────────────────────────────────────────`);
+  console.log(`Avatar path : ${avatarPath}`);
+  console.log(`Avatar size : ${(avatarBuf.length / 1024).toFixed(1)} KB  (${avatarBuf.length} bytes)`);
+  console.log(`Mime-type   : image/png  (sendt til edit() som 'avatar.png')`);
+  console.log(`API call    : openai.images.edit() — identity-preserving transformation`);
+  console.log(`Identity    : AI vil bevare ansikt, hår, skjegg, briller fra avatar`);
   console.log('\n── FULL PROMPT ─────────────────────────────────────────────────');
   console.log(prompt);
   console.log('────────────────────────────────────────────────────────────────\n');
-  console.log('Kaller OpenAI...');
+  console.log('Kaller OpenAI images.edit()...');
 
   const t0  = Date.now();
   let buf: Buffer | null = null;
@@ -150,28 +159,19 @@ async function main() {
   try {
     let raw: string | null | undefined;
 
-    if (avatarBuf) {
-      // Identity-preserving: transform Discord avatar into game character
-      const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
-      const res = await (openai.images as any).edit({
-        model:   'gpt-image-1',
-        image:   avatarFile,
-        prompt,
-        size:    '1024x1536',
-        quality: 'high',
-      });
-      raw = res.data?.[0]?.b64_json;
-    } else {
-      // Fallback: generate from scratch (no avatar available)
-      const res = await openai.images.generate({
-        model:   'gpt-image-1' as any,
-        prompt,
-        n:       1,
-        size:    '1024x1536' as any,
-        quality: 'high' as any,
-      });
-      raw = (res.data?.[0] as any)?.b64_json;
-    }
+    // Always use images.edit() — avatar is required (fails above if missing)
+    console.log(`Sender avatar (${(avatarBuf.length / 1024).toFixed(1)} KB) + prompt til openai.images.edit()...`);
+    const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
+    console.log(`Avatar konvertert til File-objekt: name=${avatarFile.name} type=${avatarFile.type}`);
+
+    const res = await (openai.images as any).edit({
+      model:   'gpt-image-1',
+      image:   avatarFile,
+      prompt,
+      size:    '1024x1536',
+      quality: 'high',
+    });
+    raw = res.data?.[0]?.b64_json;
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
