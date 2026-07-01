@@ -546,136 +546,177 @@ function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImag
   };
 }
 
-// ── Image prompt (8-section structured) ──────────────────────────────────────
+// ── Stat-driven visual direction ─────────────────────────────────────────────
+// The DOMINANT stat determines what the entire illustration SHOWS.
+// A Chaos Mage (99 chaos) and a Community Guardian (98 community) must look
+// like completely different heroes — not just different armor.
+
+function statDrivenVisual(ctx: PersonaImageContext): string[] {
+  const topLine  = ctx.statLines[0] ?? '';
+  const colonIdx = topLine.indexOf(':');
+  const topKey   = topLine.slice(0, colonIdx).trim().toLowerCase();
+  const topVal   = parseInt(topLine.slice(colonIdx + 1).trim(), 10);
+
+  if (topVal < 70) {
+    return [`Show the full power of the ${ctx.archetype} archetype — commanding presence, dramatic environment, and effects that make this card look like a collector trophy.`];
+  }
+
+  const visuals: Record<string, string[]> = {
+    chaos: [
+      `CHAOS IS THE DOMINANT FORCE. This character does not just have chaos around them — they ARE chaos incarnate.`,
+      `Reality tears apart around them. Chat bubbles, message fragments, arcane symbols, and digital glitch artifacts FLY in all directions as if expelled by their very presence.`,
+      `Lightning arcs between floating debris. Spell circles explode outward. A vortex of wild uncontrolled energy erupts from the ground beneath them.`,
+      `The environment is actively breaking down — walls crack, physics fails, explosions bloom in the background. This is the eye of a storm that answers only to them.`,
+    ],
+    community: [
+      `COMMUNITY AND CONNECTION RADIATE FROM THIS CHARACTER. They are the undeniable heart of a gathering.`,
+      `Warm welcoming light emanates outward from their body — reaching toward others like a beacon. Shield emblems, unity sigils, and crowd energy encircle them.`,
+      `Silhouettes of followers are visible in the background — they orbit this person like planets orbit a star.`,
+      `The atmosphere is warm but powerful: this is the protector, the anchor, the one everyone follows into the unknown.`,
+    ],
+    hype: [
+      `PURE HYPE. This character is caught at the absolute peak of a hype moment — maximum energy, maximum impact.`,
+      `Dynamic explosive pose. Speed lines. Motion blur trails. Energy rings erupting outward in all directions.`,
+      `The entire image feels like it is MOVING — kinetic, electric, and completely unstoppable. You feel the adrenaline through the screen.`,
+      `Crowd energy aura, explosive light effects, impact shockwaves. Looking at this card gives you a physical rush.`,
+    ],
+    lederskap: [
+      `ABSOLUTE AUTHORITY. This figure radiates command — everyone in the image, and everyone looking at the image, knows who is in charge.`,
+      `Elevated position, commanding stance, army banners or insignia rising behind them like monuments.`,
+      `Golden authority energy streams downward from above. Imposing armor that says "I have led armies and I will lead more."`,
+      `Followers are visible as silhouettes behind them — loyal, ready. The light chooses this person deliberately.`,
+    ],
+    focus: [
+      `PERFECT FOCUS. Absolute stillness surrounded by total chaos — and the character does not flinch.`,
+      `Laser-focused eyes narrow with extreme precision. Every element of the scene is exactly where they calculated it would be.`,
+      `Geometric targeting energy, sharp tactical lines, a calm tactical overlay effect in the air around them.`,
+      `The world slows down for this person. They are the fixed point that everything else rotates around.`,
+    ],
+    humor: [
+      `THE GRIN IS THE MOST POWERFUL THING ON THIS CARD. This character's charisma and humor are their primary weapon.`,
+      `Their expression dominates the illustration — wide magnetic grin, bright mischievous eyes, energy that makes everyone feel included.`,
+      `Jester-like chaos but CONTROLLED. Vibrant impossible colors. Fun and danger exist in perfect balance.`,
+      `The environment reflects their personality — nothing is quite where it should be, and somehow that makes everything better.`,
+    ],
+    kreativitet: [
+      `CREATION ENERGY IS PHYSICALLY VISIBLE. Art and reality are being actively shaped by this character's presence.`,
+      `Light trails, color explosions, and brushstroke-like energy effects radiate from their hands and body.`,
+      `Reality is being reshaped and reinvented. Colors manifest and crystallize wherever they gesture.`,
+      `A creator deity made flesh — they do not follow rules because they are writing new ones in real time.`,
+    ],
+    loyalitet: [
+      `UNBREAKABLE LOYALTY HAS BECOME A PHYSICAL FORCE. This guardian cannot and will not retreat.`,
+      `Protective shield energy forms around them like a second skin — visible, glowing, impenetrable.`,
+      `Steadfast immovable stance. Shield glyphs, protective ward circles, guardian emblems radiate outward.`,
+      `Warm protective aura reaching toward others. They have always been here. They will always be here.`,
+    ],
+    helpfulness: [
+      `HEALING AND SUPPORT LIGHT RADIATES OUTWARD FROM EVERY PART OF THIS CHARACTER.`,
+      `Warm golden healing light streams from their hands and body toward others — visible, physical, and beautiful.`,
+      `Support runes, healing particle streams, protective glow surround them completely.`,
+      `The environment brightens and stabilizes in their presence. Others would never fall while this character stands.`,
+    ],
+    activity: [
+      `PERPETUAL MOTION — this character has been everywhere simultaneously and the evidence is all around them.`,
+      `Motion blur trails, overlapping energy signatures showing constant presence in multiple locations.`,
+      `Speed, presence, blur effects — they appear in six places at once and somehow that feels right.`,
+      `The most active force in this universe — always moving, always here, always there, always everywhere.`,
+    ],
+  };
+
+  return visuals[topKey] ?? [`The ${ctx.archetype} archetype at full power — every visual element of this illustration must express what this archetype IS.`];
+}
+
+// ── Image prompt — identity-first, stat-driven visual story ───────────────────
 
 function byggImagePrompt(ctx: PersonaImageContext): string {
-  const r = ctx.rarityVisual;
-  const s = ctx;
-
-  // Section 3 — Visual Story: stats drive the illustration
-  const visualStory: string[] = [];
-  // Pull from card stats via the context's statLines (we need the raw stats object)
-  // Instead of storing raw stats, derive visual story from personality + strengths
-  if (s.personality.some(p => p.includes('community') || p.includes('leader'))) {
-    visualStory.push('Others are drawn to this person — show followers, banners, or crowd energy in background. They stand in front, leading.');
-  }
-  if (s.personality.some(p => p.includes('chaotic') || p.includes('chaos'))) {
-    visualStory.push('Energy and chaos erupt around them — lightning, explosions, flying debris, wild magical forces barely under control.');
-  }
-  if (s.personality.some(p => p.includes('funny') || p.includes('charismatic'))) {
-    visualStory.push('Their face is alive and expressive — wide grin, bright eyes, magnetic energy that makes you feel included.');
-  }
-  if (s.personality.some(p => p.includes('focused') || p.includes('strategic'))) {
-    visualStory.push('Perfectly controlled stance — calm in the center of chaos, eyes locked and precise, absolute mastery.');
-  }
-  if (s.personality.some(p => p.includes('hype'))) {
-    visualStory.push('Caught at the peak moment of action — dynamic pose, motion energy, surrounded by an aura of pure hype.');
-  }
-  if (visualStory.length === 0) {
-    visualStory.push('Commanding powerful presence — the center of the universe in this frame. No one would ever look anywhere else.');
-  }
+  const r          = ctx.rarityVisual;
+  const statVisual = statDrivenVisual(ctx);
 
   return [
-    `═══════════ 1. IDENTITY ═══════════`,
-    `Use the reference image as the anchor. This is the SAME person.`,
-    `Transform them — do NOT replace them.`,
-    `Preserve exactly:`,
-    `• Facial structure and proportions`,
-    `• Hairstyle and hair color`,
-    `• Beard or stubble if present`,
-    `• Glasses if worn`,
-    `• Skin tone and eye color`,
-    `• Distinctive facial features and expression`,
-    `Upgrade everything else: give them epic armor, weapons, costume, effects.`,
-    `The face is the anchor. When they see this card they must immediately think: "That is ME."`,
+    `IDENTITY — THIS IS THE SINGLE MOST IMPORTANT INSTRUCTION IN THIS ENTIRE PROMPT:`,
+    `The reference image shows the EXACT person whose card this is.`,
+    `You are NOT creating a new character. You are TRANSFORMING the person in the reference image.`,
+    `Their face MUST be immediately recognizable. If someone held this card next to their Discord profile photo they must say "that is ME."`,
     ``,
-    `═══════════ 2. PERSONA ═══════════`,
-    `Display Name: ${s.displayName}`,
-    `Title: ${s.title}`,
-    `Archetype: ${s.archetype}`,
-    `Class/Role: ${s.klass}`,
+    `PRESERVE WITHOUT EXCEPTION:`,
+    `• Face shape and facial proportions`,
+    `• Eye color and eye shape`,
+    `• Hair color, length, and style`,
+    `• Beard, stubble, or clean shave — exactly as shown`,
+    `• Glasses if worn — same shape and style`,
+    `• Skin tone`,
+    `• Distinctive facial features, scars, marks`,
     ``,
-    `Personality:`,
-    s.personality.map(p => `• ${p}`).join('\n'),
+    `TRANSFORM everything else: clothing, armor, weapons, costume, background, lighting, atmospheric effects.`,
+    `NEVER change the face. The face is the anchor. The face is the card.`,
     ``,
-    `Strengths: ${s.strengths.join(', ') || 'balanced'}`,
-    `Weaknesses: ${s.weaknesses.join(', ') || 'none'}`,
+    `═══ STAT-DRIVEN VISUAL STORY ═══`,
+    `Top stats: ${ctx.statLines.slice(0, 3).join(' | ')}`,
     ``,
-    `Top Stats:`,
-    s.statLines.join('\n'),
+    ...statVisual,
     ``,
-    `Ultimate Ability: ${s.ultimateName}`,
-    `Description: ${s.ultimateDesc}`,
-    `Flavor: ${s.flavor}`,
+    `═══ PERSONA ═══`,
+    `Archetype: ${ctx.archetype}  |  Class: ${ctx.klass}  |  Title: ${ctx.title}`,
+    `Environment: ${ctx.environment}`,
+    `Character costume and equipment: ${ctx.archetypeCharacter}`,
+    `Archetype atmospheric effects: ${ctx.archetypeEffects}`,
+    `Season style: ${ctx.season}`,
     ``,
-    `═══════════ 3. VISUAL STORY ═══════════`,
-    `The illustration must TELL A STORY. Not just show a figure.`,
-    visualStory.join(' '),
-    ``,
-    `Environment: ${s.environment}`,
-    `Character costume and equipment: ${s.archetypeCharacter}`,
-    `Archetype atmospheric effects: ${s.archetypeEffects}`,
-    `Season atmosphere: ${s.season}`,
-    ``,
-    `═══════════ 4. STYLE ═══════════`,
-    `Premium digital painting — AAA collector trading card illustration.`,
-    `Reference: Blizzard Entertainment × Riot Games × Magic: The Gathering × Marvel Snap.`,
-    `NOT photorealistic. NOT anime. NOT cartoon. NOT generic AI art.`,
-    `Hand-crafted feeling. Every detail looks intentional. Collector edition quality.`,
-    ``,
-    `═══════════ 5. LIGHTING ═══════════`,
-    `Strong dramatic rim light from behind — creates a glowing silhouette halo around the character.`,
-    `Powerful key light from a dramatic angle hitting the face.`,
-    `Volumetric god rays or energy beams visible in the environment.`,
-    `Multiple colored light sources from rarity effects complement the main lights.`,
-    `The character is lit like they are the most important being in the universe.`,
-    ``,
-    `═══════════ 6. RARITY: ${s.rarity.toUpperCase()} ═══════════`,
+    `═══ RARITY: ${ctx.rarity.toUpperCase()} ═══`,
+    r.mood,
     `Frame: ${r.frame}`,
-    `Color grade: ${r.colors}`,
-    `Mood: ${r.mood}`,
+    `Colors: ${r.colors}`,
     `Effects: ${r.fx}`,
     ``,
-    `═══════════ 7. COMPOSITION ═══════════`,
-    `Character fills 70–75% of the card height. Close mid-shot framing — powerful and dominant.`,
-    `Rich dramatic environment clearly visible behind and around them.`,
-    `BOTTOM 25–30% of the card: gradually fades to near-black. Clean, calm, no important visual details.`,
-    `This dark zone is reserved for data overlay — keep it simple and dark.`,
-    `Rarity frame runs along all four card edges.`,
-    `Portrait orientation (tall card, not wide).`,
+    `═══ COMPOSITION + LIGHTING ═══`,
+    `Portrait tall card. Character fills 60–70% of image height.`,
+    `CRITICAL ZONE RULES — the card has panels covering both ends:`,
+    `  TOP 16%: dark zone (header + title bars) — keep very dark, no character details`,
+    `  MIDDLE 38% (16%–54%): CHARACTER WINDOW — face and upper body centered here`,
+    `  BOTTOM 46%: dark zone (data panels) — keep very dark, fade to near-black`,
+    `Character's face should be in the upper half of the character window.`,
+    `Strong dramatic rim light from behind. Powerful key light on the face.`,
+    `Volumetric god rays or energy beams in environment. Character is the light source.`,
     ``,
-    `═══════════ 8. RESTRICTIONS ═══════════`,
-    `⚠ NO TEXT of any kind. No letters. No numbers. No symbols.`,
-    `⚠ No runes that resemble writing. No logos. No UI elements. No watermarks.`,
-    `⚠ No text in the environment, on buildings, signs, or any surface.`,
-    `⚠ Preserve the facial identity from the reference image.`,
-    `⚠ Colors must be vivid and high-contrast. Not muddy, not flat, not desaturated.`,
-    `⚠ The image alone (before any text overlay) must look like a premium collector card.`,
+    `═══ STYLE ═══`,
+    `Premium digital painting. AAA collector trading card quality.`,
+    `Reference aesthetic: Magic: The Gathering × Hearthstone × Riot Games.`,
+    `NOT photorealistic. NOT anime. NOT generic AI art. Hand-crafted, intentional, collector-tier.`,
+    ``,
+    `═══ HARD RESTRICTIONS ═══`,
+    `⚠ NO TEXT. No letters. No numbers. No runes. No symbols. No watermarks. No logos. No UI.`,
+    `⚠ PRESERVE THE FACE FROM THE REFERENCE IMAGE — this is non-negotiable.`,
+    `⚠ Vivid, high-contrast colors. Never muddy, never flat, never desaturated.`,
+    `⚠ The image alone must look like a premium collector card before any text is added.`,
   ].join('\n');
 }
 
 // ── DALL-E 3 fallback prompt (under 4000 chars, no identity) ─────────────────
 
 function byggDALLE3Prompt(ctx: PersonaImageContext): string {
-  const r = ctx.rarityVisual;
+  const r          = ctx.rarityVisual;
+  const statVisual = statDrivenVisual(ctx);
   return [
-    `Premium collector trading card illustration. Fantasy RPG character.`,
-    `Archetype: ${ctx.archetype}. Class: ${ctx.klass}.`,
-    `Personality: ${ctx.personality.slice(0, 3).join(', ')}.`,
+    `Premium collector trading card illustration. ${ctx.rarity} rarity.`,
+    `Archetype: ${ctx.archetype}. Class: ${ctx.klass}. Title: ${ctx.title}.`,
+    `Top stats: ${ctx.statLines.slice(0, 3).join(' | ')}.`,
+    ``,
+    statVisual[0] ?? '',
+    statVisual[1] ?? '',
+    ``,
     `Environment: ${ctx.environment}`,
     `Character: ${ctx.archetypeCharacter}`,
     `Effects: ${ctx.archetypeEffects}`,
-    `Ultimate ability: ${ctx.ultimateName}.`,
     ``,
+    `Rarity mood: ${r.mood}`,
     `Frame: ${r.frame}`,
-    `Color grade: ${r.colors}`,
-    `Mood: ${r.mood}`,
-    `Visual effects: ${r.fx}`,
+    `Colors: ${r.colors}`,
+    `Effects: ${r.fx}`,
     ``,
-    `Style: AAA digital painting. Magic: The Gathering × Hearthstone × Riot Games quality.`,
-    `Portrait orientation tall card. Character fills 70% of frame. Dark bottom zone — no details there.`,
-    `GLENVEX cyberpunk gaming aesthetic. Neon green energy accents.`,
-    `NO TEXT. NO LETTERS. NO WATERMARKS. No UI elements. High contrast vivid colors.`,
+    `Style: AAA digital painting. Magic: The Gathering × Hearthstone quality.`,
+    `Portrait tall card. Character face centered in upper-middle area. TOP 16% and BOTTOM 46% must be very dark.`,
+    `NO TEXT. NO LETTERS. NO RUNES. NO WATERMARKS. Vivid high-contrast colors.`,
   ].join('\n').slice(0, 3900);
 }
 

@@ -1,13 +1,18 @@
 /**
- * PERSONA CARDS — Premium Canvas Overlay
+ * PERSONA CARDS — Premium Trading Card Renderer
  *
- * gpt-image-1 generates the full art (character + frame + atmosphere).
- * This module overlays dynamic data only — the AI art is never touched.
+ * Design reference: full TCG layout with bordered dark panels.
  *
- * Layout:
- *   TOP  0–155px : Header (rarity + community + class title)
- *   MID           : Character art (untouched)
- *   BOT  820–end  : Data panel (gradient into dark + all stats/text)
+ * Structure (top → bottom):
+ *   HDR  0–70px    : Header bar  (rarity · GLENVEX · #card)
+ *   TTL  70–194px  : Title section (THE CHATTY NINJA / Message Whisperer)
+ *   MET  194–244px : Meta bar (joined · archetype)
+ *   ART  244–820px : Character art window (AI image shows through)
+ *   LXP  820–936px : Level + XP panel
+ *   STA  944–1120px: Stats (3 individual colored panels)
+ *   BMV  1128–1328px: Badges | Signature Move (side by side)
+ *   QOT  1336–1436px: Quote / flavor text
+ *   FTR  1444–1536px: Footer bar (player · lv+xp · season)
  */
 
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
@@ -18,21 +23,25 @@ import { loadPersonaImage } from './imageLoader';
 // ── Dimensions ────────────────────────────────────────────────────────────────
 const W        = 1024;
 const H        = 1536;
-const CORNER_R = 28;
-const PAD      = 52;   // horizontal padding
+const CORNER_R = 24;
+const OP       = 8;    // outer padding — gap from card edge to panel edge
+const IP       = 18;   // inner padding inside panels
+const PR       = 10;   // panel corner radius
+const PW       = W - OP * 2;   // panel width: 1008
+const GAP      = 8;    // gap between sections
 
-// Data panel constants
-const PANEL_Y  = 820;  // gradient starts
-const TITLE_Y  = 980;  // card title baseline
-const CLASS_Y  = 1042; // class subtitle baseline
-const DIV1_Y   = 1068; // first divider
-const STATS_Y  = 1090; // stat grid top
-const DIV2_Y   = 1290; // second divider
-const FLAVOR_Y = 1315; // flavor text
-const DIV3_Y   = 1388; // third divider
-const BADGE_Y  = 1408; // badges row
-const PLAYER_Y = 1468; // player name + level (small)
-const FOOT_Y   = 1516; // footer baseline
+// ── Section Y + H positions ───────────────────────────────────────────────────
+const HDR_Y = 0;    const HDR_H = 70;
+const TTL_Y = 70;   const TTL_H = 124;
+const MET_Y = 194;  const MET_H = 50;
+// character art window: 244 → 820
+const DAT_Y = 820;  // data panels start here
+const LXP_H = 116;
+const STA_H = 176;
+const BMV_H = 200;
+const QOT_H = 100;
+const FTR_H = 92;
+// total data: 116+8+176+8+200+8+100+8+92 = 716  →  820+716 = 1536 ✓
 
 // ── Rarity accent palette ─────────────────────────────────────────────────────
 interface RarityAccent { accent: string; glow: string; dim: string; text: string; bg: string; }
@@ -45,17 +54,21 @@ const ACCENT: Record<PersonaRarity, RarityAccent> = {
   Mythic:    { accent: '#ff5252', glow: 'rgba(255,82,82,0.85)',   dim: '#b71c1c', text: '#ffaaaa', bg: '#1a0000' },
 };
 
-const RARITY_HEADER: Record<PersonaRarity, string> = {
-  Common:    '◆  C O M M O N  ◆',
-  Rare:      '◈  R A R E  ◈',
-  Epic:      '⬡  E P I C  ⬡',
-  Legendary: '✦  L E G E N D A R Y  ✦',
-  Mythic:    '⚡  M Y T H I C  ⚡',
+// Per-stat accent colors (each stat has its own identity)
+const STAT_COLOR: Partial<Record<keyof PersonaStats, string>> = {
+  community:   '#00e676',
+  hype:        '#ff9100',
+  chaos:       '#e040fb',
+  focus:       '#42a5f5',
+  humor:       '#ffee58',
+  activity:    '#00bcd4',
+  helpfulness: '#66bb6a',
+  kreativitet: '#f48fb1',
+  loyalitet:   '#ffd740',
+  lederskap:   '#ff6f00',
 };
 
 // ── Stat metadata ─────────────────────────────────────────────────────────────
-// Uses BMP Unicode geometric shapes — renders correctly on any platform
-// without requiring emoji fonts (avoids □ boxes on Linux / canvas renderers).
 const STAT_META: Record<keyof PersonaStats, { label: string; icon: string }> = {
   hype:        { label: 'HYPE',      icon: '▲' },
   chaos:       { label: 'CHAOS',     icon: '◆' },
@@ -73,7 +86,7 @@ function topStats(stats: PersonaStats, n = 3) {
   return (Object.entries(stats) as [keyof PersonaStats, number][])
     .sort(([, a], [, b]) => b - a)
     .slice(0, n)
-    .map(([key, val]) => ({ ...STAT_META[key], value: val }));
+    .map(([key, val]) => ({ ...STAT_META[key], key, value: val }));
 }
 
 // ── Canvas helpers ────────────────────────────────────────────────────────────
@@ -81,15 +94,11 @@ function topStats(stats: PersonaStats, n = 3) {
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number) {
   const s = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
-  ctx.moveTo(x + s, y);
-  ctx.lineTo(x + w - s, y);
+  ctx.moveTo(x + s, y);          ctx.lineTo(x + w - s, y);
   ctx.quadraticCurveTo(x + w, y, x + w, y + s);
-  ctx.lineTo(x + w, y + h - s);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - s, y + h);
-  ctx.lineTo(x + s, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - s);
-  ctx.lineTo(x, y + s);
-  ctx.quadraticCurveTo(x, y, x + s, y);
+  ctx.lineTo(x + w, y + h - s);  ctx.quadraticCurveTo(x + w, y + h, x + w - s, y + h);
+  ctx.lineTo(x + s, y + h);      ctx.quadraticCurveTo(x, y + h, x, y + h - s);
+  ctx.lineTo(x, y + s);          ctx.quadraticCurveTo(x, y, x + s, y);
   ctx.closePath();
 }
 
@@ -116,17 +125,28 @@ function wrap2(ctx: SKRSContext2D, text: string, x: number, y: number, maxW: num
   return y;
 }
 
-function accentLine(ctx: SKRSContext2D, y: number, a: RarityAccent, alpha = 0.6) {
-  const lg = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
-  lg.addColorStop(0,    'transparent');
-  lg.addColorStop(0.12, a.accent + Math.round(alpha * 255).toString(16).padStart(2, '0'));
-  lg.addColorStop(0.5,  a.accent + Math.round(alpha * 255 * 1.3).toString(16).padStart(2, '0'));
-  lg.addColorStop(0.88, a.accent + Math.round(alpha * 255).toString(16).padStart(2, '0'));
-  lg.addColorStop(1,    'transparent');
+// ── Panel primitives ──────────────────────────────────────────────────────────
+
+function drawPanel(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, a: RarityAccent, borderAlpha = 0.55) {
   ctx.save();
-  ctx.strokeStyle = lg;
+  ctx.fillStyle = 'rgba(6,8,18,0.93)';
+  roundRect(ctx, x, y, w, h, PR); ctx.fill();
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 14;
+  ctx.strokeStyle = a.accent + Math.round(borderAlpha * 255).toString(16).padStart(2, '0');
   ctx.lineWidth   = 1.5;
-  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
+  roundRect(ctx, x, y, w, h, PR); ctx.stroke();
+  ctx.restore();
+}
+
+function drawColoredPanel(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, color: string) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(6,8,18,0.95)';
+  roundRect(ctx, x, y, w, h, PR); ctx.fill();
+  ctx.shadowColor = color + '88';
+  ctx.shadowBlur  = 18;
+  ctx.strokeStyle = color + 'cc';
+  ctx.lineWidth   = 2;
+  roundRect(ctx, x, y, w, h, PR); ctx.stroke();
   ctx.restore();
 }
 
@@ -161,279 +181,405 @@ function drawMysticalFallback(ctx: SKRSContext2D, card: PersonaCard, a: RarityAc
   ctx.fillText('?', cx, cy); ctx.restore();
 
   ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 20;
   ctx.font = 'bold 52px sans-serif'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.9;
   ctx.fillText(card.class.toUpperCase(), cx, cy + 340); ctx.restore();
 
   ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font = '18px sans-serif'; ctx.fillStyle = a.text + '88'; ctx.globalAlpha = 1;
+  ctx.font = '18px sans-serif'; ctx.fillStyle = a.text + '88';
   ctx.fillText('— Card Art Generating —', cx, H * 0.88); ctx.restore();
 }
 
-// ── HEADER (top overlay) ─────────────────────────────────────────────────────
-// Rarity · Community brand · Card class — always visible, even in thumbnails.
+// ── TOP GRADIENTS (blend art into panel zone) ────────────────────────────────
 
-function drawHeader(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
-  // Background gradient (top dark fade)
-  const bg = ctx.createLinearGradient(0, 0, 0, 175);
-  bg.addColorStop(0,   'rgba(0,0,0,0.94)');
-  bg.addColorStop(0.65, 'rgba(0,0,0,0.70)');
-  bg.addColorStop(1,   'transparent');
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, 175);
+function drawArtGradients(ctx: SKRSContext2D) {
+  // Top: fade down from opaque header into art
+  const topG = ctx.createLinearGradient(0, MET_Y + MET_H, 0, MET_Y + MET_H + 60);
+  topG.addColorStop(0, 'rgba(6,8,18,0.85)');
+  topG.addColorStop(1, 'transparent');
+  ctx.fillStyle = topG; ctx.fillRect(0, MET_Y + MET_H, W, 60);
 
-  const cx = W / 2;
+  // Bottom: fade art to dark before data panels
+  const botG = ctx.createLinearGradient(0, DAT_Y - 100, 0, DAT_Y);
+  botG.addColorStop(0, 'transparent');
+  botG.addColorStop(1, 'rgba(6,8,18,0.97)');
+  ctx.fillStyle = botG; ctx.fillRect(0, DAT_Y - 100, W, 100);
+}
 
-  // Rarity label — large, spaced, accent colored
+// ── HEADER BAR ───────────────────────────────────────────────────────────────
+// ★ COMMON  ·  GLENVEX  ·  #00124
+
+function drawHeaderBar(ctx: SKRSContext2D, card: PersonaCard, collectionNumber: number, a: RarityAccent) {
+  drawPanel(ctx, OP, HDR_Y, PW, HDR_H, a, 0.6);
+
+  const mid = HDR_Y + HDR_H / 2;
+  const cx  = W / 2;
+
+  // Rarity (left)
+  const RARITY_STARS: Record<PersonaRarity, string> = {
+    Common: '★', Rare: '★★', Epic: '★★★', Legendary: '★★★★', Mythic: '★★★★★',
+  };
   ctx.save();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 30;
-  ctx.font      = 'bold 34px sans-serif';
-  ctx.fillStyle = a.accent;
-  ctx.fillText(RARITY_HEADER[card.rarity], cx, 36);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = a.accent;
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 12;
+  ctx.fillText(`${RARITY_STARS[card.rarity]}  ${card.rarity.toUpperCase()}`, OP + IP, mid);
   ctx.restore();
 
-  // Community brand — bold white, large
+  // Brand (center)
   const community = (process.env.WORKSPACE_ID ?? 'GLENVEX').replace(/-.*/, '').toUpperCase();
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 16;
-  ctx.font      = 'bold 52px sans-serif';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(community, cx, 88);
+  ctx.font = 'bold 30px sans-serif'; ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 22;
+  ctx.fillText(`⬡  ${community}  ⬡`, cx, mid);
   ctx.restore();
 
-  // Card class — accent color, uppercase
-  const classLabel = card.class.toUpperCase();
+  // Card number (right)
   ctx.save();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10;
-  ctx.font      = '28px sans-serif';
-  ctx.fillStyle = a.accent;
-  let px = 28;
-  while (ctx.measureText(classLabel).width > W - PAD * 2 && px > 18) { px--; ctx.font = `${px}px sans-serif`; }
-  ctx.fillText(trunc(ctx, classLabel, W - PAD * 2), cx, 132);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = a.accent + 'cc';
+  ctx.fillText(`#${String(collectionNumber).padStart(5, '0')}`, OP + PW - IP, mid);
   ctx.restore();
-
-  // Decorative line under header
-  accentLine(ctx, 155, a, 0.5);
 }
 
-// ── DATA PANEL BACKGROUND ─────────────────────────────────────────────────────
+// ── TITLE SECTION ─────────────────────────────────────────────────────────────
+// THE CHATTY NINJA / Message Whisperer
 
-function drawPanelBackground(ctx: SKRSContext2D, a: RarityAccent) {
-  const g = ctx.createLinearGradient(0, PANEL_Y - 80, 0, H);
-  g.addColorStop(0,    'transparent');
-  g.addColorStop(0.12, 'rgba(0,0,0,0.40)');
-  g.addColorStop(0.30, 'rgba(0,0,0,0.78)');
-  g.addColorStop(0.55, 'rgba(0,0,0,0.92)');
-  g.addColorStop(1,    'rgba(0,0,0,0.97)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, PANEL_Y - 80, W, H - (PANEL_Y - 80));
+function drawTitleSection(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
+  drawPanel(ctx, OP, TTL_Y, PW, TTL_H, a, 0.5);
 
-  // Subtle rarity tint at bottom
-  const tint = ctx.createLinearGradient(0, H - 200, 0, H);
-  tint.addColorStop(0, 'transparent');
-  tint.addColorStop(1, a.accent + '12');
-  ctx.fillStyle = tint;
-  ctx.fillRect(0, H - 200, W, 200);
-}
-
-// ── TITLE + CLASS ─────────────────────────────────────────────────────────────
-
-function drawTitle(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
   const cx   = W / 2;
-  const maxW = W - PAD * 2;
+  const maxW = PW - IP * 2;
 
-  // Card title — large bold white
+  // Big title
   let px = 72;
   ctx.font = `bold ${px}px sans-serif`;
   const title = card.title.toUpperCase();
-  while (ctx.measureText(title).width > maxW && px > 36) { px -= 2; ctx.font = `bold ${px}px sans-serif`; }
+  while (ctx.measureText(title).width > maxW && px > 32) { px -= 2; ctx.font = `bold ${px}px sans-serif`; }
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = 'rgba(0,0,0,1)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 4;
+  ctx.shadowColor = 'rgba(0,0,0,1)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 4;
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(trunc(ctx, title, maxW), cx, TITLE_Y);
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 60; ctx.shadowOffsetY = 0; ctx.globalAlpha = 0.45;
-  ctx.fillText(trunc(ctx, title, maxW), cx, TITLE_Y);
+  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 78);
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 55; ctx.shadowOffsetY = 0; ctx.globalAlpha = 0.45;
+  ctx.fillText(trunc(ctx, title, maxW), cx, TTL_Y + 78);
   ctx.restore();
 
-  // Class subtitle — accent, uppercase
-  let cpx = 30;
+  // Class subtitle (accent color)
+  let cpx = 28;
   const classLabel = card.class.toUpperCase();
   ctx.font = `bold ${cpx}px sans-serif`;
-  while (ctx.measureText(classLabel).width > maxW - 40 && cpx > 18) { cpx--; ctx.font = `bold ${cpx}px sans-serif`; }
+  while (ctx.measureText(classLabel).width > maxW - 40 && cpx > 14) { cpx--; ctx.font = `bold ${cpx}px sans-serif`; }
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 22;
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 20;
   ctx.fillStyle = a.accent;
-  ctx.fillText(trunc(ctx, classLabel, maxW - 40), cx, CLASS_Y);
+  ctx.fillText(trunc(ctx, classLabel, maxW - 40), cx, TTL_Y + 112);
   ctx.restore();
 }
 
-// ── TOP 3 STATS GRID (3 columns) ─────────────────────────────────────────────
+// ── META BAR ─────────────────────────────────────────────────────────────────
+// JOINED date  ·  ARCHETYPE
+
+function drawMetaBar(ctx: SKRSContext2D, card: PersonaCard, member: MemberProfile, a: RarityAccent) {
+  drawPanel(ctx, OP, MET_Y, PW, MET_H, a, 0.4);
+
+  const mid = MET_Y + MET_H / 2;
+
+  // Joined date
+  const joined = (member as any).joinedAt
+    ? new Date((member as any).joinedAt as string)
+        .toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : null;
+
+  if (joined) {
+    ctx.save();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 17px sans-serif'; ctx.fillStyle = a.text + 'cc';
+    ctx.fillText(`◈  JOINED  ${joined}`, OP + IP, mid);
+    ctx.restore();
+  }
+
+  // Archetype (right)
+  ctx.save();
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 17px sans-serif'; ctx.fillStyle = a.accent;
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 10;
+  ctx.fillText(`${card.archetype.toUpperCase()}  ◈`, OP + PW - IP, mid);
+  ctx.restore();
+}
+
+// ── LEVEL + XP PANEL ─────────────────────────────────────────────────────────
+
+function drawLevelXP(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent) {
+  const y = DAT_Y;
+  drawPanel(ctx, OP, y, PW, LXP_H, a);
+
+  const XPL   = 250;
+  const level = Math.floor(member.xp / XPL) + 1;
+  const curXP = member.xp - (level - 1) * XPL;
+  const pct   = Math.max(0, Math.min(1, curXP / XPL));
+
+  // LEVEL badge box (left)
+  const boxW = 108;
+  const boxH = LXP_H - 20;
+  const boxX = OP + IP;
+  const boxY = y + 10;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  roundRect(ctx, boxX, boxY, boxW, boxH, 8); ctx.fill();
+  ctx.strokeStyle = a.accent + 'aa'; ctx.lineWidth = 1.5;
+  roundRect(ctx, boxX, boxY, boxW, boxH, 8); ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = a.accent + 'bb';
+  ctx.fillText('LEVEL', boxX + boxW / 2, boxY + 22);
+  ctx.font = 'bold 48px sans-serif'; ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 22;
+  ctx.fillText(String(level), boxX + boxW / 2, boxY + boxH - 6);
+  ctx.restore();
+
+  // XP section (right of level box)
+  const barX = boxX + boxW + 16;
+  const barW = PW - IP - boxW - 16 - IP;
+  const mid  = y + LXP_H / 2;
+
+  // XP label + numbers
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = a.accent;
+  ctx.fillText('XP', barX, mid - 16);
+  ctx.font = '17px sans-serif'; ctx.fillStyle = a.text + 'bb';
+  ctx.fillText(`  ${curXP.toLocaleString('no')} / ${(level * XPL).toLocaleString('no')}`, barX + 28, mid - 16);
+  ctx.restore();
+
+  // Track
+  const bY = mid + 4;
+  const bH = 28;
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  roundRect(ctx, barX, bY, barW, bH, bH / 2); ctx.fill();
+
+  // Fill
+  const fw = Math.max(bH, barW * pct);
+  const fg = ctx.createLinearGradient(barX, 0, barX + fw, 0);
+  fg.addColorStop(0, ACCENT[member.xp < 250 ? 'Common' : 'Rare'].dim);
+  fg.addColorStop(0.55, a.accent);
+  fg.addColorStop(1, '#ffffff');
+  ctx.save();
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 18;
+  ctx.fillStyle = fg;
+  roundRect(ctx, barX, bY, fw, bH, bH / 2); ctx.fill();
+  ctx.restore();
+}
+
+// ── STATS GRID (3 colored bordered panels) ────────────────────────────────────
 
 function drawStatsGrid(ctx: SKRSContext2D, stats: PersonaStats, a: RarityAccent) {
-  const rows  = topStats(stats, 3);
-  const colW  = (W - PAD * 2) / 3;
+  const y    = DAT_Y + LXP_H + GAP;
+  const gapX = 8;
+  const colW = Math.floor((PW - gapX * 2) / 3);
 
-  accentLine(ctx, STATS_Y - 6, a, 0.4);
+  topStats(stats, 3).forEach((stat, i) => {
+    const sx     = OP + i * (colW + gapX);
+    const sColor = STAT_COLOR[stat.key as keyof PersonaStats] ?? a.accent;
 
-  rows.forEach((stat, i) => {
-    const cx = PAD + colW * i + colW / 2;
+    drawColoredPanel(ctx, sx, y, colW, STA_H, sColor);
+
+    const cx = sx + colW / 2;
+
+    // Icon
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = sColor + 'cc';
+    ctx.fillText(stat.icon, cx, y + 44);
+    ctx.restore();
 
     // Big number
     ctx.save();
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = a.glow; ctx.shadowBlur = 36;
-    ctx.font      = 'bold 72px sans-serif';
-    ctx.fillStyle = a.accent;
-    ctx.fillText(String(stat.value), cx, STATS_Y + 90);
+    ctx.shadowColor = sColor + 'bb'; ctx.shadowBlur = 32;
+    ctx.font = 'bold 86px sans-serif'; ctx.fillStyle = '#ffffff';
+    ctx.fillText(String(stat.value), cx, y + 140);
     ctx.restore();
 
-    // Icon + label below number
+    // Stat label
     ctx.save();
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 8;
-    ctx.font      = 'bold 20px sans-serif';
-    ctx.fillStyle = a.text;
-    ctx.fillText(`${stat.icon}  ${stat.label}`, cx, STATS_Y + 122);
+    ctx.shadowColor = sColor + '66'; ctx.shadowBlur = 8;
+    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = sColor;
+    ctx.fillText(stat.label, cx, y + 164);
     ctx.restore();
-
-    // Subtle vertical divider between columns
-    if (i < 2) {
-      const dx = PAD + colW * (i + 1);
-      ctx.save();
-      ctx.strokeStyle = a.accent + '30';
-      ctx.lineWidth   = 1;
-      ctx.beginPath();
-      ctx.moveTo(dx, STATS_Y + 8);
-      ctx.lineTo(dx, STATS_Y + 140);
-      ctx.stroke();
-      ctx.restore();
-    }
   });
 }
 
-// ── BADGES ────────────────────────────────────────────────────────────────────
+// ── BADGES + SIGNATURE MOVE (side by side) ───────────────────────────────────
 
-function drawBadges(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent) {
-  if (member.badges.length === 0) return;
+function drawBadgesAndMove(ctx: SKRSContext2D, member: MemberProfile, card: PersonaCard, a: RarityAccent) {
+  const y    = DAT_Y + LXP_H + GAP + STA_H + GAP;
+  const gapX = 8;
+  const bdgW = Math.floor((PW - gapX) * 0.56);
+  const mvW  = PW - bdgW - gapX;
+  const bx   = OP;
+  const mx   = OP + bdgW + gapX;
 
-  const SHOW   = 4;
-  const badges = member.badges.slice(0, SHOW);
-  const extra  = member.badges.length - SHOW;
-  const BH     = 52;
-  const BPAD   = 20;
-  const GAP    = 12;
-
-  ctx.font = 'bold 18px sans-serif';
-  const dims = badges.map(b => {
-    const lbl = b.length > 14 ? b.slice(0, 12) + '…' : b;
-    return { lbl, w: Math.max(88, ctx.measureText(lbl).width + BPAD * 2) };
-  });
-
-  let totalW = dims.reduce((s, d) => s + d.w + GAP, -GAP);
-  if (extra > 0) totalW += 60 + GAP;
-  let bx = Math.max(PAD, (W - totalW) / 2);
-
-  accentLine(ctx, BADGE_Y - 14, a, 0.4);
-
-  for (const { lbl, w } of dims) {
-    const bg = ctx.createLinearGradient(bx, BADGE_Y, bx, BADGE_Y + BH);
-    bg.addColorStop(0, a.accent + '38'); bg.addColorStop(1, a.accent + '14');
-    ctx.fillStyle = bg;
-    roundRect(ctx, bx, BADGE_Y, w, BH, BH / 2); ctx.fill();
-
-    ctx.save();
-    ctx.shadowColor = a.glow; ctx.shadowBlur = 14;
-    ctx.strokeStyle = a.accent + 'dd'; ctx.lineWidth = 2;
-    roundRect(ctx, bx, BADGE_Y, w, BH, BH / 2); ctx.stroke();
-    ctx.restore();
-
-    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = a.glow; ctx.shadowBlur = 10;
-    ctx.fillText(lbl, bx + w / 2, BADGE_Y + BH / 2);
-    bx += w + GAP;
-  }
-
-  if (extra > 0) {
-    const mw = 60;
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
-    roundRect(ctx, bx, BADGE_Y, mw, BH, BH / 2); ctx.fill();
-    ctx.strokeStyle = a.accent + '66'; ctx.lineWidth = 1.5;
-    roundRect(ctx, bx, BADGE_Y, mw, BH, BH / 2); ctx.stroke();
-    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = a.text;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(`+${extra}`, bx + mw / 2, BADGE_Y + BH / 2);
-  }
-}
-
-// ── SIGNATURE MOVE + FLAVOR TEXT ─────────────────────────────────────────────
-
-function drawFlavor(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
-  accentLine(ctx, FLAVOR_Y - 12, a, 0.32);
-
-  const cx   = W / 2;
-  const maxW = W - PAD * 2 - 20;
-
-  // Signature move label
-  if (card.signatureMove) {
-    const ultLabel = `◆  ${card.signatureMove.toUpperCase()}`;
-    let px = 26;
-    ctx.font = `bold ${px}px sans-serif`;
-    while (ctx.measureText(ultLabel).width > maxW && px > 16) { px--; ctx.font = `bold ${px}px sans-serif`; }
-    ctx.save();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = a.glow; ctx.shadowBlur = 20;
-    ctx.fillStyle   = a.accent;
-    ctx.fillText(trunc(ctx, ultLabel, maxW), cx, FLAVOR_Y + 24);
-    ctx.restore();
-  }
-
-  // Flavor / lore text (italic, below signature move)
-  if (card.flavorText) {
-    ctx.save();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.font      = 'italic 22px sans-serif';
-    ctx.fillStyle = a.text + 'aa';
-    wrap2(ctx, `"${card.flavorText}"`, cx, FLAVOR_Y + 58, maxW, 28);
-    ctx.restore();
-  }
-}
-
-// ── PLAYER INFO (small, below badges) ────────────────────────────────────────
-
-function drawPlayerInfo(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent) {
-  const cx      = W / 2;
-  const XPL     = 250;
-  const level   = Math.floor(member.xp / XPL) + 1;
-  const name    = (member.displayName || member.username).toUpperCase();
-  const label   = `${name}  ·  LV ${level}  ·  ${member.xp} XP`;
+  // ── Badges panel ──────────────────────────────────────────────────────────
+  drawPanel(ctx, bx, y, bdgW, BMV_H, a);
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font      = 'bold 20px sans-serif';
-  ctx.fillStyle = a.text + 'aa';
-  ctx.fillText(trunc(ctx, label, W - PAD * 2), cx, PLAYER_Y);
+  ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = a.accent + 'cc';
+  ctx.fillText('BADGES', bx + bdgW / 2, y + 22);
+  ctx.restore();
+
+  const badges = member.badges.slice(0, 5);
+  if (badges.length === 0) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'italic 16px sans-serif'; ctx.fillStyle = a.text + '55';
+    ctx.fillText('No badges yet', bx + bdgW / 2, y + BMV_H / 2);
+    ctx.restore();
+  } else {
+    const availW = bdgW - IP * 2;
+    const circD  = Math.min(52, Math.floor((availW - (badges.length - 1) * 8) / badges.length));
+    const circR  = circD / 2;
+    const bcy    = y + 38 + circR;
+    let   bsx    = bx + IP + circR;
+
+    for (const badge of badges) {
+      // Circle
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.arc(bsx, bcy, circR, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowColor = a.glow; ctx.shadowBlur = 14;
+      ctx.strokeStyle = a.accent + 'cc'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(bsx, bcy, circR, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+
+      // 2-char initials inside circle
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `bold ${Math.round(circR * 0.75)}px sans-serif`;
+      ctx.fillStyle = a.accent;
+      ctx.shadowColor = a.glow; ctx.shadowBlur = 10;
+      ctx.fillText(badge.slice(0, 2).toUpperCase(), bsx, bcy);
+      ctx.restore();
+
+      // Label below
+      const lbl = (badge.length > 10 ? badge.slice(0, 8) + '…' : badge).toUpperCase();
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `bold ${Math.max(10, Math.round(circR * 0.38))}px sans-serif`;
+      ctx.fillStyle = a.text + 'aa';
+      ctx.fillText(lbl, bsx, bcy + circR + 14);
+      ctx.restore();
+
+      bsx += circD + 8;
+    }
+  }
+
+  // ── Signature move panel ──────────────────────────────────────────────────
+  drawPanel(ctx, mx, y, mvW, BMV_H, a);
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = a.accent + 'cc';
+  ctx.fillText('SIGNATURE MOVE', mx + mvW / 2, y + 22);
+  ctx.restore();
+
+  // Move name
+  const moveName = `◆  ${card.signatureMove.toUpperCase()}`;
+  const mvMaxW   = mvW - IP * 2;
+  let mpx = 24;
+  ctx.font = `bold ${mpx}px sans-serif`;
+  while (ctx.measureText(moveName).width > mvMaxW && mpx > 13) { mpx--; ctx.font = `bold ${mpx}px sans-serif`; }
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 18;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(trunc(ctx, moveName, mvMaxW), mx + mvW / 2, y + 62);
+  ctx.restore();
+
+  // Move description
+  if (card.signatureMoveDesc) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = 'italic 16px sans-serif'; ctx.fillStyle = a.text + 'bb';
+    wrap2(ctx, card.signatureMoveDesc, mx + mvW / 2, y + 92, mvMaxW, 21);
+    ctx.restore();
+  }
+}
+
+// ── QUOTE / FLAVOR TEXT ───────────────────────────────────────────────────────
+
+function drawQuote(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
+  const y = DAT_Y + LXP_H + GAP + STA_H + GAP + BMV_H + GAP;
+  drawPanel(ctx, OP, y, PW, QOT_H, a, 0.4);
+
+  const text = card.flavorText || card.quote || '';
+  if (!text) return;
+
+  const cx = W / 2;
+
+  // Decorative opening quote mark
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 56px sans-serif'; ctx.fillStyle = a.accent + '44';
+  ctx.fillText('“', OP + IP, y + 60);
+  ctx.restore();
+
+  // Text
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'italic 20px sans-serif'; ctx.fillStyle = '#e0e0e0';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 8;
+  wrap2(ctx, text, cx, y + 44, PW - IP * 2 - 56, 24);
+  ctx.restore();
+
+  // Closing quote
+  ctx.save();
+  ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 56px sans-serif'; ctx.fillStyle = a.accent + '44';
+  ctx.fillText('”', OP + PW - IP, y + 88);
   ctx.restore();
 }
 
-// ── FOOTER ────────────────────────────────────────────────────────────────────
+// ── FOOTER BAR ────────────────────────────────────────────────────────────────
 
-function drawFooter(ctx: SKRSContext2D, collectionNumber: number, a: RarityAccent) {
-  accentLine(ctx, FOOT_Y - 16, a, 0.25);
+function drawFooterBar(ctx: SKRSContext2D, member: MemberProfile, collectionNumber: number, a: RarityAccent) {
+  const y = DAT_Y + LXP_H + GAP + STA_H + GAP + BMV_H + GAP + QOT_H + GAP;
+  drawPanel(ctx, OP, y, PW, FTR_H, a, 0.38);
 
+  const mid    = y + FTR_H / 2;
+  const XPL    = 250;
+  const level  = Math.floor(member.xp / XPL) + 1;
+  const name   = (member.displayName || member.username).toUpperCase();
   const season = process.env.PERSONA_SEASON ?? '1';
-  const text   = `Card #${String(collectionNumber).padStart(3, '0')}  ·  Season ${season}  ·  GLENVEX PERSONA`;
 
+  // Left: player name
   ctx.save();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font = '17px sans-serif'; ctx.fillStyle = a.accent + '77';
-  ctx.fillText(trunc(ctx, text, W - PAD * 2), W / 2, FOOT_Y);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = a.text + 'bb';
+  ctx.fillText(`◈  ${trunc(ctx, name, 220)}`, OP + IP, mid);
+  ctx.restore();
+
+  // Center: LV · XP
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#d0d0d0';
+  ctx.fillText(`LV ${level}  ·  ${member.xp.toLocaleString('no')} XP`, W / 2, mid);
+  ctx.restore();
+
+  // Right: season
+  ctx.save();
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = a.text + 'bb';
+  ctx.fillText(`SEASON ${season}`, OP + PW - IP, mid);
   ctx.restore();
 }
 
@@ -441,7 +587,7 @@ function drawFooter(ctx: SKRSContext2D, collectionNumber: number, a: RarityAccen
 
 function drawCardEdge(ctx: SKRSContext2D, a: RarityAccent) {
   ctx.save();
-  ctx.shadowColor = a.glow; ctx.shadowBlur = 30;
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 32;
   ctx.strokeStyle = a.accent + 'cc'; ctx.lineWidth = 3.5;
   roundRect(ctx, 5, 5, W - 10, H - 10, CORNER_R); ctx.stroke();
   ctx.restore();
@@ -460,57 +606,44 @@ export async function renderPersonaCard(
   const ctx    = canvas.getContext('2d') as SKRSContext2D;
   const a      = ACCENT[card.rarity];
 
-  // ─ 1. Clip to rounded card ─────────────────────────────────────────────────
+  // 1. Clip to rounded card shape
   ctx.save();
   roundRect(ctx, 0, 0, W, H, CORNER_R);
   ctx.clip();
 
-  // ─ 2. AI art or mystical fallback ─────────────────────────────────────────
+  // 2. AI art fills the full canvas (or mystical fallback)
   let aiLoaded = false;
-
   if (fullCardImage) {
     try {
       const { img } = await loadPersonaImage(fullCardImage, '[cardRenderer]');
       const scale   = Math.max(W / img.width, H / img.height);
-      const dw      = img.width  * scale;
-      const dh      = img.height * scale;
+      const dw = img.width * scale, dh = img.height * scale;
       ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
       aiLoaded = true;
     } catch (e: any) {
       console.error('[cardRenderer] loadPersonaImage failed — using mystical fallback:', e?.message ?? e);
-      console.error(e?.stack);
     }
   }
-
   if (!aiLoaded) drawMysticalFallback(ctx, card, a);
 
-  // ─ 3. Header overlay (top) ────────────────────────────────────────────────
-  drawHeader(ctx, card, a);
+  // 3. Art gradients (fade into top/bottom panel zones)
+  drawArtGradients(ctx);
 
-  // ─ 4. Data panel background (bottom) ─────────────────────────────────────
-  drawPanelBackground(ctx, a);
+  // 4. Top panels: Header · Title · Meta
+  drawHeaderBar(ctx, card, collectionNumber, a);
+  drawTitleSection(ctx, card, a);
+  drawMetaBar(ctx, card, member, a);
 
-  // ─ 5. Title + class ───────────────────────────────────────────────────────
-  drawTitle(ctx, card, a);
-
-  // ─ 6. Top 3 stats grid ────────────────────────────────────────────────────
+  // 5. Bottom data panels
+  drawLevelXP(ctx, member, a);
   drawStatsGrid(ctx, card.stats, a);
-
-  // ─ 7. Signature move + flavor ─────────────────────────────────────────────
-  drawFlavor(ctx, card, a);
-
-  // ─ 8. Badges ──────────────────────────────────────────────────────────────
-  drawBadges(ctx, member, a);
-
-  // ─ 9. Player name + level ─────────────────────────────────────────────────
-  drawPlayerInfo(ctx, member, a);
-
-  // ─ 10. Footer ─────────────────────────────────────────────────────────────
-  drawFooter(ctx, collectionNumber, a);
+  drawBadgesAndMove(ctx, member, card, a);
+  drawQuote(ctx, card, a);
+  drawFooterBar(ctx, member, collectionNumber, a);
 
   ctx.restore(); // end clip
 
-  // ─ 12. Card border (drawn outside clip so corners are always sharp) ───────
+  // 6. Card border (outside clip — always sharp corners)
   drawCardEdge(ctx, a);
 
   return canvas.toBuffer('image/png');
