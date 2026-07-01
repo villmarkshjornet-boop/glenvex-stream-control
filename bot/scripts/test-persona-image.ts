@@ -35,88 +35,74 @@ const SEASON_STYLE: Record<string, string> = {
 
 const SEASON_SUFFIX = SEASON_STYLE[SEASON] ?? SEASON_STYLE.default;
 
-const RARITY_FRAME_STYLE = {
-  Common:
-    'matte dark steel frame with subtle engraved geometric patterns, deep charcoal and gunmetal tones, ' +
-    'no glow, dignified and restrained, industrial craft',
-  Rare:
-    'royal navy and cerulean blue crystal frame, glowing azure energy lines along frame edges, ' +
-    'cool cerulean particle wisps drifting at borders, elegant naval authority',
-  Epic:
-    'dark violet arcane frame carved with glowing runes, purple and magenta energy tendrils curling at ' +
-    'corners, mystical floating rune fragments, crackling arcane electricity',
-  Legendary:
-    'ornate 24-karat gold filigree frame with intricate scrollwork and baroque details, warm divine ' +
-    'light rays shooting from all four corners, particles of celestial golden light suspended mid-air, ' +
-    'radiant and majestic',
-  Mythic:
-    'blood-red and cosmic void obsidian frame, crimson lightning crackling at corners, swirling void ' +
-    'tendrils, dense particle storm, otherworldly light that defies physics, simultaneously terrifying ' +
-    'and magnificent, divine wrath incarnate',
+const RARITY_VISUAL: Record<string, { frame: string; colors: string; mood: string; fx: string }> = {
+  Common: {
+    frame:  'Clean polished dark charcoal steel frame with precise geometric engravings. Brushed gunmetal finish. Silver corner reinforcements. Professional military-grade craft. No glow, no particles — pure earned mastery.',
+    colors: 'High-contrast black and silver. Cool blue-gray highlights. Sharp crisp shadows. Deep rich darks. Matte finish with selective metallic sheen on armor and weapons.',
+    mood:   'A veteran warrior — every scar earned. Gritty determination, grounded strength, dangerous competence.',
+    fx:     'Sharp rim light from behind outlining the silhouette. Clean atmospheric depth. Subtle volumetric fog in the background. No particle effects — the person IS the spectacle.',
+  },
+  Rare: {
+    frame:  'Cerulean blue crystal frame — cool blue light glowing from within the crystal channels. Azure energy particles slowly drifting upward at card edges. Sapphire gem accents at corners.',
+    colors: 'Electric blue and cobalt with icy white highlights. Vibrant saturated blues. Cold chromatic energy. Background fades from deep navy to cobalt blue.',
+    mood:   'Touched by elemental power. Noble dangerous confidence. A force of nature barely contained.',
+    fx:     'Azure particle wisps rising from ground. Electric blue rim light from behind. Glowing blue accents on armor and weapons. Subtle ice crystal formations in environment.',
+  },
+  Epic: {
+    frame:  'Dark violet arcane frame with glowing purple runes carved into every surface — runes pulse with visible magical energy. Purple and magenta energy tendrils curl inward from all four corners. Crackling arcane electricity sparks at the edges.',
+    colors: 'Deep violet, electric magenta, dark purple. High-drama contrast — near-black shadows with explosive vivid purple highlights. Otherworldly and dangerous.',
+    mood:   'Wielder of forbidden arcane power. Dark mastery. Controlled danger on the edge of catastrophe. Mysterious and magnificent.',
+    fx:     'Dramatic arcane tendrils wrapping the character. Floating glowing spell fragments in air. Purple lightning crackling around hands and weapons. Strong shadow contrast amplified by bright violet light sources.',
+  },
+  Legendary: {
+    frame:  '24-karat gold ornate baroque frame — intricate filigree scrollwork at every corner and edge. Warm golden light visibly emanating from frame edges. Multiple divine light rays shoot from all four corners into the card.',
+    colors: 'Rich warm gold, deep amber, radiant divine white. God rays and golden particles fill the air. The world around the character basks in warm divine light.',
+    mood:   'The chosen one. Destiny incarnate. Pure mythical grandeur and unshakeable authority.',
+    fx:     'DRAMATIC gold god rays streaming from behind the character. Golden particle storm suspended in air. Warm amber bloom lighting their face. Glowing divine sigils in background. Character radiates visible golden energy.',
+  },
+  Mythic: {
+    frame:  'Jet black cosmic void frame lined with blood-red plasma lightning crackling violently at every edge and corner. Void tendrils seeping inward from the black frame. Simultaneously beautiful and terrifying.',
+    colors: 'Deep void black, explosive white-hot plasma cores, blood crimson energy. Reality itself looks wrong around this character.',
+    mood:   'A being that transcended hero and legend. Cosmic horror turned champion. Divine wrath with total control.',
+    fx:     'Crimson-white lightning erupting from all four corners toward the character. Dense particle storm. Dimensional cracks showing cosmic void. Character wreathed in dark void and blinding white plasma energy.',
+  },
 };
 
-const RARITY_COLOR_GRADE = {
-  Common:    'desaturated cool steel grays, subtle blue-gray shadows, matte finish',
-  Rare:      'cool azure and navy tones, cerulean highlights, crisp clarity',
-  Epic:      'deep purples, violet shadows, electric magenta highlights, arcane shimmer',
-  Legendary: 'warm gold color grade, amber god rays, rich contrast, divine warmth',
-  Mythic:    'blood red with cosmic desaturation, bursts of pure white-hot light, void black shadows',
-};
+function buildPrompt(rarity: string, archetype: string, klass: string, imagePrompt: string): string {
+  const r = RARITY_VISUAL[rarity] ?? RARITY_VISUAL.Common;
+  return `Transform the person in the reference image into a premium AAA trading card hero.
 
-const RARITY_MOOD = {
-  Common:    'gritty determination, grounded strength, earned respect',
-  Rare:      'noble strength, elemental mastery, quiet confidence',
-  Epic:      'mysterious arcane power, dark mastery, controlled danger',
-  Legendary: 'chosen one energy, mythical grandeur, destiny fulfilled',
-  Mythic:    'cosmic horror turned champion, divine wrath, power that reshapes reality',
-};
+IDENTITY — NON-NEGOTIABLE:
+Preserve their exact face: facial structure, hairstyle, hair color, beard or stubble, glasses if present, skin tone, eye color, and all distinctive features. Do NOT generate a random new person. This is the SAME person, reimagined as their ultimate hero self. They must look at this card and think: "That is ME." The face stays theirs — costume, armor, weapons and effects can be epic, but the face is the anchor.
 
-const RARITY_MATERIALS = {
-  Common:    'engraved brushed steel, dark pewter with silver highlights',
-  Rare:      'polished sapphire, cerulean ice formations, gleaming naval steel',
-  Epic:      'glowing amethyst crystals, carved arcane stone, pulsing violet runes',
-  Legendary: 'gleaming gold, radiant warm crystals, polished divine brass',
-  Mythic:    'crackling crimson plasma, void-black obsidian, glowing red gems',
-};
+ARTISTIC STYLE:
+Premium digital painting at Blizzard Entertainment / Riot Games / Magic: The Gathering quality. Cinematic, epic, hand-crafted illustration. NOT photorealistic, NOT anime, NOT cartoon, NOT generic AI art.
 
-function buildPrompt(rarity: keyof typeof RARITY_FRAME_STYLE, archetype: string, klass: string, imagePrompt: string): string {
-  return [
-    `Ultra-premium collectible trading card. Portrait orientation. Print-quality illustration.`,
-    `Art direction: Riot Games × Blizzard Entertainment × Wizards of the Coast × Marvel Snap.`,
-    `This MUST look like official AAA trading card game art — not generic AI art.`,
-    ``,
-    `SEASON VISUAL THEME: ${SEASON_SUFFIX}`,
-    ``,
-    `CHARACTER — the absolute hero filling this card:`,
-    `${archetype} archetype. ${klass} class. ${imagePrompt}`,
-    `This is a legendary stylized game CHAMPION — fictional, not a real person. Epic heroic pose.`,
-    `CRITICAL VISUAL REQUIREMENT: The character illustration MUST use VIVID, SATURATED, HIGH-CONTRAST colors.`,
-    `Rich chromatic lighting. The character pops off the card — vibrant, electrifying, visually stunning.`,
-    `Cinematic rim lighting from behind + frontal key light. Volumetric god rays / energy beams visible.`,
-    `Strong bloom on bright elements. Depth of field — character razor-sharp, background atmospheric.`,
-    `Rarity particle effects surround them. Character DOMINATES the frame — massive, powerful, unmistakable.`,
-    `DO NOT use muddy, desaturated, or dark colors for the character. The art must POP and WOW.`,
-    ``,
-    `RARITY: ${rarity.toUpperCase()}`,
-    `FRAME STYLE: ${RARITY_FRAME_STYLE[rarity]}`,
-    `COLOR GRADE: ${RARITY_COLOR_GRADE[rarity]}`,
-    `MOOD: ${RARITY_MOOD[rarity]}`,
-    ``,
-    `CARD LAYOUT — portrait (tall), strictly:`,
-    `TOP 8% : Decorative rarity sigil banner strip. Ornate metallic detail, rarity embellishments. No text.`,
-    `CENTER 63% : THE CHAMPION fills 100% of this zone. Zero empty space. Rich colors, dramatic lighting.`,
-    `  Materials: ${RARITY_MATERIALS[rarity]}`,
-    `BOTTOM 29% : Dark info panel. Near-black or very dark toned, clean, elegant.`,
-    `  Subtle ornamental decorative lines within it. Elegant divider at panel top.`,
-    `  ONLY decorative linework — absolutely zero text, numbers, or symbols.`,
-    ``,
-    `NON-NEGOTIABLE RULES:`,
-    `- ZERO TEXT anywhere on the card. No letters, numbers, runes, or words.`,
-    `- Character is VIVID and COLORFUL — not dark, muted, or muddy.`,
-    `- Bottom panel is CLEARLY DARKER than the character zone — it's the data area.`,
-    `- This card must make a collector say "WOW" and immediately want to keep it.`,
-    `- Portrait format (tall, not wide) maintained throughout.`,
-  ].join('\n');
+LIGHTING (critical for WOW):
+Strong dramatic rim light from behind creating glowing silhouette halo. Powerful key light on face from dramatic angle. Volumetric god rays in environment. Multiple colored light sources from rarity effects.
+
+CHARACTER: ${klass} — ${archetype} archetype
+Description: ${imagePrompt}
+Season atmosphere: ${SEASON_SUFFIX}
+
+RARITY: ${rarity.toUpperCase()}
+Frame: ${r.frame}
+Colors: ${r.colors}
+Mood: ${r.mood}
+Effects: ${r.fx}
+
+COMPOSITION:
+- Character fills 70–75% of card height, dominant close mid-shot framing
+- Rich dramatic environment behind the character
+- BOTTOM 25–30%: gradually fades to near-black — clean dark area for data overlay
+- Rarity frame runs along all four edges
+
+⚠ ABSOLUTE RULES:
+- ZERO TEXT. No letters. No numbers. No symbols. No runes. No logos. No UI. Nothing.
+- Preserve the person's face from the reference image.
+- Portrait orientation only (tall card, not wide).
+- Colors must be VIVID and HIGH-CONTRAST — not muddy, not dark and flat.
+- The raw AI image alone must look like a premium collector card someone would pay for.`;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
