@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "ffmpeg", "python312Packages.yt-dlp"]
+nixPkgs = ["nodejs_20", "ffmpeg", "python312Packages.yt-dlp", "fontconfig", "dejavu_fonts", "liberation_ttf"]
 
 [phases.install]
-cmds = ["npm install --no-audit --no-fund"]
+cmds = ["npm install --no-audit --no-fund", "fc-cache -f || true"]
