@@ -1,63 +1,76 @@
 /**
- * PERSONA CARDS V4 — Hybrid compositor
+ * PERSONA CARDS — Premium Canvas Overlay
  *
- * DALL-E generates the ENTIRE artistic card (frame + character + atmosphere).
- * Canvas overlays dynamic data only: rarity banner, name, XP, badges, footer.
+ * gpt-image-1 generates the full art (character + frame + atmosphere).
+ * This module overlays dynamic data only — the AI art is never touched.
  *
- * Layout zones (Canvas overlay):
- *   TOP  0–100px : Rarity banner strip (always visible in Discord thumbnail)
- *   MID  1000px+ : Safety gradient starts (over lower character zone)
- *   DATA 1060px+ : Name, title, XP bar, badges, flavor, footer
+ * Layout:
+ *   TOP  0–155px : Header (rarity + community + class title)
+ *   MID           : Character art (untouched)
+ *   BOT  820–end  : Data panel (gradient into dark + all stats/text)
  */
 
 import { createCanvas, loadImage, type SKRSContext2D } from '@napi-rs/canvas';
 import type { MemberProfile } from './memberTracker';
-import type { PersonaCard, PersonaRarity } from './personaService';
+import type { PersonaCard, PersonaRarity, PersonaStats } from './personaService';
 
-// ── Dimensions — matches gpt-image-1 portrait output ─────────────────────────
-const W = 1024;
-const H = 1536;
+// ── Dimensions ────────────────────────────────────────────────────────────────
+const W        = 1024;
+const H        = 1536;
+const CORNER_R = 28;
+const PAD      = 52;   // horizontal padding
 
-const TOP_BANNER_H = 90;  // rarity banner zone at top
-const PANEL_Y      = 840; // Canvas safety gradient starts (~55% down)
-const DATA_Y       = 900; // first data element (~59% down)
-const CORNER_R     = 30;
-const PAD          = 52;
+// Data panel constants
+const PANEL_Y  = 820;  // gradient starts (transparent→dark)
+const NAME_Y   = 960;  // name baseline
+const XP_Y     = 1010; // XP section top
+const STATS_Y  = 1135; // stats section top (after XP bar)
+const BADGE_Y  = 1365; // badge row top
+const ULT_Y    = 1410; // ultimate section top
+const FLAVOR_Y = 1465; // flavor text top
+const FOOT_Y   = 1510; // footer baseline
 
 // ── Rarity accent palette ─────────────────────────────────────────────────────
-interface RarityAccent {
-  accent: string;
-  glow:   string;
-  dim:    string;
-  text:   string;
-  bg:     string; // dark tinted bg for mystical fallback
-}
+interface RarityAccent { accent: string; glow: string; dim: string; text: string; bg: string; }
 
 const ACCENT: Record<PersonaRarity, RarityAccent> = {
-  Common:    { accent: '#c8c8e0', glow: 'rgba(200,200,224,0.65)', dim: '#6a6a90', text: '#a0a0c0', bg: '#14141e' },
-  Rare:      { accent: '#42a5f5', glow: 'rgba(66,165,245,0.7)',   dim: '#1565c0', text: '#7ab8ee', bg: '#060d20' },
-  Epic:      { accent: '#e040fb', glow: 'rgba(224,64,251,0.75)',  dim: '#8e24aa', text: '#d090f0', bg: '#100430' },
-  Legendary: { accent: '#ffd740', glow: 'rgba(255,215,64,0.8)',   dim: '#ff8f00', text: '#ffe082', bg: '#1c1000' },
-  Mythic:    { accent: '#ff5252', glow: 'rgba(255,82,82,0.85)',   dim: '#c50e29', text: '#ffbbbb', bg: '#1c0000' },
+  Common:    { accent: '#b0b8d0', glow: 'rgba(176,184,208,0.65)', dim: '#5a6080', text: '#8090b0', bg: '#10101a' },
+  Rare:      { accent: '#42a5f5', glow: 'rgba(66,165,245,0.70)',  dim: '#1565c0', text: '#7ab8ee', bg: '#040d1e' },
+  Epic:      { accent: '#e040fb', glow: 'rgba(224,64,251,0.75)',  dim: '#8e24aa', text: '#cc88ee', bg: '#0e0330' },
+  Legendary: { accent: '#ffd740', glow: 'rgba(255,215,64,0.85)',  dim: '#e65100', text: '#ffe082', bg: '#180f00' },
+  Mythic:    { accent: '#ff5252', glow: 'rgba(255,82,82,0.85)',   dim: '#b71c1c', text: '#ffaaaa', bg: '#1a0000' },
 };
 
-const RARITY_LABEL: Record<PersonaRarity, string> = {
-  Common:    '◆  C O M M O N',
-  Rare:      '◈◈  R A R E  ◈◈',
-  Epic:      '⬡⬡⬡  E P I C  ⬡⬡⬡',
+const RARITY_HEADER: Record<PersonaRarity, string> = {
+  Common:    '◆  C O M M O N  ◆',
+  Rare:      '◈  R A R E  ◈',
+  Epic:      '⬡  E P I C  ⬡',
   Legendary: '✦  L E G E N D A R Y  ✦',
   Mythic:    '⚡  M Y T H I C  ⚡',
 };
 
-const RARITY_ICON: Record<PersonaRarity, string> = {
-  Common:    '◆',
-  Rare:      '◈',
-  Epic:      '⬡',
-  Legendary: '✦',
-  Mythic:    '⚡',
+// ── Stat metadata ─────────────────────────────────────────────────────────────
+const STAT_META: Record<keyof PersonaStats, { label: string; icon: string }> = {
+  hype:        { label: 'HYPE',      icon: '🔥' },
+  chaos:       { label: 'CHAOS',     icon: '⚡' },
+  community:   { label: 'COMMUNITY', icon: '🤝' },
+  focus:       { label: 'FOCUS',     icon: '🎯' },
+  humor:       { label: 'HUMOR',     icon: '😄' },
+  activity:    { label: 'ACTIVE',    icon: '🌀' },
+  helpfulness: { label: 'HELP',      icon: '💚' },
+  kreativitet: { label: 'CREATE',    icon: '🎨' },
+  loyalitet:   { label: 'LOYAL',     icon: '🛡' },
+  lederskap:   { label: 'LEADER',    icon: '👑' },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+function topStats(stats: PersonaStats, n = 3) {
+  return (Object.entries(stats) as [keyof PersonaStats, number][])
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, n)
+    .map(([key, val]) => ({ ...STAT_META[key], value: val }));
+}
+
+// ── Canvas helpers ────────────────────────────────────────────────────────────
 
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number) {
   const s = Math.min(r, w / 2, h / 2);
@@ -81,16 +94,16 @@ function trunc(ctx: SKRSContext2D, text: string, maxW: number): string {
   return s + '…';
 }
 
-function wrap(ctx: SKRSContext2D, text: string, x: number, y: number, maxW: number, lineH: number, maxLines = 99): number {
+function wrap2(ctx: SKRSContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
   const words = text.split(' ');
   let line = '';
-  let n = 0;
+  let lines = 0;
   for (const word of words) {
     const t = line ? `${line} ${word}` : word;
     if (ctx.measureText(t).width > maxW && line) {
-      if (n >= maxLines - 1) { ctx.fillText(trunc(ctx, line, maxW), x, y); return y; }
-      ctx.fillText(line, x, y);
-      line = word; y += lineH; n++;
+      ctx.fillText(trunc(ctx, line, maxW), x, y);
+      line = word; y += lineH; lines++;
+      if (lines >= 1) { ctx.fillText(trunc(ctx, line, maxW), x, y); return y; }
     } else { line = t; }
   }
   if (line) ctx.fillText(trunc(ctx, line, maxW), x, y);
@@ -105,486 +118,376 @@ async function fetchBuf(url: string): Promise<Buffer | null> {
   } catch { return null; }
 }
 
-// ── Mystical fallback ─────────────────────────────────────────────────────────
-// Shown when DALL-E image is unavailable. Shows card identity so it's still
-// useful — the "face-down premium card" aesthetic with real data visible.
-
-function drawMysticalFallback(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
-  const cx  = W / 2;
-  const cy  = H * 0.34; // center of character zone
-
-  // Rich dark background — rarity-tinted, NOT pure black
-  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.9);
-  bg.addColorStop(0,    a.bg);
-  bg.addColorStop(0.45, '#0c0c14');
-  bg.addColorStop(1,    '#04040a');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  // Vivid rarity glow (was 0.13 — now 0.55)
-  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 520);
-  glow.addColorStop(0,   a.accent + '8c'); // 55% opacity
-  glow.addColorStop(0.4, a.accent + '30'); // 19% opacity
-  glow.addColorStop(1,   'transparent');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H);
-
-  // Secondary edge glow from bottom (rarity atmosphere)
-  const edgeGlow = ctx.createRadialGradient(cx, H, 0, cx, H, 700);
-  edgeGlow.addColorStop(0,   a.accent + '33');
-  edgeGlow.addColorStop(0.5, a.accent + '0d');
-  edgeGlow.addColorStop(1,   'transparent');
-  ctx.fillStyle = edgeGlow;
-  ctx.fillRect(0, 0, W, H);
-
-  // Subtle card-back grid
-  ctx.save();
-  ctx.globalAlpha = 0.045;
-  ctx.strokeStyle = a.accent;
-  ctx.lineWidth   = 1;
-  for (let x = 0; x < W; x += 56) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-  }
-  for (let y = 0; y < H; y += 56) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-  }
-  ctx.restore();
-
-  // Radiating lines (was 0.055 — now 0.18)
-  ctx.save();
-  ctx.globalAlpha = 0.18;
-  ctx.strokeStyle = a.accent;
-  ctx.lineWidth   = 1.5;
-  for (let ang = 0; ang < Math.PI * 2; ang += Math.PI / 12) {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(ang) * 1000, cy + Math.sin(ang) * 1000);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Concentric rings (was 0.12/0.08/0.05 — now 0.4/0.25/0.14)
-  for (const [r, alpha, lw] of [[190, 0.40, 2.5], [320, 0.25, 1.5], [470, 0.14, 1]] as [number, number, number][]) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = a.accent;
-    ctx.lineWidth   = lw;
-    ctx.shadowColor = a.glow;
-    ctx.shadowBlur  = 20;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // White rarity icon layer (large, subtly visible)
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font         = 'bold 280px sans-serif';
-  ctx.fillStyle    = '#ffffff';
-  ctx.globalAlpha  = 0.06;
-  ctx.fillText(RARITY_ICON[card.rarity], cx, cy);
-  ctx.restore();
-
-  // Bright accent "?" — the central mystery symbol (was 0.55 — now 0.88)
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor  = a.glow;
-  ctx.shadowBlur   = 80;
-  ctx.font         = 'bold 240px sans-serif';
-  ctx.fillStyle    = a.accent;
-  ctx.globalAlpha  = 0.88;
-  ctx.fillText('?', cx, cy);
-  ctx.restore();
-
-  // Inner glow orb behind the ?
-  const orb = ctx.createRadialGradient(cx, cy, 0, cx, cy, 220);
-  orb.addColorStop(0,   a.accent + '55');
-  orb.addColorStop(0.5, a.accent + '1a');
-  orb.addColorStop(1,   'transparent');
-  ctx.fillStyle = orb;
-  ctx.fillRect(0, 0, W, H);
-
-  // ── Card identity section (GPT data shown even when art is missing) ─────────
-  // Dark backdrop for text readability
-  const idY = H * 0.65;
-  const idBg = ctx.createLinearGradient(0, idY - 20, 0, idY + 220);
-  idBg.addColorStop(0, 'transparent');
-  idBg.addColorStop(0.2, 'rgba(0,0,0,0.75)');
-  idBg.addColorStop(1,   'rgba(0,0,0,0.92)');
-  ctx.fillStyle = idBg;
-  ctx.fillRect(0, idY - 20, W, 260);
-
-  // Divider line
-  const dl = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
-  dl.addColorStop(0, 'transparent');
-  dl.addColorStop(0.15, a.accent + '88');
-  dl.addColorStop(0.5,  a.accent + 'cc');
-  dl.addColorStop(0.85, a.accent + '88');
-  dl.addColorStop(1,    'transparent');
-  ctx.save();
-  ctx.strokeStyle = dl;
-  ctx.lineWidth   = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(PAD, idY);
-  ctx.lineTo(W - PAD, idY);
-  ctx.stroke();
-  ctx.restore();
-
-  // Card title (class)
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor  = a.glow;
-  ctx.shadowBlur   = 24;
-  ctx.font         = 'bold 64px sans-serif';
-  ctx.fillStyle    = '#ffffff';
-  let px = 64;
-  while (ctx.measureText(card.title).width > W - PAD * 2 && px > 32) {
-    px -= 2;
-    ctx.font = `bold ${px}px sans-serif`;
-  }
-  ctx.fillText(trunc(ctx, card.title, W - PAD * 2), cx, idY + 80);
-  ctx.restore();
-
-  // Card class
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor  = a.glow;
-  ctx.shadowBlur   = 14;
-  ctx.font         = '34px sans-serif';
-  ctx.fillStyle    = a.accent;
-  ctx.fillText(card.class, cx, idY + 130);
-  ctx.restore();
-
-  // Quote (if available)
-  if (card.quote) {
-    ctx.save();
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.font         = 'italic 20px sans-serif';
-    ctx.fillStyle    = a.text + 'bb';
-    wrap(ctx, `"${card.quote}"`, cx, idY + 180, W - PAD * 2 - 40, 26, 2);
-    ctx.restore();
-  }
-
-  // "Card art generating" notice
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.font         = '18px sans-serif';
-  ctx.fillStyle    = a.text + '77';
-  ctx.fillText('— Card Art Generating —', cx, H * 0.89);
-  ctx.restore();
-}
-
-// ── TOP: Rarity banner overlay ────────────────────────────────────────────────
-// Canvas draws this over the top of EVERY card (real or fallback).
-// Shown as the FIRST THING in Discord's compressed thumbnail view.
-
-function drawTopRarityBanner(ctx: SKRSContext2D, rarity: PersonaRarity, a: RarityAccent) {
-  // Dark gradient strip at very top
-  const bg = ctx.createLinearGradient(0, 0, 0, TOP_BANNER_H + 30);
-  bg.addColorStop(0, 'rgba(0,0,0,0.92)');
-  bg.addColorStop(0.6, 'rgba(0,0,0,0.72)');
-  bg.addColorStop(1, 'transparent');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, TOP_BANNER_H + 30);
-
-  // Rarity text — large, bold, centered, colored
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor  = a.glow;
-  ctx.shadowBlur   = 28;
-  ctx.font         = 'bold 40px sans-serif';
-  ctx.fillStyle    = a.accent;
-  ctx.fillText(RARITY_LABEL[rarity], W / 2, 52);
-  ctx.restore();
-
-  // Thin accent bottom line
+function accentLine(ctx: SKRSContext2D, y: number, a: RarityAccent, alpha = 0.6) {
   const lg = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
-  lg.addColorStop(0, 'transparent');
-  lg.addColorStop(0.15, a.accent + '55');
-  lg.addColorStop(0.5,  a.accent + '88');
-  lg.addColorStop(0.85, a.accent + '55');
-  lg.addColorStop(1, 'transparent');
+  lg.addColorStop(0,    'transparent');
+  lg.addColorStop(0.12, a.accent + Math.round(alpha * 255).toString(16).padStart(2, '0'));
+  lg.addColorStop(0.5,  a.accent + Math.round(alpha * 255 * 1.3).toString(16).padStart(2, '0'));
+  lg.addColorStop(0.88, a.accent + Math.round(alpha * 255).toString(16).padStart(2, '0'));
+  lg.addColorStop(1,    'transparent');
   ctx.save();
   ctx.strokeStyle = lg;
   ctx.lineWidth   = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(PAD, TOP_BANNER_H - 4);
-  ctx.lineTo(W - PAD, TOP_BANNER_H - 4);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
   ctx.restore();
 }
 
-// ── BOTTOM: Safety dark panel ─────────────────────────────────────────────────
-// Fades from transparent into near-black to guarantee overlay readability.
+// ── MYSTICAL FALLBACK ─────────────────────────────────────────────────────────
 
-function drawSafetyPanel(ctx: SKRSContext2D, a: RarityAccent) {
-  const g = ctx.createLinearGradient(0, PANEL_Y - 100, 0, H);
-  g.addColorStop(0,    'transparent');
-  g.addColorStop(0.15, 'rgba(0,0,0,0.45)');
-  g.addColorStop(0.4,  'rgba(0,0,0,0.78)');
-  g.addColorStop(0.7,  'rgba(0,0,0,0.90)');
-  g.addColorStop(1,    'rgba(0,0,0,0.95)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, PANEL_Y - 100, W, H - (PANEL_Y - 100));
+function drawMysticalFallback(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
+  const cx = W / 2;
+  const cy = H * 0.33;
 
-  // Accent divider at top of data zone
-  const dl = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
-  dl.addColorStop(0, 'transparent');
-  dl.addColorStop(0.12, a.accent + '55');
-  dl.addColorStop(0.5,  a.accent + '99');
-  dl.addColorStop(0.88, a.accent + '55');
-  dl.addColorStop(1, 'transparent');
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.9);
+  bg.addColorStop(0, a.bg); bg.addColorStop(0.45, '#0c0c14'); bg.addColorStop(1, '#040408');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 560);
+  glow.addColorStop(0, a.accent + '88'); glow.addColorStop(0.4, a.accent + '22'); glow.addColorStop(1, 'transparent');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+
+  ctx.save(); ctx.globalAlpha = 0.045; ctx.strokeStyle = a.accent; ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 56) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 56) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+
+  for (const [r, alpha, lw] of [[200, 0.35, 2.5], [340, 0.2, 1.5], [490, 0.12, 1]] as [number, number, number][]) {
+    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = a.accent; ctx.lineWidth = lw;
+    ctx.shadowColor = a.glow; ctx.shadowBlur = 20;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
+
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 80;
+  ctx.font = 'bold 220px sans-serif'; ctx.fillStyle = a.accent; ctx.globalAlpha = 0.85;
+  ctx.fillText('?', cx, cy); ctx.restore();
+
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 20;
+  ctx.font = 'bold 52px sans-serif'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.9;
+  ctx.fillText(card.class.toUpperCase(), cx, cy + 340); ctx.restore();
+
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '18px sans-serif'; ctx.fillStyle = a.text + '88'; ctx.globalAlpha = 1;
+  ctx.fillText('— Card Art Generating —', cx, H * 0.88); ctx.restore();
+}
+
+// ── HEADER (top overlay) ─────────────────────────────────────────────────────
+// Rarity · Community brand · Card class — always visible, even in thumbnails.
+
+function drawHeader(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
+  // Background gradient (top dark fade)
+  const bg = ctx.createLinearGradient(0, 0, 0, 175);
+  bg.addColorStop(0,   'rgba(0,0,0,0.94)');
+  bg.addColorStop(0.65, 'rgba(0,0,0,0.70)');
+  bg.addColorStop(1,   'transparent');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, 175);
+
+  const cx = W / 2;
+
+  // Rarity label — large, spaced, accent colored
   ctx.save();
-  ctx.strokeStyle = dl;
-  ctx.lineWidth   = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(PAD, DATA_Y + 2);
-  ctx.lineTo(W - PAD, DATA_Y + 2);
-  ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 30;
+  ctx.font      = 'bold 34px sans-serif';
+  ctx.fillStyle = a.accent;
+  ctx.fillText(RARITY_HEADER[card.rarity], cx, 36);
   ctx.restore();
+
+  // Community brand — bold white, large
+  const community = (process.env.WORKSPACE_ID ?? 'GLENVEX').replace(/-.*/, '').toUpperCase();
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 16;
+  ctx.font      = 'bold 52px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(community, cx, 88);
+  ctx.restore();
+
+  // Card class — accent color, uppercase
+  const classLabel = card.class.toUpperCase();
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10;
+  ctx.font      = '28px sans-serif';
+  ctx.fillStyle = a.accent;
+  let px = 28;
+  while (ctx.measureText(classLabel).width > W - PAD * 2 && px > 18) { px--; ctx.font = `${px}px sans-serif`; }
+  ctx.fillText(trunc(ctx, classLabel, W - PAD * 2), cx, 132);
+  ctx.restore();
+
+  // Decorative line under header
+  accentLine(ctx, 155, a, 0.5);
 }
 
-// ── Name ──────────────────────────────────────────────────────────────────────
+// ── DATA PANEL BACKGROUND ─────────────────────────────────────────────────────
+
+function drawPanelBackground(ctx: SKRSContext2D, a: RarityAccent) {
+  const g = ctx.createLinearGradient(0, PANEL_Y - 80, 0, H);
+  g.addColorStop(0,    'transparent');
+  g.addColorStop(0.12, 'rgba(0,0,0,0.40)');
+  g.addColorStop(0.30, 'rgba(0,0,0,0.78)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.92)');
+  g.addColorStop(1,    'rgba(0,0,0,0.97)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, PANEL_Y - 80, W, H - (PANEL_Y - 80));
+
+  // Subtle rarity tint at bottom
+  const tint = ctx.createLinearGradient(0, H - 200, 0, H);
+  tint.addColorStop(0, 'transparent');
+  tint.addColorStop(1, a.accent + '12');
+  ctx.fillStyle = tint;
+  ctx.fillRect(0, H - 200, W, 200);
+}
+
+// ── NAME ──────────────────────────────────────────────────────────────────────
 
 function drawName(ctx: SKRSContext2D, displayName: string, a: RarityAccent) {
-  const nameY = DATA_Y + 96;
-  const maxW  = W - PAD * 2;
-
-  let px = 110; // bigger start (was 88)
+  const maxW = W - PAD * 2;
+  let px = 84;
   ctx.font = `bold ${px}px sans-serif`;
-  while (ctx.measureText(displayName.toUpperCase()).width > maxW && px > 44) {
-    px -= 2;
-    ctx.font = `bold ${px}px sans-serif`;
-  }
-  const name = trunc(ctx, displayName.toUpperCase(), maxW);
+  const name = displayName.toUpperCase();
+  while (ctx.measureText(name).width > maxW && px > 40) { px -= 2; ctx.font = `bold ${px}px sans-serif`; }
 
   ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-
-  // Black drop-shadow
-  ctx.shadowColor   = 'rgba(0,0,0,0.99)';
-  ctx.shadowBlur    = 18;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle     = '#ffffff';
-  ctx.fillText(name, W / 2, nameY);
-
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  // Black drop shadow
+  ctx.shadowColor = 'rgba(0,0,0,1)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 4;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(trunc(ctx, name, maxW), W / 2, NAME_Y);
   // Rarity glow pass
-  ctx.shadowColor   = a.glow;
-  ctx.shadowBlur    = 40;
-  ctx.shadowOffsetY = 0;
-  ctx.globalAlpha   = 0.6;
-  ctx.fillText(name, W / 2, nameY);
-
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 50; ctx.shadowOffsetY = 0; ctx.globalAlpha = 0.55;
+  ctx.fillText(trunc(ctx, name, maxW), W / 2, NAME_Y);
   ctx.restore();
 }
 
-// ── Title ─────────────────────────────────────────────────────────────────────
+// ── XP BAR ────────────────────────────────────────────────────────────────────
 
-function drawTitle(ctx: SKRSContext2D, title: string, a: RarityAccent) {
-  const titleY = DATA_Y + 150;
-  const maxW   = W - PAD * 2 - 40;
-  let px = 30; // was 26
-  ctx.font = `${px}px sans-serif`;
-  while (ctx.measureText(title).width > maxW && px > 16) { px--; ctx.font = `${px}px sans-serif`; }
-
-  ctx.save();
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor   = 'rgba(0,0,0,0.95)';
-  ctx.shadowBlur    = 10;
-  ctx.shadowOffsetY = 2;
-  ctx.fillStyle     = a.accent;
-  ctx.fillText(trunc(ctx, title, maxW), W / 2, titleY);
-  ctx.restore();
-}
-
-// ── XP progress bar ───────────────────────────────────────────────────────────
-
-function drawXP(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent): number {
+function drawXP(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent) {
   const XPL   = 250;
   const level = Math.floor(member.xp / XPL) + 1;
   const curXP = member.xp - (level - 1) * XPL;
   const pct   = Math.max(0, Math.min(1, curXP / XPL));
 
-  const y  = DATA_Y + 210;
+  const y  = XP_Y;
   const BW = W - PAD * 2;
-  const BH = 24; // was 18
+  const BH = 28;
 
-  // Level label
+  // LEVEL label
   ctx.save();
-  ctx.font         = 'bold 18px sans-serif'; // was 15px
-  ctx.fillStyle    = a.accent;
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor  = a.glow;
-  ctx.shadowBlur   = 12;
-  ctx.fillText(`Lv ${level}`, PAD, y + 16);
+  ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = a.accent;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 14;
+  ctx.fillText(`LEVEL ${level}`, PAD, y + 22);
   ctx.restore();
 
   // XP counter
-  ctx.font         = '15px sans-serif'; // was 13px
-  ctx.fillStyle    = a.text;
-  ctx.textAlign    = 'right';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`${curXP} / ${XPL} XP`, W - PAD, y + 16);
-
-  // Track
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
-  roundRect(ctx, PAD, y + 24, BW, BH, BH / 2);
-  ctx.fill();
-
-  // Fill
-  const fw = Math.max(BH, BW * pct);
-  const fg = ctx.createLinearGradient(PAD, 0, PAD + fw, 0);
-  fg.addColorStop(0, a.dim);
-  fg.addColorStop(0.6, a.accent);
-  fg.addColorStop(1, '#ffffff');
   ctx.save();
-  ctx.shadowColor = a.glow;
-  ctx.shadowBlur  = 18;
-  ctx.fillStyle   = fg;
-  roundRect(ctx, PAD, y + 24, fw, BH, BH / 2);
-  ctx.fill();
+  ctx.font = '18px sans-serif'; ctx.fillStyle = a.text + 'bb';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`${curXP} / ${XPL} XP`, W - PAD, y + 22);
   ctx.restore();
 
-  return y + 24 + BH + 16;
+  // Track
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  roundRect(ctx, PAD, y + 34, BW, BH, BH / 2);
+  ctx.fill();
+
+  // Fill gradient
+  const fw = Math.max(BH, BW * pct);
+  const fg = ctx.createLinearGradient(PAD, 0, PAD + fw, 0);
+  fg.addColorStop(0,   a.dim);
+  fg.addColorStop(0.6, a.accent);
+  fg.addColorStop(1,   '#ffffff');
+  ctx.save();
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 22;
+  ctx.fillStyle   = fg;
+  roundRect(ctx, PAD, y + 34, fw, BH, BH / 2);
+  ctx.fill();
+  ctx.restore();
 }
 
-// ── Badges ────────────────────────────────────────────────────────────────────
+// ── TOP 3 STATS ───────────────────────────────────────────────────────────────
 
-function drawBadges(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent, startY: number): number {
-  if (member.badges.length === 0) return startY;
+function drawStats(ctx: SKRSContext2D, stats: PersonaStats, a: RarityAccent) {
+  const rows = topStats(stats, 3);
+  const BW   = W - PAD * 2;
+  const BH   = 22;
 
-  const SHOW   = 5;
+  let y = STATS_Y;
+  accentLine(ctx, y - 16, a, 0.45);
+
+  for (const stat of rows) {
+    // Row: [icon] LABEL (left)    [value] (right)
+    ctx.save();
+    ctx.font      = 'bold 26px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 8;
+    const labelText = `${stat.icon}  ${stat.label}`;
+    ctx.fillText(labelText, PAD, y);
+    ctx.restore();
+
+    // Value (right aligned, accent color, large)
+    ctx.save();
+    ctx.font      = 'bold 30px sans-serif';
+    ctx.fillStyle = a.accent;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = a.glow; ctx.shadowBlur = 18;
+    ctx.fillText(String(stat.value), W - PAD, y);
+    ctx.restore();
+
+    // Bar track
+    const barY = y + 10;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    roundRect(ctx, PAD, barY, BW, BH, BH / 2);
+    ctx.fill();
+
+    // Bar fill
+    const fw = Math.max(BH, BW * (stat.value / 100));
+    const fg = ctx.createLinearGradient(PAD, 0, PAD + fw, 0);
+    fg.addColorStop(0,   a.dim);
+    fg.addColorStop(0.5, a.accent);
+    fg.addColorStop(1,   '#ffffff');
+    ctx.save();
+    ctx.shadowColor = a.glow; ctx.shadowBlur = 16;
+    ctx.fillStyle   = fg;
+    roundRect(ctx, PAD, barY, fw, BH, BH / 2);
+    ctx.fill();
+    ctx.restore();
+
+    y += 72; // next stat row
+  }
+}
+
+// ── BADGES ────────────────────────────────────────────────────────────────────
+
+function drawBadges(ctx: SKRSContext2D, member: MemberProfile, a: RarityAccent) {
+  if (member.badges.length === 0) return;
+
+  const SHOW   = 4; // max 4 badges shown
   const badges = member.badges.slice(0, SHOW);
   const extra  = member.badges.length - SHOW;
-  const BH     = 38; // was 36
-  const BPAD   = 14;
+  const BH     = 40;
+  const BPAD   = 16;
   const GAP    = 10;
 
-  ctx.font = 'bold 14px sans-serif'; // was 13px
+  ctx.font = 'bold 15px sans-serif';
   const dims = badges.map(b => {
-    const lbl = b.length > 13 ? b.slice(0, 11) + '…' : b;
-    return { lbl, w: Math.max(68, ctx.measureText(lbl).width + BPAD * 2) };
+    const lbl = b.length > 14 ? b.slice(0, 12) + '…' : b;
+    return { lbl, w: Math.max(72, ctx.measureText(lbl).width + BPAD * 2) };
   });
 
   let totalW = dims.reduce((s, d) => s + d.w + GAP, -GAP);
-  if (extra > 0) totalW += 48 + GAP;
-  let bx = (W - totalW) / 2;
+  if (extra > 0) totalW += 52 + GAP;
+  let bx = Math.max(PAD, (W - totalW) / 2);
+
+  accentLine(ctx, BADGE_Y - 14, a, 0.4);
 
   for (const { lbl, w } of dims) {
-    const bg = ctx.createLinearGradient(bx, startY, bx, startY + BH);
-    bg.addColorStop(0, a.accent + '28');
-    bg.addColorStop(1, a.accent + '0f');
+    // Badge pill background
+    const bg = ctx.createLinearGradient(bx, BADGE_Y, bx, BADGE_Y + BH);
+    bg.addColorStop(0, a.accent + '28'); bg.addColorStop(1, a.accent + '10');
     ctx.fillStyle = bg;
-    roundRect(ctx, bx, startY, w, BH, BH / 2);
-    ctx.fill();
+    roundRect(ctx, bx, BADGE_Y, w, BH, BH / 2); ctx.fill();
 
+    // Border
     ctx.save();
-    ctx.shadowColor = a.glow;
-    ctx.shadowBlur  = 10;
-    ctx.strokeStyle = a.accent + 'cc';
-    ctx.lineWidth   = 1.5;
-    roundRect(ctx, bx, startY, w, BH, BH / 2);
-    ctx.stroke();
+    ctx.shadowColor = a.glow; ctx.shadowBlur = 10;
+    ctx.strokeStyle = a.accent + 'cc'; ctx.lineWidth = 1.5;
+    roundRect(ctx, bx, BADGE_Y, w, BH, BH / 2); ctx.stroke();
     ctx.restore();
 
-    ctx.font         = 'bold 14px sans-serif';
-    ctx.fillStyle    = a.accent;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(lbl, bx + w / 2, startY + BH / 2);
+    // Label
+    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = a.accent;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(lbl, bx + w / 2, BADGE_Y + BH / 2);
     bx += w + GAP;
   }
 
   if (extra > 0) {
-    const mw = 48;
-    ctx.fillStyle   = 'rgba(255,255,255,0.05)';
-    roundRect(ctx, bx, startY, mw, BH, BH / 2);
-    ctx.fill();
-    ctx.strokeStyle = a.accent + '55';
-    ctx.lineWidth   = 1;
-    roundRect(ctx, bx, startY, mw, BH, BH / 2);
-    ctx.stroke();
-    ctx.font         = 'bold 14px sans-serif';
-    ctx.fillStyle    = a.text;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`+${extra}`, bx + mw / 2, startY + BH / 2);
+    const mw = 52;
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    roundRect(ctx, bx, BADGE_Y, mw, BH, BH / 2); ctx.fill();
+    ctx.strokeStyle = a.accent + '55'; ctx.lineWidth = 1;
+    roundRect(ctx, bx, BADGE_Y, mw, BH, BH / 2); ctx.stroke();
+    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = a.text;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`+${extra}`, bx + mw / 2, BADGE_Y + BH / 2);
   }
-
-  return startY + BH + 12;
 }
 
-// ── Flavor text ───────────────────────────────────────────────────────────────
+// ── ULTIMATE ──────────────────────────────────────────────────────────────────
 
-function drawFlavor(ctx: SKRSContext2D, flavorText: string, a: RarityAccent, startY: number): number {
-  if (!flavorText) return startY;
-  ctx.font         = 'italic 16px sans-serif'; // was 14px
-  ctx.fillStyle    = a.text + 'aa';
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  const endY = wrap(ctx, `"${flavorText}"`, W / 2, startY + 18, W - PAD * 2 - 20, 22, 2);
-  return endY + 20;
-}
+function drawUltimate(ctx: SKRSContext2D, card: PersonaCard, a: RarityAccent) {
+  accentLine(ctx, ULT_Y - 12, a, 0.35);
 
-// ── Footer ────────────────────────────────────────────────────────────────────
+  const cx = W / 2;
 
-function drawFooter(ctx: SKRSContext2D, collectionNumber: number, a: RarityAccent) {
-  const fy = H - 26;
-
-  const lg = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
-  lg.addColorStop(0, 'transparent');
-  lg.addColorStop(0.2, a.accent + '44');
-  lg.addColorStop(0.8, a.accent + '44');
-  lg.addColorStop(1, 'transparent');
+  // "⚡ ULTIMATE  ·  [ABILITY NAME]"
+  const ultLabel = `⚡ ULTIMATE  ·  ${card.signatureMove.toUpperCase()}`;
   ctx.save();
-  ctx.strokeStyle = lg;
-  ctx.lineWidth   = 1;
-  ctx.beginPath();
-  ctx.moveTo(PAD, fy - 18);
-  ctx.lineTo(W - PAD, fy - 18);
-  ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 16;
+  ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = a.accent;
+  let px = 22;
+  while (ctx.measureText(ultLabel).width > W - PAD * 2 && px > 14) { px--; ctx.font = `bold ${px}px sans-serif`; }
+  ctx.fillText(trunc(ctx, ultLabel, W - PAD * 2), cx, ULT_Y + 18);
   ctx.restore();
 
-  ctx.font         = '14px sans-serif'; // was 12px
-  ctx.fillStyle    = a.accent + '77';
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'alphabetic';
-  const season = process.env.PERSONA_SEASON ?? '1';
-  ctx.fillText(
-    trunc(ctx, `Card #${String(collectionNumber).padStart(3, '0')}  ·  GLENVEX PERSONA  ·  Season ${season}`, W - PAD * 2),
-    W / 2, fy,
-  );
+  // Ability description (short)
+  if (card.signatureMoveDesc) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = 'italic 18px sans-serif'; ctx.fillStyle = a.text + 'cc';
+    ctx.fillText(trunc(ctx, `"${card.signatureMoveDesc}"`, W - PAD * 2 - 20), cx, ULT_Y + 44);
+    ctx.restore();
+  }
 }
 
-// ── Card edge border ──────────────────────────────────────────────────────────
+// ── FLAVOR TEXT ───────────────────────────────────────────────────────────────
+
+function drawFlavor(ctx: SKRSContext2D, flavorText: string, a: RarityAccent) {
+  if (!flavorText) return;
+  accentLine(ctx, FLAVOR_Y - 12, a, 0.30);
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'italic 18px sans-serif'; ctx.fillStyle = a.text + '99';
+  wrap2(ctx, `"${flavorText}"`, W / 2, FLAVOR_Y + 16, W - PAD * 2 - 20, 22);
+  ctx.restore();
+}
+
+// ── FOOTER ────────────────────────────────────────────────────────────────────
+
+function drawFooter(ctx: SKRSContext2D, collectionNumber: number, a: RarityAccent) {
+  accentLine(ctx, FOOT_Y - 16, a, 0.25);
+
+  const season = process.env.PERSONA_SEASON ?? '1';
+  const text   = `Card #${String(collectionNumber).padStart(3, '0')}  ·  Season ${season}  ·  GLENVEX PERSONA`;
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '15px sans-serif'; ctx.fillStyle = a.accent + '66';
+  ctx.fillText(trunc(ctx, text, W - PAD * 2), W / 2, FOOT_Y);
+  ctx.restore();
+}
+
+// ── CARD EDGE ─────────────────────────────────────────────────────────────────
 
 function drawCardEdge(ctx: SKRSContext2D, a: RarityAccent) {
   ctx.save();
-  ctx.shadowColor = a.glow;
-  ctx.shadowBlur  = 28;
-  ctx.strokeStyle = a.accent + 'cc';
-  ctx.lineWidth   = 3;
-  roundRect(ctx, 5, 5, W - 10, H - 10, CORNER_R);
-  ctx.stroke();
+  ctx.shadowColor = a.glow; ctx.shadowBlur = 30;
+  ctx.strokeStyle = a.accent + 'cc'; ctx.lineWidth = 3.5;
+  roundRect(ctx, 5, 5, W - 10, H - 10, CORNER_R); ctx.stroke();
   ctx.restore();
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── MAIN EXPORT ───────────────────────────────────────────────────────────────
 
 export async function renderPersonaCard(
   card: PersonaCard,
-  fullCardImage: string | Buffer | null, // URL string OR raw buffer from gpt-image-1
+  fullCardImage: string | Buffer | null,
   member: MemberProfile,
   collectionNumber: number,
   _avatarUrl?: string | null,
@@ -593,22 +496,18 @@ export async function renderPersonaCard(
   const ctx    = canvas.getContext('2d') as SKRSContext2D;
   const a      = ACCENT[card.rarity];
 
-  // ─ 1. Clip to card shape ────────────────────────────────────────────────────
+  // ─ 1. Clip to rounded card ─────────────────────────────────────────────────
   ctx.save();
   roundRect(ctx, 0, 0, W, H, CORNER_R);
   ctx.clip();
 
-  // ─ 2. Base layer: AI card art or mystical fallback ──────────────────────────
+  // ─ 2. AI art or mystical fallback ─────────────────────────────────────────
   let aiLoaded = false;
 
   if (fullCardImage) {
-    // Accept either a pre-fetched Buffer (from gpt-image-1 b64) or a URL string
     let imgBuf: Buffer | null = null;
-    if (Buffer.isBuffer(fullCardImage)) {
-      imgBuf = fullCardImage;
-    } else if (typeof fullCardImage === 'string') {
-      imgBuf = await fetchBuf(fullCardImage);
-    }
+    if (Buffer.isBuffer(fullCardImage))     imgBuf = fullCardImage;
+    else if (typeof fullCardImage === 'string') imgBuf = await fetchBuf(fullCardImage);
 
     if (imgBuf) {
       try {
@@ -616,45 +515,44 @@ export async function renderPersonaCard(
         const scale = Math.max(W / img.width, H / img.height);
         const dw    = img.width  * scale;
         const dh    = img.height * scale;
-        const dx    = (W - dw) / 2;
-        const dy    = (H - dh) / 2;
-        ctx.drawImage(img, dx, dy, dw, dh);
+        ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
         aiLoaded = true;
       } catch {}
     }
   }
 
-  if (!aiLoaded) {
-    drawMysticalFallback(ctx, card, a);
-  }
+  if (!aiLoaded) drawMysticalFallback(ctx, card, a);
 
-  // ─ 3. Top rarity banner (always shown — first thing visible in any thumbnail)
-  drawTopRarityBanner(ctx, card.rarity, a);
+  // ─ 3. Header overlay (top) ────────────────────────────────────────────────
+  drawHeader(ctx, card, a);
 
-  // ─ 4. Bottom safety gradient (guarantees data readability over AI art) ──────
-  drawSafetyPanel(ctx, a);
+  // ─ 4. Data panel background (bottom) ─────────────────────────────────────
+  drawPanelBackground(ctx, a);
 
-  // ─ 5. Data overlay ─────────────────────────────────────────────────────────
+  // ─ 5. Name ────────────────────────────────────────────────────────────────
   drawName(ctx, member.displayName || member.username, a);
-  drawTitle(ctx, card.title, a);
 
-  let y = drawXP(ctx, member, a);
+  // ─ 6. XP bar ──────────────────────────────────────────────────────────────
+  drawXP(ctx, member, a);
 
-  if (member.badges.length > 0) {
-    y += 10;
-    y = drawBadges(ctx, member, a, y);
-  }
+  // ─ 7. Top 3 stats ─────────────────────────────────────────────────────────
+  drawStats(ctx, card.stats, a);
 
-  if (card.flavorText) {
-    y += 8;
-    y = drawFlavor(ctx, card.flavorText, a, y);
-  }
+  // ─ 8. Badges ──────────────────────────────────────────────────────────────
+  drawBadges(ctx, member, a);
 
+  // ─ 9. Ultimate ability ────────────────────────────────────────────────────
+  if (card.signatureMove) drawUltimate(ctx, card, a);
+
+  // ─ 10. Flavor text ────────────────────────────────────────────────────────
+  if (card.flavorText) drawFlavor(ctx, card.flavorText, a);
+
+  // ─ 11. Footer ─────────────────────────────────────────────────────────────
   drawFooter(ctx, collectionNumber, a);
 
   ctx.restore(); // end clip
 
-  // ─ 6. Card edge (drawn outside clip so border is always crisp) ─────────────
+  // ─ 12. Card border (drawn outside clip so corners are always sharp) ───────
   drawCardEdge(ctx, a);
 
   return canvas.toBuffer('image/png');

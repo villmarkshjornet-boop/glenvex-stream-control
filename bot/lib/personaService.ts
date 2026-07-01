@@ -420,75 +420,198 @@ async function uploadKortBilde(buf: Buffer, discordId: string): Promise<string |
   return data?.publicUrl ?? null;
 }
 
-// ── Image prompt (identity-based) ────────────────────────────────────────────
+// ── Structured persona context (drives image prompt) ─────────────────────────
 
-function byggImagePrompt(card: PersonaCard): string {
-  const s   = card.stats;
-  const r   = RARITY_VISUAL[card.rarity];
-  const env = ARCHETYPE_ENVIRONMENT[card.archetype]
+interface PersonaImageContext {
+  displayName:    string;
+  title:          string;
+  archetype:      string;
+  klass:          string;
+  rarity:         PersonaRarity;
+  personality:    string[];
+  strengths:      string[];
+  weaknesses:     string[];
+  statLines:      string[];  // "HYPE: 92", "CHAOS: 81", ...
+  ultimateName:   string;
+  ultimateDesc:   string;
+  flavor:         string;
+  environment:    string;
+  season:         string;
+  rarityVisual:   { frame: string; colors: string; mood: string; fx: string };
+}
+
+function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImageContext {
+  const s = card.stats;
+
+  // Personality from top stats
+  const personality: string[] = [];
+  if (s.humor     > 70) personality.push('funny and charismatic');
+  if (s.hype      > 70) personality.push('high energy and hype-generating');
+  if (s.community > 70) personality.push('community-focused and welcoming');
+  if (s.chaos     > 70) personality.push('chaotic and unpredictable');
+  if (s.focus     > 70) personality.push('sharp, focused and strategic');
+  if (s.lederskap > 70) personality.push('natural-born leader');
+  if (s.kreativitet > 70) personality.push('creative and expressive');
+  if (s.loyalitet  > 70) personality.push('deeply loyal and protective');
+  if (s.helpfulness > 70) personality.push('helpful and supportive');
+  if (s.activity   > 70) personality.push('constantly active and engaged');
+  if (personality.length === 0) personality.push('powerful and self-assured');
+
+  // Strengths = stats above 75
+  const strengths = (Object.entries(s) as [keyof PersonaStats, number][])
+    .filter(([, v]) => v > 75)
+    .sort(([, a], [, b]) => b - a)
+    .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
+
+  // Weaknesses = stats below 45
+  const weaknesses = (Object.entries(s) as [keyof PersonaStats, number][])
+    .filter(([, v]) => v < 45)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
+
+  // Top 5 stat lines for the prompt
+  const statLines = (Object.entries(s) as [keyof PersonaStats, number][])
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([k, v]) => `${k.toUpperCase()}: ${v}`);
+
+  const environment = ARCHETYPE_ENVIRONMENT[card.archetype]
     ?? `epic dramatic setting perfectly matching a ${card.archetype} archetype`;
 
-  // Stat-to-visual: translate numbers into concrete artistic directions
-  const visuals: string[] = [];
-  if (s.humor     > 75) visuals.push('wide genuine grin, eyes lit up with joy, warm charismatic energy pouring off them');
-  if (s.chaos     > 75) visuals.push('wild energy erupting around them — controlled explosions, debris orbiting, unstable power barely contained');
-  if (s.focus     > 75) visuals.push('intense laser-focused eyes, perfectly controlled stance, calm in the center of chaos');
-  if (s.community > 75) visuals.push('natural leadership presence — protective open stance, magnetic energy that draws others to follow');
-  if (s.hype      > 75) visuals.push('explosive dynamic pose radiating hype, motion energy lines, caught mid-action at peak intensity');
-  if (s.lederskap > 75) visuals.push('commanding authority — a born leader, others instinctively defer, power worn naturally');
-  if (s.kreativitet > 75) visuals.push('creative energy visible — artistic tools or instruments as part of their power, creation manifesting in air');
-  if (s.loyalitet  > 75) visuals.push('steadfast protective stance, shield or banner element present, unwavering loyal guardian');
-  if (s.helpfulness > 75) visuals.push('open welcoming powerful stance, light emanates from hands, helper of heroes');
-  if (s.activity   > 80) visuals.push('constant motion even in stillness — hair and cape moving, energy trails, they are never at rest');
-  const visualLine = visuals.length > 0 ? visuals.join(' + ') : 'confident powerful presence, completely at home with their power';
+  return {
+    displayName,
+    title:        card.title,
+    archetype:    card.archetype,
+    klass:        card.class,
+    rarity:       card.rarity,
+    personality,
+    strengths,
+    weaknesses,
+    statLines,
+    ultimateName: card.signatureMove,
+    ultimateDesc: card.signatureMoveDesc,
+    flavor:       card.flavorText,
+    environment,
+    season:       SEASON_SUFFIX,
+    rarityVisual: RARITY_VISUAL[card.rarity],
+  };
+}
 
-  return `Transform the person in the reference image into a premium AAA trading card hero.
+// ── Image prompt (8-section structured) ──────────────────────────────────────
 
-IDENTITY — NON-NEGOTIABLE:
-Preserve their exact face: facial structure, hairstyle, hair color, beard or stubble, glasses if present, skin tone, eye color, and all distinctive features. Do NOT generate a random new person. This is the SAME person, reimagined as their ultimate hero self. They must look at this card and immediately think: "That is ME." The face is the anchor — costume, armor, weapons and effects can be epic and fantastic, but the face stays theirs.
+function byggImagePrompt(ctx: PersonaImageContext): string {
+  const r = ctx.rarityVisual;
+  const s = ctx;
 
-ARTISTIC STYLE:
-Premium digital painting at Blizzard Entertainment / Riot Games / Magic: The Gathering quality. Cinematic, epic, hand-crafted illustration feel. NOT photorealistic, NOT anime, NOT cartoon, NOT generic AI stock art. Every detail should scream "collector edition."
+  // Section 3 — Visual Story: stats drive the illustration
+  const visualStory: string[] = [];
+  // Pull from card stats via the context's statLines (we need the raw stats object)
+  // Instead of storing raw stats, derive visual story from personality + strengths
+  if (s.personality.some(p => p.includes('community') || p.includes('leader'))) {
+    visualStory.push('Others are drawn to this person — show followers, banners, or crowd energy in background. They stand in front, leading.');
+  }
+  if (s.personality.some(p => p.includes('chaotic') || p.includes('chaos'))) {
+    visualStory.push('Energy and chaos erupt around them — lightning, explosions, flying debris, wild magical forces barely under control.');
+  }
+  if (s.personality.some(p => p.includes('funny') || p.includes('charismatic'))) {
+    visualStory.push('Their face is alive and expressive — wide grin, bright eyes, magnetic energy that makes you feel included.');
+  }
+  if (s.personality.some(p => p.includes('focused') || p.includes('strategic'))) {
+    visualStory.push('Perfectly controlled stance — calm in the center of chaos, eyes locked and precise, absolute mastery.');
+  }
+  if (s.personality.some(p => p.includes('hype'))) {
+    visualStory.push('Caught at the peak moment of action — dynamic pose, motion energy, surrounded by an aura of pure hype.');
+  }
+  if (visualStory.length === 0) {
+    visualStory.push('Commanding powerful presence — the center of the universe in this frame. No one would ever look anywhere else.');
+  }
 
-LIGHTING (critical for WOW):
-Strong dramatic rim light from behind creating a glowing silhouette halo. Powerful key light on face from a dramatic angle. Volumetric god rays visible in environment. Multiple colored light sources from rarity effects. The character is lit like they are the most important being in the universe.
-
-CHARACTER:
-${card.class} — ${card.archetype} archetype
-Title: "${card.title}"
-Visual personality: ${visualLine}
-
-ENVIRONMENT: ${env}
-Season atmosphere: ${SEASON_SUFFIX}
-
-RARITY: ${card.rarity.toUpperCase()}
-Frame: ${r.frame}
-Colors: ${r.colors}
-Mood: ${r.mood}
-Effects: ${r.fx}
-
-COMPOSITION:
-- Character fills 70–75% of card height, dominant and powerful, close mid-shot framing
-- Rich dramatic environment visible behind and around the character
-- BOTTOM 25–30% of card: gradually fades to near-black — clean dark area for data overlay. No important visual elements in this zone.
-- Rarity frame runs along all four edges of the card
-
-⚠ ABSOLUTE RULES — THESE CANNOT BE BROKEN:
-- ZERO TEXT on the card. No letters. No numbers. No symbols. No runes. No logos. No UI elements. No writing of any kind.
-- Preserve the person's face from the reference image.
-- Portrait orientation only (tall card, not wide).
-- Colors must be VIVID and HIGH-CONTRAST — not muddy, not desaturated, not dark and flat.
-- The raw AI image alone, before any text overlay, must look like a premium collector card someone would pay money for.`;
+  return [
+    `═══════════ 1. IDENTITY ═══════════`,
+    `Use the reference image as the anchor. This is the SAME person.`,
+    `Transform them — do NOT replace them.`,
+    `Preserve exactly:`,
+    `• Facial structure and proportions`,
+    `• Hairstyle and hair color`,
+    `• Beard or stubble if present`,
+    `• Glasses if worn`,
+    `• Skin tone and eye color`,
+    `• Distinctive facial features and expression`,
+    `Upgrade everything else: give them epic armor, weapons, costume, effects.`,
+    `The face is the anchor. When they see this card they must immediately think: "That is ME."`,
+    ``,
+    `═══════════ 2. PERSONA ═══════════`,
+    `Display Name: ${s.displayName}`,
+    `Title: ${s.title}`,
+    `Archetype: ${s.archetype}`,
+    `Class/Role: ${s.klass}`,
+    ``,
+    `Personality:`,
+    s.personality.map(p => `• ${p}`).join('\n'),
+    ``,
+    `Strengths: ${s.strengths.join(', ') || 'balanced'}`,
+    `Weaknesses: ${s.weaknesses.join(', ') || 'none'}`,
+    ``,
+    `Top Stats:`,
+    s.statLines.join('\n'),
+    ``,
+    `Ultimate Ability: ${s.ultimateName}`,
+    `Description: ${s.ultimateDesc}`,
+    `Flavor: ${s.flavor}`,
+    ``,
+    `═══════════ 3. VISUAL STORY ═══════════`,
+    `The illustration must TELL A STORY. Not just show a figure.`,
+    visualStory.join(' '),
+    `Environment: ${s.environment}`,
+    `Season atmosphere: ${s.season}`,
+    ``,
+    `═══════════ 4. STYLE ═══════════`,
+    `Premium digital painting — AAA collector trading card illustration.`,
+    `Reference: Blizzard Entertainment × Riot Games × Magic: The Gathering × Marvel Snap.`,
+    `NOT photorealistic. NOT anime. NOT cartoon. NOT generic AI art.`,
+    `Hand-crafted feeling. Every detail looks intentional. Collector edition quality.`,
+    ``,
+    `═══════════ 5. LIGHTING ═══════════`,
+    `Strong dramatic rim light from behind — creates a glowing silhouette halo around the character.`,
+    `Powerful key light from a dramatic angle hitting the face.`,
+    `Volumetric god rays or energy beams visible in the environment.`,
+    `Multiple colored light sources from rarity effects complement the main lights.`,
+    `The character is lit like they are the most important being in the universe.`,
+    ``,
+    `═══════════ 6. RARITY: ${s.rarity.toUpperCase()} ═══════════`,
+    `Frame: ${r.frame}`,
+    `Color grade: ${r.colors}`,
+    `Mood: ${r.mood}`,
+    `Effects: ${r.fx}`,
+    ``,
+    `═══════════ 7. COMPOSITION ═══════════`,
+    `Character fills 70–75% of the card height. Close mid-shot framing — powerful and dominant.`,
+    `Rich dramatic environment clearly visible behind and around them.`,
+    `BOTTOM 25–30% of the card: gradually fades to near-black. Clean, calm, no important visual details.`,
+    `This dark zone is reserved for data overlay — keep it simple and dark.`,
+    `Rarity frame runs along all four card edges.`,
+    `Portrait orientation (tall card, not wide).`,
+    ``,
+    `═══════════ 8. RESTRICTIONS ═══════════`,
+    `⚠ NO TEXT of any kind. No letters. No numbers. No symbols.`,
+    `⚠ No runes that resemble writing. No logos. No UI elements. No watermarks.`,
+    `⚠ No text in the environment, on buildings, signs, or any surface.`,
+    `⚠ Preserve the facial identity from the reference image.`,
+    `⚠ Colors must be vivid and high-contrast. Not muddy, not flat, not desaturated.`,
+    `⚠ The image alone (before any text overlay) must look like a premium collector card.`,
+  ].join('\n');
 }
 
 // ── Image generation — edit (avatar) or generate (fallback) ──────────────────
 
 async function genererBilde(
-  card:      PersonaCard,
-  avatarBuf: Buffer | null,
-  openai:    OpenAI,
+  card:        PersonaCard,
+  avatarBuf:   Buffer | null,
+  openai:      OpenAI,
+  displayName: string,
 ): Promise<Buffer | null> {
-  const prompt = byggImagePrompt(card);
+  const personaCtx = byggPersonaContext(card, displayName);
+  const prompt     = byggImagePrompt(personaCtx);
 
   try {
     let raw: string | null | undefined;
@@ -711,7 +834,8 @@ export async function genererPersona(
   const avatarBuf = avatarUrl ? await downloadAvatar(avatarUrl) : null;
 
   // Generate image via gpt-image-1 (edit=avatar-based, generate=fallback)
-  const imageBuf  = await genererBilde(card, avatarBuf, openai);
+  const displayName = member.displayName || member.username;
+  const imageBuf    = await genererBilde(card, avatarBuf, openai, displayName);
 
   // Upload to Supabase Storage → persistent URL (never expires)
   let imageUrl: string | null = null;
