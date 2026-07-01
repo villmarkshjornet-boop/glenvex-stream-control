@@ -8,11 +8,9 @@
  * DALL-E is actually generating the card art we expect.
  */
 
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import fs from 'node:fs';
 import path from 'node:path';
-import https from 'node:https';
-import http from 'node:http';
 
 // ── Hardcoded test card (mirrors what GPT generates for a Common member) ──────
 // Edit rarity/class/archetype to test different rarities.
@@ -121,24 +119,6 @@ function buildPrompt(rarity: keyof typeof RARITY_FRAME_STYLE, archetype: string,
   ].join('\n');
 }
 
-// ── Download helper ───────────────────────────────────────────────────────────
-
-function downloadToBuffer(url: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const lib   = url.startsWith('https') ? https : http;
-    const chunks: Buffer[] = [];
-    lib.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} downloading image`));
-        return;
-      }
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-      res.on('error', reject);
-    }).on('error', reject);
-  });
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -156,101 +136,85 @@ async function main() {
 
   const prompt = buildPrompt(RARITY, ARCHETYPE, CLASS, IMAGE_PROMPT);
 
+  // Load test avatar if available — save your Discord avatar as data/test-avatar.png
+  // to test identity-preserving transformation (images.edit).
+  // Without it, the test falls back to images.generate.
+  const avatarPath = path.join(outDir, 'test-avatar.png');
+  const avatarBuf  = fs.existsSync(avatarPath) ? fs.readFileSync(avatarPath) : null;
+
   console.log('\n════════════════════════════════════════════════════════════════');
   console.log('  GLENVEX — test:persona-image');
   console.log('════════════════════════════════════════════════════════════════\n');
   console.log(`Rarity    : ${RARITY}`);
   console.log(`Archetype : ${ARCHETYPE}`);
   console.log(`Class     : ${CLASS}`);
-  console.log(`Model     : dall-e-3`);
-  console.log(`Size      : 1024x1792`);
-  console.log(`Quality   : hd`);
+  console.log(`Model     : gpt-image-1`);
+  console.log(`Size      : 1024x1536`);
+  console.log(`Quality   : high`);
   console.log(`Season    : ${SEASON} — "${SEASON_SUFFIX}"`);
+  console.log(`Mode      : ${avatarBuf ? `images.edit (avatar: ${(avatarBuf.length/1024).toFixed(0)} KB)` : 'images.generate (no avatar — save Discord avatar to data/test-avatar.png to test identity mode)'}`);
   console.log('\n── FULL PROMPT ─────────────────────────────────────────────────');
   console.log(prompt);
   console.log('────────────────────────────────────────────────────────────────\n');
   console.log('Kaller OpenAI...');
 
-  let t0 = Date.now();
-  let imageUrl: string | null = null;
-
-  // Attempt 1: preferred (portrait HD)
-  const attempts = [
-    { size: '1024x1792' as const, quality: 'hd'       as const, label: 'Portrait HD  (1024×1792, hd)'       },
-    { size: '1024x1024' as const, quality: 'hd'       as const, label: 'Square HD    (1024×1024, hd)'       },
-    { size: '1024x1024' as const, quality: 'standard' as const, label: 'Square STD   (1024×1024, standard)' },
-  ];
-
-  for (const attempt of attempts) {
-    console.log(`\nForsøk: ${attempt.label}`);
-    t0 = Date.now();
-
-    try {
-      const res = await openai.images.generate({
-        model:   'dall-e-3',
-        prompt,
-        n:       1,
-        size:    attempt.size,
-        quality: attempt.quality,
-      });
-
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      imageUrl = res.data?.[0]?.url ?? null;
-      const revisedPrompt = (res.data?.[0] as any)?.revised_prompt ?? null;
-
-      console.log(`✅  Svar mottatt på ${elapsed}s  [${attempt.label}]`);
-      console.log(`\nBilde-URL:\n  ${imageUrl}\n`);
-
-      if (revisedPrompt) {
-        console.log('── DALL-E revised_prompt (hva DALL-E faktisk tolket) ────────────');
-        console.log(revisedPrompt);
-        console.log('────────────────────────────────────────────────────────────────\n');
-      }
-      break; // success — no more attempts
-
-    } catch (err: any) {
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.error(`❌  Feilet etter ${elapsed}s:`);
-      console.error(`    message    : ${err?.message ?? err}`);
-      console.error(`    HTTP status: ${err?.status ?? '?'}`);
-      console.error(`    error.code : ${err?.code ?? '?'}`);
-      console.error(`    error.type : ${err?.type ?? '?'}`);
-      console.error(`    error.param: ${err?.param ?? '(ingen)'}`);
-      try {
-        const body = JSON.stringify(err?.error ?? err, null, 2);
-        if (body && body !== '{}') console.error(`    full error : ${body}`);
-      } catch {}
-
-      if (attempt === attempts[attempts.length - 1]) {
-        console.error('\n❌  Alle forsøk feilet. Sjekk API-nøkkelen, kontotilgang og billing på platform.openai.com');
-        process.exit(1);
-      }
-      console.log('    → Prøver neste konfigurasjon...');
-    }
-  }
-
-  if (!imageUrl) {
-    console.error('❌  Fikk ingen URL fra OpenAI (tom respons)');
-    process.exit(1);
-  }
-
-  // Download PNG
-  console.log('Laster ned PNG...');
-  const t1 = Date.now();
-  let buf: Buffer;
+  const t0  = Date.now();
+  let buf: Buffer | null = null;
 
   try {
-    buf = await downloadToBuffer(imageUrl);
-    const elapsed = ((Date.now() - t1) / 1000).toFixed(1);
-    console.log(`✅  Lastet ned ${(buf.length / 1024).toFixed(0)} KB på ${elapsed}s`);
+    let raw: string | null | undefined;
+
+    if (avatarBuf) {
+      // Identity-preserving: transform Discord avatar into game character
+      const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
+      const res = await (openai.images as any).edit({
+        model:   'gpt-image-1',
+        image:   avatarFile,
+        prompt,
+        size:    '1024x1536',
+        quality: 'high',
+      });
+      raw = res.data?.[0]?.b64_json;
+    } else {
+      // Fallback: generate from scratch (no avatar available)
+      const res = await openai.images.generate({
+        model:   'gpt-image-1' as any,
+        prompt,
+        n:       1,
+        size:    '1024x1536' as any,
+        quality: 'high' as any,
+      });
+      raw = (res.data?.[0] as any)?.b64_json;
+    }
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (!raw) {
+      console.error(`❌  OpenAI svarte uten b64_json (${elapsed}s)`);
+      process.exit(1);
+    }
+
+    buf = Buffer.from(raw, 'base64');
+    fs.writeFileSync(outFile, buf);
+    console.log(`\n✅  Svar mottatt på ${elapsed}s`);
+    console.log(`✅  Lagret til:  ${outFile}  (${(buf.length / 1024).toFixed(0)} KB)\n`);
+    process.exit(0);
+
   } catch (err: any) {
-    console.error(`❌  Download feilet: ${err.message}`);
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    console.error(`\n❌  OpenAI feilet etter ${elapsed}s:`);
+    console.error(`    message    : ${err?.message ?? err}`);
+    console.error(`    HTTP status: ${err?.status ?? '?'}`);
+    console.error(`    error.code : ${err?.code ?? '?'}`);
+    console.error(`    error.type : ${err?.type ?? '?'}`);
+    console.error(`    error.param: ${err?.param ?? '(ingen)'}`);
+    try {
+      const body = JSON.stringify(err?.error ?? err, null, 2);
+      if (body && body !== '{}') console.error(`    full error : ${body}`);
+    } catch {}
     process.exit(1);
   }
-
-  fs.writeFileSync(outFile, buf);
-  console.log(`\n✅  Lagret til:  ${outFile}`);
-  console.log('\nÅpne filen for å se om DALL-E genererer et fullverdig trading card.\n');
+  console.log('\nÅpne filen for å se om modellen genererer et fullverdig trading card.\n');
 }
 
 main().catch((err) => {

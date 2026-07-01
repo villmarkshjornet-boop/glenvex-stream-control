@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import type { MemberProfile } from './memberTracker';
 import { deductXP, ALLE_BADGES } from './memberTracker';
@@ -316,96 +316,206 @@ Svar KUN med JSON (ingen annen tekst):
   } catch { return null; }
 }
 
-// ── DALL-E — full trading card (hybrid V4) ───────────────────────────────────
-// AI generates the ENTIRE card: frame + character + atmosphere + rarity effects.
-// Canvas only overlays dynamic data (name, XP, badges, card#) afterwards.
+// ── gpt-image-1 — identity-based trading card ────────────────────────────────
+// AI transforms the Discord avatar into an epic game character.
+// Canvas only overlays: name, title, XP, badges, card#, season.
+//
+// Model: gpt-image-1  Size: 1024x1536  Quality: high
+// Edit endpoint used when avatar is available (identity preservation).
+// Generate endpoint used as fallback (no avatar).
 
 const RARITY_FRAME_STYLE: Record<PersonaRarity, string> = {
   Common:
-    'matte dark steel frame with subtle engraved geometric patterns, deep charcoal and gunmetal tones, ' +
-    'no glow, dignified and restrained, industrial craft',
+    'matte dark steel frame, subtle engraved geometric patterns, deep charcoal gunmetal tones, industrial craft, dignified',
   Rare:
-    'royal navy and cerulean blue crystal frame, glowing azure energy lines along frame edges, ' +
-    'cool cerulean particle wisps drifting at borders, elegant naval authority',
+    'royal cerulean blue crystal frame, glowing azure energy lines on frame edges, cool particle wisps drifting at borders',
   Epic:
-    'dark violet arcane frame carved with glowing runes, purple and magenta energy tendrils curling at ' +
-    'corners, mystical floating rune fragments, crackling arcane electricity',
+    'dark violet arcane frame carved with glowing runes, purple magenta energy tendrils at corners, crackling arcane electricity',
   Legendary:
-    'ornate 24-karat gold filigree frame with intricate scrollwork and baroque details, warm divine ' +
-    'light rays shooting from all four corners, particles of celestial golden light suspended mid-air, ' +
-    'radiant and majestic',
+    'ornate 24-karat gold filigree frame, intricate baroque scrollwork, warm divine light rays from corners, celestial golden particles',
   Mythic:
-    'blood-red and cosmic void obsidian frame, crimson lightning crackling at corners, swirling void ' +
-    'tendrils, dense particle storm, otherworldly light that defies physics, simultaneously terrifying ' +
-    'and magnificent, divine wrath incarnate',
+    'blood-red cosmic void obsidian frame, crimson lightning at corners, swirling void tendrils, dense particle storm, terrifying and magnificent',
 };
 
 const RARITY_COLOR_GRADE: Record<PersonaRarity, string> = {
-  Common:    'desaturated cool steel grays, subtle blue-gray shadows, matte finish',
-  Rare:      'cool azure and navy tones, cerulean highlights, crisp clarity',
-  Epic:      'deep purples, violet shadows, electric magenta highlights, arcane shimmer',
-  Legendary: 'warm gold color grade, amber god rays, rich contrast, divine warmth',
-  Mythic:    'blood red with cosmic desaturation, bursts of pure white-hot light, void black shadows',
+  Common:    'cool steel grays, subtle blue-gray shadows, grounded matte finish',
+  Rare:      'azure navy tones, cerulean highlights, crisp elemental clarity',
+  Epic:      'deep purples, violet shadows, electric magenta accents, arcane shimmer',
+  Legendary: 'warm gold color grade, amber god rays, rich divine contrast',
+  Mythic:    'blood red and cosmic black, bursts of white-hot plasma, void shadows',
 };
 
 const RARITY_MOOD: Record<PersonaRarity, string> = {
   Common:    'gritty determination, grounded strength, earned respect',
-  Rare:      'noble strength, elemental mastery, quiet confidence',
+  Rare:      'noble elemental mastery, quiet dangerous confidence',
   Epic:      'mysterious arcane power, dark mastery, controlled danger',
   Legendary: 'chosen one energy, mythical grandeur, destiny fulfilled',
   Mythic:    'cosmic horror turned champion, divine wrath, power that reshapes reality',
 };
 
-async function genererBilde(card: PersonaCard, openai: OpenAI): Promise<string | null> {
-  const prompt = [
-    `Ultra-premium collectible trading card. Portrait orientation. Print-quality illustration.`,
-    `Art direction: Riot Games × Blizzard Entertainment × Wizards of the Coast × Marvel Snap.`,
-    `This MUST look like official AAA trading card game art — not generic AI art.`,
+const ARCHETYPE_ENVIRONMENT: Record<string, string> = {
+  Bard:       'concert stage with neon spotlights, crowd silhouettes behind, screens and light rigs above',
+  Berserker:  'epic chaotic battlefield, fire and destruction behind them, storm clouds, fallen enemy banners',
+  Paladin:    'grand cathedral interior, divine light through stained glass windows, holy energy rising from floor',
+  Rogue:      'rain-soaked rooftop at night, city neon reflections in puddles below, smoke, moonlight and shadows',
+  Warlock:    'dark forbidden arcane library, floating spell crystals, dimensional rift portal, ancient tomes orbiting',
+  Support:    'warm grand community hall, banners and crowd in background, sense of belonging and protection',
+  Hunter:     'misty ancient forest at dawn, golden light shafts through canopy, leaves falling, animal tracks',
+  Mage:       'floating ethereal arcane laboratory, glowing spell circles on floor, magical instruments orbiting',
+  Warrior:    'fortress battlements at sunset, banners flying, sense of victory, army behind them',
+  Wanderer:   'dramatic scenic vista at golden hour, epic landscape stretching to horizon, wind energy',
+};
+
+// ── Avatar download ───────────────────────────────────────────────────────────
+
+async function downloadAvatar(url: string): Promise<Buffer | null> {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return null;
+    return Buffer.from(await r.arrayBuffer());
+  } catch { return null; }
+}
+
+// ── Supabase Storage upload → permanent public URL ────────────────────────────
+
+async function uploadKortBilde(buf: Buffer, discordId: string): Promise<string | null> {
+  const sb = getSb();
+  if (!sb) return null;
+
+  const bucket  = 'persona-cards';
+  const filePath = `${WORKSPACE_ID}/${discordId}/${SEASON}.png`;
+
+  const doUpload = async () =>
+    sb.storage.from(bucket).upload(filePath, buf, { contentType: 'image/png', upsert: true });
+
+  let { error } = await doUpload();
+
+  if (error) {
+    // Bucket might not exist yet — try creating it
+    if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('does not exist')) {
+      try {
+        await sb.storage.createBucket(bucket, { public: true });
+        ({ error } = await doUpload());
+      } catch {}
+    }
+    if (error) {
+      console.warn('[Persona] Storage upload feilet:', error.message);
+      return null;
+    }
+  }
+
+  const { data } = sb.storage.from(bucket).getPublicUrl(filePath);
+  return data?.publicUrl ?? null;
+}
+
+// ── Image prompt (identity-based) ────────────────────────────────────────────
+
+function byggImagePrompt(card: PersonaCard): string {
+  const s = card.stats;
+  const visuals: string[] = [];
+  if (s.humor     > 75) visuals.push('laughing or grinning — joyful positive energy radiating from them');
+  if (s.chaos     > 75) visuals.push('chaotic magical explosions and wild energy swirling around them');
+  if (s.focus     > 75) visuals.push('calm, intense focused eyes — precise controlled masterful stance');
+  if (s.community > 75) visuals.push('strong leadership presence — protective posture, others drawn to their energy');
+  if (s.hype      > 75) visuals.push('dramatically energetic dynamic pose, spotlight on them');
+  if (s.lederskap > 75) visuals.push('commanding natural authority, born leader — inspiring and powerful');
+  if (s.kreativitet > 75) visuals.push('creative tools or instruments visible, artistic energy from hands');
+  if (s.loyalitet > 75) visuals.push('steadfast loyal protector stance, shield or banner element');
+  if (s.helpfulness > 75) visuals.push('open welcoming gesture, warm approachable energy');
+  if (s.activity  > 80) visuals.push('dynamic action pose, motion blur effect, constant energy aura');
+
+  const env = ARCHETYPE_ENVIRONMENT[card.archetype]
+    ?? `epic ${card.archetype.toLowerCase()} setting, dramatic atmosphere matching the class`;
+
+  return [
+    `TRADING CARD CHARACTER TRANSFORMATION — COLLECTOR EDITION`,
     ``,
-    `SEASON VISUAL THEME: ${SEASON_SUFFIX}`,
+    `═══ IDENTITY PRESERVATION — MOST IMPORTANT RULE ═══`,
+    `Transform THIS SPECIFIC PERSON into their epic game character version.`,
+    `Preserve EXACTLY: facial structure, hair style and color, beard or stubble if present,`,
+    `eye shape and color, skin tone, distinctive facial features, overall body silhouette.`,
+    `Do NOT create a random new person. This IS the same person, as an epic hero.`,
+    `They must look at this card and immediately think: "That is ME."`,
     ``,
-    `CHARACTER — the absolute hero filling this card:`,
-    `${card.archetype} archetype. ${card.class} class. ${card.imagePrompt}`,
-    `This is a legendary stylized game CHAMPION — fictional, not a real person. Epic heroic pose.`,
-    `CRITICAL VISUAL REQUIREMENT: The character illustration MUST use VIVID, SATURATED, HIGH-CONTRAST colors.`,
-    `Rich chromatic lighting. The character pops off the card — vibrant, electrifying, visually stunning.`,
-    `Cinematic rim lighting from behind + frontal key light. Volumetric god rays / energy beams visible.`,
-    `Strong bloom on bright elements. Depth of field — character razor-sharp, background atmospheric.`,
-    `Rarity particle effects surround them. Character DOMINATES the frame — massive, powerful, unmistakable.`,
-    `DO NOT use muddy, desaturated, or dark colors for the character. The art must POP and WOW.`,
+    `STYLE CONSISTENCY (critical for rerolls):`,
+    `The FACE stays the same person across every version.`,
+    `Only OUTFIT, ARMOR, WEAPONS, ENVIRONMENT, and EFFECTS may vary per reroll.`,
+    `Think: same actor, different costume and set.`,
+    ``,
+    `ARTISTIC STYLE:`,
+    `Premium digital painting. Blizzard × Riot Games × Wizards of the Coast quality.`,
+    `NOT photorealistic. NOT anime. NOT cartoon. NOT generic AI look.`,
+    `High-end collector edition trading card illustration. Cinematic, epic, hand-crafted feel.`,
+    ``,
+    `CHARACTER:`,
+    `Class: ${card.class} (${card.archetype} archetype)`,
+    `Title: ${card.title}`,
+    `Personality: ${card.description.split('\n').join(' ')}`,
+    ``,
+    `VISUAL PERSONALITY — show these traits in expression, pose, and effects:`,
+    visuals.length > 0 ? visuals.join('; ') : 'powerful confident presence, commanding the frame',
+    ``,
+    `ENVIRONMENT: ${env}`,
+    ``,
+    `SEASON THEME: ${SEASON_SUFFIX}`,
     ``,
     `RARITY: ${card.rarity.toUpperCase()}`,
-    `FRAME STYLE: ${RARITY_FRAME_STYLE[card.rarity]}`,
+    `FRAME: ${RARITY_FRAME_STYLE[card.rarity]}`,
     `COLOR GRADE: ${RARITY_COLOR_GRADE[card.rarity]}`,
     `MOOD: ${RARITY_MOOD[card.rarity]}`,
     ``,
-    `CARD LAYOUT — portrait (tall), strictly:`,
-    `TOP 8% : Decorative rarity sigil banner strip. Ornate metallic detail, rarity embellishments. No text.`,
-    `CENTER 63% : THE CHAMPION fills 100% of this zone. Zero empty space. Rich colors, dramatic lighting.`,
-    `  Materials: ${card.rarity === 'Legendary' ? 'gleaming gold, radiant warm crystals, polished divine brass' : card.rarity === 'Mythic' ? 'crackling crimson plasma, void-black obsidian, glowing red gems' : card.rarity === 'Epic' ? 'glowing amethyst crystals, carved arcane stone, pulsing violet runes' : card.rarity === 'Rare' ? 'polished sapphire, cerulean ice formations, gleaming naval steel' : 'engraved brushed steel, dark pewter with silver highlights'}`,
-    `BOTTOM 29% : Dark info panel. Near-black or very dark toned, clean, elegant.`,
-    `  Subtle ornamental decorative lines within it. Elegant divider at panel top.`,
-    `  ONLY decorative linework — absolutely zero text, numbers, or symbols.`,
+    `CARD COMPOSITION — STRICT PORTRAIT:`,
+    `- Character fills 70–75% of frame, close to mid-shot, dominant and powerful`,
+    `- BOTTOM 25–30% of card: dark, calm, no important details — reserved for data overlay`,
+    `- Decorative rarity frame/border around entire card matching rarity style`,
     ``,
-    `NON-NEGOTIABLE RULES:`,
-    `- ZERO TEXT anywhere on the card. No letters, numbers, runes, or words.`,
-    `- Character is VIVID and COLORFUL — not dark, muted, or muddy.`,
-    `- Bottom panel is CLEARLY DARKER than the character zone — it's the data area.`,
-    `- This card must make a collector say "WOW" and immediately want to keep it.`,
-    `- Portrait format (tall, not wide) maintained throughout.`,
+    `NON-NEGOTIABLE:`,
+    `- ZERO TEXT anywhere. No letters, numbers, words, symbols.`,
+    `- Preserve the person's identity. They must recognize themselves.`,
+    `- Portrait orientation (tall, not wide).`,
+    `- Must make the viewer say: "WOW — that is actually me as a game character."`,
   ].join('\n');
+}
+
+// ── Image generation — edit (avatar) or generate (fallback) ──────────────────
+
+async function genererBilde(
+  card:      PersonaCard,
+  avatarBuf: Buffer | null,
+  openai:    OpenAI,
+): Promise<Buffer | null> {
+  const prompt = byggImagePrompt(card);
 
   try {
-    const res = await openai.images.generate({
-      model: 'dall-e-3',
-      prompt,
-      n: 1,
-      size: '1024x1792',
-      quality: 'hd',
-    });
-    return res.data?.[0]?.url ?? null;
+    let raw: string | null | undefined;
+
+    if (avatarBuf) {
+      // Transform Discord avatar into game character (identity-preserving)
+      const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
+      const res = await (openai.images as any).edit({
+        model:   'gpt-image-1',
+        image:   avatarFile,
+        prompt,
+        size:    '1024x1536',
+        quality: 'high',
+      });
+      raw = res.data?.[0]?.b64_json;
+    } else {
+      // No avatar available — generate from scratch
+      const res = await openai.images.generate({
+        model:   'gpt-image-1' as any,
+        prompt,
+        n:       1,
+        size:    '1024x1536' as any,
+        quality: 'high' as any,
+      });
+      raw = (res.data?.[0] as any)?.b64_json;
+    }
+
+    if (!raw) return null;
+    return Buffer.from(raw, 'base64');
   } catch (e: any) {
-    console.warn('[Persona] Kortgenerering feilet:', e?.message);
+    console.warn('[Persona] Bildegenerering feilet:', e?.message);
     return null;
   }
 }
@@ -593,14 +703,25 @@ export async function genererPersona(
   const card             = await genererPersonaJson(member, rarity, openai);
   if (!card) return { feil: 'AI klarte ikke å generere persona. Prøv igjen om litt.' };
 
-  const imageUrl         = await genererBilde(card, openai);
+  // Download Discord avatar for identity-based transformation
+  const avatarBuf = avatarUrl ? await downloadAvatar(avatarUrl) : null;
+
+  // Generate image via gpt-image-1 (edit=avatar-based, generate=fallback)
+  const imageBuf  = await genererBilde(card, avatarBuf, openai);
+
+  // Upload to Supabase Storage → persistent URL (never expires)
+  let imageUrl: string | null = null;
+  if (imageBuf) {
+    imageUrl = await uploadKortBilde(imageBuf, member.id);
+  }
+
   const collectionNumber = await hentCollectionNumber(member.id);
   await lagrePersona(member, card, imageUrl, xpCost, rerollCount);
 
-  // Render PNG-samlekort (fallback til V2 embed hvis dette feiler)
+  // Render PNG — pass buffer directly (skip re-fetch, same data we just generated)
   let cardPng: Buffer | null = null;
   try {
-    cardPng = await renderPersonaCard(card, imageUrl, member, collectionNumber, avatarUrl);
+    cardPng = await renderPersonaCard(card, imageBuf, member, collectionNumber, avatarUrl);
   } catch (e: any) {
     console.warn('[Persona] PNG-rendering feilet:', e?.message);
     logSystemEvent({

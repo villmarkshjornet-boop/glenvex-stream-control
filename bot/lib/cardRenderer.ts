@@ -14,13 +14,13 @@ import { createCanvas, loadImage, type SKRSContext2D } from '@napi-rs/canvas';
 import type { MemberProfile } from './memberTracker';
 import type { PersonaCard, PersonaRarity } from './personaService';
 
-// ── Dimensions ────────────────────────────────────────────────────────────────
+// ── Dimensions — matches gpt-image-1 portrait output ─────────────────────────
 const W = 1024;
-const H = 1792;
+const H = 1536;
 
-const TOP_BANNER_H = 100; // rarity banner zone at top
-const PANEL_Y      = 980; // Canvas safety gradient starts (~54% down)
-const DATA_Y       = 1050; // first data element (~58% down)
+const TOP_BANNER_H = 90;  // rarity banner zone at top
+const PANEL_Y      = 840; // Canvas safety gradient starts (~55% down)
+const DATA_Y       = 900; // first data element (~59% down)
 const CORNER_R     = 30;
 const PAD          = 52;
 
@@ -584,10 +584,10 @@ function drawCardEdge(ctx: SKRSContext2D, a: RarityAccent) {
 
 export async function renderPersonaCard(
   card: PersonaCard,
-  fullCardImageUrl: string | null,
+  fullCardImage: string | Buffer | null, // URL string OR raw buffer from gpt-image-1
   member: MemberProfile,
   collectionNumber: number,
-  _avatarUrl?: string | null, // kept for compat, not used
+  _avatarUrl?: string | null,
 ): Promise<Buffer> {
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d') as SKRSContext2D;
@@ -598,14 +598,21 @@ export async function renderPersonaCard(
   roundRect(ctx, 0, 0, W, H, CORNER_R);
   ctx.clip();
 
-  // ─ 2. Base layer: DALL-E card art or mystical fallback ─────────────────────
+  // ─ 2. Base layer: AI card art or mystical fallback ──────────────────────────
   let aiLoaded = false;
 
-  if (fullCardImageUrl) {
-    const buf = await fetchBuf(fullCardImageUrl);
-    if (buf) {
+  if (fullCardImage) {
+    // Accept either a pre-fetched Buffer (from gpt-image-1 b64) or a URL string
+    let imgBuf: Buffer | null = null;
+    if (Buffer.isBuffer(fullCardImage)) {
+      imgBuf = fullCardImage;
+    } else if (typeof fullCardImage === 'string') {
+      imgBuf = await fetchBuf(fullCardImage);
+    }
+
+    if (imgBuf) {
       try {
-        const img   = await loadImage(buf);
+        const img   = await loadImage(imgBuf);
         const scale = Math.max(W / img.width, H / img.height);
         const dw    = img.width  * scale;
         const dh    = img.height * scale;
