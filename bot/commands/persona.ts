@@ -16,6 +16,7 @@ import {
 import {
   genererPersona,
   hentSistePersona,
+  byggPersonaEmbed,
   renderPersonaCard,
   REROLL_XP_COST,
   RARITY_COLOR,
@@ -97,17 +98,20 @@ export const personaCommand = {
         const { eksisterende, member: m, png } = res;
         const harNokXP  = m.xp >= REROLL_XP_COST;
         const knappeRad = lagKnappeRad(user.id, harNokXP);
+        const embed     = byggPersonaEmbed(eksisterende.card, null, user.username, eksisterende.rerollCount, m, eksisterende.collectionNumber);
 
         if (png) {
           const fil = new AttachmentBuilder(png, { name: 'persona-card.png' });
           await interaction.editReply({
             content:    kortTekst(eksisterende.card.rarity, eksisterende.card.title, eksisterende.card.class, m.xp, m.level),
+            embeds:     [embed as any],
             files:      [fil],
             components: [knappeRad],
           });
         } else {
           await interaction.editReply({
             content:    `🎴 ${eksisterende.card.title} · ${eksisterende.card.rarity} · **${m.xp} XP**`,
+            embeds:     [embed as any],
             components: [knappeRad],
           });
         }
@@ -149,9 +153,10 @@ export const personaCommand = {
             kortTekst(resultat.card.rarity, resultat.card.title, resultat.card.class, member!.xp - resultat.xpCost, member!.level)
           : kortTekst(resultat.card.rarity, resultat.card.title, resultat.card.class, member!.xp - resultat.xpCost, member!.level);
 
+      const embed = byggPersonaEmbed(resultat.card, null, user.username, resultat.rerollCount, member!, resultat.collectionNumber);
       await interaction.editReply({
         content:    tekst,
-        embeds:     [],
+        embeds:     [embed as any],
         files:      [fil],
         components: [knappeRad],
       });
@@ -198,11 +203,12 @@ export const personaCommand = {
         const nyHarNokXP = (oppdatertMedlem.xp - ny.xpCost) >= REROLL_XP_COST;
 
         if (ny.cardPng) {
-          const fil = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
+          const fil      = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
+          const nyEmbed  = byggPersonaEmbed(ny.card, null, user.username, ny.rerollCount, oppdatertMedlem, ny.collectionNumber);
           await btn.editReply({
             content:    `🔁 Rerollet!  Card #${String(ny.collectionNumber).padStart(3, '0')}  (-${REROLL_XP_COST} XP)\n` +
               kortTekst(ny.card.rarity, ny.card.title, ny.card.class, oppdatertMedlem.xp - ny.xpCost, oppdatertMedlem.level),
-            embeds:     [],
+            embeds:     [nyEmbed as any],
             files:      [fil],
             components: [lagKnappeRad(user.id, nyHarNokXP)],
           });
