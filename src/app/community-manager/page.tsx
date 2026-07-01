@@ -587,10 +587,318 @@ function DashboardTab({ summary, loading }: { summary: SummaryData | null; loadi
   );
 }
 
+// ── Samlekort Tab ─────────────────────────────────────────────────────────────
+
+interface PersonaEntry {
+  discordId:       string;
+  displayName:     string;
+  username:        string;
+  xp:              number;
+  level:           number;
+  lastSeen:        string | null;
+  hasCard:         boolean;
+  rarity:          string | null;
+  archetype:       string | null;
+  personaTitle:    string | null;
+  imageUrl:        string | null;
+  rerollCount:     number;
+  generatedAt:     string | null;
+  lastGeneratedAt: string | null;
+}
+
+interface PersonaAdminSettings {
+  showcaseAktiv:     boolean;
+  twitchVarselAktiv: boolean;
+  showcaseKanalId:   string;
+  cooldownMinutter:  number;
+}
+
+const RARITY_BADGE: Record<string, string> = {
+  Common:    'text-gray-400 border-gray-600/40 bg-gray-500/10',
+  Rare:      'text-blue-400 border-blue-500/40 bg-blue-500/10',
+  Epic:      'text-purple-400 border-purple-500/40 bg-purple-500/10',
+  Legendary: 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10',
+  Mythic:    'text-red-400 border-red-500/40 bg-red-500/10',
+};
+
+function SamlekortTab() {
+  const [personas, setPersonas]       = useState<PersonaEntry[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [settings, setSettings]       = useState<PersonaAdminSettings>({
+    showcaseAktiv: false, twitchVarselAktiv: false, showcaseKanalId: '', cooldownMinutter: 60,
+  });
+  const [settingsOpen, setSettingsOpen]   = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [generating, setGenerating]   = useState<Set<string>>(new Set());
+  const [genError, setGenError]       = useState<Record<string, string>>({});
+  const [search, setSearch]           = useState('');
+
+  const loadPersonas = useCallback(() => {
+    setLoading(true);
+    fetch('/api/community-manager/personas')
+      .then(r => r.json())
+      .then(d => setPersonas(d.personas ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadPersonas();
+    fetch('/api/community-manager/personas/settings')
+      .then(r => r.json())
+      .then(d => { if (d.settings) setSettings(d.settings); })
+      .catch(() => {});
+  }, [loadPersonas]);
+
+  const saveSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      await fetch('/api/community-manager/personas/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+    } catch {}
+    setSettingsSaving(false);
+  };
+
+  const generate = async (discordId: string) => {
+    setGenerating(prev => new Set(prev).add(discordId));
+    setGenError(prev => { const n = { ...prev }; delete n[discordId]; return n; });
+    try {
+      const res  = await fetch('/api/community-manager/personas/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordId }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setGenError(prev => ({ ...prev, [discordId]: data.error ?? 'Ukjent feil' }));
+      } else {
+        loadPersonas();
+      }
+    } catch {
+      setGenError(prev => ({ ...prev, [discordId]: 'Nettverksfeil' }));
+    }
+    setGenerating(prev => { const n = new Set(prev); n.delete(discordId); return n; });
+  };
+
+  const filtered = personas.filter(p =>
+    p.displayName.toLowerCase().includes(search.toLowerCase()) ||
+    p.username?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const withCard    = filtered.filter(p => p.hasCard).length;
+  const withoutCard = filtered.filter(p => !p.hasCard).length;
+
+  return (
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <p className="text-[9px] text-g-muted">
+            <span className="text-g-green font-mono font-bold">{withCard}</span> kort generert
+            {withoutCard > 0 && <span className="ml-2 text-g-muted/60">· {withoutCard} mangler</span>}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Søk..."
+            className="bg-g-card border border-g-border rounded-lg px-2.5 py-1 text-xs text-g-text outline-none focus:border-g-green/50 w-36"
+          />
+          <button
+            onClick={() => setSettingsOpen(o => !o)}
+            className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all ${
+              settingsOpen ? 'border-g-green/40 text-g-green bg-g-green/10' : 'border-g-border text-g-muted hover:text-g-text'
+            }`}
+          >
+            Innstillinger
+          </button>
+          <button
+            onClick={loadPersonas}
+            className="text-[10px] px-2.5 py-1 rounded-lg border border-g-border text-g-muted hover:text-g-text transition-all"
+          >
+            Oppdater
+          </button>
+        </div>
+      </div>
+
+      {/* Settings panel */}
+      {settingsOpen && (
+        <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
+          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Samlekort-innstillinger</p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Discord showcase toggle */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold text-g-text">Discord Showcase</p>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, showcaseAktiv: !s.showcaseAktiv }))}
+                  className={`w-9 h-5 rounded-full border transition-all relative ${
+                    settings.showcaseAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    settings.showcaseAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                  }`} />
+                </button>
+              </div>
+              <p className="text-[9px] text-g-muted">Post kortet til Discord-kanal etter generering</p>
+            </div>
+
+            {/* Twitch notification toggle */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold text-g-text">Twitch-varsel</p>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, twitchVarselAktiv: !s.twitchVarselAktiv }))}
+                  className={`w-9 h-5 rounded-full border transition-all relative ${
+                    settings.twitchVarselAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    settings.twitchVarselAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                  }`} />
+                </button>
+              </div>
+              <p className="text-[9px] text-g-muted">Send Twitch-chat-melding (kommer snart)</p>
+            </div>
+
+            {/* Showcase channel ID */}
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-g-text">Showcase-kanal ID</p>
+              <input
+                value={settings.showcaseKanalId}
+                onChange={e => setSettings(s => ({ ...s, showcaseKanalId: e.target.value }))}
+                placeholder="Discord kanal-ID (f.eks. 1234567890)"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+              />
+            </div>
+
+            {/* Cooldown */}
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-g-text">Cooldown (minutter)</p>
+              <input
+                type="number"
+                min={0}
+                max={10080}
+                value={settings.cooldownMinutter}
+                onChange={e => setSettings(s => ({ ...s, cooldownMinutter: Number(e.target.value) }))}
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+              />
+              <p className="text-[9px] text-g-muted">Minimum tid mellom genereringer per member</p>
+            </div>
+          </div>
+
+          <button
+            onClick={saveSettings}
+            disabled={settingsSaving}
+            className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+          >
+            {settingsSaving ? 'Lagrer...' : 'Lagre innstillinger'}
+          </button>
+        </div>
+      )}
+
+      {/* Member list */}
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-16 bg-g-card border border-g-border rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
+          <p className="text-xs text-g-muted">Ingen membres funnet.</p>
+        </div>
+      ) : (
+        <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
+          {filtered.map((p, i) => {
+            const isGenerating = generating.has(p.discordId);
+            const err          = genError[p.discordId];
+            const rarityStyle  = p.rarity ? (RARITY_BADGE[p.rarity] ?? 'text-g-muted border-g-border') : null;
+            return (
+              <div
+                key={p.discordId}
+                className={`flex items-center gap-3 px-4 py-3 ${
+                  i < filtered.length - 1 ? 'border-b border-g-border/50' : ''
+                } ${isGenerating ? 'opacity-60' : ''}`}
+              >
+                {/* Avatar */}
+                <div className="w-8 h-8 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-[11px] font-black text-g-green">
+                    {p.displayName?.[0]?.toUpperCase() ?? '?'}
+                  </span>
+                </div>
+
+                {/* Name + level */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] font-bold text-g-text truncate">{p.displayName}</span>
+                    <span className="text-[9px] text-g-muted/60 font-mono">Lv {p.level}</span>
+                    {p.rarity && rarityStyle && (
+                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${rarityStyle}`}>
+                        {p.rarity}
+                      </span>
+                    )}
+                    {p.archetype && (
+                      <span className="text-[8px] text-g-muted/60 truncate">{p.archetype}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {p.personaTitle ? (
+                      <span className="text-[9px] text-g-muted truncate italic">{p.personaTitle}</span>
+                    ) : (
+                      <span className="text-[9px] text-g-muted/40">Ingen persona</span>
+                    )}
+                    {p.generatedAt && (
+                      <span className="text-[8px] text-g-muted/40 flex-shrink-0">
+                        · {tidSiden(p.generatedAt)}
+                      </span>
+                    )}
+                  </div>
+                  {err && <p className="text-[9px] text-red-400 mt-0.5">{err}</p>}
+                </div>
+
+                {/* Card thumbnail */}
+                {p.imageUrl && (
+                  <a href={p.imageUrl} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                    <img
+                      src={p.imageUrl}
+                      alt={p.personaTitle ?? ''}
+                      className="w-8 h-11 rounded object-cover border border-g-border hover:border-g-green/40 transition-colors"
+                    />
+                  </a>
+                )}
+
+                {/* Generate button */}
+                <button
+                  onClick={() => generate(p.discordId)}
+                  disabled={isGenerating}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                    isGenerating
+                      ? 'border-g-border text-g-muted cursor-not-allowed'
+                      : p.hasCard
+                        ? 'border-g-border text-g-muted hover:border-yellow-500/40 hover:text-yellow-400'
+                        : 'border-g-green/40 text-g-green bg-g-green/5 hover:bg-g-green/10'
+                  }`}
+                >
+                  {isGenerating ? '...' : p.hasCard ? 'Reroll' : 'Generer'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CommunityManagerPage() {
-  const [tab, setTab]                     = useState<'dashboard' | 'membres'>('dashboard');
+  const [tab, setTab]                     = useState<'dashboard' | 'membres' | 'samlekort'>('dashboard');
   const [summary, setSummary]             = useState<SummaryData | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [members, setMembers]             = useState<Member[]>([]);
@@ -683,20 +991,23 @@ export default function CommunityManagerPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-g-border">
-        {(['dashboard', 'membres'] as const).map(t => (
+        {(['dashboard', 'membres', 'samlekort'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all -mb-px ${
               tab === t
                 ? 'border-g-green text-g-green'
                 : 'border-transparent text-g-muted hover:text-g-text'
             }`}>
-            {t === 'dashboard' ? 'Dashboard' : 'Membres'}
+            {t === 'dashboard' ? 'Dashboard' : t === 'membres' ? 'Membres' : 'Samlekort'}
           </button>
         ))}
       </div>
 
       {/* Dashboard tab */}
       {tab === 'dashboard' && <DashboardTab summary={summary} loading={summaryLoading} />}
+
+      {/* Samlekort tab */}
+      {tab === 'samlekort' && <SamlekortTab />}
 
       {/* Membres tab */}
       {tab === 'membres' && (

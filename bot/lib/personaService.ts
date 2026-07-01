@@ -1,9 +1,14 @@
 import OpenAI, { toFile } from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import type { MemberProfile } from './memberTracker';
 import { deductXP, ALLE_BADGES } from './memberTracker';
 import { renderPersonaCard } from './cardRenderer';
 import { logSystemEvent } from './systemEvents';
+import { selectArchetypeCandidates, getArchetype, archetypeExists, scoreAllArchetypes } from './archetypeLibrary';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const REROLL_XP_COST = 250;
@@ -234,6 +239,25 @@ async function genererPersonaJson(member: MemberProfile, rarity: PersonaRarity, 
     : rarity === 'Rare'      ? 'RARE — distinkt. En karakter som skiller seg ut.'
     : 'COMMON — vanlig, men sjarmerende. Litt humor er bra.';
 
+  // Score archetypes against member activity — deterministic scores for logging,
+  // jittered candidates for GPT so rerolls diverge on identical stats.
+  const allScored   = scoreAllArchetypes(member);
+  const candidates  = selectArchetypeCandidates(member, 5);
+
+  console.log(`[Persona] ── Archetype candidates for ${member.username} (${rarity}) ──`);
+  for (const { arch, score, rank } of candidates) {
+    console.log(`  #${rank}  ${arch.name.padEnd(24)} score=${score.toFixed(3)}  "${arch.personality.slice(0, 60)}…"`);
+  }
+  // Log what position each candidate holds in the deterministic ranking
+  for (const cand of candidates) {
+    const det = allScored.find(s => s.arch.name === cand.arch.name);
+    if (det) console.log(`       deterministic rank: #${det.rank}  raw=${det.score.toFixed(3)}`);
+  }
+
+  const candidateList = candidates
+    .map(s => `• ${s.arch.name} — ${s.arch.personality}`)
+    .join('\n');
+
   const prompt = `Du er en humoristisk RPG-spillmester som lager Discord community samlekort — tenk Pokémon, Hearthstone, Clash Royale.
 Lag ett UNIKT, morsomt og positivt samlekort basert KUN på aktivitetsdataene nedenfor.
 
@@ -251,25 +275,28 @@ AKTIVITETSDATA:
 
 SJELDENHET: ${rarityHint}
 
+ARCHETYPE KANDIDATER — velg den som passer best til aktivitetsdataene:
+${candidateList}
+
 REGLER:
 - ALDRI kommenter kjønn, alder, kropp, utseende, religion eller politikk.
 - Stats skal speile faktiske data: høye meldinger → høy activity/chaos, mye voice → høy community/lederskap
-- "title" = stort slagkraftig navn på STORE bokstaver, f.eks. "THE MEME WARRIOR" eller "CHAOS ARCHITECT" eller "VOICE OF THE NORTH"
-- "class" = en arketype-tittel, f.eks. "Chaos Viking", "The Strategist", "Meme Wizard"
-- "archetype" = RPG-klasse, f.eks. "Berserker", "Support", "Rogue", "Paladin", "Bard", "Warlock"
+- "title" = stort slagkraftig navn på STORE bokstaver. La den valgte archetypen forme tittelen: en Chaos Mage får kaotisk tittel, en Guild Master får autoritær tittel.
+- "class" = en kreativ arketype-tittel, f.eks. "Chaos Viking", "The Strategist", "Meme Wizard"
+- "archetype" = ett av kandidatnavnene over (skriv NØYAKTIG som vist — ingen varianter)
 - "description" = 3-4 KORTE linjer (IKKE ett avsnitt). Tenk dikt-stil. Morsomt og treffende.
-- "signatureMove" = navn på ultimate ability, store bokstaver, f.eks. "WALL OF TEXT" eller "CHAOS BURST"
-- "signatureMoveDesc" = 1 kort, morsom setning om hva abilityen gjør
+- "signatureMove" = navn på ultimate ability, store bokstaver. Skal passe archetypens kraft og stil naturlig.
+- "signatureMoveDesc" = 1 kort, morsom setning — stil og tone skal matche archetypen
 - "quote" = 1 karaktersitat på norsk, som på et ekte samlekort
-- "flavorText" = én lore-setning nederst på kortet. Tenk "Ryktene sier..." eller "Ingen vet når han begynte å skrive..."
+- "flavorText" = én lore-setning som lyder som den kommer fra archetypens verden. Tenk "Ryktene sier..." eller "Ingen vet når han begynte å skrive..."
 - Stats er 0-100. Lag variasjon — ikke alle 50.
-- "imagePrompt" = 1 engelsk setning for DALL-E 3. Fiktiv karakter basert på klassen. ALDRI ekte ansikt. ALDRI realistisk person.
+- "imagePrompt" = 1 engelsk setning om karakterens vibes. Fiktiv karakter basert på klassen. ALDRI ekte ansikt.
 
 Svar KUN med JSON (ingen annen tekst):
 {
   "title": "THE [NOKO EPISK]",
   "class": "klasse-tittel",
-  "archetype": "RPG-klasse",
+  "archetype": "ett av kandidatnavnene",
   "description": "linje1\\nlinje2\\nlinje3",
   "signatureMove": "ABILITY NAME",
   "signatureMoveDesc": "én setning om hva abilityen gjør",
@@ -287,7 +314,7 @@ Svar KUN med JSON (ingen annen tekst):
     "loyalitet": 0-100,
     "lederskap": 0-100
   },
-  "imagePrompt": "english DALL-E prompt, fictional stylized character, no real face, trading card art"
+  "imagePrompt": "english sentence about character vibes, no real face, trading card art"
 }`;
 
   try {
@@ -298,12 +325,33 @@ Svar KUN med JSON (ingen annen tekst):
       max_tokens: 900,
       response_format: { type: 'json_object' },
     });
+
     const raw    = res.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as Partial<PersonaCard>;
+
+    // Validate archetype — fall back to top-scored candidate if GPT hallucinated
+    let chosenArchetype = parsed.archetype ?? '';
+    const inLibrary = archetypeExists(chosenArchetype);
+    if (!inLibrary) {
+      const fallback = candidates[0]?.arch.name ?? 'Wanderer';
+      console.warn(`[Persona] ⚠ GPT valgte "${chosenArchetype}" — ikke i library. Fallback → "${fallback}"`);
+      chosenArchetype = fallback;
+    }
+
+    const candidateNames = candidates.map(s => s.arch.name).join(', ');
+    const wasInCandidates = candidates.some(s => s.arch.name === chosenArchetype);
+    console.log(`[Persona] Valgt archetype: "${chosenArchetype}" ${inLibrary ? '✅' : '⚠ fallback'}${!wasInCandidates && inLibrary ? ' (i library men ikke i topp-5)' : ''}`);
+    console.log(`[Persona] Kandidater sendt til GPT: ${candidateNames}`);
+
+    const archLib = getArchetype(chosenArchetype);
+    if (archLib) {
+      console.log(`[Persona] Personality match: "${archLib.personality}"`);
+    }
+
     return {
       title:             (parsed.title ?? 'THE UNKNOWN').toUpperCase(),
       class:             parsed.class             ?? 'Mysterious',
-      archetype:         parsed.archetype         ?? 'Wanderer',
+      archetype:         chosenArchetype,
       rarity,
       description:       parsed.description       ?? '',
       signatureMove:     (parsed.signatureMove ?? 'UNKNOWN POWER').toUpperCase(),
@@ -313,8 +361,14 @@ Svar KUN med JSON (ingen annen tekst):
       stats:             { ...defaultStats(), ...(parsed.stats ?? {}) },
       imagePrompt:       parsed.imagePrompt       ?? `Futuristic gaming character, neon green, cyberpunk trading card art`,
     };
-  } catch { return null; }
+  } catch (e: any) {
+    console.error('[Persona] genererPersonaJson feilet:', e?.message ?? e);
+    console.error(e?.stack);
+    return null;
+  }
 }
+
+export { genererPersonaJson };
 
 // ── gpt-image-1 — identity-based trading card ────────────────────────────────
 // AI transforms the Discord avatar into an epic game character.
@@ -365,18 +419,7 @@ const RARITY_VISUAL: Record<PersonaRarity, {
   },
 };
 
-const ARCHETYPE_ENVIRONMENT: Record<string, string> = {
-  Bard:       'concert stage with neon spotlights, crowd silhouettes behind, screens and light rigs above',
-  Berserker:  'epic chaotic battlefield, fire and destruction behind them, storm clouds, fallen enemy banners',
-  Paladin:    'grand cathedral interior, divine light through stained glass windows, holy energy rising from floor',
-  Rogue:      'rain-soaked rooftop at night, city neon reflections in puddles below, smoke, moonlight and shadows',
-  Warlock:    'dark forbidden arcane library, floating spell crystals, dimensional rift portal, ancient tomes orbiting',
-  Support:    'warm grand community hall, banners and crowd in background, sense of belonging and protection',
-  Hunter:     'misty ancient forest at dawn, golden light shafts through canopy, leaves falling, animal tracks',
-  Mage:       'floating ethereal arcane laboratory, glowing spell circles on floor, magical instruments orbiting',
-  Warrior:    'fortress battlements at sunset, banners flying, sense of victory, army behind them',
-  Wanderer:   'dramatic scenic vista at golden hour, epic landscape stretching to horizon, wind energy',
-};
+// Environment and visual data are now sourced from archetypeLibrary.ts
 
 // ── Avatar download ───────────────────────────────────────────────────────────
 
@@ -423,21 +466,23 @@ async function uploadKortBilde(buf: Buffer, discordId: string): Promise<string |
 // ── Structured persona context (drives image prompt) ─────────────────────────
 
 interface PersonaImageContext {
-  displayName:    string;
-  title:          string;
-  archetype:      string;
-  klass:          string;
-  rarity:         PersonaRarity;
-  personality:    string[];
-  strengths:      string[];
-  weaknesses:     string[];
-  statLines:      string[];  // "HYPE: 92", "CHAOS: 81", ...
-  ultimateName:   string;
-  ultimateDesc:   string;
-  flavor:         string;
-  environment:    string;
-  season:         string;
-  rarityVisual:   { frame: string; colors: string; mood: string; fx: string };
+  displayName:        string;
+  title:              string;
+  archetype:          string;
+  klass:              string;
+  rarity:             PersonaRarity;
+  personality:        string[];
+  strengths:          string[];
+  weaknesses:         string[];
+  statLines:          string[];  // "HYPE: 92", "CHAOS: 81", ...
+  ultimateName:       string;
+  ultimateDesc:       string;
+  flavor:             string;
+  environment:        string;
+  archetypeCharacter: string;
+  archetypeEffects:   string;
+  season:             string;
+  rarityVisual:       { frame: string; colors: string; mood: string; fx: string };
 }
 
 function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImageContext {
@@ -475,25 +520,29 @@ function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImag
     .slice(0, 5)
     .map(([k, v]) => `${k.toUpperCase()}: ${v}`);
 
-  const environment = ARCHETYPE_ENVIRONMENT[card.archetype]
-    ?? `epic dramatic setting perfectly matching a ${card.archetype} archetype`;
+  const archLib           = getArchetype(card.archetype);
+  const environment       = archLib?.environment ?? `epic dramatic setting perfectly matching a ${card.archetype} archetype`;
+  const archetypeCharacter = archLib?.character  ?? `powerful ${card.archetype} with epic equipment fitting their class`;
+  const archetypeEffects   = archLib?.effects    ?? `dramatic atmospheric effects matching their power level`;
 
   return {
     displayName,
-    title:        card.title,
-    archetype:    card.archetype,
-    klass:        card.class,
-    rarity:       card.rarity,
+    title:              card.title,
+    archetype:          card.archetype,
+    klass:              card.class,
+    rarity:             card.rarity,
     personality,
     strengths,
     weaknesses,
     statLines,
-    ultimateName: card.signatureMove,
-    ultimateDesc: card.signatureMoveDesc,
-    flavor:       card.flavorText,
+    ultimateName:       card.signatureMove,
+    ultimateDesc:       card.signatureMoveDesc,
+    flavor:             card.flavorText,
     environment,
-    season:       SEASON_SUFFIX,
-    rarityVisual: RARITY_VISUAL[card.rarity],
+    archetypeCharacter,
+    archetypeEffects,
+    season:             SEASON_SUFFIX,
+    rarityVisual:       RARITY_VISUAL[card.rarity],
   };
 }
 
@@ -562,7 +611,10 @@ function byggImagePrompt(ctx: PersonaImageContext): string {
     `═══════════ 3. VISUAL STORY ═══════════`,
     `The illustration must TELL A STORY. Not just show a figure.`,
     visualStory.join(' '),
+    ``,
     `Environment: ${s.environment}`,
+    `Character costume and equipment: ${s.archetypeCharacter}`,
+    `Archetype atmospheric effects: ${s.archetypeEffects}`,
     `Season atmosphere: ${s.season}`,
     ``,
     `═══════════ 4. STYLE ═══════════`,
@@ -649,7 +701,7 @@ async function genererBilde(
 
 // ── Lagre i DB ────────────────────────────────────────────────────────────────
 
-const PERSONA_PROMPT_VERSION = 'v2';
+const PERSONA_PROMPT_VERSION = 'v3';
 const PERSONA_MODEL           = 'gpt-4o-mini';
 const PERSONA_IMAGE_MODEL     = 'dall-e-3';
 
@@ -846,18 +898,31 @@ export async function genererPersona(
   const collectionNumber = await hentCollectionNumber(member.id);
   await lagrePersona(member, card, imageUrl, xpCost, rerollCount);
 
-  // Render PNG — pass buffer directly (skip re-fetch, same data we just generated)
-  let cardPng: Buffer | null = null;
+  // Render PNG — write imageBuf to temp file first so loadPersonaImage
+  // can load via path (avoids @napi-rs/canvas Buffer bug on Windows).
+  let cardPng:   Buffer | null = null;
+  let imagePath: string | null = null;
+  if (imageBuf) {
+    imagePath = path.join(os.tmpdir(), `persona_${member.id}_${crypto.randomUUID()}.png`);
+    fs.writeFileSync(imagePath, imageBuf);
+    console.log(`[Persona] image temp path: ${imagePath} (${(imageBuf.length / 1024).toFixed(1)} KB)`);
+  }
   try {
-    cardPng = await renderPersonaCard(card, imageBuf, member, collectionNumber, avatarUrl);
+    cardPng = await renderPersonaCard(card, imagePath, member, collectionNumber, avatarUrl);
   } catch (e: any) {
     console.warn('[Persona] PNG-rendering feilet:', e?.message);
+    console.error(e?.stack);
     logSystemEvent({
       source: 'discord_bot', event_type: 'PERSONA_CARD_IMAGE_FAILED',
       title: `Persona PNG-rendering feilet for ${member.username}`,
       severity: 'warning',
       metadata: { userId: member.id, username: member.username, error: e?.message, rarity: card.rarity },
     });
+  } finally {
+    if (imagePath) {
+      try { fs.unlinkSync(imagePath); }
+      catch { /* non-fatal */ }
+    }
   }
 
   return { card, imageUrl, cardPng, xpCost, rerollCount, collectionNumber, ersteGang: !eksisterende };

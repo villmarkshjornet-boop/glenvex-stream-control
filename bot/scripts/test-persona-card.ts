@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { renderPersonaCard } from '../lib/cardRenderer';
+import { loadPersonaImage } from '../lib/imageLoader';
 import type { PersonaCard } from '../lib/personaService';
 import type { MemberProfile } from '../lib/memberTracker';
 
@@ -81,16 +82,35 @@ async function main() {
   console.log('  GLENVEX — test:persona-card (Canvas compositor)');
   console.log('════════════════════════════════════════════════════════════════\n');
 
-  // Load AI art — HARD FAIL if missing
-  if (!fs.existsSync(AI_ART)) {
-    console.error(`❌  AI art ikke funnet: ${AI_ART}`);
+  console.log(`\n── BASE IMAGE DIAGNOSTICS ──────────────────────────────────────`);
+  console.log(`Path        : ${AI_ART}`);
+
+  const aiArtExists = fs.existsSync(AI_ART);
+  console.log(`Exists      : ${aiArtExists}`);
+
+  if (!aiArtExists) {
+    console.error(`\n❌  AI art ikke funnet: ${AI_ART}`);
     console.error('    Kjør "npm run test:persona-image" først for å generere AI-bildet.');
     process.exit(1);
   }
 
   const aiArtBuf = fs.readFileSync(AI_ART);
-  console.log(`AI art    : ${AI_ART}`);
-  console.log(`AI art    : ${(aiArtBuf.length / 1024).toFixed(0)} KB`);
+  console.log(`Buffer size : ${aiArtBuf.length} bytes  (${(aiArtBuf.length / 1024).toFixed(1)} KB)`);
+
+  // Pre-flight: verify Canvas can load this image — fail hard, no silent fallback.
+  try {
+    const { width, height, sourceType } = await loadPersonaImage(AI_ART, '[pre-flight]');
+    console.log(`Dimensions  : ${width} × ${height}px`);
+    console.log(`Source type : ${sourceType}`);
+    console.log(`Load status : OK`);
+  } catch (e: any) {
+    console.error(`\n❌  loadPersonaImage() feilet — renderPersonaCard() ville brukt fallback.`);
+    console.error(`    Feil: ${e.message}`);
+    console.error(e.stack);
+    process.exit(1);
+  }
+
+  console.log(`\n── CARD ─────────────────────────────────────────────────────────`);
   console.log(`Card      : ${CARD.rarity} ${CARD.class} — "${CARD.title}"`);
   console.log(`Member    : ${MEMBER.displayName} · Level ${MEMBER.level} · ${MEMBER.xp} XP`);
   console.log(`Stats     : HYPE ${CARD.stats.hype} · CHAOS ${CARD.stats.chaos} · COMMUNITY ${CARD.stats.community}`);
@@ -102,13 +122,15 @@ async function main() {
   const t0 = Date.now();
 
   try {
-    const png = await renderPersonaCard(CARD, aiArtBuf, MEMBER, 4);
+    // Pass file path — not Buffer — so cardRenderer loads via native path (avoids Windows Buffer bug)
+    const png = await renderPersonaCard(CARD, AI_ART, MEMBER, 4);
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
     fs.writeFileSync(OUT_FILE, png);
 
     console.log(`\n✅  Ferdig på ${elapsed}s`);
     console.log(`✅  Lagret til: ${OUT_FILE} (${(png.length / 1024).toFixed(0)} KB)`);
+    console.log(`✅  AI-bilde bekreftet brukt (pre-flight OK + ingen [cardRenderer] loadImage-feil over)`);
     console.log('\n── Kort inneholder ─────────────────────────────────────────────');
     console.log(`  Navn      : ${MEMBER.displayName}`);
     console.log(`  Rarity    : ${CARD.rarity}`);

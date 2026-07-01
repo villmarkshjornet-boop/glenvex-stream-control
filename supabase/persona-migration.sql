@@ -27,6 +27,7 @@ CREATE TABLE community_personas (
   stats                JSONB,
   image_prompt         TEXT,
 
+
   -- Generert bilde
   image_url            TEXT,
 

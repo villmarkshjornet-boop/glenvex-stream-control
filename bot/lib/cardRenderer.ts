@@ -10,9 +10,10 @@
  *   BOT  820–end  : Data panel (gradient into dark + all stats/text)
  */
 
-import { createCanvas, loadImage, type SKRSContext2D } from '@napi-rs/canvas';
+import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import type { MemberProfile } from './memberTracker';
 import type { PersonaCard, PersonaRarity, PersonaStats } from './personaService';
+import { loadPersonaImage } from './imageLoader';
 
 // ── Dimensions ────────────────────────────────────────────────────────────────
 const W        = 1024;
@@ -110,14 +111,6 @@ function wrap2(ctx: SKRSContext2D, text: string, x: number, y: number, maxW: num
   }
   if (line) ctx.fillText(trunc(ctx, line, maxW), x, y);
   return y;
-}
-
-async function fetchBuf(url: string): Promise<Buffer | null> {
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!r.ok) return null;
-    return Buffer.from(await r.arrayBuffer());
-  } catch { return null; }
 }
 
 function accentLine(ctx: SKRSContext2D, y: number, a: RarityAccent, alpha = 0.6) {
@@ -507,19 +500,16 @@ export async function renderPersonaCard(
   let aiLoaded = false;
 
   if (fullCardImage) {
-    let imgBuf: Buffer | null = null;
-    if (Buffer.isBuffer(fullCardImage))     imgBuf = fullCardImage;
-    else if (typeof fullCardImage === 'string') imgBuf = await fetchBuf(fullCardImage);
-
-    if (imgBuf) {
-      try {
-        const img   = await loadImage(imgBuf);
-        const scale = Math.max(W / img.width, H / img.height);
-        const dw    = img.width  * scale;
-        const dh    = img.height * scale;
-        ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-        aiLoaded = true;
-      } catch {}
+    try {
+      const { img } = await loadPersonaImage(fullCardImage, '[cardRenderer]');
+      const scale   = Math.max(W / img.width, H / img.height);
+      const dw      = img.width  * scale;
+      const dh      = img.height * scale;
+      ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      aiLoaded = true;
+    } catch (e: any) {
+      console.error('[cardRenderer] loadPersonaImage failed — using mystical fallback:', e?.message ?? e);
+      console.error(e?.stack);
     }
   }
 
