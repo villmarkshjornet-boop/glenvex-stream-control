@@ -431,6 +431,58 @@ async function downloadAvatar(url: string): Promise<Buffer | null> {
   } catch { return null; }
 }
 
+// ── Avatar classification ─────────────────────────────────────────────────────
+// Before generating, we need to know what the avatar actually IS.
+// Real human photos → preserve identity (gpt-image-1 edit + identity prompt).
+// Illustrations/logos/characters → use as style reference, not identity.
+
+interface AvatarClassification {
+  type: 'human' | 'art';
+  description: string;  // "bearded man with glasses", "green anime ninja", "wolf mascot"
+}
+
+async function classifyAvatar(avatarBuf: Buffer, openai: OpenAI): Promise<AvatarClassification> {
+  try {
+    const base64 = avatarBuf.toString('base64');
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}`, detail: 'low' } },
+          {
+            type: 'text',
+            text: `Classify this Discord avatar.
+
+Is this:
+A) A REAL photograph of an actual human being (realistic face, real person)
+B) ANYTHING ELSE: anime, cartoon, logo, game character, animal, mascot, drawing, illustration, AI art, robot, creature, symbol, etc.
+
+Write a SHORT description (max 10 words) of what you see.
+
+Respond with ONLY valid JSON, no other text:
+{"type": "human" or "art", "description": "short description"}`,
+          },
+        ],
+      }],
+      max_tokens: 80,
+      temperature: 0,
+    });
+
+    const raw    = (res.choices[0]?.message?.content ?? '{}').trim();
+    const parsed = JSON.parse(raw);
+    const cls: AvatarClassification = {
+      type:        parsed.type === 'human' ? 'human' : 'art',
+      description: (parsed.description ?? 'avatar character') as string,
+    };
+    console.log(`[Persona] Avatar classified as "${cls.type}": ${cls.description}`);
+    return cls;
+  } catch (e: any) {
+    console.warn('[Persona] Avatar classification feilet:', e?.message, '— defaulter til "art"');
+    return { type: 'art', description: 'avatar character' };
+  }
+}
+
 // ── Supabase Storage upload → permanent public URL ────────────────────────────
 
 async function uploadKortBilde(buf: Buffer, discordId: string): Promise<string | null> {
@@ -670,12 +722,15 @@ function byggImagePrompt(ctx: PersonaImageContext): string {
     `Effects: ${r.fx}`,
     ``,
     `═══ COMPOSITION + LIGHTING ═══`,
-    `Portrait tall card. Character fills 60–70% of image height.`,
-    `CRITICAL ZONE RULES — the card has panels covering both ends:`,
-    `  TOP 16%: dark zone (header + title bars) — keep very dark, no character details`,
-    `  MIDDLE 38% (16%–54%): CHARACTER WINDOW — face and upper body centered here`,
-    `  BOTTOM 46%: dark zone (data panels) — keep very dark, fade to near-black`,
-    `Character's face should be in the upper half of the character window.`,
+    `Portrait tall card. Character fills 65–75% of image height.`,
+    `ZONE ARCHITECTURE — the card overlays semi-transparent panels on top of your image:`,
+    `  TOP 0–4%: small header bar — very dark`,
+    `  TOP 4–16%: title zone — SEMI-TRANSPARENT panel, character BODY shows through here`,
+    `  16%–53%: CHARACTER WINDOW — face and upper body DOMINATE this zone`,
+    `  BOTTOM 53–100%: data panels — very dark, fade to near-black at 60%`,
+    `CRITICAL: Character's FACE must be at 18–40% of image height.`,
+    `Character body starts at ~10%, face at 18–40%, body fills down to 65%.`,
+    `Below 60%: fade to near-black (data overlays here — keep dark).`,
     `Strong dramatic rim light from behind. Powerful key light on the face.`,
     `Volumetric god rays or energy beams in environment. Character is the light source.`,
     ``,
@@ -720,6 +775,62 @@ function byggDALLE3Prompt(ctx: PersonaImageContext): string {
   ].join('\n').slice(0, 3900);
 }
 
+// ── Art/style-reference prompt (for non-human avatars) ───────────────────────
+// When the avatar is an illustration, logo, or character — we DON'T preserve
+// a face. Instead we amplify the character's existing identity: colors,
+// type, symbolism, expression, theme → epic trading card version.
+
+function byggArtStylePrompt(ctx: PersonaImageContext, avatarDescription: string): string {
+  const r          = ctx.rarityVisual;
+  const statVisual = statDrivenVisual(ctx);
+
+  return [
+    `CHARACTER STYLE TRANSFORMATION:`,
+    `The reference image shows: "${avatarDescription}"`,
+    `This is NOT a real person. DO NOT generate a human face from it.`,
+    `Transform this character/avatar/symbol into an EPIC, premium trading card illustration.`,
+    ``,
+    `PRESERVE FROM THE REFERENCE:`,
+    `• Color palette (exact dominant colors)`,
+    `• Character type: ninja stays ninja, wolf stays wolf, robot stays robot`,
+    `• Core symbolism and personality of the character`,
+    `• Distinctive markings, shapes, accessories`,
+    ``,
+    `AMPLIFY: Make it dramatic, epic, AAA-quality. Triple the energy and detail.`,
+    ``,
+    `═══ STAT-DRIVEN VISUAL STORY ═══`,
+    `Top stats: ${ctx.statLines.slice(0, 3).join(' | ')}`,
+    ``,
+    ...statVisual,
+    ``,
+    `═══ PERSONA ═══`,
+    `Archetype: ${ctx.archetype}  |  Class: ${ctx.klass}  |  Title: ${ctx.title}`,
+    `Environment: ${ctx.environment}`,
+    `Equipment/build: ${ctx.archetypeCharacter}`,
+    `Atmospheric effects: ${ctx.archetypeEffects}`,
+    `Season style: ${ctx.season}`,
+    ``,
+    `═══ RARITY: ${ctx.rarity.toUpperCase()} ═══`,
+    r.mood,
+    `Frame: ${r.frame}`,
+    `Colors: ${r.colors} (blend with the avatar's own color palette)`,
+    `Effects: ${r.fx}`,
+    ``,
+    `═══ COMPOSITION ═══`,
+    `Portrait tall card. Character fills 60–70% of image height.`,
+    `TOP 4% very dark (header). BOTTOM 46% very dark (data panels).`,
+    `CHARACTER centered in middle zone.`,
+    ``,
+    `═══ STYLE ═══`,
+    `Premium digital painting. Magic: The Gathering × Hearthstone × Riot Games.`,
+    `NOT photorealistic. NOT generic AI art. Intentional collector-tier illustration.`,
+    ``,
+    `⚠ NO TEXT. No letters. No numbers. No watermarks. No logos.`,
+    `⚠ DO NOT create a realistic human face. Keep the original character type.`,
+    `⚠ Vivid, high-contrast. Never muddy or flat.`,
+  ].join('\n').slice(0, 3900);
+}
+
 // ── Image generation — gpt-image-1 primary, DALL-E 3 fallback ────────────────
 
 async function genererBilde(
@@ -728,24 +839,42 @@ async function genererBilde(
   openai:      OpenAI,
   displayName: string,
 ): Promise<Buffer | null> {
-  const personaCtx  = byggPersonaContext(card, displayName);
-  const fullPrompt  = byggImagePrompt(personaCtx);
-  const shortPrompt = byggDALLE3Prompt(personaCtx);
+  const personaCtx = byggPersonaContext(card, displayName);
 
-  // ── Forsøk 1: gpt-image-1 (identity-preserving, krever Tier 4) ───────────
+  // ── Classify avatar: real human vs illustration/logo/character ────────────
+  let avatarType: AvatarClassification = { type: 'art', description: 'avatar character' };
+  if (avatarBuf) {
+    avatarType = await classifyAvatar(avatarBuf, openai);
+  }
+
+  // Choose prompt based on avatar type
+  const isHuman     = avatarType.type === 'human';
+  const mainPrompt  = isHuman
+    ? byggImagePrompt(personaCtx)                                    // identity-lock
+    : byggArtStylePrompt(personaCtx, avatarType.description);       // style-reference
+  const shortPrompt = isHuman
+    ? byggDALLE3Prompt(personaCtx)
+    : byggArtStylePrompt(personaCtx, avatarType.description);       // already ≤ 3900 chars
+
+  console.log(`[Persona] Mode: ${isHuman ? 'identity-preserving (human photo)' : `style-reference (${avatarType.description})`}`);
+
+  // ── Forsøk 1: gpt-image-1 (Tier 4 required for edit, generate as fallback) ─
   try {
     let raw: string | null | undefined;
 
     if (avatarBuf) {
+      // Use avatar as reference regardless of type:
+      // - human → identity preservation
+      // - art   → style/character reference
       const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
       const res = await (openai.images as any).edit({
         model: 'gpt-image-1', image: avatarFile,
-        prompt: fullPrompt, size: '1024x1536', quality: 'high',
+        prompt: mainPrompt, size: '1024x1536', quality: 'high',
       });
       raw = res.data?.[0]?.b64_json;
     } else {
       const res = await openai.images.generate({
-        model: 'gpt-image-1' as any, prompt: fullPrompt,
+        model: 'gpt-image-1' as any, prompt: mainPrompt,
         n: 1, size: '1024x1536' as any, quality: 'high' as any,
       });
       raw = (res.data?.[0] as any)?.b64_json;
@@ -761,7 +890,7 @@ async function genererBilde(
     console.log('[Persona] Faller tilbake til DALL-E 3...');
   }
 
-  // ── Forsøk 2: DALL-E 3 (tilgjengelig på alle tiers) ──────────────────────
+  // ── Forsøk 2: DALL-E 3 (tilgjengelig på alle tiers, ingen referansebilde) ─
   try {
     const res = await openai.images.generate({
       model: 'dall-e-3', prompt: shortPrompt,
