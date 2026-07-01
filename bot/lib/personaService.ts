@@ -654,7 +654,32 @@ function byggImagePrompt(ctx: PersonaImageContext): string {
   ].join('\n');
 }
 
-// ── Image generation — edit (avatar) or generate (fallback) ──────────────────
+// ── DALL-E 3 fallback prompt (under 4000 chars, no identity) ─────────────────
+
+function byggDALLE3Prompt(ctx: PersonaImageContext): string {
+  const r = ctx.rarityVisual;
+  return [
+    `Premium collector trading card illustration. Fantasy RPG character.`,
+    `Archetype: ${ctx.archetype}. Class: ${ctx.klass}.`,
+    `Personality: ${ctx.personality.slice(0, 3).join(', ')}.`,
+    `Environment: ${ctx.environment}`,
+    `Character: ${ctx.archetypeCharacter}`,
+    `Effects: ${ctx.archetypeEffects}`,
+    `Ultimate ability: ${ctx.ultimateName}.`,
+    ``,
+    `Frame: ${r.frame}`,
+    `Color grade: ${r.colors}`,
+    `Mood: ${r.mood}`,
+    `Visual effects: ${r.fx}`,
+    ``,
+    `Style: AAA digital painting. Magic: The Gathering × Hearthstone × Riot Games quality.`,
+    `Portrait orientation tall card. Character fills 70% of frame. Dark bottom zone — no details there.`,
+    `GLENVEX cyberpunk gaming aesthetic. Neon green energy accents.`,
+    `NO TEXT. NO LETTERS. NO WATERMARKS. No UI elements. High contrast vivid colors.`,
+  ].join('\n').slice(0, 3900);
+}
+
+// ── Image generation — gpt-image-1 primary, DALL-E 3 fallback ────────────────
 
 async function genererBilde(
   card:        PersonaCard,
@@ -662,39 +687,55 @@ async function genererBilde(
   openai:      OpenAI,
   displayName: string,
 ): Promise<Buffer | null> {
-  const personaCtx = byggPersonaContext(card, displayName);
-  const prompt     = byggImagePrompt(personaCtx);
+  const personaCtx  = byggPersonaContext(card, displayName);
+  const fullPrompt  = byggImagePrompt(personaCtx);
+  const shortPrompt = byggDALLE3Prompt(personaCtx);
 
+  // ── Forsøk 1: gpt-image-1 (identity-preserving, krever Tier 4) ───────────
   try {
     let raw: string | null | undefined;
 
     if (avatarBuf) {
-      // Transform Discord avatar into game character (identity-preserving)
       const avatarFile = await toFile(avatarBuf, 'avatar.png', { type: 'image/png' });
       const res = await (openai.images as any).edit({
-        model:   'gpt-image-1',
-        image:   avatarFile,
-        prompt,
-        size:    '1024x1536',
-        quality: 'high',
+        model: 'gpt-image-1', image: avatarFile,
+        prompt: fullPrompt, size: '1024x1536', quality: 'high',
       });
       raw = res.data?.[0]?.b64_json;
     } else {
-      // No avatar available — generate from scratch
       const res = await openai.images.generate({
-        model:   'gpt-image-1' as any,
-        prompt,
-        n:       1,
-        size:    '1024x1536' as any,
-        quality: 'high' as any,
+        model: 'gpt-image-1' as any, prompt: fullPrompt,
+        n: 1, size: '1024x1536' as any, quality: 'high' as any,
       });
       raw = (res.data?.[0] as any)?.b64_json;
     }
 
-    if (!raw) return null;
-    return Buffer.from(raw, 'base64');
+    if (raw) {
+      console.log('[Persona] gpt-image-1 OK');
+      return Buffer.from(raw, 'base64');
+    }
+    console.warn('[Persona] gpt-image-1 returnerte ingen data — prøver DALL-E 3');
   } catch (e: any) {
-    console.warn('[Persona] Bildegenerering feilet:', e?.message);
+    console.error('[Persona] gpt-image-1 feilet:', e?.message ?? e);
+    console.log('[Persona] Faller tilbake til DALL-E 3...');
+  }
+
+  // ── Forsøk 2: DALL-E 3 (tilgjengelig på alle tiers) ──────────────────────
+  try {
+    const res = await openai.images.generate({
+      model: 'dall-e-3', prompt: shortPrompt,
+      n: 1, size: '1024x1792', quality: 'hd',
+    });
+    const url = res.data?.[0]?.url;
+    if (!url) { console.warn('[Persona] DALL-E 3 returnerte ingen URL'); return null; }
+
+    const imgRes = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!imgRes.ok) { console.warn('[Persona] DALL-E 3 nedlasting feilet:', imgRes.status); return null; }
+
+    console.log('[Persona] DALL-E 3 OK');
+    return Buffer.from(await imgRes.arrayBuffer());
+  } catch (e: any) {
+    console.error('[Persona] DALL-E 3 feilet:', e?.message ?? e);
     return null;
   }
 }
