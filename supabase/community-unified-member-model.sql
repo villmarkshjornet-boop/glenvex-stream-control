@@ -13,6 +13,8 @@ ALTER TABLE community_members
   ADD COLUMN IF NOT EXISTS twitch_linked            BOOLEAN     NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS discord_avatar_url       TEXT,
   ADD COLUMN IF NOT EXISTS joined_discord_at        TIMESTAMPTZ,
+  -- Twitch sub tracking (may already exist from earlier migration)
+  ADD COLUMN IF NOT EXISTS twitch_sub_since         TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS twitch_sub_last_seen_at  TIMESTAMPTZ,
   -- XP per plattform
   ADD COLUMN IF NOT EXISTS discord_xp               INTEGER     NOT NULL DEFAULT 0,
