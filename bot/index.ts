@@ -1835,8 +1835,10 @@ async function sjekkPreHype() {
   }
 }
 
-const BOT_ADMIN_USERNAME = process.env.BOT_ADMIN_USERNAME ?? 'gkarlsen';
-const STATUS_KANAL_ID = process.env.STATUS_CHANNEL_ID ?? '1511722714623381645';
+const BOT_ADMIN_USERNAME = process.env.BOT_ADMIN_USERNAME;
+if (!BOT_ADMIN_USERNAME) console.warn('[startup] BOT_ADMIN_USERNAME ikke satt — admin-rolle vil ikke tildeles automatisk');
+const STATUS_KANAL_ID = process.env.STATUS_CHANNEL_ID;
+if (!STATUS_KANAL_ID) console.warn('[startup] STATUS_CHANNEL_ID ikke satt — startup-melding vil ikke sendes');
 
 async function tildelTwitchSubRolle(
   twitchUsername: string,
@@ -1917,6 +1919,7 @@ async function tildelTwitchSubRolle(
 }
 
 async function sikkerAdminTilGkarlsen(): Promise<void> {
+  if (!BOT_ADMIN_USERNAME) return;
   const guild = client.guilds.cache.first();
   if (!guild) return;
   const members = await guild.members.fetch().catch(() => guild.members.cache);
@@ -2393,7 +2396,7 @@ client.once('clientReady', () => {
   });
   sikkerAdminTilGkarlsen().catch(() => {});
 
-  const statusKanal = client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined;
+  const statusKanal = STATUS_KANAL_ID ? client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined : undefined;
   if (statusKanal) {
     const PATCH_NOTES = [
       '✅ `/profil` — sjekk XP, level og statistikk',
