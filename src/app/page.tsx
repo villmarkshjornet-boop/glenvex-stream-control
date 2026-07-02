@@ -15,6 +15,8 @@ import { AiStatusRow } from '@/components/dashboard/AiStatusRow';
 import { LiveCommandCenter } from '@/components/dashboard/LiveCommandCenter';
 import { NextStreamBrief } from '@/components/dashboard/NextStreamBrief';
 import { StorageHealthCard } from '@/components/dashboard/StorageHealthCard';
+import { WhatToDoNow } from '@/components/dashboard/WhatToDoNow';
+import { CommunitySnapshot } from '@/components/dashboard/CommunitySnapshot';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -148,6 +150,12 @@ export default function Dashboard() {
             <PartnerEngineStatus />
             <CreatorBrainLearning />
           </div>
+
+          {/* WHAT TO DO NOW */}
+          <WhatToDoNow slow={slow} live={live} />
+
+          {/* COMMUNITY SNAPSHOT */}
+          <CommunitySnapshot />
 
           {/* DEBUG PANEL */}
           {live?.debug && (
