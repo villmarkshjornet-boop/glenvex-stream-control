@@ -29,8 +29,9 @@ import { minekortCommand, handleMinekortButton } from './commands/minekort';
 import { linktwitchCommand } from './commands/linktwitch';
 import { adminCommand }   from './commands/admin';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
-import { awardCoins } from './lib/coinService';
+import { awardCoins, getBalance } from './lib/coinService';
 import { awardSubCard } from './lib/cardCollectionService';
+import { publishCardDrop } from './lib/cardDropPublisher';
 import { findMemberByTwitchId, storeUnmatchedSub } from './lib/twitchLinkService';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
@@ -1890,7 +1891,28 @@ async function tildelTwitchSubRolle(
 
   addSub(discordId, twitchUsername, displayName);
   awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
-  awardSubCard(discordId, twitchUsername, subTier).catch(() => {});
+
+  // Award sub card, then publish card drop event
+  const member = getMember(discordId);
+  awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
+    if (!subCard) return;
+    const coinBal = await getBalance(discordId).catch(() => 0);
+    publishCardDrop({
+      userId:          discordId,
+      discordUsername: displayName,
+      twitchUsername,
+      cardId:          subCard.id,
+      cardType:        'sub',
+      rarity:          subCard.rarity,
+      title:           subCard.title,
+      klass:           subCard.class ?? null,
+      level:           member?.level ?? 1,
+      xp:              member?.xp ?? 0,
+      coinsBalance:    coinBal,
+      cardImageUrl:    subCard.card_image_url ?? null,
+      source:          'sub',
+    }).catch(() => {});
+  }).catch(() => {});
 }
 
 async function sikkerAdminTilGkarlsen(): Promise<void> {

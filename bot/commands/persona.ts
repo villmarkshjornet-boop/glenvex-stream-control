@@ -52,6 +52,7 @@ import {
   RARITY_BANNER,
 } from '../lib/personaService';
 import { getBalance } from '../lib/coinService';
+import { publishCardDrop } from '../lib/cardDropPublisher';
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
 
@@ -216,6 +217,25 @@ export const personaCommand = {
       });
     }
 
+    // Publiser card drop (fire-and-forget — ikke kall ved cache hit)
+    publishCardDrop({
+      userId:          user.id,
+      discordUsername: bestName,
+      twitchUsername:  member!.twitchUsername ?? null,
+      cardType:        'persona',
+      rarity:          resultat.card.rarity,
+      title:           resultat.card.title,
+      klass:           resultat.card.class,
+      archetype:       resultat.card.archetype,
+      level:           member!.level,
+      xp:              member!.xp,
+      coinsBalance:    coinBalance - resultat.coinCost,
+      cardNumber:      resultat.collectionNumber,
+      cardImageUrl:    resultat.imageUrl,
+      cardImageBuffer: resultat.cardPng,
+      source:          'persona_reroll',
+    }).catch(() => {});
+
     // ── Button collector ──────────────────────────────────────────────────────
     const msg       = await interaction.fetchReply();
     const collector = msg.createMessageComponentCollector({
@@ -260,6 +280,24 @@ export const personaCommand = {
             components: [lagKnappeRad(user.id, nyHarNokCoins)],
           });
         }
+
+        publishCardDrop({
+          userId:          user.id,
+          discordUsername: oppdatertMedlem.displayName,
+          twitchUsername:  oppdatertMedlem.twitchUsername ?? null,
+          cardType:        'persona',
+          rarity:          ny.card.rarity,
+          title:           ny.card.title,
+          klass:           ny.card.class,
+          archetype:       ny.card.archetype,
+          level:           oppdatertMedlem.level,
+          xp:              oppdatertMedlem.xp,
+          coinsBalance:    nyBalance,
+          cardNumber:      ny.collectionNumber,
+          cardImageUrl:    ny.imageUrl,
+          cardImageBuffer: ny.cardPng,
+          source:          'persona_reroll',
+        }).catch(() => {});
         return;
       }
 

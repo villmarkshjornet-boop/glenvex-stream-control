@@ -664,6 +664,13 @@ interface PersonaAdminSettings {
   cooldownMinutter:  number;
 }
 
+interface CardDropSettings {
+  discordCardDropChannelEnabled:      boolean;
+  discordCardDropChannelId:           string | null;
+  discordCardDropDmEnabled:           boolean;
+  twitchCardDropNotificationsEnabled: boolean;
+}
+
 const RARITY_BADGE: Record<string, string> = {
   Common:    'text-gray-400 border-gray-600/40 bg-gray-500/10',
   Rare:      'text-blue-400 border-blue-500/40 bg-blue-500/10',
@@ -680,6 +687,11 @@ function SamlekortTab() {
   });
   const [settingsOpen, setSettingsOpen]   = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [cardDropSettings, setCardDropSettings] = useState<CardDropSettings>({
+    discordCardDropChannelEnabled: false, discordCardDropChannelId: null,
+    discordCardDropDmEnabled: true, twitchCardDropNotificationsEnabled: false,
+  });
+  const [cardDropSaving, setCardDropSaving] = useState(false);
   const [generating, setGenerating]   = useState<Set<string>>(new Set());
   const [genError, setGenError]       = useState<Record<string, string>>({});
   const [search, setSearch]           = useState('');
@@ -699,6 +711,10 @@ function SamlekortTab() {
       .then(r => r.json())
       .then(d => { if (d.settings) setSettings(d.settings); })
       .catch(() => {});
+    fetch('/api/community-manager/card-settings')
+      .then(r => r.json())
+      .then(d => { if (d.settings) setCardDropSettings(d.settings); })
+      .catch(() => {});
   }, [loadPersonas]);
 
   const saveSettings = async () => {
@@ -710,6 +726,17 @@ function SamlekortTab() {
       });
     } catch {}
     setSettingsSaving(false);
+  };
+
+  const saveCardDropSettings = async () => {
+    setCardDropSaving(true);
+    try {
+      await fetch('/api/community-manager/card-settings', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cardDropSettings),
+      });
+    } catch {}
+    setCardDropSaving(false);
   };
 
   const generate = async (discordId: string) => {
@@ -849,6 +876,95 @@ function SamlekortTab() {
           >
             {settingsSaving ? 'Lagrer...' : 'Lagre innstillinger'}
           </button>
+
+          {/* ── Kortkanal — Card Drops ─────────────────────────────────── */}
+          <div className="border-t border-g-border/50 pt-4 space-y-3">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Kortkanal — Card Drops</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Post i kanal */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-g-text">Post nye kort i Discord-kanal</p>
+                  <button
+                    onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropChannelEnabled: !s.discordCardDropChannelEnabled }))}
+                    className={`w-9 h-5 rounded-full border transition-all relative ${
+                      cardDropSettings.discordCardDropChannelEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                      cardDropSettings.discordCardDropChannelEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                    }`} />
+                  </button>
+                </div>
+                <p className="text-[9px] text-g-muted">Poster kortbildet i valgt kanal etter generering</p>
+              </div>
+
+              {/* Send DM */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-g-text">Send kort på DM til brukeren</p>
+                  <button
+                    onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropDmEnabled: !s.discordCardDropDmEnabled }))}
+                    className={`w-9 h-5 rounded-full border transition-all relative ${
+                      cardDropSettings.discordCardDropDmEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                      cardDropSettings.discordCardDropDmEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                    }`} />
+                  </button>
+                </div>
+                <p className="text-[9px] text-g-muted">
+                  {cardDropSettings.discordCardDropDmEnabled
+                    ? 'Brukere mottar kortet privat'
+                    : 'Brukere får ikke kortet tilsendt privat'}
+                </p>
+              </div>
+
+              {/* Channel ID */}
+              <div className="space-y-1">
+                <p className="text-[11px] font-bold text-g-text">Discord kortkanal-ID</p>
+                <input
+                  value={cardDropSettings.discordCardDropChannelId ?? ''}
+                  onChange={e => setCardDropSettings(s => ({ ...s, discordCardDropChannelId: e.target.value || null }))}
+                  placeholder="Kanal-ID (f.eks. 1234567890)"
+                  className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+                />
+              </div>
+
+              {/* Twitch varsel */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-g-text">Varsle Twitch-chat ved korttrekk</p>
+                  <button
+                    onClick={() => setCardDropSettings(s => ({ ...s, twitchCardDropNotificationsEnabled: !s.twitchCardDropNotificationsEnabled }))}
+                    className={`w-9 h-5 rounded-full border transition-all relative ${
+                      cardDropSettings.twitchCardDropNotificationsEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                      cardDropSettings.twitchCardDropNotificationsEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                    }`} />
+                  </button>
+                </div>
+                <p className="text-[9px] text-g-muted">Sender melding i Twitch-chat når noen får nytt kort</p>
+              </div>
+            </div>
+
+            {/* Warnings */}
+            {cardDropSettings.discordCardDropChannelEnabled && !cardDropSettings.discordCardDropChannelId && (
+              <p className="text-[9px] text-yellow-400">⚠️ Ingen kortkanal valgt — nye kort blir ikke postet offentlig.</p>
+            )}
+
+            <button
+              onClick={saveCardDropSettings}
+              disabled={cardDropSaving}
+              className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+            >
+              {cardDropSaving ? 'Lagrer...' : 'Lagre kortkanal'}
+            </button>
+          </div>
         </div>
       )}
 

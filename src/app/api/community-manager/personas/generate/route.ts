@@ -247,6 +247,39 @@ export async function POST(req: Request) {
   const { id: _omit, ...historikkRow } = personaRow as any;
   await db.from('community_persona_history').insert(historikkRow);
 
+  // Card drop channel post (communityCardSettings)
+  const cardSettings = ((wsRow as any)?.settings_json?.communityCardSettings ?? {}) as any;
+  if (cardSettings.discordCardDropChannelEnabled && cardSettings.discordCardDropChannelId) {
+    const token = process.env.DISCORD_TOKEN;
+    if (token) {
+      const displayName = (member as any).display_name || (member as any).username || discordId.slice(0, 8);
+      const RARITY_COLOR_MAP: Record<string, number> = { Common: 0x9e9e9e, Rare: 0x1565c0, Epic: 0x7b1fa2, Legendary: 0xf9a825, Mythic: 0xd50000 };
+      const banners: Record<string, string> = { Mythic: '⚡', Legendary: '✨', Epic: '✨', Rare: '💎', Common: '🎴' };
+      const banner = banners[card.rarity] ?? '🎴';
+      const embed = {
+        title:       `${banner} Nytt samlekort generert!`,
+        description: `**${displayName}** fikk et **${card.rarity.toUpperCase()}**-kort: **${card.title}**\nClass: ${card.class}`,
+        color:       RARITY_COLOR_MAP[card.rarity] ?? 0x9e9e9e,
+        image:       imageUrl ? { url: imageUrl } : undefined,
+        footer:      { text: `Admin-generert · ${card.rarity} · Season: ${season}` },
+        timestamp:   now,
+      };
+      try {
+        await fetch(`https://discord.com/api/v10/channels/${cardSettings.discordCardDropChannelId}/messages`, {
+          method:  'POST',
+          headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ embeds: [embed] }),
+        });
+        await db.from('community_card_drop_events').insert({
+          workspace_id: wsId, user_id: discordId, rarity: card.rarity,
+          card_type: 'persona', source: 'admin_generate',
+          discord_channel_posted: true, dm_sent: false, twitch_sent: false,
+          metadata: { title: card.title, klass: card.class, imageUrl },
+        });
+      } catch {}
+    }
+  }
+
   // Discord showcase post
   if (personaSettings.showcaseAktiv && personaSettings.showcaseKanalId && imageUrl) {
     const token = process.env.DISCORD_TOKEN;
