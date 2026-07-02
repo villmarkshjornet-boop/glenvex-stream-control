@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceId } from '@/lib/workspace';
 import { getDb } from '@/lib/db';
+import { requireAuth } from '@/lib/requireAuth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const authError = requireAuth(req);
+  if (authError) return authError;
+
   const { channelId, message } = await req.json();
   if (!channelId || !message?.trim()) {
     return NextResponse.json({ error: 'Mangler kanal eller melding' }, { status: 400 });

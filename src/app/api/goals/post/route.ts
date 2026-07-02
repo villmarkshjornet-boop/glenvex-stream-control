@@ -4,6 +4,7 @@ import { getAnnonseringsKanalId } from '@/lib/discordChannel';
 import { postOgOppdater } from '@/lib/discordMessages';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { requireAuth } from '@/lib/requireAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ function botHeaders() {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = requireAuth(req);
+  if (authError) return authError;
+
   const { goals, live } = await req.json() as {
     goals: { type: string; label: string; mal: number; gjeldende: number; aktiv: boolean }[];
     live: { followers: number; discordMembres: number };

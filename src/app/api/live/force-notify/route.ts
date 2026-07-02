@@ -1,15 +1,19 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { postLiveEmbed } from '@/lib/discord';
 import { getLiveKanalId } from '@/lib/discordChannel';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { requireAuth } from '@/lib/requireAuth';
 import type { StreamInfo } from '@/types';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authError = requireAuth(req);
+  if (authError) return authError;
+
   const wsId = getWorkspaceId();
   const db   = getDb();
 
