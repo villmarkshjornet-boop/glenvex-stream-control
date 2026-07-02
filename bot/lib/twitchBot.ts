@@ -16,6 +16,7 @@ import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId a
 import { addTwitchMessageXP } from './memberTracker';
 import { verifyLinkCode } from './twitchLinkService';
 import { checkCompliance } from './complianceEngine';
+import { canPostToTwitch } from './postingGate';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
@@ -894,17 +895,25 @@ export function startTwitchBot() {
 }
 
 export function sendTwitchPromoToChat(msg: string): void {
-  const compliance = checkCompliance({
-    content: msg,
-    channel: 'twitch_chat',
-    category: 'partner_promo',
-    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
-  });
-  if (!compliance.allowed) {
-    console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
-    return;
-  }
-  void chatSend(`#${KANAL}`, msg, { trigger: 'approved_proposal' });
+  void (async () => {
+    const workspaceId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const gate = await canPostToTwitch(workspaceId, 'partner_promo');
+    if (!gate.allowed) {
+      console.log(`[PostGate] Blocked Twitch post: ${gate.reason} — ${gate.detail}`);
+      return;
+    }
+    const compliance = checkCompliance({
+      content: msg,
+      channel: 'twitch_chat',
+      category: 'partner_promo',
+      workspaceId,
+    });
+    if (!compliance.allowed) {
+      console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
+      return;
+    }
+    void chatSend(`#${KANAL}`, msg, { trigger: 'approved_proposal' });
+  })();
 }
 
 export function stopTwitchBot() {
@@ -927,22 +936,30 @@ export function getChatMsgsLastMinute(): number {
 
 export function sendTwitchChatMessage(msg: string): void {
   if (!client) return;
-  const compliance = checkCompliance({
-    content: msg,
-    channel: 'twitch_chat',
-    category: 'system',
-    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
-  });
-  if (!compliance.allowed) {
-    console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
-    return;
-  }
-  client.say(`#${KANAL}`, msg).catch(() => {});
-  logSystemEvent({
-    source: 'twitch_bot', event_type: 'BOT_CHAT_MESSAGE',
-    title: msg.slice(0, 100), severity: 'info',
-    metadata: { trigger: 'poll_manager', channel: KANAL },
-  });
+  void (async () => {
+    const workspaceId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const gate = await canPostToTwitch(workspaceId, 'system');
+    if (!gate.allowed) {
+      console.log(`[PostGate] Blocked Twitch post: ${gate.reason} — ${gate.detail}`);
+      return;
+    }
+    const compliance = checkCompliance({
+      content: msg,
+      channel: 'twitch_chat',
+      category: 'system',
+      workspaceId,
+    });
+    if (!compliance.allowed) {
+      console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
+      return;
+    }
+    client?.say(`#${KANAL}`, msg).catch(() => {});
+    logSystemEvent({
+      source: 'twitch_bot', event_type: 'BOT_CHAT_MESSAGE',
+      title: msg.slice(0, 100), severity: 'info',
+      metadata: { trigger: 'poll_manager', channel: KANAL },
+    });
+  })();
 }
 
 export function onTwitchChatMessage(handler: (username: string, message: string) => void): void {
