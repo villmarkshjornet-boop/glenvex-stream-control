@@ -14,6 +14,7 @@ import { logApiError } from './observability';
 import { getBrainState } from './creatorBrain';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 import { addTwitchMessageXP } from './memberTracker';
+import { verifyLinkCode } from './twitchLinkService';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
@@ -34,9 +35,18 @@ async function chatSend(channel: string, message: string, context?: Record<strin
 }
 
 // Callback som index.ts setter for å tildele Discord Twitch-Sub-rolle
-let _onSubCallback: ((username: string) => Promise<void>) | null = null;
-export function setOnSubCallback(cb: (username: string) => Promise<void>): void {
+// twitchUserId er Twitch numeric user-id fra IRC tags (kan mangle for gift-mottakere)
+type OnSubCb = (twitchUsername: string, twitchUserId?: string, subTier?: string) => Promise<void>;
+let _onSubCallback: OnSubCb | null = null;
+export function setOnSubCallback(cb: OnSubCb): void {
   _onSubCallback = cb;
+}
+
+// Callback som index.ts setter for å behandle verifiserte Discord ↔ Twitch-koblinger
+type LinkVerifiedCb = (discordId: string, twitchUserId: string, twitchUsername: string) => void;
+let _onLinkVerifiedCallback: LinkVerifiedCb | null = null;
+export function setOnLinkVerifiedCallback(cb: LinkVerifiedCb): void {
+  _onLinkVerifiedCallback = cb;
 }
 
 // Henter Discord URL fra Supabase hver gang så det alltid er oppdatert
@@ -629,13 +639,13 @@ export function startTwitchBot() {
 
   // ─── SUBSCRIPTION ──────────────────────────────────────────────────────────
 
-  client.on('subscription', async (channel, username, _method, _message, _userstate) => {
+  client.on('subscription', async (channel, username, _method, _message, userstate) => {
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på ${BOT_BRAND}`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
     const svar = await aiSvar(`${username} har nettopp subscripet for første gang! Lag en veldig entusiastisk, personlig norsk takkemelding. Maks 2 setninger.`);
     await chatSend(channel, svar || `@${username} TUSEN TAKK for subben! 💜 Du er absolutt en legende! FeelsGoodMan PartyTime`, { trigger: 'sub', username });
-    _onSubCallback?.(username).catch(() => {});
+    _onSubCallback?.(username, (userstate as any)?.['user-id'], (userstate as any)?.['msg-param-sub-plan']).catch(() => {});
 
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       content: `🌟 **${username}** er nå subscriber! Takk for støtten! FeelsGoodMan`,
@@ -644,13 +654,13 @@ export function startTwitchBot() {
 
   // ─── RESUB ─────────────────────────────────────────────────────────────────
 
-  client.on('resub', async (channel, username, months, _message, _userstate, _methods) => {
+  client.on('resub', async (channel, username, months, _message, userstate, _methods) => {
     logBotAgentEvent({ source: 'twitch', event_type: 'resub', username, importance_score: 75, metadata: { months } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Resub: ${username} (${months} mnd)`, severity: 'info', metadata: { type: 'resub', giver: username, mottaker: username, months } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`, { trigger: 'resub', username, months });
-    _onSubCallback?.(username).catch(() => {});
+    _onSubCallback?.(username, (userstate as any)?.['user-id'], (userstate as any)?.['msg-param-sub-plan']).catch(() => {});
   });
 
   // ─── GIFT SUB ──────────────────────────────────────────────────────────────
@@ -662,7 +672,8 @@ export function startTwitchBot() {
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Gifter subs til community`, confidence_score: 0.85, metadata: { gifter: true } }).catch(() => {});
     const svar = await aiSvar(`${username} giftet sub til ${recipient}! Takk på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} gifter sub til @${recipient}! Sjenerøst! PogChamp`, { trigger: 'giftsub', username, recipient });
-    _onSubCallback?.(recipient).catch(() => {}); // recipient får sub-rollen
+    // Gift recipient: user-id not available from gift event tags — use username fallback
+    _onSubCallback?.(recipient, undefined, undefined).catch(() => {}); // recipient får sub-rollen
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
       content: `🎁 **${username}** giftet sub til **${recipient ?? 'noen'}**! Sjenerøst! PogChamp`,
     });
@@ -769,6 +780,32 @@ export function startTwitchBot() {
           { trigger: 'badge_unlock', username: tags.username }
         ).catch(() => {}), xpRes.leveledUp ? 2000 : 800);
       }
+    }
+
+    // ── !verify <kode> — Discord ↔ Twitch link-verifisering ─────────────────────
+    if (tekLower.startsWith('!verify ') || tekLower === '!verify') {
+      const parts  = tekst.trim().split(/\s+/);
+      const code   = parts[1] ?? '';
+      const twitchUserId = (tags as any)['user-id'] ?? '';
+      if (code.length >= 4 && twitchUserId) {
+        verifyLinkCode(twitchUserId, tags.username ?? brukernavn, code)
+          .then(result => {
+            if (result) {
+              chatSend(channel,
+                `✅ @${tags.username} — Twitch-kontoen din er nå koblet til Discord! 🔗 GlitchCat`,
+                { trigger: 'verify_success', twitchUsername: tags.username },
+              ).catch(() => {});
+              // Notify Discord via callback if registered
+              _onLinkVerifiedCallback?.(result.discordId, twitchUserId, tags.username ?? brukernavn);
+            } else {
+              client?.say(channel,
+                `/w ${tags.username} Ugyldig eller utløpt kode. Bruk /linktwitch i Discord for ny kode.`,
+              ).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+      return;
     }
 
     // Promotion engine: per-minutt teller + rullende buffer

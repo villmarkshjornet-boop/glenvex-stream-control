@@ -16,12 +16,27 @@ interface Member {
 }
 
 interface MemberOverview {
-  discord_id:            string;
-  workspace_id:          string;
-  display_name:          string;
-  username:              string;
-  nickname:              string | null;
-  top_role:              string;
+  discord_id:               string;
+  workspace_id:             string;
+  display_name:             string;
+  username:                 string;
+  nickname:                 string | null;
+  top_role:                 string;
+  // Unified model
+  member_type:              'discord' | 'twitch' | 'linked';
+  twitch_id:                string | null;
+  twitch_username:          string | null;
+  twitch_display_name:      string | null;
+  twitch_linked:            boolean;
+  discord_xp:               number;
+  twitch_xp:                number;
+  total_xp:                 number;
+  messages_discord:         number;
+  messages_twitch:          number;
+  last_discord_activity_at: string | null;
+  last_twitch_activity_at:  string | null;
+  last_seen_stream_at:      string | null;
+  // Core
   xp:                    number;
   level:                 number;
   messages:              number;
@@ -1130,6 +1145,11 @@ export default function CommunityManagerPage() {
                       m.epic_cards      > 0 ? '🔮' :
                       m.rare_cards      > 0 ? '💎' :
                       m.total_cards     > 0 ? '🎴' : null;
+                    const platformBadge =
+                      m.member_type === 'linked'  ? { label: '🔗 Koblet',  cls: 'border-emerald-500/40 text-emerald-400 bg-emerald-500/5' } :
+                      m.member_type === 'twitch'  ? { label: '📺 Twitch',  cls: 'border-purple-500/30 text-purple-400 bg-purple-500/5' } :
+                      m.twitch_linked             ? { label: '🔗 Koblet',  cls: 'border-emerald-500/40 text-emerald-400 bg-emerald-500/5' } :
+                      null;
                     return (
                       <div key={m.discord_id} onClick={() => selectMember(m.discord_id)}
                         className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-g-bg transition-colors ${i < filtrerte.length - 1 ? 'border-b border-g-border/50' : ''}`}>
@@ -1143,6 +1163,9 @@ export default function CommunityManagerPage() {
                             {m.twitch_sub_status && (
                               <span className="text-[8px] px-1.5 py-0.5 rounded-full border border-purple-500/40 text-purple-400 bg-purple-500/5 flex-shrink-0">SUB</span>
                             )}
+                            {platformBadge && (
+                              <span className={`text-[8px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${platformBadge.cls}`}>{platformBadge.label}</span>
+                            )}
                             {m.top_role !== 'MEMBER' && (
                               <span className="text-[8px] px-1.5 py-0.5 rounded-full border border-g-border text-g-muted flex-shrink-0">{m.top_role}</span>
                             )}
@@ -1150,7 +1173,13 @@ export default function CommunityManagerPage() {
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[9px]">
                             {rolle && <span className={`font-bold flex-shrink-0 ${rolle.farge.split(' ')[0]}`}>{rolle.navn}</span>}
                             <span className="text-g-muted font-mono">Lv {m.level}</span>
-                            <span className="text-g-green font-mono">{m.xp.toLocaleString()} XP</span>
+                            {m.member_type === 'linked' ? (
+                              <span className="text-g-green font-mono" title={`Discord: ${m.discord_xp} · Twitch: ${m.twitch_xp}`}>
+                                {m.total_xp.toLocaleString()} XP
+                              </span>
+                            ) : (
+                              <span className="text-g-green font-mono">{m.xp.toLocaleString()} XP</span>
+                            )}
                             <span className="text-yellow-400/80 font-mono">💰{m.coins_balance}</span>
                             {topRarityEmoji && <span className="text-g-muted">{topRarityEmoji} {m.total_cards}</span>}
                           </div>

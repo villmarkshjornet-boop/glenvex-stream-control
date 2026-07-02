@@ -17,7 +17,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -26,10 +26,12 @@ import { innsendCommand } from './commands/innsend';
 import { profilCommand } from './commands/profil';
 import { personaCommand } from './commands/persona';
 import { minekortCommand, handleMinekortButton } from './commands/minekort';
+import { linktwitchCommand } from './commands/linktwitch';
 import { adminCommand }   from './commands/admin';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins } from './lib/coinService';
 import { awardSubCard } from './lib/cardCollectionService';
+import { findMemberByTwitchId, storeUnmatchedSub } from './lib/twitchLinkService';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle, tildeltRolleKonfigurert } from './lib/roleManager';
@@ -1834,32 +1836,61 @@ async function sjekkPreHype() {
 const BOT_ADMIN_USERNAME = process.env.BOT_ADMIN_USERNAME ?? 'gkarlsen';
 const STATUS_KANAL_ID = process.env.STATUS_CHANNEL_ID ?? '1511722714623381645';
 
-async function tildelTwitchSubRolle(twitchUsername: string, subTier?: string): Promise<void> {
+async function tildelTwitchSubRolle(
+  twitchUsername: string,
+  twitchUserId?: string,
+  subTier?: string,
+): Promise<void> {
   const guild = client.guilds.cache.first();
   if (!guild) return;
+
   const ROLLE_NAVN = '⭐ Twitch Sub';
   let rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
   if (!rolle) {
     rolle = await guild.roles.create({ name: ROLLE_NAVN, color: 0x9146FF, reason: 'Auto-opprettet for Twitch subs' });
   }
-  const lower   = twitchUsername.toLowerCase();
-  const members = await guild.members.fetch().catch(() => guild.members.cache);
-  const match   = [...members.values()].find(m =>
-    m.user.username.toLowerCase() === lower ||
-    (m.nickname ?? '').toLowerCase() === lower
-  );
-  if (match && !match.roles.cache.has(rolle.id)) {
-    await match.roles.add(rolle, 'Twitch sub verifisert').catch(() => {});
+
+  // ── Steg 1: Prøv verifisert lookup via twitch_user_id (primær) ──────────────
+  let discordId: string | null = null;
+  let displayName = twitchUsername;
+
+  if (twitchUserId) {
+    const linked = await findMemberByTwitchId(twitchUserId);
+    if (linked) {
+      discordId   = linked.discordId;
+      displayName = linked.displayName;
+    }
   }
 
-  // Award coins + sub card to the matched Discord member (fire-and-forget)
-  if (match) {
-    const discordId   = match.user.id;
-    const displayName = match.displayName;
-    addSub(discordId, match.user.username, displayName);
-    awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
-    awardSubCard(discordId, twitchUsername, subTier).catch(() => {});
+  // ── Steg 2: Username fallback (kun mulig match — ingen garanti) ──────────────
+  if (!discordId) {
+    const lower       = twitchUsername.toLowerCase();
+    const guildMbrs   = await guild.members.fetch().catch(() => guild.members.cache);
+    const usernameHit = [...guildMbrs.values()].find(m =>
+      m.user.username.toLowerCase() === lower ||
+      (m.nickname ?? '').toLowerCase() === lower,
+    );
+    if (usernameHit) {
+      discordId   = usernameHit.user.id;
+      displayName = usernameHit.displayName;
+    }
   }
+
+  // ── Steg 3: Ingen match → lagre som unlinked sub ─────────────────────────────
+  if (!discordId) {
+    storeUnmatchedSub(twitchUsername, twitchUserId, subTier, 'sub').catch(() => {});
+    return;
+  }
+
+  // ── Tildel rolle + rewards ────────────────────────────────────────────────────
+  const guildMember = await guild.members.fetch(discordId).catch(() => null);
+  if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
+    await guildMember.roles.add(rolle, 'Twitch sub verifisert').catch(() => {});
+  }
+
+  addSub(discordId, twitchUsername, displayName);
+  awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
+  awardSubCard(discordId, twitchUsername, subTier).catch(() => {});
 }
 
 async function sikkerAdminTilGkarlsen(): Promise<void> {
@@ -2020,7 +2051,7 @@ client.once('clientReady', () => {
       const commandData = [
         liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand,
         socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand,
-        personaCommand, minekortCommand, adminCommand,
+        personaCommand, minekortCommand, linktwitchCommand, adminCommand,
       ].map(c => c.data.toJSON());
 
       const clientId = process.env.DISCORD_CLIENT_ID ?? '';
@@ -2142,6 +2173,19 @@ client.once('clientReady', () => {
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
 
   setOnSubCallback(tildelTwitchSubRolle);
+  setOnLinkVerifiedCallback(async (discordId, _twitchUserId, twitchUsername) => {
+    // When a Discord ↔ Twitch link is verified via !verify, check for pending unlinked subs
+    // and award the Twitch Sub role if applicable
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+    const ROLLE_NAVN = '⭐ Twitch Sub';
+    const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
+    if (!rolle) return;
+    const guildMember = await guild.members.fetch(discordId).catch(() => null);
+    if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
+      await guildMember.roles.add(rolle, `Twitch-kobling verifisert: ${twitchUsername}`).catch(() => {});
+    }
+  });
   sikkerAdminTilGkarlsen().catch(() => {});
 
   const statusKanal = client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined;

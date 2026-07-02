@@ -20,9 +20,24 @@ export interface MemberProfile {
   id: string;
   username: string;
   displayName: string;
-  nickname: string | null;     // server-specific nickname (null = not set)
-  topRole: string;             // OWNER | ADMIN | MODERATOR | VIP | SUBSCRIBER | BOOSTER | MEMBER
+  nickname: string | null;
+  topRole: string;
   twitchId: string | null;
+  // ── Unified Discord + Twitch model ─────────────────────────────────────────
+  memberType:             'discord' | 'twitch' | 'linked';
+  twitchUsername:         string | null;
+  twitchDisplayName:      string | null;
+  twitchLinked:           boolean;
+  discordAvatarUrl:       string | null;
+  discordXp:              number;
+  twitchXp:               number;
+  messagesDiscord:        number;
+  messagesTwitch:         number;
+  lastDiscordActivityAt:  string | null;
+  lastTwitchActivityAt:   string | null;
+  lastSeenStreamAt:       string | null;
+  joinedDiscordAt:        string | null;
+  // ───────────────────────────────────────────────────────────────────────────
   xp: number;
   level: number;
   messages: number;
@@ -80,11 +95,29 @@ function syncToSupabase(m: MemberProfile): void {
   if (!sb) return;
 
   const full = {
-    discord_id:       m.id,
-    workspace_id:     WORKSPACE_ID,
-    username:         m.username,
-    display_name:     m.displayName,
-    twitch_id:        m.twitchId ?? null,
+    discord_id:               m.id,
+    workspace_id:             WORKSPACE_ID,
+    username:                 m.username,
+    display_name:             m.displayName,
+    nickname:                 m.nickname               ?? null,
+    top_role:                 m.topRole                ?? 'MEMBER',
+    twitch_id:                m.twitchId               ?? null,
+    // Unified model
+    member_type:              m.memberType             ?? 'discord',
+    twitch_username:          m.twitchUsername         ?? null,
+    twitch_display_name:      m.twitchDisplayName      ?? null,
+    twitch_linked:            m.twitchLinked           ?? false,
+    discord_avatar_url:       m.discordAvatarUrl       ?? null,
+    discord_xp:               m.discordXp              ?? 0,
+    twitch_xp:                m.twitchXp               ?? 0,
+    total_xp:                 m.xp,
+    messages_discord:         m.messagesDiscord        ?? 0,
+    messages_twitch:          m.messagesTwitch         ?? 0,
+    last_discord_activity_at: m.lastDiscordActivityAt  ?? null,
+    last_twitch_activity_at:  m.lastTwitchActivityAt   ?? null,
+    last_seen_stream_at:      m.lastSeenStreamAt       ?? null,
+    joined_discord_at:        m.joinedDiscordAt        ?? null,
+    // Core
     xp:               m.xp,
     level:            m.level,
     messages:         m.messages,
@@ -155,13 +188,27 @@ export async function lasterMedlemmerFraSupabase(): Promise<void> {
     const existing = fs.existsSync(FILE) ? load() : {};
     const members: Record<string, MemberProfile> = { ...existing };
     for (const r of rows) {
+      const isTwitch = (r.discord_id as string).startsWith('tw_');
       members[r.discord_id] = {
-        id:               r.discord_id,
-        username:         r.username,
-        displayName:      r.display_name,
-        nickname:         r.nickname ?? null,
-        topRole:          r.top_role ?? 'MEMBER',
-        twitchId:         r.twitch_id ?? null,
+        id:                    r.discord_id,
+        username:              r.username,
+        displayName:           r.display_name,
+        nickname:              r.nickname            ?? null,
+        topRole:               r.top_role            ?? 'MEMBER',
+        twitchId:              r.twitch_id           ?? null,
+        memberType:            r.member_type         ?? (isTwitch ? 'twitch' : 'discord'),
+        twitchUsername:        r.twitch_username     ?? null,
+        twitchDisplayName:     r.twitch_display_name ?? null,
+        twitchLinked:          r.twitch_linked       ?? false,
+        discordAvatarUrl:      r.discord_avatar_url  ?? null,
+        discordXp:             r.discord_xp          ?? (isTwitch ? 0 : r.xp ?? 0),
+        twitchXp:              r.twitch_xp           ?? (isTwitch ? r.xp ?? 0 : 0),
+        messagesDiscord:       r.messages_discord    ?? (isTwitch ? 0 : r.messages ?? 0),
+        messagesTwitch:        r.messages_twitch     ?? (isTwitch ? r.messages ?? 0 : 0),
+        lastDiscordActivityAt: r.last_discord_activity_at ?? null,
+        lastTwitchActivityAt:  r.last_twitch_activity_at  ?? null,
+        lastSeenStreamAt:      r.last_seen_stream_at      ?? null,
+        joinedDiscordAt:       r.joined_discord_at        ?? r.joined_at ?? null,
         xp:               r.xp ?? 0,
         level:            r.level ?? 1,
         messages:         r.messages ?? 0,
@@ -239,9 +286,23 @@ export function upsertMember(
   if (!members[id]) {
     members[id] = {
       id, username, displayName,
-      nickname:  opts?.nickname ?? null,
-      topRole:   opts?.topRole  ?? 'MEMBER',
-      twitchId: null, xp: 0, level: 1,
+      nickname:              opts?.nickname     ?? null,
+      topRole:               opts?.topRole      ?? 'MEMBER',
+      twitchId:              null,
+      memberType:            'discord',
+      twitchUsername:        null,
+      twitchDisplayName:     null,
+      twitchLinked:          false,
+      discordAvatarUrl:      null,
+      discordXp:             0,
+      twitchXp:              0,
+      messagesDiscord:       0,
+      messagesTwitch:        0,
+      lastDiscordActivityAt: null,
+      lastTwitchActivityAt:  null,
+      lastSeenStreamAt:      null,
+      joinedDiscordAt:       opts?.guildJoinedAt ?? new Date().toISOString(),
+      xp: 0, level: 1,
       messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
       subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
       streakDays: 0, lastStreakDate: null,
@@ -356,7 +417,14 @@ export function addMessageXP(
   // Grant XP
   const members = load();
   const m: MemberProfile = members[id] ?? {
-    id, username, displayName, twitchId: null, xp: 0, level: 1,
+    id, username, displayName,
+    nickname: null, topRole: 'MEMBER', twitchId: null,
+    memberType: 'discord', twitchUsername: null, twitchDisplayName: null, twitchLinked: false,
+    discordAvatarUrl: null, discordXp: 0, twitchXp: 0,
+    messagesDiscord: 0, messagesTwitch: 0,
+    lastDiscordActivityAt: null, lastTwitchActivityAt: null, lastSeenStreamAt: null,
+    joinedDiscordAt: new Date().toISOString(),
+    xp: 0, level: 1,
     messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
     subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
     streakDays: 0, lastStreakDate: null,
@@ -382,10 +450,13 @@ export function addMessageXP(
   const streakBonus = Math.min(0.5, m.streakDays * XP_STREAK_MULT);
   xpTildelt = Math.round(xpTildelt * (1 + streakBonus));
 
-  m.xp += xpTildelt;
-  m.messages += 1;
-  m.level = levelFromXP(m.xp);
-  m.lastSeen = new Date().toISOString();
+  m.xp                    += xpTildelt;
+  m.messages              += 1;
+  m.discordXp              = (m.discordXp  ?? 0) + xpTildelt;
+  m.messagesDiscord        = (m.messagesDiscord ?? 0) + 1;
+  m.lastDiscordActivityAt  = new Date().toISOString();
+  m.level                  = levelFromXP(m.xp);
+  m.lastSeen               = new Date().toISOString();
 
   const nyeBadges = checkAllBadges(m);
   updateStreak(m);
@@ -447,7 +518,16 @@ export function addTwitchMessageXP(
   const members = load();
   const m: MemberProfile = members[id] ?? {
     id, username: twitchUsername, displayName,
-    twitchId: twitchUserId, xp: 0, level: 1,
+    nickname: null, topRole: 'MEMBER',
+    twitchId: twitchUserId,
+    memberType: 'twitch',
+    twitchUsername: twitchUsername, twitchDisplayName: twitchUsername,
+    twitchLinked: false, discordAvatarUrl: null,
+    discordXp: 0, twitchXp: 0,
+    messagesDiscord: 0, messagesTwitch: 0,
+    lastDiscordActivityAt: null, lastTwitchActivityAt: null, lastSeenStreamAt: null,
+    joinedDiscordAt: null,
+    xp: 0, level: 1,
     messages: 0, reactions: 0, voiceMinutes: 0, streamsWatched: 0, streamsAttended: 0,
     subs: 0, giftSubs: 0, raids: 0, engagementScore: 0, communityScore: 0,
     streakDays: 0, lastStreakDate: null,
@@ -467,10 +547,16 @@ export function addTwitchMessageXP(
   const streakBonus = Math.min(0.5, m.streakDays * XP_STREAK_MULT);
   xpTildelt = Math.round(xpTildelt * (1 + streakBonus));
 
-  m.xp       += xpTildelt;
-  m.messages += 1;
-  m.level     = levelFromXP(m.xp);
-  m.lastSeen  = new Date().toISOString();
+  m.xp                    += xpTildelt;
+  m.messages              += 1;
+  m.twitchXp               = (m.twitchXp  ?? 0) + xpTildelt;
+  m.messagesTwitch         = (m.messagesTwitch ?? 0) + 1;
+  m.lastTwitchActivityAt   = new Date().toISOString();
+  m.lastSeenStreamAt       = new Date().toISOString();
+  m.twitchUsername         = m.twitchUsername  ?? twitchUsername;
+  m.twitchDisplayName      = m.twitchDisplayName ?? twitchUsername;
+  m.level                  = levelFromXP(m.xp);
+  m.lastSeen               = new Date().toISOString();
 
   const nyeBadges = checkAllBadges(m);
   updateStreak(m);

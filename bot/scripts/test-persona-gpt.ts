@@ -47,6 +47,19 @@ const MEMBER: MemberProfile = {
   lastSeen:        new Date().toISOString(),
   lastWelcomed:    null,
   badges:          ['🏆 Founder', '🎙 Voice', '🔥 Veteran', '👑 MVP', '⭐ Star', '🎯 Pro'],
+  memberType:            'discord',
+  twitchUsername:        null,
+  twitchDisplayName:     null,
+  twitchLinked:          false,
+  discordAvatarUrl:      null,
+  discordXp:             1450,
+  twitchXp:              0,
+  messagesDiscord:       234,
+  messagesTwitch:        0,
+  lastDiscordActivityAt: new Date().toISOString(),
+  lastTwitchActivityAt:  null,
+  lastSeenStreamAt:      null,
+  joinedDiscordAt:       '2024-01-01T00:00:00Z',
 };
 
 const RARITY = 'Legendary' as const;
