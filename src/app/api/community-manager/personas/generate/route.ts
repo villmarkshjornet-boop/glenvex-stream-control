@@ -2,14 +2,9 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import OpenAI from 'openai';
+import { type PersonaRarity, RARITY_COLOR, rarityFromScore } from '@/lib/rarity';
 
 export const dynamic = 'force-dynamic';
-
-type PersonaRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
-
-const RARITY_COLOR: Record<PersonaRarity, number> = {
-  Common: 0x9e9e9e, Rare: 0x1565c0, Epic: 0x7b1fa2, Legendary: 0xf9a825, Mythic: 0xd50000,
-};
 
 const RARITY_VISUAL: Record<PersonaRarity, string> = {
   Common:    'dark steel military frame, high-contrast black and silver, veteran warrior with earned scars',
@@ -21,15 +16,11 @@ const RARITY_VISUAL: Record<PersonaRarity, string> = {
 
 function trekkSjeldenhet(m: any): PersonaRarity {
   const aktivitet   = Math.min(40, (m.messages ?? 0) * 0.15 + (m.voice_minutes ?? 0) * 0.05 + (m.streams_attended ?? 0) * 2);
-  const xpBonus     = Math.min(10, Math.floor((m.xp ?? 0) / 500));
+  const xpBonus     = Math.min(10, Math.floor((m.xp ?? 0) / 500)); // 500 = XP bonus scale, not level threshold
   const badgeBonus  = Math.min(15, (m.badges?.length ?? 0) * 3);
   const streakBonus = Math.min(15, (m.streak_days ?? 0) * 1.5);
   const score       = aktivitet + xpBonus + badgeBonus + streakBonus + Math.random() * 20;
-  if (score >= 96) return 'Mythic';
-  if (score >= 86) return 'Legendary';
-  if (score >= 71) return 'Epic';
-  if (score >= 51) return 'Rare';
-  return 'Common';
+  return rarityFromScore(score);
 }
 
 const ARCHETYPE_LIST = [

@@ -3,6 +3,7 @@ import path from 'path';
 import { logSystemEvent } from './systemEvents';
 import { createClient } from '@supabase/supabase-js';
 import { awardCoins, xpToCoins, COIN_RATES } from './coinService';
+import { XP_PER_LEVEL, levelFromXP, xpIntoCurrentLevel } from '@/lib/xp';
 
 function getSb() {
   const url = process.env.SUPABASE_URL;
@@ -59,7 +60,7 @@ export interface MemberProfile {
 }
 
 const XP_PER_MESSAGE  = 15;
-const XP_PER_LEVEL    = 250;
+// XP_PER_LEVEL is imported from @/lib/xp — single source of truth
 const DEFAULT_COOLDOWN_MS = 30_000;
 const XP_DAGLIG_BONUS = 50;   // første melding per dag
 const XP_LANG_MELDING = 10;   // bonus for meldinger >60 tegn
@@ -261,17 +262,6 @@ function computeScores(m: MemberProfile): void {
     Math.min(m.level * 2, 25) +
     Math.min(m.badges.length * 5, 25)
   ));
-}
-
-// ─── Level helpers ────────────────────────────────────────────────────────────
-
-export function levelFromXP(xp: number): number {
-  return Math.floor(xp / XP_PER_LEVEL) + 1;
-}
-
-export function xpToNextLevel(xp: number): number {
-  const currentLevelXP = (levelFromXP(xp) - 1) * XP_PER_LEVEL;
-  return XP_PER_LEVEL - (xp - currentLevelXP);
 }
 
 // ─── Upsert ───────────────────────────────────────────────────────────────────

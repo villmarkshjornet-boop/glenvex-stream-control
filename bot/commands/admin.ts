@@ -4,9 +4,8 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
 } from 'discord.js';
-import { getMember, setXP, upsertMember, levelFromXP } from '../lib/memberTracker';
-
-const XP_PER_LEVEL = 250;
+import { getMember, setXP, upsertMember } from '../lib/memberTracker';
+import { XP_PER_LEVEL, levelFromXP } from '@/lib/xp';
 
 export const adminCommand = {
   data: new SlashCommandBuilder()

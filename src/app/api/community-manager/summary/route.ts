@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { XP_PER_LEVEL } from '@/lib/xp';
 
 export const dynamic = 'force-dynamic';
-
-const XP_PER_LEVEL     = 500;
 const MILESTONE_LEVELS = [5, 15, 30, 50];
 const PRIO_ORDER       = { high: 0, medium: 1, low: 2 } as const;
 

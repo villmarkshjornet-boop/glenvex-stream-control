@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { RARITY_RANK } from '@/lib/rarity';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,10 +9,6 @@ const SORT_MAP: Record<string, string> = {
   created_at: 'created_at',
   title:      'title',
   rarity:     'rarity',
-};
-
-const RARITY_ORDER: Record<string, number> = {
-  Mythic: 0, Legendary: 1, Epic: 2, Rare: 3, Common: 4,
 };
 
 export async function GET(req: NextRequest) {
@@ -97,7 +94,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (sort === 'rarity') {
-    cards.sort((a, b) => (RARITY_ORDER[a.rarity] ?? 99) - (RARITY_ORDER[b.rarity] ?? 99));
+    cards.sort((a, b) => (RARITY_RANK[a.rarity as keyof typeof RARITY_RANK] ?? 99) - (RARITY_RANK[b.rarity as keyof typeof RARITY_RANK] ?? 99));
   }
 
   const byRarity: Record<string, number> = {};

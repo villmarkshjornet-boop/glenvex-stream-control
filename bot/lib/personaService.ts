@@ -11,6 +11,8 @@ import { addCardToCollection } from './cardCollectionService';
 import { renderPersonaCard } from './cardRenderer';
 import { logSystemEvent } from './systemEvents';
 import { selectArchetypeCandidates, getArchetype, archetypeExists, scoreAllArchetypes } from './archetypeLibrary';
+import { XP_PER_LEVEL } from '@/lib/xp';
+import { type PersonaRarity, RARITY_COLOR, rarityFromScore } from '@/lib/rarity';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 const REROLL_COIN_COST = COIN_RATES.CARD_REROLL_COST;  // 100 coins
@@ -32,31 +34,19 @@ const SEASON_SUFFIX = SEASON_STYLE[SEASON] ?? SEASON_STYLE.default;
 
 // ── Rarity — deterministisk score ────────────────────────────────────────────
 
-export type PersonaRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
+// PersonaRarity, RARITY_COLOR — imported from @/lib/rarity (single source of truth)
+export type { PersonaRarity };
 
 function trekkSjeldenhet(member: MemberProfile): PersonaRarity {
   const aktivitet   = Math.min(40, member.messages * 0.15 + member.voiceMinutes * 0.05 + member.streamsAttended * 2);
-  const xpBonus     = Math.min(10, Math.floor(member.xp / 500));
+  const xpBonus     = Math.min(10, Math.floor(member.xp / 500)); // 500 = XP bonus scale, not level threshold
   const badgeBonus  = Math.min(15, member.badges.length * 3);
   const streakBonus = Math.min(15, member.streakDays * 1.5);
-  const tilfeldig   = Math.random() * 20;
-  const score       = aktivitet + xpBonus + badgeBonus + streakBonus + tilfeldig;
-
-  if (score >= 96) return 'Mythic';
-  if (score >= 86) return 'Legendary';
-  if (score >= 71) return 'Epic';
-  if (score >= 51) return 'Rare';
-  return 'Common';
+  const score       = aktivitet + xpBonus + badgeBonus + streakBonus + Math.random() * 20;
+  return rarityFromScore(score);
 }
 
-// Rarity display config
-export const RARITY_COLOR: Record<PersonaRarity, number> = {
-  Common:    0x9e9e9e,
-  Rare:      0x1565c0,
-  Epic:      0x7b1fa2,
-  Legendary: 0xf9a825,
-  Mythic:    0xd50000,
-};
+export { RARITY_COLOR };
 
 const RARITY_BANNER: Record<PersonaRarity, string> = {
   Common:    '▪ COMMON',
@@ -162,15 +152,14 @@ function byggUnlocks(member: MemberProfile): string[] {
 }
 
 // ── XP progress bar ───────────────────────────────────────────────────────────
-
-const XP_PER_LEVEL = 250;
+// XP_PER_LEVEL imported from @/lib/xp
 
 function xpProgressBar(xp: number): string {
-  const level    = Math.floor(xp / XP_PER_LEVEL) + 1;
-  const levelXP  = (level - 1) * XP_PER_LEVEL;
-  const nextXP   = level * XP_PER_LEVEL;
-  const pct      = Math.min(1, (xp - levelXP) / (nextXP - levelXP));
-  const bar      = statBar(Math.round(pct * 100), 10);
+  const level   = Math.floor(Math.max(0, xp) / XP_PER_LEVEL) + 1;
+  const levelXP = (level - 1) * XP_PER_LEVEL;
+  const nextXP  = level * XP_PER_LEVEL;
+  const pct     = Math.min(1, Math.max(0, (xp - levelXP) / (nextXP - levelXP)));
+  const bar     = statBar(Math.round(pct * 100), 10);
   return `Lv ${level}  ${bar}  ${xp - levelXP}/${nextXP - levelXP} XP`;
 }
 

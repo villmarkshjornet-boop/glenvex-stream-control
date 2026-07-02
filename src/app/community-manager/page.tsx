@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { tidSiden } from '@/components/dashboard/helpers';
 import { PageHeader } from '@/components/ui';
+import { XP_PER_LEVEL, levelFromXP, xpIntoCurrentLevel, levelProgress } from '@/lib/xp';
+import { RARITY_ORDER, RARITY_BADGE_CLASSES, RARITY_GLOW_CLASSES, RARITY_RANK } from '@/lib/rarity';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -146,7 +148,7 @@ interface SummaryData {
   diagnostics: Diagnostics;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Constants (XP_PER_LEVEL, RARITY_* imported from @/lib/xp and @/lib/rarity) ─
 
 const LEVEL_ROLLER: { level: number; navn: string; farge: string }[] = [
   { level: 50, navn: 'Community Hero', farge: 'text-yellow-400 border-yellow-400/30' },
@@ -188,12 +190,9 @@ const PRIO_DOT: Record<string, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const XP_PER_LEVEL = 500;
-
-// NEVER trust a stored level column — always recompute from XP.
-function xpToLevel(xp: number): number {
-  return Math.floor(Math.max(0, xp) / XP_PER_LEVEL) + 1;
-}
+// XP_PER_LEVEL + levelFromXP imported from @/lib/xp — single source of truth.
+// NEVER trust the stored level column — always recompute from XP.
+const xpToLevel = levelFromXP;
 
 function getRolle(level: number) { return LEVEL_ROLLER.find(r => level >= r.level) ?? null; }
 
@@ -218,9 +217,9 @@ function getMemberSegments(m: Member): { navn: string; farge: string }[] {
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
-function XPBar({ xp, level }: { xp: number; level: number }) {
-  const XP_PER_LEVEL = 500;
-  const pct = Math.min(100, Math.round(((xp - (level - 1) * XP_PER_LEVEL) / XP_PER_LEVEL) * 100));
+function XPBar({ xp }: { xp: number }) {
+  const level = levelFromXP(xp);
+  const pct   = levelProgress(xp);
   return (
     <div className="w-full">
       <div className="flex justify-between text-[9px] text-g-muted mb-1">
@@ -364,7 +363,7 @@ function MemberDetailView({
                 </div>
               </div>
               <div className="mt-4">
-                <XPBar xp={displayXp} level={displayLevel} />
+                <XPBar xp={displayXp} />
               </div>
             </div>
 
@@ -797,23 +796,7 @@ function DashboardTab({ summary, loading, cardStats, setTab }: {
 
 // ── Kort Tab (kortsamling) ────────────────────────────────────────────────────
 
-const CARD_RARITY_GLOW: Record<string, string> = {
-  Mythic: 'border-red-500/40 shadow-red-500/10',
-  Legendary: 'border-yellow-500/40 shadow-yellow-500/10',
-  Epic: 'border-purple-500/40 shadow-purple-500/10',
-  Rare: 'border-blue-500/40 shadow-blue-500/10',
-  Common: 'border-g-border',
-};
-
-const CARD_RARITY_BADGE: Record<string, string> = {
-  Mythic: 'text-red-400 bg-red-500/10 border-red-500/30',
-  Legendary: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
-  Epic: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
-  Rare: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-  Common: 'text-gray-400 bg-gray-500/10 border-gray-500/30',
-};
-
-const CARD_KORT_RARITY_ORDER = ['Mythic', 'Legendary', 'Epic', 'Rare', 'Common'];
+// RARITY_GLOW_CLASSES, RARITY_BADGE_CLASSES, RARITY_ORDER imported from @/lib/rarity
 
 function KortTab() {
   const [cards, setCards]                 = useState<CardEntry[]>([]);
@@ -865,7 +848,7 @@ function KortTab() {
   };
 
   const sorted = [...cards].sort((a, b) => {
-    if (cardSort === 'rarity') return CARD_KORT_RARITY_ORDER.indexOf(a.rarity) - CARD_KORT_RARITY_ORDER.indexOf(b.rarity);
+    if (cardSort === 'rarity') return (RARITY_RANK[a.rarity as keyof typeof RARITY_RANK] ?? 99) - (RARITY_RANK[b.rarity as keyof typeof RARITY_RANK] ?? 99);
     if (cardSort === 'title') return a.title.localeCompare(b.title);
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
@@ -945,7 +928,7 @@ function KortTab() {
           {sorted.map(card => (
             <div key={card.id}
               onClick={() => setSelectedCard(card)}
-              className={`relative bg-g-card border rounded-xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-all shadow-lg group ${CARD_RARITY_GLOW[card.rarity] ?? 'border-g-border'}`}>
+              className={`relative bg-g-card border rounded-xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-all shadow-lg group ${RARITY_GLOW_CLASSES[card.rarity as keyof typeof RARITY_GLOW_CLASSES] ?? 'border-g-border'}`}>
               {/* Card image */}
               <div className="aspect-[3/4] relative">
                 {card.card_image_url ? (
@@ -973,7 +956,7 @@ function KortTab() {
               <div className="p-2">
                 <p className="text-[10px] font-bold text-g-text truncate leading-tight">{card.title}</p>
                 <div className="flex items-center justify-between mt-1">
-                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${CARD_RARITY_BADGE[card.rarity] ?? 'text-g-muted border-g-border'}`}>
+                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${RARITY_BADGE_CLASSES[card.rarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border'}`}>
                     {card.rarity}
                   </span>
                   <span className="text-[8px] text-g-muted truncate ml-1">{card.display_name}</span>
@@ -1128,13 +1111,7 @@ interface CardDropSettings {
   twitchCardDropNotificationsEnabled: boolean;
 }
 
-const RARITY_BADGE: Record<string, string> = {
-  Common:    'text-gray-400 border-gray-600/40 bg-gray-500/10',
-  Rare:      'text-blue-400 border-blue-500/40 bg-blue-500/10',
-  Epic:      'text-purple-400 border-purple-500/40 bg-purple-500/10',
-  Legendary: 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10',
-  Mythic:    'text-red-400 border-red-500/40 bg-red-500/10',
-};
+// RARITY_BADGE replaced by RARITY_BADGE_CLASSES from @/lib/rarity
 
 function SamlekortTab() {
   const [personas, setPersonas]       = useState<PersonaEntry[]>([]);
@@ -1441,7 +1418,7 @@ function SamlekortTab() {
           {filtered.map((p, i) => {
             const isGenerating = generating.has(p.discordId);
             const err          = genError[p.discordId];
-            const rarityStyle  = p.rarity ? (RARITY_BADGE[p.rarity] ?? 'text-g-muted border-g-border') : null;
+            const rarityStyle  = p.rarity ? (RARITY_BADGE_CLASSES[p.rarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border') : null;
             return (
               <div
                 key={p.discordId}
