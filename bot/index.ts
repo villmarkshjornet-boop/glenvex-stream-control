@@ -57,7 +57,10 @@ import { initCreatorBrain, getBrainState } from './lib/creatorBrain';
 import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate } from './lib/streamStateSync';
 import { startLiveAgent, stopLiveAgent } from './lib/liveAgent';
 import { startPollManager, stopPollManager } from './lib/pollManager';
+import { getBotDb } from './lib/supabase';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
+import { checkCompliance } from './lib/complianceEngine';
+import { startAllSchedulers } from './core/scheduler';
 import OpenAI from 'openai';
 
 // Log + send Discord-melding
@@ -1125,12 +1128,32 @@ let forrigeFollowers = 0;
 
 async function sjekkGoals() {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const goalFil = path.join(process.cwd(), 'data', 'goals.json');
-    if (!fs.existsSync(goalFil)) return;
+    // Primary: read goals from Supabase workspaces.settings_json.viewer_goals
+    // Fallback: read from data/goals.json (Railway ephemeral disk — may be absent after redeploy)
+    let goals: any[] | null = null;
 
-    const goals = JSON.parse(fs.readFileSync(goalFil, 'utf-8')) as any[];
+    const db = getBotDb();
+    if (db) {
+      const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+      const { data } = await db
+        .from('workspaces')
+        .select('settings_json')
+        .eq('id', wsId)
+        .single();
+      const saved = data?.settings_json?.viewer_goals;
+      if (Array.isArray(saved) && saved.length > 0) {
+        goals = saved;
+      }
+    }
+
+    // File fallback
+    if (!goals) {
+      const fs = require('fs');
+      const path = require('path');
+      const goalFil = path.join(process.cwd(), 'data', 'goals.json');
+      if (!fs.existsSync(goalFil)) return;
+      goals = JSON.parse(fs.readFileSync(goalFil, 'utf-8')) as any[];
+    }
     const aktive = goals.filter((g: any) => g.aktiv && g.mal > 0);
     if (aktive.length === 0) return;
 
@@ -1265,6 +1288,18 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
           : aiTekst;
       }
     } catch {}
+  }
+
+  const compliance = checkCompliance({
+    content: typeof tekst === 'string' ? tekst : JSON.stringify(tekst).slice(0, 500),
+    channel: 'discord_channel',
+    category: 'partner_promo',
+    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+    metadata: { partner: partner.navn, channelId: kanal.id },
+  });
+  if (!compliance.allowed) {
+    console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
+    return;
   }
 
   await discordSendMed('partner_promo', kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
@@ -1637,15 +1672,9 @@ client.on('threadCreate', async (thread: ThreadChannel) => {
   } catch {}
 });
 
-// ─── Schedulers ──────────────────────────────────────────────────────────────
-
-const POLL_INTERVAL        = 2  * 60 * 1000;
-const PROAKTIV_INTERVAL    = 8  * 60 * 60 * 1000;
-const CLIP_INTERVAL        = 12 * 60 * 60 * 1000;
-const STATS_SJEKK_INTERVAL = 6  * 60 * 60 * 1000;
-const RYDD_SJEKK_INTERVAL  = 6  * 60 * 60 * 1000;
-const SOCIALS_INTERVAL     = 8  * 60 * 60 * 1000; // Hver 8. time
-const GOALS_INTERVAL       = 6  * 60 * 60 * 1000; // Hver 6. time
+// ─── Schedulers (moved to bot/core/scheduler.ts) ─────────────────────────────
+// Interval constants and setInterval/setTimeout registrations are now in
+// bot/core/scheduler.ts.  startAllSchedulers() is called from clientReady.
 
 async function resetAnalyzerendeVods(grunn: string) {
   // Reset ALLE ANALYZING-VODs – Railway-restart dreper alle prosesser, ingen er aktive
@@ -2415,30 +2444,27 @@ client.once('clientReady', () => {
     statusKanal.send({ embeds: [embed] }).catch(() => {});
   }
 
+  // ── Schedulers — all recurring jobs are registered in bot/core/scheduler.ts ─
   // I multi_tenant-mode kjører WorkspaceManager live-sjekk for andre workspaces.
   // Default-workspace (WORKSPACE_ID) fortsetter å bruke checkLive() direkte.
-  setTimeout(() => { checkLive(); setInterval(checkLive, POLL_INTERVAL); }, 5_000);
-  // Heartbeat: skriv til system_events hvert 5. min (sikrer at Coverage aldri viser 0)
-  setTimeout(() => { writeHeartbeats(); setInterval(writeHeartbeats, 5 * 60_000); }, 60_000);
-  setInterval(sjekkPreHype, 10 * 60 * 1000); // Sjekk pre-hype hvert 10. min
-  setInterval(() => withCron('dispatch-approved-proposals', dispatchApprovedProposalsRunner), 2 * 60 * 1000);
-  // Phase 18: Learning Engine — nightly run + initial catch-up 10 min after startup
-  setTimeout(() => runLearningEngine().catch(() => {}), 10 * 60 * 1000);
-  setInterval(() => runLearningEngine().catch(() => {}), 24 * 60 * 60 * 1000);
-  setTimeout(() => { withCron('send-proaktiv', sendProaktivMelding); setInterval(() => withCron('send-proaktiv', sendProaktivMelding), PROAKTIV_INTERVAL); }, 30 * 60 * 1000);
-  setTimeout(() => { withCron('post-top-clip', postTopClip); setInterval(() => withCron('post-top-clip', postTopClip), CLIP_INTERVAL); }, 60 * 60 * 1000);
-  setTimeout(() => { withCron('del-socials', delSocialsSubtilt); setInterval(() => withCron('del-socials', delSocialsSubtilt), SOCIALS_INTERVAL); }, 3 * 60 * 60 * 1000);
-  setTimeout(() => { withCron('sjekk-goals', sjekkGoals); setInterval(() => withCron('sjekk-goals', sjekkGoals), GOALS_INTERVAL); }, 2 * 60 * 60 * 1000);
-  setInterval(sjekkUkentligStats, STATS_SJEKK_INTERVAL);
-  setInterval(autoRyddKanaler, RYDD_SJEKK_INTERVAL);
-  setInterval(kjørDuplikatSkan, RYDD_SJEKK_INTERVAL);
-  setInterval(() => sjekkStuckeVodsPeriodisk().catch(() => {}), 30 * 60 * 1000); // Stuck-sjekk hvert 30. min
-  setInterval(autoPostStreamplan, STATS_SJEKK_INTERVAL);
-  // Community Manager Phase C: MVP daily (check every 4h, posts only after noon),
-  // hype every 8h, idle check every 30 min
-  setTimeout(() => { withCron('community-mvp', sjekkOgSendMVP); setInterval(() => withCron('community-mvp', sjekkOgSendMVP), 4 * 60 * 60 * 1000); }, 60 * 60 * 1000);
-  setTimeout(() => { withCron('community-hype', sjekkOgSendHype); setInterval(() => withCron('community-hype', sjekkOgSendHype), 8 * 60 * 60 * 1000); }, 2 * 60 * 60 * 1000);
-  setInterval(() => sjekkIdlePrompt().catch(() => {}), 30 * 60 * 1000);
+  startAllSchedulers({
+    checkLive,
+    writeHeartbeats,
+    sjekkPreHype,
+    dispatchApprovedProposalsRunner,
+    sendProaktivMelding,
+    postTopClip,
+    delSocialsSubtilt,
+    sjekkGoals,
+    sjekkUkentligStats,
+    autoRyddKanaler,
+    kjørDuplikatSkan,
+    sjekkStuckeVodsPeriodisk,
+    autoPostStreamplan,
+    sjekkOgSendMVP,
+    sjekkOgSendHype,
+    sjekkIdlePrompt,
+  });
 });
 
 // ─── Meldingslytter ───────────────────────────────────────────────────────────

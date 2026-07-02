@@ -15,6 +15,7 @@ import { getBrainState } from './creatorBrain';
 import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId as getBotChatKanalId, getLiveKanalId as getBotLiveKanalId, getRaidKanalId as getBotRaidKanalId, getPauseTwitch, getPausePartnerPromo, getSvarSjanse, getCooldownMs, getDiscordInviteUrl, getTwitchUrl } from './botKanalPreferanser';
 import { addTwitchMessageXP } from './memberTracker';
 import { verifyLinkCode } from './twitchLinkService';
+import { checkCompliance } from './complianceEngine';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
@@ -893,6 +894,16 @@ export function startTwitchBot() {
 }
 
 export function sendTwitchPromoToChat(msg: string): void {
+  const compliance = checkCompliance({
+    content: msg,
+    channel: 'twitch_chat',
+    category: 'partner_promo',
+    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+  });
+  if (!compliance.allowed) {
+    console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
+    return;
+  }
   void chatSend(`#${KANAL}`, msg, { trigger: 'approved_proposal' });
 }
 
@@ -916,6 +927,16 @@ export function getChatMsgsLastMinute(): number {
 
 export function sendTwitchChatMessage(msg: string): void {
   if (!client) return;
+  const compliance = checkCompliance({
+    content: msg,
+    channel: 'twitch_chat',
+    category: 'system',
+    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+  });
+  if (!compliance.allowed) {
+    console.log(`[COMPLIANCE_BLOCKED] ${compliance.ruleId}: ${compliance.reason}`);
+    return;
+  }
   client.say(`#${KANAL}`, msg).catch(() => {});
   logSystemEvent({
     source: 'twitch_bot', event_type: 'BOT_CHAT_MESSAGE',
