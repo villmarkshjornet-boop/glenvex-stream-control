@@ -10,6 +10,7 @@ import { spendCoins, COIN_RATES } from './coinService';
 import { addCardToCollection } from './cardCollectionService';
 import { renderPersonaCard } from './cardRenderer';
 import { logSystemEvent } from './systemEvents';
+import { callChatCompletion, callImageGeneration } from './openaiWrapper';
 import { selectArchetypeCandidates, getArchetype, archetypeExists, scoreAllArchetypes } from './archetypeLibrary';
 import { XP_PER_LEVEL } from '@/lib/xp';
 import { type PersonaRarity, RARITY_COLOR, rarityFromScore } from '@/lib/rarity';
@@ -304,13 +305,17 @@ Svar KUN med JSON (ingen annen tekst):
 }`;
 
   try {
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.92,
-      max_tokens: 900,
-      response_format: { type: 'json_object' },
-    });
+    const res = await callChatCompletion(
+      {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.92,
+        max_tokens: 900,
+        response_format: { type: 'json_object' },
+      },
+      { source: 'persona_service', workspaceId: WORKSPACE_ID },
+    );
+    if (!res) return null;
 
     const raw    = res.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as Partial<PersonaCard>;
@@ -348,8 +353,8 @@ Svar KUN med JSON (ingen annen tekst):
       imagePrompt:       parsed.imagePrompt       ?? `Futuristic gaming character, neon green, cyberpunk trading card art`,
     };
   } catch (e: any) {
-    console.error('[Persona] genererPersonaJson feilet:', e?.message ?? e);
-    console.error(e?.stack);
+    // JSON parse errors or other non-OpenAI failures
+    console.error('[Persona] genererPersonaJson feilet (parse/logic):', e?.message ?? e);
     return null;
   }
 }
@@ -428,9 +433,9 @@ interface AvatarClassification {
 }
 
 async function classifyAvatar(avatarBuf: Buffer, openai: OpenAI): Promise<AvatarClassification> {
-  try {
-    const base64 = avatarBuf.toString('base64');
-    const res = await openai.chat.completions.create({
+  const base64 = avatarBuf.toString('base64');
+  const res = await callChatCompletion(
+    {
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
@@ -453,8 +458,15 @@ Respond with ONLY valid JSON, no other text:
       }],
       max_tokens: 80,
       temperature: 0,
-    });
+    },
+    { source: 'persona_service', workspaceId: WORKSPACE_ID },
+  );
 
+  if (!res) {
+    return { type: 'art', description: 'avatar character' };
+  }
+
+  try {
     const raw    = (res.choices[0]?.message?.content ?? '{}').trim();
     const parsed = JSON.parse(raw);
     const cls: AvatarClassification = {
@@ -464,7 +476,7 @@ Respond with ONLY valid JSON, no other text:
     console.log(`[Persona] Avatar classified as "${cls.type}": ${cls.description}`);
     return cls;
   } catch (e: any) {
-    console.warn('[Persona] Avatar classification feilet:', e?.message, '— defaulter til "art"');
+    console.warn('[Persona] Avatar classification JSON parse feilet:', e?.message, '— defaulter til "art"');
     return { type: 'art', description: 'avatar character' };
   }
 }
@@ -877,12 +889,14 @@ async function genererBilde(
   }
 
   // ── Forsøk 2: DALL-E 3 (tilgjengelig på alle tiers, ingen referansebilde) ─
+  const dalleRes = await callImageGeneration(
+    { model: 'dall-e-3', prompt: shortPrompt, n: 1, size: '1024x1792', quality: 'hd' },
+    { source: 'persona_service', workspaceId: WORKSPACE_ID },
+  );
+  if (!dalleRes) return null;
+
   try {
-    const res = await openai.images.generate({
-      model: 'dall-e-3', prompt: shortPrompt,
-      n: 1, size: '1024x1792', quality: 'hd',
-    });
-    const url = res.data?.[0]?.url;
+    const url = dalleRes.data?.[0]?.url;
     if (!url) { console.warn('[Persona] DALL-E 3 returnerte ingen URL'); return null; }
 
     const imgRes = await fetch(url, { signal: AbortSignal.timeout(30_000) });
@@ -891,7 +905,7 @@ async function genererBilde(
     console.log('[Persona] DALL-E 3 OK');
     return Buffer.from(await imgRes.arrayBuffer());
   } catch (e: any) {
-    console.error('[Persona] DALL-E 3 feilet:', e?.message ?? e);
+    console.error('[Persona] DALL-E 3 nedlasting feilet:', e?.message ?? e);
     return null;
   }
 }

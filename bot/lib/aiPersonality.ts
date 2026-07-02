@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { getRecentCrossPlatformContext } from './crossPlatformContext';
 import { logBotAgentEvent } from './agentLogger';
 import { getMemoryContext } from './aiMemory';
+import { callChatCompletion, callImageGeneration } from './openaiWrapper';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -135,17 +136,18 @@ export function setCooldown(userId: string): void {
   cooldowns.set(userId, Date.now());
 }
 
-async function genererBilde(client: OpenAI, prompt: string): Promise<string | null> {
-  try {
-    const response = await client.images.generate({
+async function genererBilde(_client: OpenAI, prompt: string): Promise<string | null> {
+  const response = await callImageGeneration(
+    {
       model: 'dall-e-3',
       prompt: `${prompt}. Dark cinematic style, neon green accents, gaming aesthetic. Norwegian gaming community.`,
       n: 1,
       size: '1024x1024',
       quality: 'standard',
-    });
-    return response.data?.[0]?.url ?? null;
-  } catch { return null; }
+    },
+    { source: 'ai_personality' },
+  );
+  return response?.data?.[0]?.url ?? null;
 }
 
 // ── Hovedfunksjon ─────────────────────────────────────────────────────────────
@@ -183,9 +185,9 @@ export async function generateChatReply(
 
   const erBilde = erBildeForespørsel(message);
 
-  try {
-    if (erBilde) {
-      const promptRes = await client.chat.completions.create({
+  if (erBilde) {
+    const promptRes = await callChatCompletion(
+      {
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'Lag en kort DALL-E bildeprompt på engelsk (maks 50 ord). Kun prompt, ingen forklaring.' },
@@ -193,35 +195,44 @@ export async function generateChatReply(
         ],
         max_tokens: 80,
         temperature: 0.7,
-      });
-      const bildePrompt = promptRes.choices[0]?.message?.content ?? message;
-      const [bildeUrl, svarRes] = await Promise.all([
-        genererBilde(client, bildePrompt),
-        client.chat.completions.create({
+      },
+      { source: 'ai_personality' },
+    );
+    const bildePrompt = promptRes?.choices[0]?.message?.content ?? message;
+    const [bildeUrl, svarRes] = await Promise.all([
+      genererBilde(client, bildePrompt),
+      callChatCompletion(
+        {
           model: 'gpt-4o-mini',
           messages: [{ role: 'system', content: systemMelding }, ...hist, { role: 'user', content: 'Kommenter kort at du genererer bildet (1 setning, norsk).' }],
           max_tokens: 80,
           temperature: 0.9,
-        }),
-      ]);
-      const tekst = svarRes.choices[0]?.message?.content ?? null;
-      if (tekst) { hist.push({ role: 'assistant', content: tekst }); history.set(channelId, hist.slice(-MAX_HISTORY)); }
-      return { tekst, bildeUrl };
-    }
+        },
+        { source: 'ai_personality' },
+      ),
+    ]);
+    const tekst = svarRes?.choices[0]?.message?.content ?? null;
+    if (tekst) { hist.push({ role: 'assistant', content: tekst }); history.set(channelId, hist.slice(-MAX_HISTORY)); }
+    return { tekst, bildeUrl };
+  }
 
-    const response = await client.chat.completions.create({
+  const response = await callChatCompletion(
+    {
       model: 'gpt-4o-mini',
       messages: [{ role: 'system', content: systemMelding }, ...hist],
       max_tokens: 200,
       temperature: 0.92,
-    });
+    },
+    { source: 'ai_personality' },
+  );
 
-    const reply = response.choices[0]?.message?.content ?? null;
-    if (reply) { hist.push({ role: 'assistant', content: reply }); history.set(channelId, hist.slice(-MAX_HISTORY)); }
-    return { tekst: reply, bildeUrl: null };
-  } catch {
+  if (!response) {
     return { tekst: `Noe gikk galt der, prøv igjen 😅`, bildeUrl: null };
   }
+
+  const reply = response.choices[0]?.message?.content ?? null;
+  if (reply) { hist.push({ role: 'assistant', content: reply }); history.set(channelId, hist.slice(-MAX_HISTORY)); }
+  return { tekst: reply, bildeUrl: null };
 }
 
 // ── Proaktive meldinger ───────────────────────────────────────────────────────
