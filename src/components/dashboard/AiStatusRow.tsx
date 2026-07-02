@@ -31,12 +31,13 @@ export function AiStatusRow({ coverage, loading }: Props) {
 
   if (loading) {
     return (
-      <div className="bg-g-card border border-g-border rounded-2xl px-5 py-4">
-        <div className="flex items-center gap-6">
+      <div className="bg-g-card border border-g-border rounded-xl p-4">
+        <div className="h-3 bg-g-border rounded w-20 mb-3 animate-pulse" />
+        <div className="space-y-2">
           {AI_SYSTEM_KEYS.map(s => (
-            <div key={s.key} className="flex items-center gap-1.5 animate-pulse">
+            <div key={s.key} className="flex items-center justify-between animate-pulse">
+              <div className="h-3 bg-g-border rounded w-24" />
               <div className="w-1.5 h-1.5 rounded-full bg-g-border" />
-              <span className="text-[10px] text-g-muted/30">{t(s.tKey)}</span>
             </div>
           ))}
         </div>
@@ -45,30 +46,33 @@ export function AiStatusRow({ coverage, loading }: Props) {
   }
 
   return (
-    <div className="bg-g-card border border-g-border rounded-2xl px-5 py-4">
-      <div className="flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold flex-shrink-0">{t('aiStatus.title')}</p>
-        <div className="flex items-center gap-5 flex-wrap">
-          {AI_SYSTEM_KEYS.map(sys => {
-            const entry = coverage?.find(c => c.key === sys.key);
-            const dot   = coverageDot(entry);
-            const lbl   = !entry ? t('aiStatus.noData')
-                        : entry.errors24h > 0 ? t('aiStatus.errors', { n: entry.errors24h })
-                        : entry.status === 'active' ? t('aiStatus.active')
-                        : entry.status === 'stale'  ? t('aiStatus.stale')
-                        : entry.passive ? t('aiStatus.passive')
-                        : t('aiStatus.unknown');
-            const isErr = entry && entry.errors24h > 0;
-            return (
-              <div key={sys.key} className="flex items-center gap-1.5" title={`${t(sys.tKey)}: ${lbl}`}>
+    <div className="bg-g-card border border-g-border rounded-xl p-4">
+      <h3 className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">
+        {t('aiStatus.title')}
+      </h3>
+      <div className="space-y-2">
+        {AI_SYSTEM_KEYS.map(sys => {
+          const entry = coverage?.find(c => c.key === sys.key);
+          const dot   = coverageDot(entry);
+          const lbl   = !entry ? t('aiStatus.noData')
+                      : entry.errors24h > 0 ? t('aiStatus.errors', { n: entry.errors24h })
+                      : entry.status === 'active' ? t('aiStatus.active')
+                      : entry.status === 'stale'  ? t('aiStatus.stale')
+                      : entry.passive ? t('aiStatus.passive')
+                      : t('aiStatus.unknown');
+          const isErr = entry && entry.errors24h > 0;
+          return (
+            <div key={sys.key} className="flex items-center justify-between">
+              <span className="text-xs text-g-muted">{t(sys.tKey)}</span>
+              <div className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-                <span className={`text-[10px] font-medium ${isErr ? 'text-red-400' : 'text-g-muted/70'}`}>
-                  {t(sys.tKey)}
+                <span className={`text-xs ${isErr ? 'text-red-400' : 'text-g-text'}`} title={lbl}>
+                  {isErr ? `${entry.errors24h} feil` : lbl}
                 </span>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
