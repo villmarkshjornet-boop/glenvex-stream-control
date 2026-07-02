@@ -676,7 +676,9 @@ Vær direkte og engasjerende.`,
     );
 
     await kanal.send({ embeds: [embed], components: [row] });
-  } catch {}
+  } catch (e: any) {
+    console.log('[AI_ERROR] sjekkGameContext:', e?.message);
+  }
 }
 
 // ─── Håndter duplikat-knapper ────────────────────────────────────────────────
@@ -969,7 +971,9 @@ async function postPreLiveHype(tittel: string, spill: string) {
     });
     const melding = res.choices[0]?.message?.content ?? '';
     if (melding) await discordSend(kanal, `🔴 **${BOT_BRAND} ER LIVE!** ${melding}`, { trigger: 'pre_live_hype' });
-  } catch {}
+  } catch (e: any) {
+    console.log('[AI_ERROR] postPreLiveHype:', e?.message);
+  }
 }
 
 // ─── Level-up handler ────────────────────────────────────────────────────────
@@ -1118,7 +1122,9 @@ async function smartVelkomst(userId: string, username: string, displayName: stri
       await kanal.send(melding);
       setLastWelcomed(userId);
     }
-  } catch {}
+  } catch (e: any) {
+    console.log('[AI_ERROR] postTilbakeVelkomst:', e?.message);
+  }
 }
 
 let forrigeFollowers = 0;
@@ -1196,7 +1202,9 @@ async function delSocialsSubtilt() {
         temperature: 0.95,
       });
       intro = res.choices[0]?.message?.content?.trim() ?? intro;
-    } catch {}
+    } catch (e: any) {
+      console.log('[AI_ERROR] delSocialsSubtilt:', e?.message);
+    }
   }
 
   const embed = new EmbedBuilder()
@@ -1264,7 +1272,9 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
           ? `${aiTekst}\n${partner.finalUrl}${kode}`
           : aiTekst;
       }
-    } catch {}
+    } catch (e: any) {
+      console.log('[AI_ERROR] sendPartnerPromoMelding:', e?.message);
+    }
   }
 
   await discordSendMed('partner_promo', kanal, tekst, { trigger: 'partner_promo', partner: partner.navn });
@@ -1608,7 +1618,9 @@ client.on('guildMemberAdd', async (member) => {
         temperature: 0.9,
       });
       velkomst = res.choices[0]?.message?.content ?? velkomst;
-    } catch {}
+    } catch (e: any) {
+      console.log('[AI_ERROR] guildMemberAdd welcome:', e?.message);
+    }
   }
 
   await discordSend(kanal, velkomst, { trigger: 'member_welcome', member: member.displayName }).catch(() => {});
@@ -1634,7 +1646,9 @@ client.on('threadCreate', async (thread: ThreadChannel) => {
     }
 
     await thread.send(melding);
-  } catch {}
+  } catch (e: any) {
+    console.log('[AI_ERROR] threadCreate:', e?.message);
+  }
 });
 
 // ─── Schedulers ──────────────────────────────────────────────────────────────
