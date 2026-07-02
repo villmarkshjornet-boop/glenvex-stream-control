@@ -61,6 +61,7 @@ import { getBotDb } from './lib/supabase';
 import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
 import { checkCompliance } from './lib/complianceEngine';
 import { startAllSchedulers } from './core/scheduler';
+import { processPendingDMs } from './lib/dmProcessor';
 import OpenAI from 'openai';
 
 // Log + send Discord-melding
@@ -2479,6 +2480,13 @@ client.once('clientReady', () => {
     sjekkOgSendHype,
     sjekkIdlePrompt,
   });
+
+  // ── Discord DM queue processor: hvert 60. sek ─────────────────────────────
+  setInterval(() => {
+    processPendingDMs(client).catch((err: Error) => {
+      console.log(`[SCHEDULER_ERROR] processPendingDMs: ${err?.message}`);
+    });
+  }, 60_000);
 });
 
 // ─── Meldingslytter ───────────────────────────────────────────────────────────
