@@ -42,13 +42,13 @@ a { color: inherit; }
 
 @layer components {
   /* Page title — used in PageHeader component */
-  .t-page { @apply text-xl font-black tracking-wider text-g-text uppercase; }
+  .t-page { @apply text-2xl font-semibold tracking-tight text-g-text; }
 
   /* Section header / card title */
-  .t-section { @apply text-[10px] font-bold tracking-widest uppercase text-g-muted; }
+  .t-section { @apply text-xs font-semibold tracking-widest uppercase text-g-muted; }
 
   /* Card sub-label / metadata */
-  .t-label { @apply text-[9px] font-bold tracking-widest uppercase text-g-muted/60; }
+  .t-label { @apply text-[11px] font-medium tracking-wide uppercase text-g-muted/70; }
 
   /* Body text */
   .t-body { @apply text-sm text-g-text leading-relaxed; }
@@ -57,10 +57,10 @@ a { color: inherit; }
   .t-detail { @apply text-xs text-g-muted leading-snug; }
 
   /* Caption / timestamp */
-  .t-caption { @apply text-[9px] text-g-muted/50; }
+  .t-caption { @apply text-[11px] text-g-muted/60; }
 
   /* Mono numbers / data */
-  .t-mono { @apply font-mono text-g-green font-black; }
+  .t-mono { @apply font-mono text-g-green font-bold; }
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────────── */
@@ -104,12 +104,40 @@ a { color: inherit; }
 /* ── Card hover micro-interaction ─────────────────────────────────────────── */
 
 .card-hover {
-  transition: border-color var(--transition-base), background-color var(--transition-base);
+  transition: border-color 200ms, background-color 200ms, transform 200ms, box-shadow 200ms;
 }
 .card-hover:hover {
-  border-color: rgba(26, 47, 26, 0.8);
-  background-color: rgba(255,255,255,0.01);
+  border-color: rgba(26, 47, 26, 1);
+  background-color: #111820;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
+
+/* ── Gradient text for premium headers ──────────────────────────────────────── */
+
+.gradient-text {
+  background: linear-gradient(135deg, #c8f5c8 0%, #4a6a4a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Glass card variant ─────────────────────────────────────────────────────── */
+
+.glass-card {
+  background: rgba(13, 17, 23, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(26, 47, 26, 0.8);
+}
+
+/* ── Live pulse dot — use with w-2 h-2 rounded-full bg-g-green ─────────────── */
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,65,0.4); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(0,255,65,0); }
+}
+.pulse-live { animation: pulse-live 2s ease-in-out infinite; }
 
 /* ── Print styles (for PDF export) ─────────────────────────────────────────── */
 
