@@ -16,13 +16,20 @@ interface CardProps {
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
   hover?: boolean;
+  variant?: 'default' | 'glass' | 'highlight';
 }
 
 const CARD_PAD = { none: '', sm: 'p-4', md: 'p-5', lg: 'p-6' };
 
-export function Card({ children, className = '', padding = 'md', hover = false }: CardProps) {
+const CARD_VARIANT: Record<string, string> = {
+  default:   'bg-g-card border border-g-border rounded-2xl',
+  glass:     'glass-card rounded-2xl',
+  highlight: 'bg-g-card border border-g-green/20 rounded-2xl shadow-[0_0_16px_rgba(0,255,65,0.06)]',
+};
+
+export function Card({ children, className = '', padding = 'md', hover = false, variant = 'default' }: CardProps) {
   return (
-    <div className={`bg-g-card border border-g-border rounded-2xl ${CARD_PAD[padding]} ${hover ? 'transition-colors hover:border-g-border/80 hover:bg-g-card-hover' : ''} ${className}`}>
+    <div className={`${CARD_VARIANT[variant]} ${CARD_PAD[padding]} ${hover ? 'card-hover' : ''} ${className}`}>
       {children}
     </div>
   );
@@ -41,7 +48,7 @@ export function CardInner({ children, className = '' }: { children: React.ReactN
 
 export function SectionLabel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={`text-[10px] text-g-muted uppercase tracking-widest font-bold ${className}`}>
+    <p className={`text-xs font-semibold tracking-widest uppercase text-g-muted border-b border-g-border/30 pb-2 mb-4 ${className}`}>
       {children}
     </p>
   );
@@ -58,10 +65,10 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, children }: PageHeaderProps) {
   return (
-    <div className="flex items-start justify-between">
+    <div className="flex items-start justify-between mb-8">
       <div>
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">{title}</h1>
-        {subtitle && <p className="text-xs text-g-muted mt-0.5">{subtitle}</p>}
+        <h1 className="text-2xl font-semibold tracking-tight gradient-text">{title}</h1>
+        {subtitle && <p className="text-sm text-g-muted mt-1.5">{subtitle}</p>}
       </div>
       {children && <div className="flex items-center gap-2 flex-shrink-0">{children}</div>}
     </div>
@@ -74,7 +81,7 @@ export function PageHeader({ title, subtitle, children }: PageHeaderProps) {
 
 export function BrandLogo({ subtitle = 'Creator OS', size = 'md' }: { subtitle?: string; size?: 'sm' | 'md' | 'lg' }) {
   const textSize = size === 'lg' ? 'text-2xl' : size === 'sm' ? 'text-sm' : 'text-lg';
-  const subSize  = size === 'lg' ? 'text-[10px]' : 'text-[8px]';
+  const subSize  = size === 'lg' ? 'text-xs' : 'text-[11px]';
   return (
     <div>
       <div
@@ -107,9 +114,9 @@ const BADGE_VARIANT: Record<BadgeVariant, string> = {
 };
 
 const BADGE_SIZE: Record<BadgeSize, string> = {
-  xs: 'px-1   py-0.5 text-[8px]',
-  sm: 'px-1.5 py-0.5 text-[9px]',
-  md: 'px-2   py-1   text-[10px]',
+  xs: 'px-1.5 py-0.5 text-[11px]',
+  sm: 'px-1.5 py-0.5 text-[11px]',
+  md: 'px-2   py-1   text-xs',
 };
 
 interface BadgeProps {
@@ -143,7 +150,7 @@ const DOT_COLOR: Record<DotColor, string> = {
 export function StatusDot({ color, pulse = false, size = 'sm' }: { color: DotColor; pulse?: boolean; size?: 'xs' | 'sm' | 'md' }) {
   const sz = size === 'xs' ? 'w-1 h-1' : size === 'md' ? 'w-2 h-2' : 'w-1.5 h-1.5';
   return (
-    <span className={`inline-block rounded-full flex-shrink-0 ${sz} ${DOT_COLOR[color]} ${pulse ? 'animate-pulse' : ''}`} />
+    <span className={`inline-block rounded-full flex-shrink-0 ${sz} ${DOT_COLOR[color]} ${pulse ? 'pulse-live' : ''}`} />
   );
 }
 
@@ -157,6 +164,9 @@ interface MetricCardProps {
   sub?: string;
   accent?: 'green' | 'yellow' | 'red' | 'default';
   className?: string;
+  trend?: string;
+  trendUp?: boolean;
+  suffix?: string;
 }
 
 const METRIC_ACCENT: Record<string, string> = {
@@ -166,12 +176,19 @@ const METRIC_ACCENT: Record<string, string> = {
   default: 'text-g-text',
 };
 
-export function MetricCard({ label, value, sub, accent = 'default', className = '' }: MetricCardProps) {
+export function MetricCard({ label, value, sub, accent = 'default', className = '', trend, trendUp, suffix }: MetricCardProps) {
   return (
-    <div className={`bg-g-card border border-g-border rounded-2xl p-5 ${className}`}>
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-1">{label}</p>
-      <p className={`text-3xl font-black ${METRIC_ACCENT[accent]}`}>{value}</p>
-      {sub && <p className="text-[9px] text-g-muted/60 mt-1">{sub}</p>}
+    <div className={`bg-g-card border border-g-border rounded-xl p-4 space-y-1 ${className}`}>
+      <p className="text-[11px] font-medium tracking-widest uppercase text-g-muted">{label}</p>
+      <p className={`text-2xl font-mono font-bold ${METRIC_ACCENT[accent]}`}>
+        {value}{suffix && <span className="text-base text-g-muted ml-1">{suffix}</span>}
+      </p>
+      {sub && <p className="text-[11px] text-g-muted/60 mt-1">{sub}</p>}
+      {trend && (
+        <p className={`text-xs font-medium ${trendUp ? 'text-g-green' : 'text-red-400'}`}>
+          {trend}
+        </p>
+      )}
     </div>
   );
 }
@@ -215,8 +232,8 @@ export function ProgressBar({ value, max = 100, color = 'green', size = 'sm', sh
   return (
     <div className={className}>
       {label && <div className="flex justify-between items-center mb-1">
-        <span className="text-[9px] text-g-muted">{label}</span>
-        <span className="text-[9px] text-g-muted font-mono">{Math.round(pct)}%</span>
+        <span className="text-[11px] text-g-muted">{label}</span>
+        <span className="text-[11px] text-g-muted font-mono">{Math.round(pct)}%</span>
       </div>}
       <div className={`w-full bg-g-border/40 rounded-full overflow-hidden ${PROG_SIZE[size]}`}>
         <div
@@ -248,7 +265,7 @@ interface TabBarProps {
 
 export function TabBar({ tabs, active, onChange, className = '', size = 'md' }: TabBarProps) {
   const btnBase = size === 'sm'
-    ? 'px-3 py-1.5 text-[10px]'
+    ? 'px-3 py-1.5 text-[11px]'
     : 'px-4 py-2 text-xs';
   return (
     <div className={`flex items-center gap-1 border-b border-g-border/50 ${className}`}>
@@ -264,7 +281,7 @@ export function TabBar({ tabs, active, onChange, className = '', size = 'md' }: 
         >
           {tab.label}
           {tab.badge !== undefined && (
-            <span className={`text-[8px] px-1 rounded font-bold border ${
+            <span className={`text-[11px] px-1 rounded font-bold border ${
               active === tab.id ? 'text-g-green border-g-green/30 bg-g-green/10' : 'text-g-muted border-g-border'
             }`}>{tab.badge}</span>
           )}
@@ -325,7 +342,7 @@ export function SettingsRow({ label, hint, children, className = '' }: SettingsR
     <div className={`flex items-center justify-between gap-4 py-3 border-b border-g-border/30 last:border-b-0 ${className}`}>
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold text-g-text">{label}</p>
-        {hint && <p className="text-[10px] text-g-muted mt-0.5 leading-snug">{hint}</p>}
+        {hint && <p className="text-[11px] text-g-muted mt-0.5 leading-snug">{hint}</p>}
       </div>
       <div className="flex-shrink-0">{children}</div>
     </div>
@@ -350,7 +367,7 @@ export function FilterBar({ filters, active, onChange, className = '' }: FilterB
         <button
           key={f.id}
           onClick={() => onChange(f.id)}
-          className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+          className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition-all ${
             active === f.id
               ? 'bg-g-green/10 text-g-green border-g-green/30'
               : 'bg-transparent text-g-muted border-g-border hover:text-g-text hover:border-g-border/80'
@@ -460,7 +477,7 @@ export function EmptyState({ title, description, icon, action, compact = false, 
     <div className={`flex flex-col items-center justify-center text-center ${compact ? 'py-6' : 'py-10'} ${className}`}>
       {icon && <p className={`${compact ? 'text-xl mb-2' : 'text-2xl mb-3'} opacity-30`}>{icon}</p>}
       <p className={`${compact ? 'text-xs' : 'text-sm'} font-semibold text-g-muted`}>{title}</p>
-      {description && <p className={`text-[10px] text-g-muted/60 mt-1 max-w-xs leading-relaxed`}>{description}</p>}
+      {description && <p className="text-[11px] text-g-muted/60 mt-1 max-w-xs leading-relaxed">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -498,16 +515,16 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'cta';
 type ButtonSize    = 'xs' | 'sm' | 'md' | 'lg';
 
 const BTN_VARIANT: Record<ButtonVariant, string> = {
-  primary:   'bg-g-green/10 border-g-green/30 text-g-green hover:bg-g-green/20',
+  primary:   'bg-g-green/10 border-g-green/25 text-g-green hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-[0_0_12px_rgba(0,255,65,0.1)]',
   secondary: 'bg-transparent border-g-border text-g-muted hover:text-g-text hover:border-g-border/80',
   ghost:     'bg-transparent border-transparent text-g-muted hover:text-g-text',
-  danger:    'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20',
+  danger:    'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/15',
   cta:       'bg-g-green border-g-green text-black hover:bg-g-green/80',
 };
 
 const BTN_SIZE: Record<ButtonSize, string> = {
-  xs: 'px-2   py-1    text-[9px]',
-  sm: 'px-3   py-1    text-[10px]',
+  xs: 'px-2   py-1    text-[11px]',
+  sm: 'px-3   py-1    text-xs',
   md: 'px-4   py-1.5  text-xs',
   lg: 'px-5   py-2    text-sm',
 };
@@ -524,7 +541,7 @@ export function Button({ variant = 'secondary', size = 'md', loading = false, cl
     <button
       {...props}
       disabled={disabled || loading}
-      className={`inline-flex items-center gap-1.5 border rounded-lg font-bold transition-all ${BTN_VARIANT[variant]} ${BTN_SIZE[size]} ${disabled || loading ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
+      className={`inline-flex items-center gap-1.5 border rounded-lg font-medium transition-all duration-200 ${BTN_VARIANT[variant]} ${BTN_SIZE[size]} ${disabled || loading ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
     >
       {loading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />}
       {!loading && icon && <span className="flex-shrink-0">{icon}</span>}
@@ -553,7 +570,7 @@ export function CollapseSection({ label, children, defaultOpen = false, badge, c
         className="w-full flex items-center justify-between px-5 py-3 bg-g-bg/30 hover:bg-g-bg/50 transition-all text-left"
       >
         <div className="flex items-center gap-2">
-          <span className="text-xs text-g-muted uppercase tracking-widest font-bold">{label}</span>
+          <span className="text-xs text-g-muted uppercase tracking-widest font-semibold">{label}</span>
           {badge}
         </div>
         <span className={`text-[11px] text-g-muted transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
@@ -570,8 +587,8 @@ export function CollapseSection({ label, children, defaultOpen = false, badge, c
 
 // ── Divider ───────────────────────────────────────────────────────────────────
 
-export function Divider({ className = '' }: { className?: string }) {
-  return <div className={`border-t border-g-border/40 ${className}`} />;
+export function Divider({ className }: { className?: string }) {
+  return <div className={`border-t border-g-border/40 ${className ?? ''}`} />;
 }
 
 

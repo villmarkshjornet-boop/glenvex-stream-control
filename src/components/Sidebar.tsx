@@ -135,37 +135,36 @@ export default function Sidebar() {
   const isDashboard = pathname === '/';
 
   return (
-    <aside className="w-52 min-h-screen bg-g-sidebar border-r border-g-border flex flex-col flex-shrink-0">
+    <aside className="w-52 min-h-screen bg-g-sidebar border-r border-g-border/60 flex flex-col flex-shrink-0 pt-4">
 
       {/* Logo */}
       <Link
         href="/"
-        className="px-4 py-4 border-b border-g-border block hover:bg-white/[0.02] transition-colors"
+        className="px-4 pb-4 border-b border-g-border/40 mb-4 block hover:bg-white/[0.02] transition-colors"
       >
         <div
-          className="text-g-green font-black text-base tracking-[0.15em] uppercase"
+          className="text-sm font-bold tracking-widest text-g-green uppercase"
           style={{ textShadow: '0 0 12px rgba(0,255,65,0.35)' }}
         >
           GLENVEX
         </div>
-        <div className="text-[8px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
+        <div className="text-[11px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
       </Link>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto px-2 space-y-0.5">
 
         {/* Dashboard — top-level direct link */}
         <Link
           href="/"
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
             isDashboard
-              ? 'bg-g-green/10 text-g-green border border-g-green/20'
-              : 'text-g-muted hover:text-g-text hover:bg-white/[0.03] border border-transparent'
+              ? 'bg-g-green/10 text-g-green border-r-2 border-g-green'
+              : 'text-g-muted/70 hover:text-g-text hover:bg-white/[0.03]'
           }`}
         >
-          <LayoutGrid size={14} className="flex-shrink-0" />
+          <LayoutGrid size={16} className="flex-shrink-0 w-4 h-4" />
           <span className="flex-1">Dashboard</span>
-          {isDashboard && <span className="w-1.5 h-1.5 rounded-full bg-g-green flex-shrink-0" />}
         </Link>
 
         {/* Groups */}
@@ -177,21 +176,21 @@ export default function Sidebar() {
             <div key={group.id}>
 
               {/* Group separator + toggle */}
-              <div className="mt-3 mb-0.5">
+              <div className="px-3 pb-1 pt-4">
                 <button
                   onClick={() => toggle(group.id)}
-                  className={`w-full flex items-center justify-between px-2 py-1 rounded transition-all group ${
-                    isActive ? 'text-g-green/70' : 'text-g-muted/50 hover:text-g-muted'
+                  className={`w-full flex items-center justify-between transition-all group ${
+                    isActive ? 'text-g-green/70' : 'text-g-muted/60 hover:text-g-muted'
                   }`}
                 >
-                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">{group.label}</span>
-                  <span className={`text-[10px] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-widest">{group.label}</span>
+                  <span className={`text-[11px] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>›</span>
                 </button>
               </div>
 
               {/* Group items */}
               {isOpen && (
-                <div className="space-y-0.5 ml-1">
+                <div className="space-y-0.5">
                   {group.items.map(item => {
                     const active = isItemActive(item.href, pathname);
                     const Icon   = item.icon;
@@ -199,15 +198,14 @@ export default function Sidebar() {
                       <Link
                         key={`${item.href}-${item.label}`}
                         href={item.href}
-                        className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[11px] transition-all ${
+                        className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
                           active
-                            ? 'text-g-green font-bold bg-g-green/5'
-                            : 'text-g-muted hover:text-g-text hover:bg-white/[0.02] font-medium'
+                            ? 'bg-g-green/10 text-g-green border-r-2 border-g-green'
+                            : 'text-g-muted/70 hover:text-g-text hover:bg-white/[0.03]'
                         }`}
                       >
-                        <Icon size={13} className="flex-shrink-0" />
+                        <Icon size={16} className="flex-shrink-0 w-4 h-4" />
                         <span className="flex-1 leading-none">{item.label}</span>
-                        {active && <span className="w-1 h-1 rounded-full bg-g-green flex-shrink-0" />}
                       </Link>
                     );
                   })}
@@ -219,10 +217,10 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer status */}
-      <div className="px-4 py-2.5 border-t border-g-border">
-        <Link href="/innstillinger#helse" className="flex items-center gap-1.5 group">
-          <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
-          <p className="text-[8px] text-g-muted/40 group-hover:text-g-muted transition-colors tracking-widest uppercase">
+      <div className="px-4 py-3 border-t border-g-border/40 mt-auto">
+        <Link href="/innstillinger#helse" className="flex items-center gap-2 group">
+          <span className="w-2 h-2 rounded-full bg-g-green flex-shrink-0 pulse-live" />
+          <p className="text-[11px] text-g-muted/50 group-hover:text-g-muted transition-colors tracking-widest uppercase">
             System Online
           </p>
         </Link>
