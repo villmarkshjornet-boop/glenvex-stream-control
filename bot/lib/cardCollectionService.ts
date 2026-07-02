@@ -48,6 +48,7 @@ export interface CollectionCard {
   stats:         Record<string, number> | null;
   metadata:      Record<string, unknown> | null;
   created_at:    string;
+  updated_at:    string;
 }
 
 interface AddCardParams {

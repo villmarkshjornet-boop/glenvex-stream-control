@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS community_cards (
   is_tradeable   BOOLEAN     NOT NULL DEFAULT true,
   stats          JSONB,
   metadata       JSONB,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_community_cards_user
