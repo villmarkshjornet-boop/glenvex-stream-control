@@ -1113,43 +1113,419 @@ interface CardDropSettings {
 
 // RARITY_BADGE replaced by RARITY_BADGE_CLASSES from @/lib/rarity
 
-function SamlekortTab() {
-  const [personas, setPersonas]       = useState<PersonaEntry[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [settings, setSettings]       = useState<PersonaAdminSettings>({
+// ── Deck types ────────────────────────────────────────────────────────────────
+
+interface DeckCard {
+  id: string;
+  title: string;
+  rarity: string;
+  card_type: string;
+  card_image_url: string | null;
+  card_number: number | null;
+  source: string;
+  is_active: boolean;
+  is_tradeable: boolean;
+  created_at: string;
+}
+
+interface DeckStats {
+  totalCards: number;
+  uniqueCards: number;
+  duplicates: number;
+  highestRarity: string;
+  activeCard: { id: string; title: string; rarity: string } | null;
+  subCardCount: number;
+  lastCardAt: string | null;
+}
+
+interface DeckEntry {
+  user: {
+    id: string;
+    displayName: string;
+    username: string;
+    level: number;
+    avatarUrl: string | null;
+  };
+  stats: DeckStats;
+  cards: DeckCard[];
+}
+
+// ── DeckUserRow ───────────────────────────────────────────────────────────────
+
+const USER_COLORS = [
+  'bg-violet-500/20 text-violet-300 border-violet-500/30',
+  'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  'bg-rose-500/20 text-rose-300 border-rose-500/30',
+  'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+];
+
+function userColorClass(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return USER_COLORS[Math.abs(h) % USER_COLORS.length];
+}
+
+function DeckUserRow({ deck, onOpen }: { deck: DeckEntry; onOpen: (d: DeckEntry) => void }) {
+  const colorCls = userColorClass(deck.user.id);
+  const rarityBadge = RARITY_BADGE_CLASSES[deck.stats.highestRarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border';
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 hover:bg-g-bg transition-colors cursor-pointer" onClick={() => onOpen(deck)}>
+      <div className={`w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 ${colorCls}`}>
+        {deck.user.avatarUrl ? (
+          <img src={deck.user.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
+        ) : (
+          <span className="text-[11px] font-black">{deck.user.displayName[0]?.toUpperCase() ?? '?'}</span>
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] font-bold text-g-text truncate">{deck.user.displayName}</span>
+          <span className="text-[9px] font-mono text-g-muted/60">Lv {deck.user.level}</span>
+          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${rarityBadge}`}>
+            {deck.stats.highestRarity}
+          </span>
+          {deck.stats.subCardCount > 0 && (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full border border-purple-500/30 text-purple-400 bg-purple-500/5 flex-shrink-0">SUB</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[9px]">
+          <span className="text-g-green font-mono">{deck.stats.totalCards} kort</span>
+          <span className="text-g-muted">{deck.stats.uniqueCards} unike</span>
+          {deck.stats.duplicates > 0 && <span className="text-yellow-400/70">{deck.stats.duplicates} duplikater</span>}
+          {deck.stats.activeCard && (
+            <span className="text-g-muted/60 truncate max-w-[120px] italic">{deck.stats.activeCard.title}</span>
+          )}
+          {deck.stats.lastCardAt && (
+            <span className="text-g-muted/40 flex-shrink-0">{tidSiden(deck.stats.lastCardAt)}</span>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={(e) => { e.stopPropagation(); onOpen(deck); }}
+        className="flex-shrink-0 px-3 py-1.5 text-[10px] font-bold border border-g-border text-g-muted rounded-lg hover:border-g-green/40 hover:text-g-green transition-all"
+      >
+        Åpne deck →
+      </button>
+    </div>
+  );
+}
+
+// ── DeckDrawer ────────────────────────────────────────────────────────────────
+
+type DrawerFilter = 'alle' | 'aktive' | 'duplikater' | 'låste' | 'sub';
+
+function DeckDrawer({
+  deck,
+  onClose,
+  onRefresh,
+}: {
+  deck: DeckEntry;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [filter, setFilter] = useState<DrawerFilter>('alle');
+  const [rarityFilter, setRarityFilter] = useState('');
+  const [drawerSearch, setDrawerSearch] = useState('');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [rerollMsg, setRerollMsg] = useState<Record<string, string>>({});
+
+  const doAction = async (cardId: string, action: string) => {
+    setActionLoading(cardId);
+    try {
+      const res = await fetch(`/api/community-manager/cards/${cardId}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as Record<string, unknown>;
+        if (action === 'reroll') {
+          setRerollMsg(prev => ({ ...prev, [cardId]: (d.error as string | undefined) ?? 'Reroll er kun tilgjengelig fra Discord-bot' }));
+        }
+      } else {
+        if (confirmDeleteId === cardId) setConfirmDeleteId(null);
+        onRefresh();
+      }
+    } catch {
+      if (action === 'reroll') {
+        setRerollMsg(prev => ({ ...prev, [cardId]: 'Reroll er kun tilgjengelig fra Discord-bot' }));
+      }
+    }
+    setActionLoading(null);
+  };
+
+  const titleCounts = deck.cards.reduce<Record<string, number>>((acc, c) => {
+    const key = c.title.toUpperCase();
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const seenTitles = new Set<string>();
+  const cardsWithCount = deck.cards.map(c => {
+    const key = c.title.toUpperCase();
+    const count = titleCounts[key];
+    const isFirstOfTitle = !seenTitles.has(key);
+    if (isFirstOfTitle) seenTitles.add(key);
+    return { ...c, dupCount: count, isFirstOfTitle };
+  });
+
+  const visible = cardsWithCount.filter(c => {
+    if (filter === 'aktive' && !c.is_active) return false;
+    if (filter === 'duplikater' && (titleCounts[c.title.toUpperCase()] ?? 1) <= 1) return false;
+    if (filter === 'låste' && c.is_tradeable) return false;
+    if (filter === 'sub' && c.card_type !== 'sub') return false;
+    if (rarityFilter && c.rarity !== rarityFilter) return false;
+    if (drawerSearch) {
+      const lc = drawerSearch.toLowerCase();
+      if (!c.title.toLowerCase().includes(lc) && !c.source.toLowerCase().includes(lc)) return false;
+    }
+    return true;
+  });
+
+  const rarityBadge = RARITY_BADGE_CLASSES[deck.stats.highestRarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border';
+  const colorCls = userColorClass(deck.user.id);
+
+  const FILTER_TABS: { key: DrawerFilter; label: string }[] = [
+    { key: 'alle',       label: 'Alle' },
+    { key: 'aktive',     label: 'Aktive' },
+    { key: 'duplikater', label: 'Duplikater' },
+    { key: 'låste',      label: 'Låste' },
+    { key: 'sub',        label: 'SUB' },
+  ];
+
+  const RARITIES = ['Mythic', 'Legendary', 'Epic', 'Rare', 'Common'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="w-full max-w-2xl bg-g-bg border-l border-g-border flex flex-col h-full overflow-hidden">
+        {/* Drawer header */}
+        <div className="flex items-start justify-between p-5 border-b border-g-border flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-full border flex items-center justify-center flex-shrink-0 ${colorCls}`}>
+              {deck.user.avatarUrl ? (
+                <img src={deck.user.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
+              ) : (
+                <span className="text-sm font-black">{deck.user.displayName[0]?.toUpperCase() ?? '?'}</span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-g-text">{deck.user.displayName}</span>
+                <span className="text-[9px] font-mono text-g-muted">Lv {deck.user.level}</span>
+                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${rarityBadge}`}>
+                  {deck.stats.highestRarity}
+                </span>
+              </div>
+              <p className="text-[9px] text-g-muted mt-0.5">
+                {deck.stats.totalCards} kort · {deck.stats.uniqueCards} unike · {deck.stats.duplicates} duplikater
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-g-muted hover:text-g-text text-xl font-bold flex-shrink-0 ml-4">×</button>
+        </div>
+
+        {/* Filter bar */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-g-border flex-shrink-0 flex-wrap">
+          {FILTER_TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setFilter(t.key)}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                filter === t.key
+                  ? 'border-g-green/40 text-g-green bg-g-green/10'
+                  : 'border-g-border text-g-muted hover:text-g-text'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+          <select
+            value={rarityFilter}
+            onChange={e => setRarityFilter(e.target.value)}
+            className="text-[10px] bg-g-card border border-g-border rounded-lg px-2 py-1 text-g-muted outline-none focus:border-g-green/50"
+          >
+            <option value="">Alle sjeldenheter</option>
+            {RARITIES.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <input
+            value={drawerSearch}
+            onChange={e => setDrawerSearch(e.target.value)}
+            placeholder="Søk kort..."
+            className="flex-1 min-w-[100px] bg-g-card border border-g-border rounded-lg px-2.5 py-1 text-[10px] text-g-text outline-none focus:border-g-green/50"
+          />
+        </div>
+
+        {/* Card grid */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {visible.length === 0 ? (
+            <div className="flex items-center justify-center h-40">
+              <p className="text-xs text-g-muted">Ingen kort i denne samlingen ennå.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              {visible.map(card => {
+                const glowCls = RARITY_GLOW_CLASSES[card.rarity as keyof typeof RARITY_GLOW_CLASSES] ?? 'border-g-border';
+                const badgeCls = RARITY_BADGE_CLASSES[card.rarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border';
+                const isConfirmingDelete = confirmDeleteId === card.id;
+                const isLoading = actionLoading === card.id;
+                const msg = rerollMsg[card.id];
+
+                return (
+                  <div
+                    key={card.id}
+                    className={`group relative bg-g-card border rounded-xl overflow-hidden flex flex-col shadow-sm ${glowCls}`}
+                  >
+                    {/* Image area */}
+                    <div className="relative aspect-[3/4] bg-g-bg flex-shrink-0">
+                      {card.card_image_url ? (
+                        <img
+                          src={card.card_image_url}
+                          alt={card.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className={`w-full h-full flex items-center justify-center ${colorCls}`}>
+                          <span className="text-2xl font-black opacity-60">{card.title[0]?.toUpperCase() ?? '?'}</span>
+                        </div>
+                      )}
+
+                      {/* Overlay badges */}
+                      <div className="absolute top-1.5 left-1.5 flex flex-col gap-1">
+                        {card.is_active && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-g-green text-black">AKTIV</span>
+                        )}
+                        {!card.is_tradeable && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/80 text-black">LÅST</span>
+                        )}
+                        {card.card_type === 'sub' && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/80 text-white">SUB</span>
+                        )}
+                      </div>
+
+                      {card.isFirstOfTitle && card.dupCount > 1 && (
+                        <div className="absolute top-1.5 right-1.5">
+                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-black/70 text-g-text border border-g-border">
+                            x{card.dupCount}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card info */}
+                    <div className="p-2 flex flex-col gap-1.5 flex-1">
+                      <p className="text-[10px] font-bold text-g-text leading-tight truncate" title={card.title}>
+                        {card.title}
+                      </p>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className={`text-[8px] font-bold px-1 py-0.5 rounded border ${badgeCls}`}>{card.rarity}</span>
+                        <span className="text-[8px] text-g-muted/50 capitalize">{card.source}</span>
+                      </div>
+                      <p className="text-[8px] text-g-muted/40 font-mono truncate" title={card.id}>{card.id.slice(0, 12)}…</p>
+                      <p className="text-[8px] text-g-muted/40">{tidSiden(card.created_at)}</p>
+
+                      {msg && (
+                        <p className="text-[8px] text-yellow-400 leading-tight">{msg}</p>
+                      )}
+
+                      {/* Actions */}
+                      {isConfirmingDelete ? (
+                        <div className="flex gap-1 mt-1">
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="flex-1 text-[8px] py-1 rounded border border-g-border text-g-muted hover:text-g-text transition-all"
+                          >
+                            Avbryt
+                          </button>
+                          <button
+                            onClick={() => doAction(card.id, 'delete')}
+                            disabled={isLoading}
+                            className="flex-1 text-[8px] py-1 rounded border border-red-500/40 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-all disabled:opacity-50"
+                          >
+                            {isLoading ? '...' : 'Slett'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-4 gap-1 mt-1">
+                          <button
+                            onClick={() => doAction(card.id, 'set_active')}
+                            disabled={isLoading || card.is_active || card.card_type !== 'persona'}
+                            title="Sett aktiv"
+                            className="text-[9px] py-1 rounded border border-g-green/30 text-g-green hover:bg-g-green/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            ★
+                          </button>
+                          <button
+                            onClick={() => doAction(card.id, card.is_tradeable ? 'lock' : 'unlock')}
+                            disabled={isLoading}
+                            title={card.is_tradeable ? 'Lås' : 'Lås opp'}
+                            className="text-[9px] py-1 rounded border border-g-border text-g-muted hover:text-g-text transition-all disabled:opacity-30"
+                          >
+                            {card.is_tradeable ? '🔒' : '🔓'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setRerollMsg(prev => { const n = { ...prev }; delete n[card.id]; return n; });
+                              doAction(card.id, 'reroll');
+                            }}
+                            disabled={isLoading}
+                            title="Reroll"
+                            className="text-[9px] py-1 rounded border border-g-border text-g-muted hover:text-g-text transition-all disabled:opacity-30"
+                          >
+                            🔁
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(card.id)}
+                            disabled={isLoading}
+                            title="Slett"
+                            className="text-[9px] py-1 rounded border border-red-500/20 text-red-400/70 hover:bg-red-500/10 hover:text-red-400 transition-all disabled:opacity-30"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SettingsTab ───────────────────────────────────────────────────────────────
+
+function SettingsTab() {
+  const [settings, setSettings]     = useState<PersonaAdminSettings>({
     showcaseAktiv: false, twitchVarselAktiv: false, showcaseKanalId: '', cooldownMinutter: 60,
   });
-  const [settingsOpen, setSettingsOpen]   = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [cardDropSettings, setCardDropSettings] = useState<CardDropSettings>({
     discordCardDropChannelEnabled: false, discordCardDropChannelId: null,
     discordCardDropDmEnabled: true, twitchCardDropNotificationsEnabled: false,
   });
   const [cardDropSaving, setCardDropSaving] = useState(false);
-  const [generating, setGenerating]   = useState<Set<string>>(new Set());
-  const [genError, setGenError]       = useState<Record<string, string>>({});
-  const [search, setSearch]           = useState('');
-
-  const loadPersonas = useCallback(() => {
-    setLoading(true);
-    fetch('/api/community-manager/personas')
-      .then(r => r.json())
-      .then(d => setPersonas(d.personas ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
 
   useEffect(() => {
-    loadPersonas();
     fetch('/api/community-manager/personas/settings')
       .then(r => r.json())
-      .then(d => { if (d.settings) setSettings(d.settings); })
+      .then(d => { if (d.settings) setSettings(d.settings as PersonaAdminSettings); })
       .catch(() => {});
     fetch('/api/community-manager/card-settings')
       .then(r => r.json())
-      .then(d => { if (d.settings) setCardDropSettings(d.settings); })
+      .then(d => { if (d.settings) setCardDropSettings(d.settings as CardDropSettings); })
       .catch(() => {});
-  }, [loadPersonas]);
+  }, []);
 
   const saveSettings = async () => {
     setSettingsSaving(true);
@@ -1173,324 +1549,277 @@ function SamlekortTab() {
     setCardDropSaving(false);
   };
 
-  const generate = async (discordId: string) => {
-    setGenerating(prev => new Set(prev).add(discordId));
-    setGenError(prev => { const n = { ...prev }; delete n[discordId]; return n; });
-    try {
-      const res  = await fetch('/api/community-manager/personas/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discordId }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setGenError(prev => ({ ...prev, [discordId]: data.error ?? 'Ukjent feil' }));
-      } else {
-        loadPersonas();
-      }
-    } catch {
-      setGenError(prev => ({ ...prev, [discordId]: 'Nettverksfeil' }));
+  return (
+    <div className="px-5 pb-5 space-y-4">
+      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold pt-4">Samlekort-innstillinger</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold text-g-text">Discord Showcase</p>
+            <button
+              onClick={() => setSettings(s => ({ ...s, showcaseAktiv: !s.showcaseAktiv }))}
+              className={`w-9 h-5 rounded-full border transition-all relative ${
+                settings.showcaseAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+              }`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                settings.showcaseAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+              }`} />
+            </button>
+          </div>
+          <p className="text-[9px] text-g-muted">Post kortet til Discord-kanal etter generering</p>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold text-g-text">Twitch-varsel</p>
+            <button
+              onClick={() => setSettings(s => ({ ...s, twitchVarselAktiv: !s.twitchVarselAktiv }))}
+              className={`w-9 h-5 rounded-full border transition-all relative ${
+                settings.twitchVarselAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+              }`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                settings.twitchVarselAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+              }`} />
+            </button>
+          </div>
+          <p className="text-[9px] text-g-muted">Send Twitch-chat-melding (kommer snart)</p>
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-[11px] font-bold text-g-text">Showcase-kanal ID</p>
+          <input
+            value={settings.showcaseKanalId}
+            onChange={e => setSettings(s => ({ ...s, showcaseKanalId: e.target.value }))}
+            placeholder="Discord kanal-ID (f.eks. 1234567890)"
+            className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-[11px] font-bold text-g-text">Cooldown (minutter)</p>
+          <input
+            type="number"
+            min={0}
+            max={10080}
+            value={settings.cooldownMinutter}
+            onChange={e => setSettings(s => ({ ...s, cooldownMinutter: Number(e.target.value) }))}
+            className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+          />
+          <p className="text-[9px] text-g-muted">Minimum tid mellom genereringer per member</p>
+        </div>
+      </div>
+
+      <button
+        onClick={saveSettings}
+        disabled={settingsSaving}
+        className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+      >
+        {settingsSaving ? 'Lagrer...' : 'Lagre innstillinger'}
+      </button>
+
+      <div className="border-t border-g-border/50 pt-4 space-y-3">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Kortkanal — Card Drops</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-g-text">Post nye kort i Discord-kanal</p>
+              <button
+                onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropChannelEnabled: !s.discordCardDropChannelEnabled }))}
+                className={`w-9 h-5 rounded-full border transition-all relative ${
+                  cardDropSettings.discordCardDropChannelEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                }`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                  cardDropSettings.discordCardDropChannelEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                }`} />
+              </button>
+            </div>
+            <p className="text-[9px] text-g-muted">Poster kortbildet i valgt kanal etter generering</p>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-g-text">Send kort på DM til brukeren</p>
+              <button
+                onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropDmEnabled: !s.discordCardDropDmEnabled }))}
+                className={`w-9 h-5 rounded-full border transition-all relative ${
+                  cardDropSettings.discordCardDropDmEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                }`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                  cardDropSettings.discordCardDropDmEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                }`} />
+              </button>
+            </div>
+            <p className="text-[9px] text-g-muted">
+              {cardDropSettings.discordCardDropDmEnabled
+                ? 'Brukere mottar kortet privat'
+                : 'Brukere får ikke kortet tilsendt privat'}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold text-g-text">Discord kortkanal-ID</p>
+            <input
+              value={cardDropSettings.discordCardDropChannelId ?? ''}
+              onChange={e => setCardDropSettings(s => ({ ...s, discordCardDropChannelId: e.target.value || null }))}
+              placeholder="Kanal-ID (f.eks. 1234567890)"
+              className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-g-text">Varsle Twitch-chat ved korttrekk</p>
+              <button
+                onClick={() => setCardDropSettings(s => ({ ...s, twitchCardDropNotificationsEnabled: !s.twitchCardDropNotificationsEnabled }))}
+                className={`w-9 h-5 rounded-full border transition-all relative ${
+                  cardDropSettings.twitchCardDropNotificationsEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
+                }`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                  cardDropSettings.twitchCardDropNotificationsEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
+                }`} />
+              </button>
+            </div>
+            <p className="text-[9px] text-g-muted">Sender melding i Twitch-chat når noen får nytt kort</p>
+          </div>
+        </div>
+
+        {cardDropSettings.discordCardDropChannelEnabled && !cardDropSettings.discordCardDropChannelId && (
+          <p className="text-[9px] text-yellow-400">Ingen kortkanal valgt — nye kort blir ikke postet offentlig.</p>
+        )}
+
+        <button
+          onClick={saveCardDropSettings}
+          disabled={cardDropSaving}
+          className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+        >
+          {cardDropSaving ? 'Lagrer...' : 'Lagre kortkanal'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── SamlekortTab ──────────────────────────────────────────────────────────────
+
+function SamlekortTab() {
+  const [decks, setDecks]               = useState<DeckEntry[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+  const [search, setSearch]             = useState('');
+  const [selectedDeck, setSelectedDeck] = useState<DeckEntry | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const loadDecks = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch('/api/community-manager/decks')
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) setError(d.error as string);
+        setDecks((d.decks ?? []) as DeckEntry[]);
+      })
+      .catch(() => setError('Nettverksfeil'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { loadDecks(); }, [loadDecks]);
+
+  const handleDeckRefresh = () => {
+    loadDecks();
+    if (selectedDeck) {
+      fetch('/api/community-manager/decks')
+        .then(r => r.json())
+        .then(d => {
+          const updated = ((d.decks ?? []) as DeckEntry[]).find(dk => dk.user.id === selectedDeck.user.id);
+          if (updated) setSelectedDeck(updated);
+        })
+        .catch(() => {});
     }
-    setGenerating(prev => { const n = new Set(prev); n.delete(discordId); return n; });
   };
 
-  const filtered = personas.filter(p =>
-    p.displayName.toLowerCase().includes(search.toLowerCase()) ||
-    p.username?.toLowerCase().includes(search.toLowerCase())
+  const totalCards = decks.reduce((s, d) => s + d.stats.totalCards, 0);
+  const filtered   = decks.filter(d =>
+    !search ||
+    d.user.displayName.toLowerCase().includes(search.toLowerCase()) ||
+    d.user.username.toLowerCase().includes(search.toLowerCase()),
   );
-
-  const withCard    = filtered.filter(p => p.hasCard).length;
-  const withoutCard = filtered.filter(p => !p.hasCard).length;
 
   return (
     <div className="space-y-4">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <p className="text-[9px] text-g-muted">
-            <span className="text-g-green font-mono font-bold">{withCard}</span> kort generert
-            {withoutCard > 0 && <span className="ml-2 text-g-muted/60">· {withoutCard} mangler</span>}
-          </p>
-        </div>
+      {/* Innstillinger (collapsible — renders SettingsTab when open) */}
+      <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
+        <button
+          onClick={() => setSettingsOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <span className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Innstillinger</span>
+          <span className={`text-[10px] text-g-muted transition-transform ${settingsOpen ? 'rotate-180' : ''}`}>▾</span>
+        </button>
+        {settingsOpen && <div className="border-t border-g-border/50"><SettingsTab /></div>}
+      </div>
+
+      {/* Deck list header */}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[9px] text-g-muted">
+          <span className="text-g-green font-mono font-bold">{decks.length}</span> brukere ·{' '}
+          <span className="text-g-green font-mono font-bold">{totalCards}</span> kort totalt
+        </p>
         <div className="flex items-center gap-2">
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Søk..."
+            placeholder="Søk bruker..."
             className="bg-g-card border border-g-border rounded-lg px-2.5 py-1 text-xs text-g-text outline-none focus:border-g-green/50 w-36"
           />
           <button
-            onClick={() => setSettingsOpen(o => !o)}
-            className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all ${
-              settingsOpen ? 'border-g-green/40 text-g-green bg-g-green/10' : 'border-g-border text-g-muted hover:text-g-text'
-            }`}
-          >
-            Innstillinger
-          </button>
-          <button
-            onClick={loadPersonas}
+            onClick={loadDecks}
             className="text-[10px] px-2.5 py-1 rounded-lg border border-g-border text-g-muted hover:text-g-text transition-all"
           >
-            Oppdater
+            ↻
           </button>
         </div>
       </div>
 
-      {/* Settings panel */}
-      {settingsOpen && (
-        <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Samlekort-innstillinger</p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Discord showcase toggle */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-g-text">Discord Showcase</p>
-                <button
-                  onClick={() => setSettings(s => ({ ...s, showcaseAktiv: !s.showcaseAktiv }))}
-                  className={`w-9 h-5 rounded-full border transition-all relative ${
-                    settings.showcaseAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
-                  }`}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                    settings.showcaseAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
-                  }`} />
-                </button>
-              </div>
-              <p className="text-[9px] text-g-muted">Post kortet til Discord-kanal etter generering</p>
-            </div>
-
-            {/* Twitch notification toggle */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-g-text">Twitch-varsel</p>
-                <button
-                  onClick={() => setSettings(s => ({ ...s, twitchVarselAktiv: !s.twitchVarselAktiv }))}
-                  className={`w-9 h-5 rounded-full border transition-all relative ${
-                    settings.twitchVarselAktiv ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
-                  }`}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                    settings.twitchVarselAktiv ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
-                  }`} />
-                </button>
-              </div>
-              <p className="text-[9px] text-g-muted">Send Twitch-chat-melding (kommer snart)</p>
-            </div>
-
-            {/* Showcase channel ID */}
-            <div className="space-y-1">
-              <p className="text-[11px] font-bold text-g-text">Showcase-kanal ID</p>
-              <input
-                value={settings.showcaseKanalId}
-                onChange={e => setSettings(s => ({ ...s, showcaseKanalId: e.target.value }))}
-                placeholder="Discord kanal-ID (f.eks. 1234567890)"
-                className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
-              />
-            </div>
-
-            {/* Cooldown */}
-            <div className="space-y-1">
-              <p className="text-[11px] font-bold text-g-text">Cooldown (minutter)</p>
-              <input
-                type="number"
-                min={0}
-                max={10080}
-                value={settings.cooldownMinutter}
-                onChange={e => setSettings(s => ({ ...s, cooldownMinutter: Number(e.target.value) }))}
-                className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
-              />
-              <p className="text-[9px] text-g-muted">Minimum tid mellom genereringer per member</p>
-            </div>
-          </div>
-
-          <button
-            onClick={saveSettings}
-            disabled={settingsSaving}
-            className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
-          >
-            {settingsSaving ? 'Lagrer...' : 'Lagre innstillinger'}
-          </button>
-
-          {/* ── Kortkanal — Card Drops ─────────────────────────────────── */}
-          <div className="border-t border-g-border/50 pt-4 space-y-3">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Kortkanal — Card Drops</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Post i kanal */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-g-text">Post nye kort i Discord-kanal</p>
-                  <button
-                    onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropChannelEnabled: !s.discordCardDropChannelEnabled }))}
-                    className={`w-9 h-5 rounded-full border transition-all relative ${
-                      cardDropSettings.discordCardDropChannelEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                      cardDropSettings.discordCardDropChannelEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
-                    }`} />
-                  </button>
-                </div>
-                <p className="text-[9px] text-g-muted">Poster kortbildet i valgt kanal etter generering</p>
-              </div>
-
-              {/* Send DM */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-g-text">Send kort på DM til brukeren</p>
-                  <button
-                    onClick={() => setCardDropSettings(s => ({ ...s, discordCardDropDmEnabled: !s.discordCardDropDmEnabled }))}
-                    className={`w-9 h-5 rounded-full border transition-all relative ${
-                      cardDropSettings.discordCardDropDmEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                      cardDropSettings.discordCardDropDmEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
-                    }`} />
-                  </button>
-                </div>
-                <p className="text-[9px] text-g-muted">
-                  {cardDropSettings.discordCardDropDmEnabled
-                    ? 'Brukere mottar kortet privat'
-                    : 'Brukere får ikke kortet tilsendt privat'}
-                </p>
-              </div>
-
-              {/* Channel ID */}
-              <div className="space-y-1">
-                <p className="text-[11px] font-bold text-g-text">Discord kortkanal-ID</p>
-                <input
-                  value={cardDropSettings.discordCardDropChannelId ?? ''}
-                  onChange={e => setCardDropSettings(s => ({ ...s, discordCardDropChannelId: e.target.value || null }))}
-                  placeholder="Kanal-ID (f.eks. 1234567890)"
-                  className="w-full bg-g-bg border border-g-border rounded-lg px-2.5 py-1.5 text-[11px] text-g-text outline-none focus:border-g-green/50 font-mono"
-                />
-              </div>
-
-              {/* Twitch varsel */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-g-text">Varsle Twitch-chat ved korttrekk</p>
-                  <button
-                    onClick={() => setCardDropSettings(s => ({ ...s, twitchCardDropNotificationsEnabled: !s.twitchCardDropNotificationsEnabled }))}
-                    className={`w-9 h-5 rounded-full border transition-all relative ${
-                      cardDropSettings.twitchCardDropNotificationsEnabled ? 'bg-g-green/20 border-g-green/50' : 'bg-g-bg border-g-border'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                      cardDropSettings.twitchCardDropNotificationsEnabled ? 'left-4 bg-g-green' : 'left-0.5 bg-g-muted/40'
-                    }`} />
-                  </button>
-                </div>
-                <p className="text-[9px] text-g-muted">Sender melding i Twitch-chat når noen får nytt kort</p>
-              </div>
-            </div>
-
-            {/* Warnings */}
-            {cardDropSettings.discordCardDropChannelEnabled && !cardDropSettings.discordCardDropChannelId && (
-              <p className="text-[9px] text-yellow-400">⚠️ Ingen kortkanal valgt — nye kort blir ikke postet offentlig.</p>
-            )}
-
-            <button
-              onClick={saveCardDropSettings}
-              disabled={cardDropSaving}
-              className="px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
-            >
-              {cardDropSaving ? 'Lagrer...' : 'Lagre kortkanal'}
-            </button>
-          </div>
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+          <p className="text-xs text-red-400">{error}</p>
         </div>
       )}
 
-      {/* Member list */}
+      {/* Deck list */}
       {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 bg-g-card border border-g-border rounded-xl animate-pulse" />
+        <div className="bg-g-card border border-g-border rounded-xl overflow-hidden space-y-0">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="h-14 bg-g-card border-b border-g-border/40 animate-pulse last:border-b-0" />
           ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
-          <p className="text-xs text-g-muted">Ingen membres funnet.</p>
+          <p className="text-xs text-g-muted">Ingen samlekort funnet.</p>
         </div>
       ) : (
         <div className="bg-g-card border border-g-border rounded-xl overflow-hidden">
-          {filtered.map((p, i) => {
-            const isGenerating = generating.has(p.discordId);
-            const err          = genError[p.discordId];
-            const rarityStyle  = p.rarity ? (RARITY_BADGE_CLASSES[p.rarity as keyof typeof RARITY_BADGE_CLASSES] ?? 'text-g-muted border-g-border') : null;
-            return (
-              <div
-                key={p.discordId}
-                className={`flex items-center gap-3 px-4 py-3 ${
-                  i < filtered.length - 1 ? 'border-b border-g-border/50' : ''
-                } ${isGenerating ? 'opacity-60' : ''}`}
-              >
-                {/* Avatar */}
-                <div className="w-8 h-8 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0">
-                  <span className="text-[11px] font-black text-g-green">
-                    {p.displayName?.[0]?.toUpperCase() ?? '?'}
-                  </span>
-                </div>
-
-                {/* Name + level */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11px] font-bold text-g-text truncate">{p.displayName}</span>
-                    <span className="text-[9px] text-g-muted/60 font-mono">Lv {xpToLevel(p.xp ?? 0)}</span>
-                    {p.rarity && rarityStyle && (
-                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${rarityStyle}`}>
-                        {p.rarity}
-                      </span>
-                    )}
-                    {p.archetype && (
-                      <span className="text-[8px] text-g-muted/60 truncate">{p.archetype}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {p.personaTitle ? (
-                      <span className="text-[9px] text-g-muted truncate italic">{p.personaTitle}</span>
-                    ) : (
-                      <span className="text-[9px] text-g-muted/40">Ingen persona</span>
-                    )}
-                    {p.generatedAt && (
-                      <span className="text-[8px] text-g-muted/40 flex-shrink-0">
-                        · {tidSiden(p.generatedAt)}
-                      </span>
-                    )}
-                  </div>
-                  {err && <p className="text-[9px] text-red-400 mt-0.5">{err}</p>}
-                </div>
-
-                {/* Card thumbnail */}
-                {p.imageUrl && (
-                  <a href={p.imageUrl} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
-                    <img
-                      src={p.imageUrl}
-                      alt={p.personaTitle ?? ''}
-                      className="w-8 h-11 rounded object-cover border border-g-border hover:border-g-green/40 transition-colors"
-                    />
-                  </a>
-                )}
-
-                {/* Generate button */}
-                <button
-                  onClick={() => generate(p.discordId)}
-                  disabled={isGenerating}
-                  className={`flex-shrink-0 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
-                    isGenerating
-                      ? 'border-g-border text-g-muted cursor-not-allowed'
-                      : p.hasCard
-                        ? 'border-g-border text-g-muted hover:border-yellow-500/40 hover:text-yellow-400'
-                        : 'border-g-green/40 text-g-green bg-g-green/5 hover:bg-g-green/10'
-                  }`}
-                >
-                  {isGenerating ? '...' : p.hasCard ? 'Reroll' : 'Generer'}
-                </button>
-              </div>
-            );
-          })}
+          {filtered.map((deck, i) => (
+            <div key={deck.user.id} className={i < filtered.length - 1 ? 'border-b border-g-border/50' : ''}>
+              <DeckUserRow deck={deck} onOpen={setSelectedDeck} />
+            </div>
+          ))}
         </div>
+      )}
+
+      {selectedDeck && (
+        <DeckDrawer
+          deck={selectedDeck}
+          onClose={() => setSelectedDeck(null)}
+          onRefresh={handleDeckRefresh}
+        />
       )}
     </div>
   );

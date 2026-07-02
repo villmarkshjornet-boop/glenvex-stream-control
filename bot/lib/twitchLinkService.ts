@@ -101,6 +101,7 @@ export async function verifyLinkCode(
       twitch_username:     twitchUsername,
       twitch_display_name: twitchUsername,
       twitch_linked:       true,
+      twitch_linked_at:    new Date().toISOString(),
       member_type:         'linked',
       updated_at:          new Date().toISOString(),
     })

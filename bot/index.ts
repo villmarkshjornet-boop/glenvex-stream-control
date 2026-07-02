@@ -2200,11 +2200,15 @@ client.once('clientReady', () => {
 
   setOnSubCallback(tildelTwitchSubRolle);
   setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername) => {
+    const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    console.log(`[LINKTWITCH_VERIFY_STARTED] discordId=${discordId} twitchUserId=${twitchUserId} twitchUsername=${twitchUsername}`);
     try {
       const guild = client.guilds.cache.first();
-      if (!guild) return;
+      if (!guild) {
+        console.log('[LINKTWITCH_VERIFY_STARTED] ingen guild, avbryter');
+        return;
+      }
 
-      // Check if this user is a Twitch subscriber (already in DB from prior sub event)
       const sb = (() => {
         const url = process.env.SUPABASE_URL;
         const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -2216,59 +2220,156 @@ client.once('clientReady', () => {
         });
       })();
 
-      let isSub = false;
+      // ── Live Helix subscriber check ────────────────────────────────────────
+      let isSub   = false;
       let subTier = '1000';
-      if (sb) {
+      let helixUsed = false;
+
+      console.log(`[SUB_CHECK_STARTED] twitchUserId=${twitchUserId}`);
+      try {
+        const broadcasterId = await getBroadcasterId();
+        const broadcasterToken = await getBroadcasterUserToken();
+        if (!broadcasterId || !broadcasterToken) {
+          console.log(`[BROADCASTER_TOKEN_MISSING] broadcasterId=${broadcasterId ?? 'null'} token=${broadcasterToken ? 'ok' : 'null'}`);
+        } else {
+          const helixRes = await fetch(
+            `https://api.twitch.tv/helix/subscriptions/user?broadcaster_id=${broadcasterId}&user_id=${twitchUserId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${broadcasterToken}`,
+                'Client-Id':   process.env.TWITCH_CLIENT_ID ?? '',
+              },
+              signal: AbortSignal.timeout(8_000),
+            },
+          );
+          if (helixRes.ok) {
+            const helixBody = await helixRes.json() as { data?: { tier?: string }[] };
+            isSub    = (helixBody.data ?? []).length > 0;
+            subTier  = helixBody.data?.[0]?.tier ?? '1000';
+            helixUsed = true;
+          } else if (helixRes.status === 404) {
+            isSub     = false;
+            helixUsed = true;
+          } else {
+            console.log(`[SUB_CHECK_HELIX_ERROR] status=${helixRes.status}`);
+          }
+        }
+      } catch (helixErr: any) {
+        console.log(`[SUB_CHECK_HELIX_ERROR] ${helixErr?.message}`);
+      }
+
+      // Fallback to DB if Helix was unavailable
+      if (!helixUsed && sb) {
         const { data: cm } = await sb
           .from('community_members')
           .select('twitch_sub_status,twitch_sub_tier,subs')
-          .eq('workspace_id', process.env.WORKSPACE_ID ?? 'glenvex-default')
+          .eq('workspace_id', wsId)
           .eq('discord_id', discordId)
           .single();
-        isSub    = !!(cm?.twitch_sub_status || (cm?.subs ?? 0) > 0);
-        subTier  = cm?.twitch_sub_tier ?? '1000';
+        isSub   = !!(cm?.twitch_sub_status || (cm?.subs ?? 0) > 0);
+        subTier = cm?.twitch_sub_tier ?? '1000';
       }
 
-      // Award Twitch Sub role if user is a sub
+      console.log(`[SUB_CHECK_RESULT] isSub=${isSub} subTier=${subTier} helixUsed=${helixUsed}`);
+
+      // ── Role assignment ────────────────────────────────────────────────────
+      const guildMember = await guild.members.fetch(discordId).catch(() => null);
+      if (guildMember && isSub) {
+        const subRole = guild.roles.cache.find(r => r.name === '⭐ Twitch Sub');
+        if (subRole && !guildMember.roles.cache.has(subRole.id)) {
+          await guildMember.roles.add(subRole, `Twitch sub bekreftet: ${twitchUsername}`).catch(() => {});
+        }
+      }
+
+      // ── Sub card ───────────────────────────────────────────────────────────
       if (isSub) {
-        const ROLLE_NAVN = '⭐ Twitch Sub';
-        const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
-        const guildMember = await guild.members.fetch(discordId).catch(() => null);
-        if (rolle && guildMember && !guildMember.roles.cache.has(rolle.id)) {
-          await guildMember.roles.add(rolle, `Twitch-kobling verifisert + sub bekreftet: ${twitchUsername}`).catch(() => {});
+        // Idempotency: check if sub card already exists
+        let existingSubCard = false;
+        if (sb) {
+          const { data: existing } = await sb
+            .from('community_cards')
+            .select('id')
+            .eq('workspace_id', wsId)
+            .eq('user_id', discordId)
+            .eq('card_type', 'sub')
+            .limit(1)
+            .single();
+          existingSubCard = !!existing;
         }
 
-        // Generate SUB card and notify
-        const member = getMember(discordId);
-        awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
-          if (!subCard) return;
-          const coinBal = await getBalance(discordId).catch(() => 0);
-          publishCardDrop({
-            userId:          discordId,
-            discordUsername: member?.displayName ?? twitchUsername,
-            twitchUsername,
-            cardId:          subCard.id,
-            cardType:        'sub',
-            rarity:          subCard.rarity,
-            title:           subCard.title,
-            klass:           subCard.class ?? null,
-            level:           member?.level ?? 1,
-            xp:              member?.xp ?? 0,
-            coinsBalance:    coinBal,
-            cardImageUrl:    subCard.card_image_url ?? null,
-            source:          'sub',
-          }).catch(() => {});
-        }).catch(() => {});
-      } else {
-        // Not a sub — still give them the verified link confirmation role if applicable
-        const ROLLE_NAVN = '⭐ Twitch Sub';
-        const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
-        if (rolle) {
-          const guildMember = await guild.members.fetch(discordId).catch(() => null);
-          if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
-            await guildMember.roles.add(rolle, `Twitch-kobling verifisert: ${twitchUsername}`).catch(() => {});
-          }
+        if (existingSubCard) {
+          console.log(`[SUB_CARD_ALREADY_EXISTS] discordId=${discordId}`);
+          logSystemEvent({
+            source: 'twitch_link', event_type: 'SUB_CARD_ALREADY_EXISTS',
+            title:  `Sub-kort finnes allerede for ${discordId}`,
+            severity: 'info', metadata: { discordId, twitchUsername, wsId },
+          });
+        } else {
+          const member = getMember(discordId);
+          awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
+            if (!subCard) {
+              logSystemEvent({
+                source: 'twitch_link', event_type: 'SUB_CARD_AWARD_FAILED',
+                title:  `awardSubCard returnerte null for ${discordId}`,
+                severity: 'error', metadata: { discordId, twitchUsername, wsId },
+              });
+              return;
+            }
+            console.log(`[SUB_CARD_AWARDED] discordId=${discordId} cardId=${subCard.id}`);
+            logSystemEvent({
+              source: 'twitch_link', event_type: 'SUB_CARD_AWARDED',
+              title:  `Sub-kort tildelt ${discordId} — ${subCard.title} (${subCard.rarity})`,
+              severity: 'info', metadata: { discordId, twitchUsername, cardId: subCard.id, rarity: subCard.rarity, wsId },
+            });
+            const coinBal = await getBalance(discordId).catch(() => 0);
+            publishCardDrop({
+              userId:          discordId,
+              discordUsername: member?.displayName ?? twitchUsername,
+              twitchUsername,
+              cardId:          subCard.id,
+              cardType:        'sub',
+              rarity:          subCard.rarity,
+              title:           subCard.title,
+              klass:           subCard.class ?? null,
+              level:           member?.level ?? 1,
+              xp:              member?.xp ?? 0,
+              coinsBalance:    coinBal,
+              cardImageUrl:    subCard.card_image_url ?? null,
+              source:          'sub',
+            }).catch(() => {});
+          }).catch(() => {
+            logSystemEvent({
+              source: 'twitch_link', event_type: 'SUB_CARD_AWARD_FAILED',
+              title:  `awardSubCard kastet feil for ${discordId}`,
+              severity: 'error', metadata: { discordId, twitchUsername, wsId },
+            });
+          });
         }
+      } else {
+        console.log(`[SUB_CARD_SKIPPED_NOT_SUB] discordId=${discordId}`);
+        logSystemEvent({
+          source: 'twitch_link', event_type: 'SUB_CARD_SKIPPED_NOT_SUB',
+          title:  `${twitchUsername} er ikke sub — ingen sub-kort`,
+          severity: 'info', metadata: { discordId, twitchUsername, helixUsed, wsId },
+        });
+      }
+
+      // ── Discord DM to user ─────────────────────────────────────────────────
+      const dmContent = isSub
+        ? `✅ Twitch-kontoen **${twitchUsername}** er koblet til din Discord-profil!\n\n🌟 Du er subscriber — sub-kortet ditt er på vei!`
+        : `✅ Twitch-kontoen **${twitchUsername}** er koblet til din Discord-profil!\n\nBlir du sub på Twitch, får du automatisk ditt sub-kort.`;
+      const discordUser = await client.users.fetch(discordId).catch(() => null);
+      if (discordUser) {
+        await discordUser.send({ content: dmContent }).then(() => {
+          console.log(`[LINKTWITCH_DM_SENT] discordId=${discordId}`);
+        }).catch((dmErr: any) => {
+          console.log(`[LINKTWITCH_DM_FAILED] discordId=${discordId} reason=${dmErr?.message}`);
+          logSystemEvent({
+            source: 'twitch_link', event_type: 'LINKTWITCH_DM_FAILED',
+            title:  `DM til ${discordId} feilet etter verifisering`,
+            severity: 'warning', metadata: { discordId, twitchUsername, reason: dmErr?.message, wsId },
+          });
+        });
       }
 
       logSystemEvent({
@@ -2276,15 +2377,17 @@ client.once('clientReady', () => {
         event_type: 'TWITCH_LINK_VERIFIED',
         title:      `Discord ${discordId} koblet til Twitch ${twitchUsername} — isSub: ${isSub}`,
         severity:   'info',
-        metadata:   { discordId, twitchUserId, twitchUsername, isSub, subTier },
+        metadata:   { discordId, twitchUserId, twitchUsername, isSub, subTier, helixUsed, wsId },
       });
+      console.log(`[LINKTWITCH_VERIFY_FINISHED] discordId=${discordId} isSub=${isSub}`);
     } catch (err: any) {
+      console.log(`[LINKTWITCH_VERIFY_EXCEPTION] ${err?.message}`);
       logSystemEvent({
         source:     'twitch_link',
         event_type: 'TWITCH_LINK_CALLBACK_FAILED',
-        title:      `Link-callback feilet for ${twitchUsername}: ${err?.message}`,
+        title:      `Link-callback kastet feil for ${twitchUsername}: ${err?.message}`,
         severity:   'error',
-        metadata:   { discordId, twitchUsername, error: err?.message },
+        metadata:   { discordId, twitchUsername, error: err?.message, stack: err?.stack?.slice(0, 500) },
       });
     }
   });
