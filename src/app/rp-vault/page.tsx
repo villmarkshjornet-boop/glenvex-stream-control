@@ -22,9 +22,9 @@ interface RPCharacter {
 }
 
 const STATUS_STIL: Record<string, string> = {
-  aktiv: 'text-g-green border-g-green/30 bg-g-green/10',
-  inaktiv: 'text-g-muted border-g-border bg-g-bg',
-  arkivert: 'text-g-muted border-g-border opacity-50',
+  aktiv: 'bg-g-green/15 text-g-green border-g-green/30',
+  inaktiv: 'bg-g-border text-g-muted border-g-border',
+  arkivert: 'bg-g-border text-g-muted border-g-border opacity-50',
 };
 
 export default function RPVaultPage() {
@@ -65,7 +65,7 @@ export default function RPVaultPage() {
   );
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="RP Character Vault" subtitle="Alle lagrede RP-karakterer — full oversikt og administrasjon" />
 
       {/* Stats */}
@@ -76,7 +76,7 @@ export default function RPVaultPage() {
           { label: 'Publisert på Discord', value: chars.filter(c => c.discordMsgId).length },
         ].map(s => (
           <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
+            <p className="text-[11px] text-g-muted uppercase tracking-widest">{s.label}</p>
             <p className="text-2xl font-black text-g-green font-mono mt-1">{s.value}</p>
           </div>
         ))}
@@ -86,17 +86,22 @@ export default function RPVaultPage() {
         {/* Liste */}
         <div className="lg:col-span-2 space-y-3">
           <input value={søk} onChange={e => setSøk(e.target.value)} placeholder="Søk i karakterer..."
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" />
 
-          {loading ? <p className="text-xs text-g-muted">Laster...</p> :
-           filtrerte.length === 0 ? (
-            <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
-              <p className="text-xs text-g-muted">Ingen karakterer. Opprett karakterer via RP Manager.</p>
+          {loading ? (
+            <div className="animate-pulse space-y-3">
+              <div className="h-4 bg-g-border/40 rounded w-3/4" />
+              <div className="h-4 bg-g-border/40 rounded w-1/2" />
+              <div className="h-4 bg-g-border/40 rounded w-2/3" />
+            </div>
+          ) : filtrerte.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-sm text-g-muted">Ingen karakterer. Opprett karakterer via RP Manager.</p>
             </div>
           ) : filtrerte.map(c => (
             <div key={c.id}
               onClick={() => { setValgt(valgt?.id === c.id ? null : c); setForm(c); setRedigerer(false); }}
-              className={`bg-g-card border rounded-2xl overflow-hidden cursor-pointer transition-all hover:border-g-green/20 ${valgt?.id === c.id ? 'border-g-green/30' : 'border-g-border'}`}>
+              className={`bg-g-card border rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:bg-g-card-hover ${valgt?.id === c.id ? 'border-g-green/30' : 'border-g-border'}`}>
               <div className="flex gap-3 p-4">
                 {c.bildeUrl ? (
                   <img src={c.bildeUrl} alt={c.navn} className="w-16 h-16 rounded-lg object-cover flex-shrink-0 border border-g-border" />
@@ -107,13 +112,13 @@ export default function RPVaultPage() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
-                    <p className="text-sm font-black text-g-text">{c.navn}</p>
-                    {c.kallenavn && <p className="text-xs text-g-muted">"{c.kallenavn}"</p>}
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-bold uppercase ml-auto flex-shrink-0 ${STATUS_STIL[c.status] ?? STATUS_STIL.inaktiv}`}>{c.status}</span>
+                    <p className="text-sm font-semibold text-g-text">{c.navn}</p>
+                    {c.kallenavn && <p className="text-xs text-g-muted">&quot;{c.kallenavn}&quot;</p>}
+                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ml-auto flex-shrink-0 ${STATUS_STIL[c.status] ?? STATUS_STIL.inaktiv}`}>{c.status}</span>
                   </div>
                   <p className="text-xs text-g-green">{c.rolle} • {c.server}</p>
-                  {c.fraksjon && <p className="text-[10px] text-g-muted">{c.fraksjon}</p>}
-                  <p className="text-[10px] text-g-muted mt-1 line-clamp-1">{c.beskrivelse}</p>
+                  {c.fraksjon && <p className="text-[11px] text-g-muted">{c.fraksjon}</p>}
+                  <p className="text-xs text-g-muted mt-1 line-clamp-1">{c.beskrivelse}</p>
                 </div>
               </div>
             </div>
@@ -124,8 +129,8 @@ export default function RPVaultPage() {
         {valgt && (
           <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4 sticky top-4">
             <div className="flex justify-between items-start">
-              <p className="text-xs font-black text-g-text">{valgt.navn}</p>
-              <button onClick={() => setValgt(null)} className="text-g-muted hover:text-g-text text-xs">✕</button>
+              <p className="text-sm font-semibold text-g-text">{valgt.navn}</p>
+              <button onClick={() => setValgt(null)} className="text-g-muted hover:text-g-text text-xs transition-colors">✕</button>
             </div>
 
             {valgt.bildeUrl && (
@@ -133,19 +138,19 @@ export default function RPVaultPage() {
             )}
 
             {!redigerer ? (
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2">
                 {[['Rolle', valgt.rolle], ['Server', valgt.server], ['Fraksjon', valgt.fraksjon ?? '–']].map(([l, v]) => (
                   <div key={l} className="flex justify-between py-1 border-b border-g-border/30 last:border-0">
-                    <span className="text-g-muted">{l}</span>
-                    <span className="text-g-text">{v}</span>
+                    <span className="text-xs text-g-muted">{l}</span>
+                    <span className="text-xs text-g-text">{v}</span>
                   </div>
                 ))}
                 <div>
-                  <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Beskrivelse</p>
-                  <p className="text-xs text-g-text leading-relaxed">{valgt.beskrivelse}</p>
+                  <p className="text-[11px] text-g-muted uppercase tracking-widest mb-1">Beskrivelse</p>
+                  <p className="text-sm text-g-text leading-relaxed">{valgt.beskrivelse}</p>
                 </div>
                 {valgt.discordMsgId && (
-                  <p className="text-[9px] text-g-green">✓ Publisert på Discord</p>
+                  <p className="text-[11px] text-g-green">✓ Publisert på Discord</p>
                 )}
               </div>
             ) : (
@@ -155,15 +160,15 @@ export default function RPVaultPage() {
                   { felt: 'fraksjon', label: 'Fraksjon', ph: 'Los Santos PD...' },
                 ].map(({ felt, label, ph }) => (
                   <div key={felt}>
-                    <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">{label}</p>
+                    <p className="text-[11px] text-g-muted uppercase tracking-widest mb-1">{label}</p>
                     <input value={(form as any)[felt] ?? ''} onChange={e => setForm(p => ({ ...p, [felt]: e.target.value }))} placeholder={ph}
-                      className="w-full bg-g-bg border border-g-border rounded px-3 py-1.5 text-xs text-g-text outline-none focus:border-g-green/50" />
+                      className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" />
                   </div>
                 ))}
                 <div>
-                  <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Beskrivelse</p>
+                  <p className="text-[11px] text-g-muted uppercase tracking-widest mb-1">Beskrivelse</p>
                   <textarea value={form.beskrivelse ?? ''} onChange={e => setForm(p => ({ ...p, beskrivelse: e.target.value }))} rows={3}
-                    className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text resize-none outline-none focus:border-g-green/50" />
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none" />
                 </div>
               </div>
             )}
@@ -171,27 +176,27 @@ export default function RPVaultPage() {
             <div className="space-y-1.5">
               {redigerer ? (
                 <>
-                  <button onClick={lagre} className="w-full py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded hover:bg-g-green/20 transition-all">Lagre</button>
-                  <button onClick={() => setRedigerer(false)} className="w-full py-2 border border-g-border text-g-muted text-xs font-bold rounded transition-all">Avbryt</button>
+                  <button onClick={lagre} className="w-full py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200">Lagre</button>
+                  <button onClick={() => setRedigerer(false)} className="w-full py-2 text-g-muted text-sm hover:text-g-text transition-colors">Avbryt</button>
                 </>
               ) : (
                 <>
-                  <button onClick={() => setRedigerer(true)} className="w-full py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">Rediger</button>
+                  <button onClick={() => setRedigerer(true)} className="w-full py-2 border border-g-border rounded-lg text-sm text-g-muted hover:text-g-text hover:border-g-green/30 transition-all duration-200">Rediger</button>
                   <button onClick={() => fetch('/api/rp-characters', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: valgt.id, status: valgt.status === 'aktiv' ? 'arkivert' : 'aktiv' }) }).then(() => hent())}
-                    className="w-full py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                    className="w-full py-2 border border-g-border rounded-lg text-sm text-g-muted hover:text-g-text hover:border-g-green/30 transition-all duration-200">
                     {valgt.status === 'aktiv' ? 'Arkiver' : 'Aktiver'}
                   </button>
-                  <button onClick={() => setVisSlettDialog(true)} className="w-full py-2 border border-red-500/20 rounded text-xs text-red-400 hover:bg-red-500/10 transition-all">Slett</button>
+                  <button onClick={() => setVisSlettDialog(true)} className="w-full py-2 border border-red-500/20 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-all duration-200">Slett</button>
                 </>
               )}
             </div>
 
             {visSlettDialog && (
-              <div className="border border-red-500/30 rounded-lg p-3 bg-red-500/5 space-y-2">
-                <p className="text-xs font-bold text-red-400">Hva vil du slette?</p>
-                <button onClick={() => slett(false)} className="w-full py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-text text-left px-3 transition-all">Arkiver kun i appen</button>
-                <button onClick={() => slett(true)} className="w-full py-1.5 border border-red-500/30 rounded text-xs text-red-400 hover:bg-red-500/10 text-left px-3 transition-all">Slett også Discord-meldingen</button>
-                <button onClick={() => setVisSlettDialog(false)} className="w-full py-1.5 text-xs text-g-muted hover:text-g-text transition-all">Avbryt</button>
+              <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 space-y-2">
+                <p className="font-semibold">Hva vil du slette?</p>
+                <button onClick={() => slett(false)} className="w-full py-1.5 border border-g-border rounded-lg text-sm text-g-muted hover:text-g-text text-left px-3 transition-all">Arkiver kun i appen</button>
+                <button onClick={() => slett(true)} className="w-full py-1.5 border border-red-500/30 rounded-lg text-sm text-red-400 hover:bg-red-500/10 text-left px-3 transition-all">Slett også Discord-meldingen</button>
+                <button onClick={() => setVisSlettDialog(false)} className="w-full py-1.5 text-sm text-g-muted hover:text-g-text transition-colors">Avbryt</button>
               </div>
             )}
           </div>

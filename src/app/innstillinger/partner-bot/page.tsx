@@ -40,7 +40,7 @@ function Toggle({ value, onChange, label, hint }: { value: boolean; onChange: (v
       <UIToggle value={value} onChange={onChange} />
       <div>
         <div className="text-xs font-semibold text-g-text">{label}</div>
-        {hint && <div className="text-[10px] text-g-muted mt-0.5 leading-snug">{hint}</div>}
+        {hint && <div className="text-xs text-g-muted mt-0.5 leading-snug">{hint}</div>}
       </div>
     </label>
   );
@@ -143,7 +143,7 @@ export default function PartnerBotSettingsPage() {
 
       {/* ── Global kill switch ── */}
       <section className="p-5 bg-g-card border border-g-border rounded-2xl">
-        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Status</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Status</p>
         <Toggle
           value={settings.enabled}
           onChange={v => set('enabled', v)}
@@ -154,7 +154,7 @@ export default function PartnerBotSettingsPage() {
 
       {/* ── Platform ── */}
       <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-4">
-        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Plattformer</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Plattformer</p>
         <Toggle value={settings.twitchEnabled} onChange={v => set('twitchEnabled', v)} label="Twitch chat-promo" />
         <Toggle value={settings.discordEnabled} onChange={v => set('discordEnabled', v)} label="Discord-promo" />
         <Toggle
@@ -168,7 +168,7 @@ export default function PartnerBotSettingsPage() {
 
       {/* ── Approval ── */}
       <section className="p-5 bg-g-card border border-g-border rounded-2xl">
-        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Godkjenning</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Godkjenning</p>
         <Toggle
           value={settings.requireApproval}
           onChange={v => set('requireApproval', v)}
@@ -179,7 +179,7 @@ export default function PartnerBotSettingsPage() {
 
       {/* ── Cooldowns ── */}
       <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-5">
-        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Cooldowns og grenser</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Cooldowns og grenser</p>
         <div className="grid grid-cols-2 gap-5">
           <NumberInput value={settings.maxPostsPerStream} onChange={v => set('maxPostsPerStream', v)} label="Maks promoer per stream" min={1} max={10} />
           <NumberInput value={settings.cooldownMinutes} onChange={v => set('cooldownMinutes', v)} label="Cooldown (minutter)" hint="Min tid mellom promoer" min={5} max={240} />
@@ -191,7 +191,7 @@ export default function PartnerBotSettingsPage() {
 
       {/* ── Message settings ── */}
       <section className="p-5 bg-g-card border border-g-border rounded-2xl space-y-4">
-        <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-4">Meldingsinnstillinger</p>
+        <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-4">Meldingsinnstillinger</p>
         <div>
           <label className="block text-sm font-medium text-g-text mb-1">Tone</label>
           <select
@@ -223,7 +223,7 @@ export default function PartnerBotSettingsPage() {
         <button
           onClick={save}
           disabled={saving}
-          className="px-6 py-2 bg-g-green text-black font-bold rounded text-sm hover:bg-g-green/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200 disabled:opacity-50"
         >
           {saving ? 'Lagrer…' : saved ? '✓ Lagret' : 'Lagre innstillinger'}
         </button>
@@ -260,13 +260,13 @@ export default function PartnerBotSettingsPage() {
                           messageTwitch: editingMsg?.id === p.id && editingMsg.field === 'twitch' ? editingMsg.value : p.message_twitch ?? undefined,
                           messageDiscord: editingMsg?.id === p.id && editingMsg.field === 'discord' ? editingMsg.value : p.message_discord ?? undefined,
                         })}
-                        className="px-3 py-1 bg-g-green text-black text-xs font-bold rounded hover:bg-g-green/80"
+                        className="px-3 py-1 bg-g-green/10 border border-g-green/25 text-g-green text-xs font-medium rounded-lg hover:bg-g-green/20 transition-all duration-200"
                       >
                         Godkjenn
                       </button>
                       <button
                         onClick={() => handleProposal(p.id, 'reject')}
-                        className="px-3 py-1 bg-g-border text-g-muted text-xs font-bold rounded hover:bg-red-900/30 hover:text-red-400"
+                        className="px-3 py-1 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/15 transition-all duration-200"
                       >
                         Avvis
                       </button>

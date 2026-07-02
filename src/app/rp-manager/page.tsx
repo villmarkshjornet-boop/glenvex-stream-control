@@ -166,17 +166,17 @@ export default function RPManagerPage() {
   const harValgte = valgtKanaler.size > 0;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="RP Manager" subtitle="Administrer karakterer og RP-server — klikk på en karakter for å laste den inn" />
 
       {/* Lagrede karakterer */}
       {lagrede.length > 0 && (
         <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Lagrede karakterer – klikk for å laste inn</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Lagrede karakterer – klikk for å laste inn</p>
           <div className="flex gap-2 flex-wrap">
             {lagrede.map(k => (
               <button key={k.id} onClick={() => lastInn(k)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold transition-all ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all duration-200 ${
                   valgtKarakter?.id === k.id
                     ? 'border-g-green/40 bg-g-green/10 text-g-green'
                     : 'border-g-border text-g-muted hover:border-g-green/30 hover:text-g-text'
@@ -185,11 +185,11 @@ export default function RPManagerPage() {
                   <img src={k.bildeUrl} alt={k.navn} className="w-6 h-6 rounded-full object-cover border border-g-border" />
                 )}
                 <span>{k.navn}</span>
-                <span className="text-[9px] opacity-60">{k.server}</span>
+                <span className="text-[11px] opacity-60">{k.server}</span>
               </button>
             ))}
             <button onClick={() => { setValgtKarakter(null); setForm({ serverNavn: 'Future RP', karakterNavn: '', karakterRolle: '', karakterBeskrivelse: '', backstory: '', erstattNXT: true }); setGenerert(null); setRedigert(null); }}
-              className="px-3 py-2 rounded-lg border border-dashed border-g-border text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+              className="px-3 py-2 rounded-lg border border-dashed border-g-border text-[11px] text-g-muted hover:text-g-text hover:border-g-green/30 transition-all duration-200">
               + Ny karakter
             </button>
           </div>
@@ -199,60 +199,60 @@ export default function RPManagerPage() {
       {/* Skjema */}
       <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">
             {valgtKarakter ? `Redigerer: ${valgtKarakter.navn}` : 'Ny karakter'}
           </p>
           {valgtKarakter && (
-            <span className="text-[9px] text-g-green border border-g-green/30 bg-g-green/10 px-2 py-0.5 rounded-full font-bold">Lastet inn</span>
+            <span className="text-[11px] font-medium bg-g-green/15 text-g-green px-2 py-0.5 rounded-full">Lastet inn</span>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Server / RP-navn</label>
+            <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Server / RP-navn</label>
             <input value={form.serverNavn} onChange={e => oppdater('serverNavn', e.target.value)}
-              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:border-g-green/50 outline-none" placeholder="Future RP" />
+              className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" placeholder="Future RP" />
           </div>
           <div>
-            <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Karakternavn</label>
+            <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Karakternavn</label>
             <input value={form.karakterNavn} onChange={e => oppdater('karakterNavn', e.target.value)}
-              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:border-g-green/50 outline-none" placeholder="Mats Haugland" />
+              className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" placeholder="Mats Haugland" />
           </div>
         </div>
 
         <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Rolle / Yrke</label>
+          <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Rolle / Yrke</label>
           <input value={form.karakterRolle} onChange={e => oppdater('karakterRolle', e.target.value)}
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:border-g-green/50 outline-none" placeholder="Politibetjent, regelrytter, galning" />
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" placeholder="Politibetjent, regelrytter, galning" />
         </div>
 
         <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Karakterbeskrivelse</label>
+          <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Karakterbeskrivelse</label>
           <textarea value={form.karakterBeskrivelse} onChange={e => oppdater('karakterBeskrivelse', e.target.value)} rows={3}
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:border-g-green/50 outline-none resize-none"
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none"
             placeholder="Kjøreglad, jævel på å skyte..." />
         </div>
 
         <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Backstory</label>
+          <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Backstory</label>
           <textarea value={form.backstory} onChange={e => oppdater('backstory', e.target.value)} rows={3}
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:border-g-green/50 outline-none resize-none"
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none"
             placeholder="Bakgrunnshistorien til karakteren..." />
         </div>
 
         {/* Bilde */}
         <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-widest block mb-1">Bilde (valgfritt – DALL-E genereres etter innhold)</label>
+          <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Bilde (valgfritt – DALL-E genereres etter innhold)</label>
           <div className="flex items-center gap-3">
             <button onClick={() => fileRef.current?.click()}
-              className="px-3 py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+              className="px-4 py-2 border border-g-border rounded-lg text-sm text-g-muted hover:text-g-text hover:border-g-green/30 transition-all duration-200">
               Last opp bilde
             </button>
             {(opplastetBilde ?? valgtKarakter?.bildeUrl) && (
               <div className="flex items-center gap-2">
                 <img src={opplastetBilde ?? valgtKarakter?.bildeUrl} alt="Karakter"
                   className="w-10 h-10 rounded object-cover border border-g-border" />
-                <button onClick={() => setOpplastetBilde(null)} className="text-[10px] text-red-400 hover:text-red-300">Fjern</button>
+                <button onClick={() => setOpplastetBilde(null)} className="text-[11px] text-red-400 hover:text-red-300 transition-colors">Fjern</button>
               </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={håndterBildeOpplasting} />
@@ -261,11 +261,11 @@ export default function RPManagerPage() {
 
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={form.erstattNXT} onChange={e => oppdater('erstattNXT', e.target.checked)} className="accent-green-400" />
-          <span className="text-xs text-g-text">Erstatt NXT-referanser med {form.serverNavn || 'Future RP'} i Discord</span>
+          <span className="text-sm text-g-text">Erstatt NXT-referanser med {form.serverNavn || 'Future RP'} i Discord</span>
         </label>
 
         <button onClick={generer} disabled={loading || !form.karakterNavn}
-          className="w-full py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all disabled:opacity-50">
+          className="w-full py-2.5 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium tracking-widest uppercase rounded-lg transition-all duration-200 disabled:opacity-50">
           {loading ? (
             <span className="flex items-center justify-center gap-2">
               <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
@@ -275,7 +275,9 @@ export default function RPManagerPage() {
         </button>
 
         {feil && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400 font-mono">✗ {feil}</div>
+          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+            ✗ {feil}
+          </div>
         )}
       </div>
 
@@ -301,7 +303,7 @@ export default function RPManagerPage() {
                     className="w-full max-h-64 object-cover rounded-lg border border-g-border" />
                 ) : (
                   <button onClick={genererBilde} disabled={loadingBilde}
-                    className="w-full py-2.5 border border-dashed border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                    className="w-full py-2.5 border border-dashed border-g-border rounded-lg text-sm text-g-muted hover:text-g-text hover:border-g-green/30 transition-all duration-200">
                     {loadingBilde ? (
                       <span className="flex items-center justify-center gap-2">
                         <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
@@ -311,19 +313,21 @@ export default function RPManagerPage() {
                   </button>
                 )}
                 <textarea value={redigert.karakterIntro} onChange={e => setRedigert(prev => prev ? { ...prev, karakterIntro: e.target.value } : prev)}
-                  rows={10} className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono focus:border-g-green/50 outline-none resize-none leading-relaxed" />
+                  rows={10} className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none leading-relaxed" />
               </>
             )}
 
             {aktivTab === 'server' && (
               <textarea value={redigert.serverOppdatering} onChange={e => setRedigert(prev => prev ? { ...prev, serverOppdatering: e.target.value } : prev)}
-                rows={6} className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono focus:border-g-green/50 outline-none resize-none leading-relaxed" />
+                rows={6} className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none leading-relaxed" />
             )}
 
             {aktivTab === 'kanaler' && (
               <div className="space-y-2">
                 {redigert.kanalForslag.length === 0 ? (
-                  <p className="text-xs text-g-muted">Ingen NXT-kanaler funnet.</p>
+                  <div className="text-center py-12">
+                    <p className="text-sm text-g-muted">Ingen NXT-kanaler funnet.</p>
+                  </div>
                 ) : redigert.kanalForslag.map(k => (
                   <label key={k.id} className="flex items-center gap-3 py-2 cursor-pointer border-b border-g-border/30 last:border-0">
                     <input type="checkbox" checked={valgtKanaler.has(k.id)}
@@ -343,7 +347,7 @@ export default function RPManagerPage() {
 
           <div className="px-5 pb-5 space-y-2">
             <button onClick={publiser} disabled={publishing}
-              className="w-full py-2.5 bg-g-green/20 border border-g-green/40 hover:bg-g-green/30 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all">
+              className="w-full py-2.5 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium tracking-widest uppercase rounded-lg transition-all duration-200">
               {publishing ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" />
@@ -353,7 +357,7 @@ export default function RPManagerPage() {
             </button>
 
             {resultater && (
-              <div className="border border-g-border rounded p-3 space-y-1">
+              <div className="border border-g-border rounded-lg p-3 space-y-1">
                 {resultater.map((r, i) => (
                   <p key={i} className={`text-xs font-mono ${r.startsWith('✓') ? 'text-g-green' : r.startsWith('  ↳') ? 'text-g-muted pl-3' : 'text-red-400'}`}>{r}</p>
                 ))}

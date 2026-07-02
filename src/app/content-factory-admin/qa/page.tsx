@@ -30,10 +30,10 @@ export default function ContentFactoryQAPage() {
   ) ?? [];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-4xl mx-auto space-y-5 animate-fade-in">
       <PageHeader title="Content Factory QA" subtitle="Automatisk datavalidering — kjøres etter hver endring">
         <button onClick={kjørQA} disabled={loading}
-          className="px-4 py-2 bg-g-green/10 border border-g-green/20 text-g-green text-xs font-bold rounded-lg hover:bg-g-green/20 transition-all">
+          className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200">
           {loading ? 'Kjører...' : '▶ Kjør QA'}
         </button>
       </PageHeader>
@@ -46,7 +46,7 @@ export default function ContentFactoryQAPage() {
               <p className={`text-4xl font-black ${res.status === 'PASSED' ? 'text-g-green' : 'text-red-400'}`}>
                 {res.status === 'PASSED' ? '✓ PASSED' : '✗ FAILED'}
               </p>
-              <div className="text-xs text-g-muted space-y-0.5">
+              <div className="text-sm text-g-muted space-y-0.5">
                 <p>Sjekket {res.sjekket.vods} VODs og {res.sjekket.highlights} highlights</p>
                 <p>{res.sammendrag.totalFeil} feil funnet</p>
               </div>
@@ -61,8 +61,8 @@ export default function ContentFactoryQAPage() {
               { label: 'Uten kategori', value: res.sammendrag.utenKategori, ok: res.sammendrag.utenKategori === 0 },
               { label: 'Totale feil', value: res.sammendrag.totalFeil, ok: res.sammendrag.totalFeil === 0 },
             ].map(s => (
-              <div key={s.label} className={`bg-g-card border rounded-lg p-3 text-center ${s.ok ? 'border-g-border' : 'border-red-500/30'}`}>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest leading-tight">{s.label}</p>
+              <div key={s.label} className={`bg-g-card border rounded-2xl p-3 text-center ${s.ok ? 'border-g-border' : 'border-red-500/30'}`}>
+                <p className="text-xs font-semibold tracking-widest uppercase text-g-muted leading-tight">{s.label}</p>
                 <p className={`text-2xl font-black font-mono mt-1 ${s.ok ? 'text-g-green' : 'text-red-400'}`}>{s.value}</p>
               </div>
             ))}
@@ -72,20 +72,20 @@ export default function ContentFactoryQAPage() {
           {res.feil.length > 0 && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold text-g-text">Datafeil ({res.feil.length})</p>
+                <p className="text-sm font-semibold text-g-text">Datafeil ({res.feil.length})</p>
                 <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filtrer..."
-                  className="bg-g-bg border border-g-border rounded px-3 py-1 text-xs text-g-text outline-none focus:border-g-green/50 w-32" />
+                  className="bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 w-36" />
               </div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {filtrertFeil.map((f, i) => (
                   <div key={i} className="p-3 bg-g-bg border border-red-500/20 rounded-lg">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[9px] text-red-400 font-bold border border-red-400/30 px-1.5 py-0.5 rounded">{f.type}</span>
-                      <span className="text-[9px] text-g-muted font-mono">{f.entitetId.slice(0, 12)}...</span>
-                      <span className="text-[9px] text-yellow-400 font-bold">{f.felt}</span>
-                      <span className="text-[9px] text-g-muted">= {String(f.verdi ?? 'null').slice(0, 30)}</span>
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="text-[11px] text-red-400 font-semibold border border-red-400/30 px-1.5 py-0.5 rounded bg-red-500/10">{f.type}</span>
+                      <span className="text-[11px] text-g-muted font-mono">{f.entitetId.slice(0, 12)}...</span>
+                      <span className="text-[11px] text-yellow-400 font-semibold">{f.felt}</span>
+                      <span className="text-[11px] text-g-muted">= {String(f.verdi ?? 'null').slice(0, 30)}</span>
                     </div>
-                    <p className="text-[10px] text-g-text">→ {f.anbefaling}</p>
+                    <p className="text-xs text-g-text">→ {f.anbefaling}</p>
                   </div>
                 ))}
               </div>
@@ -94,7 +94,7 @@ export default function ContentFactoryQAPage() {
 
           {/* Definition of Done */}
           <div className="bg-g-card border border-g-border rounded-2xl p-5">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Definition of Done</p>
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Definition of Done</p>
             <div className="space-y-1.5">
               {[
                 { tekst: 'Ingen NaN i UI', ok: res.sammendrag.nanRisiko === 0 },
@@ -103,7 +103,7 @@ export default function ContentFactoryQAPage() {
                 { tekst: 'Alle highlights har start/end tid', ok: res.sammendrag.utenStartEnd === 0 },
                 { tekst: 'QA rapporterer PASSED', ok: res.status === 'PASSED' },
               ].map((item, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
+                <div key={i} className="flex items-center gap-2 text-sm">
                   <span className={item.ok ? 'text-g-green' : 'text-red-400'}>{item.ok ? '✓' : '✗'}</span>
                   <span className={item.ok ? 'text-g-text' : 'text-red-400'}>{item.tekst}</span>
                 </div>

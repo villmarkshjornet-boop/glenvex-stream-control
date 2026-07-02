@@ -46,12 +46,12 @@ export default function PubliseringPage() {
   }, []);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="Publisering" subtitle="Klipp klare for publisering — ingen autopublisering" />
 
       <div className="bg-g-card border border-g-green/10 rounded-2xl p-4">
-        <p className="text-xs text-g-green font-bold mb-1">Ingen autopublisering</p>
-        <p className="text-[10px] text-g-muted leading-relaxed">
+        <p className="text-xs text-g-green font-semibold mb-1">Ingen autopublisering</p>
+        <p className="text-xs text-g-muted leading-relaxed">
           Klipp publiseres aldri automatisk. Last ned eller åpne klippet, og publiser manuelt til ønsket plattform.
         </p>
       </div>
@@ -62,23 +62,23 @@ export default function PubliseringPage() {
         </div>
       ) : klare.length === 0 ? (
         <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
-          <p className="text-g-muted text-xs">Ingen klipp klare for publisering ennå.</p>
-          <p className="text-g-muted/60 text-[9px] mt-1">Klipp genereres automatisk etter at Content Factory er ferdig.</p>
-          <Link href="/content-factory-admin/highlights" className="mt-4 inline-block px-4 py-2 bg-g-green/10 border border-g-green/20 rounded text-xs text-g-green font-bold hover:bg-g-green/20 transition-all">
+          <p className="text-sm text-g-muted">Ingen klipp klare for publisering ennå.</p>
+          <p className="text-xs text-g-muted/60 mt-1">Klipp genereres automatisk etter at Content Factory er ferdig.</p>
+          <Link href="/content-factory-admin/highlights" className="mt-4 inline-block px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200">
             ▶ Gå til Highlights
           </Link>
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{klare.length} klipp klare</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">{klare.length} klipp klare</p>
           {klare.map(h => (
             <div key={h.id} className="bg-g-card border border-g-green/10 rounded-2xl p-4">
               <div className="flex items-start gap-4">
                 <div className="flex-1 min-w-0">
-                  <p className="text-[9px] text-g-muted">{vods[h.vod_id] ?? h.vod_id}</p>
-                  <p className="text-xs font-bold text-g-text mt-0.5 truncate">{h.title}</p>
+                  <p className="text-xs text-g-muted">{vods[h.vod_id] ?? h.vod_id}</p>
+                  <p className="text-sm font-semibold text-g-text mt-0.5 truncate">{h.title}</p>
                   {h.clip_finished_at && (
-                    <p className="text-[9px] text-g-muted mt-0.5">
+                    <p className="text-xs text-g-muted mt-0.5">
                       Ferdig {new Date(h.clip_finished_at).toLocaleDateString('no-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
                   )}
@@ -86,19 +86,19 @@ export default function PubliseringPage() {
                 <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                   {h.clip_url && (
                     <a href={h.clip_url} target="_blank" rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 rounded text-[10px] text-g-green font-bold hover:bg-g-green/20 transition-all">
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/25 rounded-lg text-[11px] text-g-green font-medium hover:bg-g-green/20 transition-all duration-200">
                       ▶ 16:9
                     </a>
                   )}
                   {h.vertical_clip_url && (
                     <a href={h.vertical_clip_url} target="_blank" rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 rounded text-[10px] text-g-green font-bold hover:bg-g-green/20 transition-all">
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/25 rounded-lg text-[11px] text-g-green font-medium hover:bg-g-green/20 transition-all duration-200">
                       ▶ 9:16
                     </a>
                   )}
                   {h.clip_url && (
                     <a href={h.clip_url} download
-                      className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted font-bold hover:text-g-green hover:border-g-green/30 transition-all">
+                      className="px-3 py-1.5 border border-g-border rounded-lg text-[11px] text-g-muted font-medium hover:text-g-text transition-all duration-200">
                       ↓ Last ned
                     </a>
                   )}
@@ -110,10 +110,10 @@ export default function PubliseringPage() {
       )}
 
       <div className="flex gap-3">
-        <Link href="/content-factory-admin/highlights" className="px-4 py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+        <Link href="/content-factory-admin/highlights" className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors">
           ← Tilbake til Highlights
         </Link>
-        <Link href="/content-factory-admin" className="px-4 py-2 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+        <Link href="/content-factory-admin" className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors">
           Content Factory
         </Link>
       </div>

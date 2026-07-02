@@ -86,9 +86,9 @@ export default function JobMonitorPage() {
   const antallFeilet = vods.filter(v => v.status === 'FAILED').length;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5 animate-fade-in">
       <PageHeader title="Job Monitor" subtitle="Overvåk alle Content Factory-jobber og pipeline-steg">
-        <button onClick={hent} className="text-[9px] text-g-muted hover:text-g-green transition-colors">↻ Oppdater</button>
+        <button onClick={hent} className="text-[11px] text-g-muted hover:text-g-green transition-colors">↻ Oppdater</button>
       </PageHeader>
 
       {/* Sammendrag */}
@@ -99,9 +99,9 @@ export default function JobMonitorPage() {
           { label: 'Feilet', value: antallFeilet, color: 'text-red-400' },
           { label: 'Total kostnad', value: kost(totalKostnad), color: 'text-yellow-400' },
         ].map(s => (
-          <div key={s.label} className="bg-g-card border border-g-border rounded-lg p-3 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
-            <p className={`text-lg font-black font-mono mt-1 ${s.color ?? 'text-g-green'}`}>{s.value}</p>
+          <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-3 text-center">
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">{s.label}</p>
+            <p className={`text-2xl font-black font-mono mt-1 ${s.color ?? 'text-g-green'}`}>{s.value}</p>
           </div>
         ))}
       </div>
@@ -110,7 +110,7 @@ export default function JobMonitorPage() {
       <div className="flex gap-2">
         {(['alle', 'aktive', 'ferdige', 'feilet'] as const).map(f => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 text-xs font-bold uppercase rounded border transition-all ${filter === f ? 'border-g-green/30 text-g-green bg-g-green/10' : 'border-g-border text-g-muted hover:text-g-text'}`}>
+            className={`px-3 py-1.5 text-xs font-semibold uppercase rounded border transition-all ${filter === f ? 'border-g-green/30 text-g-green bg-g-green/10' : 'border-g-border text-g-muted hover:text-g-text'}`}>
             {f}
           </button>
         ))}
@@ -118,27 +118,31 @@ export default function JobMonitorPage() {
 
       {/* Jobb-liste */}
       {loading ? (
-        <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
-          <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
+        <div className="bg-g-card border border-g-border rounded-2xl p-8">
+          <div className="animate-pulse space-y-3">
+            <div className="h-4 bg-g-border/40 rounded w-3/4" />
+            <div className="h-4 bg-g-border/40 rounded w-1/2" />
+            <div className="h-4 bg-g-border/40 rounded w-2/3" />
+          </div>
         </div>
       ) : filtrert.length === 0 ? (
         <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center">
-          <p className="text-xs text-g-muted">Ingen jobber.</p>
+          <p className="text-sm text-g-muted">Ingen jobber.</p>
         </div>
       ) : filtrert.map(v => (
         <div key={v.id} className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
           {/* Jobb-header */}
           <div className="p-4 cursor-pointer flex items-start gap-3" onClick={() => setValgt(valgt === v.id ? null : v.id)}>
-            <div className={`text-[9px] px-2 py-0.5 rounded border font-bold uppercase flex-shrink-0 mt-0.5 ${STATUS_STIL[v.status] ?? STATUS_STIL.PENDING}`}>
+            <div className={`text-[11px] px-2 py-0.5 rounded border font-semibold uppercase flex-shrink-0 mt-0.5 ${STATUS_STIL[v.status] ?? STATUS_STIL.PENDING}`}>
               {v.status}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-g-text truncate">{v.title ?? 'Ukjent stream'}</p>
-              <p className="text-[9px] text-g-muted">{v.category} · {new Date(v.created_at).toLocaleString('no-NO')}</p>
+              <p className="text-sm font-semibold text-g-text truncate">{v.title ?? 'Ukjent stream'}</p>
+              <p className="text-[11px] text-g-muted">{v.category} · {new Date(v.created_at).toLocaleString('no-NO')}</p>
             </div>
-            <div className="text-right flex-shrink-0 text-[9px] text-g-muted">
-              {v.totalMs && <p>{tid(v.totalMs)}</p>}
-              {v.totalKostnad && v.totalKostnad > 0 && <p className="text-yellow-400">{kost(v.totalKostnad)}</p>}
+            <div className="text-right flex-shrink-0 text-[11px] text-g-muted">
+              {v.totalMs && <p className="font-mono">{tid(v.totalMs)}</p>}
+              {v.totalKostnad && v.totalKostnad > 0 && <p className="text-yellow-400 font-mono">{kost(v.totalKostnad)}</p>}
             </div>
           </div>
 
@@ -150,9 +154,9 @@ export default function JobMonitorPage() {
                 const stil = STATUS_STIL[s?.status ?? 'IKKE_STARTET'];
                 return (
                   <div key={stegNavn} className={`flex-shrink-0 px-2 py-1 rounded border text-center min-w-[80px] ${stil}`}>
-                    <p className="text-[8px] font-bold uppercase">{stegNavn}</p>
-                    <p className="text-[8px] mt-0.5">{s?.status === 'OK' || s?.status === 'COMPLETE' ? '✓' : s?.status === 'FAILED' || s?.status === 'FEILET' ? '✗' : s?.status ? '◎' : '○'}</p>
-                    {s?.output && <p className="text-[8px]">{s.output}</p>}
+                    <p className="text-[11px] font-semibold uppercase">{stegNavn}</p>
+                    <p className="text-[11px] mt-0.5">{s?.status === 'OK' || s?.status === 'COMPLETE' ? '✓' : s?.status === 'FAILED' || s?.status === 'FEILET' ? '✗' : s?.status ? '◎' : '○'}</p>
+                    {s?.output && <p className="text-[11px] font-mono">{s.output}</p>}
                   </div>
                 );
               })}
@@ -166,10 +170,10 @@ export default function JobMonitorPage() {
                 <div key={s.steg} className={`p-3 rounded-lg border ${STATUS_STIL[s.status] ?? STATUS_STIL.PENDING}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold">{s.steg}</p>
-                      {s.melding && <p className="text-[10px] mt-0.5 opacity-80">{s.melding}</p>}
+                      <p className="text-xs font-semibold">{s.steg}</p>
+                      {s.melding && <p className="text-[11px] mt-0.5 opacity-80">{s.melding}</p>}
                     </div>
-                    <div className="text-right flex-shrink-0 text-[9px]">
+                    <div className="text-right flex-shrink-0 text-[11px] font-mono">
                       {s.durationMs && <p>{tid(s.durationMs)}</p>}
                       {s.kostnad && s.kostnad > 0 && <p>{kost(s.kostnad)}</p>}
                       {s.output && <p>{s.output} items</p>}

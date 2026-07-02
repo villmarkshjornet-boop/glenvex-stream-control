@@ -197,23 +197,23 @@ export default function HighlightViewerPage() {
   const hAssets = (h: Highlight) => assets.filter(a => a.highlight_id === h.id);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto space-y-5 animate-fade-in">
       <PageHeader title="Highlight Viewer" subtitle="Se alle highlights, captions og generer videoklipp" />
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* VOD-velger */}
         <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">VODs ({vods.length})</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">VODs ({vods.length})</p>
           {vods.length === 0 ? (
-            <p className="text-[10px] text-g-muted">Ingen VODs. Start pipeline i Content Factory.</p>
+            <p className="text-[11px] text-g-muted">Ingen VODs. Start pipeline i Content Factory.</p>
           ) : vods.map(v => (
             <button key={v.id} onClick={() => hentHighlights(v.id)}
               className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all ${valgtVod === v.id ? 'border-g-green/30 bg-g-green/5' : 'border-g-border hover:border-g-green/20'}`}>
               <p className="font-bold text-g-text truncate">{v.title ?? 'Ukjent stream'}</p>
-              <p className="text-[9px] text-g-muted mt-0.5">
+              <p className="text-[11px] text-g-muted mt-0.5">
                 {v.category || 'Ukjent'} · {sikkerDato(v.created_at)}
               </p>
-              <span className={`text-[8px] font-bold ${
+              <span className={`text-[11px] font-medium ${
                 v.status === 'COMPLETE' ? 'text-g-green' :
                 v.status === 'FAILED' ? 'text-red-400' :
                 'text-yellow-400'
@@ -225,15 +225,19 @@ export default function HighlightViewerPage() {
         {/* Highlight-liste */}
         <div className="lg:col-span-3 space-y-3">
           {loading && (
-            <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
-              <span className="w-6 h-6 border-2 border-g-green/30 border-t-g-green rounded-full animate-spin inline-block" />
+            <div className="bg-g-card border border-g-border rounded-2xl p-8">
+              <div className="animate-pulse space-y-3">
+                <div className="h-4 bg-g-border/40 rounded w-3/4" />
+                <div className="h-4 bg-g-border/40 rounded w-1/2" />
+                <div className="h-4 bg-g-border/40 rounded w-2/3" />
+              </div>
             </div>
           )}
 
           {!loading && highlights.length === 0 && valgtVod && (
             <div className="bg-g-card border border-g-border rounded-2xl p-6 text-center space-y-3">
-              <p className="text-xs text-g-muted">Ingen highlights for denne VOD-en.</p>
-              <p className="text-[9px] text-g-muted">Railway må ha fullført Phase 1 (transkripsjon) før Phase 2 kan kjøres.</p>
+              <p className="text-sm text-g-muted">Ingen highlights for denne VOD-en.</p>
+              <p className="text-[11px] text-g-muted">Railway må ha fullført Phase 1 (transkripsjon) før Phase 2 kan kjøres.</p>
               <button
                 onClick={kjørPhase2}
                 disabled={phase2Running}
@@ -273,17 +277,17 @@ export default function HighlightViewerPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${KAT_FARGE[h.category] ?? 'text-g-muted border-g-border'}`}>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium uppercase ${KAT_FARGE[h.category] ?? 'text-g-muted border-g-border'}`}>
                           {h.category}
                         </span>
-                        <span className="text-[9px] text-g-green font-black">Score: {h.score}/100</span>
-                        <span className="text-[9px] text-g-muted ml-auto">
+                        <span className="text-[11px] text-g-green font-semibold font-mono">Score: {h.score}/100</span>
+                        <span className="text-[11px] text-g-muted ml-auto font-mono">
                           {tidFormat(h.start_time)} → {tidFormat(h.end_time)}
                           {' '}({Math.round(h.end_time - h.start_time)}s)
                         </span>
                       </div>
-                      <p className="text-xs font-bold text-g-text truncate">{h.title}</p>
-                      {h.begrunnelse && <p className="text-[9px] text-g-muted mt-0.5 italic">{h.begrunnelse}</p>}
+                      <p className="text-sm font-semibold text-g-text truncate">{h.title}</p>
+                      {h.begrunnelse && <p className="text-[11px] text-g-muted mt-0.5 italic">{h.begrunnelse}</p>}
                     </div>
                     <span className="text-g-muted text-xs flex-shrink-0">{erValgt ? '▲' : '▼'}</span>
                   </div>
@@ -296,8 +300,8 @@ export default function HighlightViewerPage() {
                     <div className="bg-g-bg border border-g-border rounded-lg p-4 space-y-3">
                       {/* Status-header */}
                       <div className="flex items-center justify-between">
-                        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Videoklipp</p>
-                        <span className={`text-[8px] px-2 py-0.5 rounded border font-bold uppercase ${
+                        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Videoklipp</p>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium uppercase ${
                           h.clip_status === 'CLIPPED'        ? 'text-g-green border-g-green/30 bg-g-green/5' :
                           h.clip_status === 'CLIPPING'       ? 'text-yellow-400 border-yellow-400/30 animate-pulse' :
                           h.clip_status === 'READY_FOR_CLIP' ? 'text-blue-400 border-blue-400/30' :
@@ -307,7 +311,7 @@ export default function HighlightViewerPage() {
                       </div>
 
                       {/* Synlig statusboks */}
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-mono">
                         <span className="text-g-muted">Highlight ID</span>
                         <span className="text-g-text truncate">{h.id}</span>
                         <span className="text-g-muted">Start → Slutt</span>
@@ -336,13 +340,13 @@ export default function HighlightViewerPage() {
 
                       {/* Statusmeldinger */}
                       {h.clip_status === 'READY_FOR_CLIP' && (
-                        <div className="flex items-center gap-2 p-2 bg-blue-400/5 border border-blue-400/20 rounded text-[10px] text-blue-400">
+                        <div className="flex items-center gap-2 p-2 bg-blue-400/5 border border-blue-400/20 rounded-lg text-[11px] text-blue-400">
                           <span className="w-2 h-2 border border-blue-400/40 border-t-blue-400 rounded-full animate-spin flex-shrink-0" />
                           I kø – bruk «Force klipp nå» for øyeblikkelig klipping
                         </div>
                       )}
                       {h.clip_status === 'CLIPPING' && (
-                        <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded text-[10px] text-yellow-400">
+                        <div className="flex items-center gap-2 p-2 bg-yellow-400/5 border border-yellow-400/20 rounded-lg text-[11px] text-yellow-400">
                           <span className="w-2 h-2 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin flex-shrink-0" />
                           Railway klipper nå – laster ned og koder video (2–5 min)...
                         </div>
@@ -365,7 +369,7 @@ export default function HighlightViewerPage() {
                               await hentHighlights(valgtVod);
                             }}
                             disabled={klipperH === h.id}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-g-green/10 border border-g-green/30 text-g-green text-[10px] font-black rounded hover:bg-g-green/20 transition-all disabled:opacity-40"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-g-green/10 border border-g-green/25 text-g-green text-[11px] font-medium rounded-lg hover:bg-g-green/20 transition-all duration-200 disabled:opacity-40"
                           >
                             {klipperH === h.id ? (
                               <><span className="w-2.5 h-2.5 border border-g-green/40 border-t-g-green rounded-full animate-spin" /> Starter...</>
@@ -379,7 +383,7 @@ export default function HighlightViewerPage() {
                         {(h.clip_status === 'CLIP_FAILED' || !h.clip_status) && (
                           <button
                             onClick={() => genererKlipp(h.id)}
-                            className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all"
+                            className="px-3 py-1.5 bg-g-bg border border-g-border text-g-muted text-[11px] font-medium rounded-lg hover:text-g-green hover:border-g-green/30 transition-all"
                           >
                             ↺ Legg i kø (60s polling)
                           </button>
@@ -390,16 +394,16 @@ export default function HighlightViewerPage() {
                     {/* Nedlasting av ferdige videoer */}
                     {(h.clip_url || h.vertical_clip_url) && (
                       <div className="bg-g-bg border border-g-green/20 rounded-lg p-4 space-y-3">
-                        <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">Klar for nedlasting</p>
+                        <p className="text-xs font-semibold tracking-widest uppercase text-g-green">Klar for nedlasting</p>
 
                         {h.clip_url && (
                           <div className="space-y-2">
-                            <p className="text-[9px] text-g-muted font-bold uppercase">16:9 – YouTube / Twitch</p>
+                            <p className="text-[11px] text-g-muted font-semibold uppercase">16:9 – YouTube / Twitch</p>
                             <video controls className="w-full rounded border border-g-border" style={{ maxHeight: '200px' }}>
                               <source src={h.clip_url} type="video/mp4" />
                             </video>
                             <a href={h.clip_url} download={`${h.title ?? 'highlight'}_16x9.mp4`}
-                              className="inline-block px-3 py-1.5 bg-g-bg border border-g-green/30 rounded text-[10px] text-g-green hover:bg-g-green/10 transition-all font-bold">
+                              className="inline-block px-3 py-1.5 bg-g-green/10 border border-g-green/25 rounded-lg text-[11px] text-g-green hover:bg-g-green/20 transition-all duration-200 font-medium">
                               ↓ Last ned 16:9 MP4
                             </a>
                           </div>
@@ -407,12 +411,12 @@ export default function HighlightViewerPage() {
 
                         {h.vertical_clip_url && (
                           <div className="space-y-2">
-                            <p className="text-[9px] text-g-muted font-bold uppercase">9:16 – TikTok / Shorts / Reel</p>
+                            <p className="text-[11px] text-g-muted font-semibold uppercase">9:16 – TikTok / Shorts / Reel</p>
                             <video controls className="mx-auto rounded border border-g-border" style={{ maxHeight: '300px', maxWidth: '170px' }}>
                               <source src={h.vertical_clip_url} type="video/mp4" />
                             </video>
                             <a href={h.vertical_clip_url} download={`${h.title ?? 'highlight'}_9x16.mp4`}
-                              className="inline-block px-3 py-1.5 bg-g-bg border border-g-green/30 rounded text-[10px] text-g-green hover:bg-g-green/10 transition-all font-bold">
+                              className="inline-block px-3 py-1.5 bg-g-green/10 border border-g-green/25 rounded-lg text-[11px] text-g-green hover:bg-g-green/20 transition-all duration-200 font-medium">
                               ↓ Last ned 9:16 MP4
                             </a>
                           </div>
@@ -444,7 +448,7 @@ export default function HighlightViewerPage() {
                             }
                           }}
                           disabled={posterDiscord === h.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[10px] font-black rounded hover:bg-indigo-500/20 transition-all disabled:opacity-40"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-medium rounded-lg hover:bg-indigo-500/20 transition-all duration-200 disabled:opacity-40"
                         >
                           {posterDiscord === h.id ? (
                             <><span className="w-2.5 h-2.5 border border-indigo-400/40 border-t-indigo-400 rounded-full animate-spin" /> Poster...</>
@@ -454,7 +458,11 @@ export default function HighlightViewerPage() {
                             <>◈ Post til Discord</>
                           )}
                         </button>
-                        {discordFeil && <p className="text-[9px] text-red-400 mt-1">{discordFeil}</p>}
+                        {discordFeil && (
+                          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mt-1">
+                            {discordFeil}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -462,8 +470,8 @@ export default function HighlightViewerPage() {
                     {h.clip_status === 'CLIPPED' && h.clip_quality_score != null && (
                       <div className="bg-g-bg border border-g-green/20 rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold">Klipp-kvalitet (GPT-4o)</p>
-                          <span className={`text-[8px] px-2 py-0.5 rounded border font-black ${
+                          <p className="text-xs font-semibold tracking-widest uppercase text-g-green">Klipp-kvalitet (GPT-4o)</p>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold font-mono ${
                             h.clip_quality_score >= 80 ? 'text-g-green border-g-green/30 bg-g-green/5' :
                             h.clip_quality_score >= 65 ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/5' :
                             'text-red-400 border-red-400/30 bg-red-400/5'
@@ -479,8 +487,8 @@ export default function HighlightViewerPage() {
                           ].map(({ label, val }) => val != null && (
                             <div key={label} className="space-y-0.5">
                               <div className="flex justify-between items-center">
-                                <span className="text-[9px] text-g-muted">{label}</span>
-                                <span className="text-[9px] font-bold text-g-text">{val}</span>
+                                <span className="text-[11px] text-g-muted">{label}</span>
+                                <span className="text-[11px] font-semibold text-g-text font-mono">{val}</span>
                               </div>
                               <div className="h-1 bg-g-border rounded-full overflow-hidden">
                                 <div className={`h-full rounded-full transition-all ${
@@ -511,7 +519,7 @@ export default function HighlightViewerPage() {
                           </>
                         )}
                       </button>
-                      <p className="text-[9px] text-g-muted">tekster + metadata + klipp-URLs</p>
+                      <p className="text-[11px] text-g-muted">tekster + metadata + klipp-URLs</p>
                     </div>
 
                     {/* Captions */}
@@ -519,41 +527,41 @@ export default function HighlightViewerPage() {
                       {yt && (
                         <div className="p-3 bg-g-bg border border-red-400/20 rounded-lg">
                           <div className="flex justify-between items-center mb-1">
-                            <p className="text-[9px] text-red-400 font-bold uppercase">▶ YouTube</p>
+                            <p className="text-[11px] text-red-400 font-semibold uppercase">▶ YouTube</p>
                             <button onClick={() => kopier(`${yt.tittel}\n\n${yt.beskrivelse}\n\n${(yt.hashtags ?? []).join(' ')}`, `yt-${h.id}`)}
-                              className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+                              className="text-[11px] text-g-muted hover:text-g-green transition-colors">
                               {kopiert === `yt-${h.id}` ? '✓ Kopiert!' : 'Kopier'}
                             </button>
                           </div>
-                          <p className="text-xs font-bold text-g-text">{yt.tittel}</p>
-                          <p className="text-[10px] text-g-muted mt-1">{yt.beskrivelse}</p>
-                          <p className="text-[9px] text-g-green mt-1">{(yt.hashtags ?? []).join(' ')}</p>
+                          <p className="text-sm font-semibold text-g-text">{yt.tittel}</p>
+                          <p className="text-[11px] text-g-muted mt-1">{yt.beskrivelse}</p>
+                          <p className="text-[11px] text-g-green mt-1 font-mono">{(yt.hashtags ?? []).join(' ')}</p>
                         </div>
                       )}
                       {tt && (
                         <div className="p-3 bg-g-bg border border-pink-400/20 rounded-lg">
                           <div className="flex justify-between items-center mb-1">
-                            <p className="text-[9px] text-pink-400 font-bold uppercase">♪ TikTok</p>
+                            <p className="text-[11px] text-pink-400 font-semibold uppercase">♪ TikTok</p>
                             <button onClick={() => kopier(`${tt.caption}\n\n${(tt.hashtags ?? []).join(' ')}`, `tt-${h.id}`)}
-                              className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+                              className="text-[11px] text-g-muted hover:text-g-green transition-colors">
                               {kopiert === `tt-${h.id}` ? '✓ Kopiert!' : 'Kopier'}
                             </button>
                           </div>
-                          <p className="text-xs text-g-text">{tt.caption}</p>
-                          <p className="text-[9px] text-g-green mt-1">{(tt.hashtags ?? []).join(' ')}</p>
+                          <p className="text-sm text-g-text">{tt.caption}</p>
+                          <p className="text-[11px] text-g-green mt-1 font-mono">{(tt.hashtags ?? []).join(' ')}</p>
                         </div>
                       )}
                       {ig && (
                         <div className="p-3 bg-g-bg border border-purple-400/20 rounded-lg">
                           <div className="flex justify-between items-center mb-1">
-                            <p className="text-[9px] text-purple-400 font-bold uppercase">Instagram</p>
+                            <p className="text-[11px] text-purple-400 font-semibold uppercase">Instagram</p>
                             <button onClick={() => kopier(`${ig.caption}\n\n${(ig.hashtags ?? []).join(' ')}`, `ig-${h.id}`)}
-                              className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+                              className="text-[11px] text-g-muted hover:text-g-green transition-colors">
                               {kopiert === `ig-${h.id}` ? '✓ Kopiert!' : 'Kopier'}
                             </button>
                           </div>
-                          <p className="text-xs text-g-text">{ig.caption}</p>
-                          <p className="text-[9px] text-g-green mt-1">{(ig.hashtags ?? []).join(' ')}</p>
+                          <p className="text-sm text-g-text">{ig.caption}</p>
+                          <p className="text-[11px] text-g-green mt-1 font-mono">{(ig.hashtags ?? []).join(' ')}</p>
                         </div>
                       )}
                     </div>

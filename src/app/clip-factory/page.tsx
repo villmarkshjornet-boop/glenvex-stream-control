@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageHeader, TabBar, Spinner, EmptyState } from '@/components/ui';
+import { PageHeader, EmptyState } from '@/components/ui';
 
 interface ClipContent {
   id: string;
@@ -62,15 +62,19 @@ export default function ClipFactoryPage() {
   })() : '';
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-4xl mx-auto space-y-5 animate-fade-in">
       <PageHeader title="Clip Factory" subtitle="Gjør streams om til innhold for TikTok, YouTube og Instagram" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Clip-liste */}
         <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
-          <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase">Clips denne uken</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Clips denne uken</p>
           {loading ? (
-            <div className="flex justify-center py-6"><Spinner /></div>
+            <div className="animate-pulse space-y-3">
+              <div className="h-4 bg-g-border/40 rounded w-3/4" />
+              <div className="h-4 bg-g-border/40 rounded w-1/2" />
+              <div className="h-4 bg-g-border/40 rounded w-2/3" />
+            </div>
           ) : clips.length === 0 ? (
             <EmptyState icon="▶" title="Ingen clips" description="Clips hentes automatisk fra Twitch." />
           ) : clips.map(clip => (
@@ -81,12 +85,12 @@ export default function ClipFactoryPage() {
                 <img src={clip.thumbnailUrl} alt={clip.title} className="w-20 h-12 object-cover rounded-lg flex-shrink-0" />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-g-text truncate">{clip.title}</p>
-                <p className="text-[10px] text-g-muted mt-0.5">{clip.viewCount} visninger · {Math.round(clip.duration)}s</p>
+                <p className="text-sm font-semibold text-g-text truncate">{clip.title}</p>
+                <p className="text-[11px] text-g-muted mt-0.5 font-mono">{clip.viewCount} visninger · {Math.round(clip.duration)}s</p>
                 <button
                   onClick={e => { e.stopPropagation(); genererInnhold(clip.id); }}
                   disabled={clip.genererer}
-                  className="mt-1.5 text-[10px] text-g-green hover:underline font-bold">
+                  className="mt-1.5 text-[11px] text-g-green hover:underline font-medium">
                   {clip.genererer ? 'Genererer...' : clip.innhold ? '✓ Vis innhold' : '◆ Generer innhold'}
                 </button>
               </div>
@@ -105,7 +109,7 @@ export default function ClipFactoryPage() {
               <div className="flex border-b border-g-border">
                 {(['tiktok', 'youtube', 'instagram'] as const).map(p => (
                   <button key={p} onClick={() => setPlattform(p)}
-                    className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-wider transition-all ${plattform === p ? 'text-g-green border-b-2 border-g-green bg-g-green/5' : 'text-g-muted hover:text-g-text'}`}>
+                    className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all ${plattform === p ? 'text-g-green border-b-2 border-g-green bg-g-green/5' : 'text-g-muted hover:text-g-text'}`}>
                     {p === 'tiktok' ? 'TikTok' : p === 'youtube' ? 'YouTube' : 'Instagram'}
                   </button>
                 ))}
@@ -115,21 +119,21 @@ export default function ClipFactoryPage() {
                   <>
                     {'tittel' in valgtInnhold && (
                       <div>
-                        <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Tittel</p>
-                        <p className="text-xs font-bold text-g-text">{(valgtInnhold as any).tittel}</p>
+                        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-1">Tittel</p>
+                        <p className="text-sm font-semibold text-g-text">{(valgtInnhold as any).tittel}</p>
                       </div>
                     )}
                     <div>
-                      <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">
+                      <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-1">
                         {plattform === 'instagram' ? 'Caption' : 'Beskrivelse'}
                       </p>
-                      <p className="text-xs text-g-text font-mono whitespace-pre-wrap leading-relaxed">
+                      <p className="text-sm text-g-text whitespace-pre-wrap leading-relaxed">
                         {(valgtInnhold as any).beskrivelse ?? (valgtInnhold as any).caption}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[9px] text-g-muted uppercase tracking-widest mb-1">Hashtags</p>
-                      <p className="text-xs text-g-green font-mono">{(valgtInnhold as any).hashtags}</p>
+                      <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-1">Hashtags</p>
+                      <p className="text-sm text-g-green font-mono">{(valgtInnhold as any).hashtags}</p>
                     </div>
                     <button
                       onClick={async () => {

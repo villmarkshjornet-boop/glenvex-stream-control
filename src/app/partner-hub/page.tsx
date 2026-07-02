@@ -214,8 +214,8 @@ export default function PartnerHubPage() {
           { label: 'Eksponeringer', value: totalEksponering },
           { label: 'Featured', value: featured?.navn ?? '–' },
         ].map(s => (
-          <div key={s.label} className="bg-g-card border border-g-border rounded-lg p-4 text-center">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
+          <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
+            <p className="text-[11px] text-g-muted uppercase tracking-widest">{s.label}</p>
             <p className="text-sm font-black text-g-green font-mono mt-1 truncate">{s.value}</p>
           </div>
         ))}
@@ -231,7 +231,7 @@ export default function PartnerHubPage() {
                 <span className="text-yellow-400 text-xl font-black">★</span>
               </div>
               <div>
-                <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold">Featured Partner</p>
+                <p className="text-[11px] text-yellow-400 uppercase tracking-widest font-bold">Featured Partner</p>
                 <p className="text-lg font-black text-g-text mt-0.5">{featured.navn}</p>
                 <p className="text-xs text-g-muted mt-0.5">{featured.beskrivelse}</p>
                 {featured.rabattkode && (
@@ -256,10 +256,10 @@ export default function PartnerHubPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Partner-liste */}
         <div className="lg:col-span-2 space-y-3">
-          <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Alle partnere</p>
+          <p className="text-xs text-g-muted font-bold tracking-widest uppercase">Alle partnere</p>
           {loading ? <p className="text-xs text-g-muted">Laster...</p> :
            partners.length === 0 ? (
-            <div className="bg-g-card border border-g-border rounded-lg p-8 text-center">
+            <div className="bg-g-card border border-g-border rounded-xl p-8 text-center">
               <p className="text-xs text-g-muted">Ingen partnere ennå. Trykk "+ Ny partner" for å starte.</p>
             </div>
           ) : partners.map(p => (
@@ -274,19 +274,19 @@ export default function PartnerHubPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-bold text-g-text">{p.navn}</p>
-                      {p.featured && <span className="text-[9px] text-yellow-400 font-bold">★ FEATURED</span>}
-                      {p.ownedBrand && <span className="text-[9px] text-purple-400 font-bold">OWNED</span>}
-                      {!p.aktiv && <span className="text-[9px] text-g-muted font-bold">INAKTIV</span>}
+                      {p.featured && <span className="text-[11px] text-yellow-400 font-bold">★ FEATURED</span>}
+                      {p.ownedBrand && <span className="text-[11px] text-purple-400 font-bold">OWNED</span>}
+                      {!p.aktiv && <span className="text-[11px] text-g-muted font-bold">INAKTIV</span>}
                     </div>
-                    <p className="text-[10px] text-g-muted">{p.kategori} • {p.eksponering} eksponeringer</p>
+                    <p className="text-xs text-g-muted">{p.kategori} • {p.eksponering} eksponeringer</p>
                   </div>
                 </div>
                 <div className="flex gap-1">
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${KATEGORI_FARGE[p.kategori]}`}>{p.kategori}</span>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded border font-bold uppercase ${KATEGORI_FARGE[p.kategori]}`}>{p.kategori}</span>
                 </div>
               </div>
               <p className="text-xs text-g-muted truncate">{p.beskrivelse}</p>
-              {p.rabattkode && <p className="text-[10px] text-g-green font-mono mt-1">Kode: {p.rabattkode}</p>}
+              {p.rabattkode && <p className="text-xs text-g-green font-mono mt-1">Kode: {p.rabattkode}</p>}
             </div>
           ))}
         </div>
@@ -304,7 +304,7 @@ export default function PartnerHubPage() {
                       const stats = analytics[valgt.navn];
                       if (!stats) return null;
                       const c = { god: 'text-g-green border-g-green/30 bg-g-green/10', moderat: 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10', svak: 'text-g-muted/50 border-g-border/30' }[stats.dataStrength];
-                      return <span className={`mt-0.5 inline-block px-1.5 py-0.5 border rounded text-[9px] font-bold ${c}`}>{stats.dataStrength} datagrunnlag</span>;
+                      return <span className={`mt-0.5 inline-block px-1.5 py-0.5 border rounded text-[11px] font-bold ${c}`}>{stats.dataStrength} datagrunnlag</span>;
                     })()}
                   </div>
                   <button onClick={() => setValgt(null)} className="text-g-muted text-xs hover:text-g-text">✕</button>
@@ -327,43 +327,43 @@ export default function PartnerHubPage() {
                 {(() => {
                   const stats = analytics[valgt.navn];
                   if (!stats) return (
-                    <p className="text-[10px] text-g-muted/40 italic">Henter historikk...</p>
+                    <p className="text-xs text-g-muted/40 italic">Henter historikk...</p>
                   );
                   const { contentLog: cl, proposals: pr, lastDecision: ld } = stats;
                   const hasData = cl.total > 0 || pr.total > 0;
                   if (!hasData) return (
-                    <p className="text-[10px] text-g-muted/40 italic">Ingen historikk funnet ennå</p>
+                    <p className="text-xs text-g-muted/40 italic">Ingen historikk funnet ennå</p>
                   );
                   return (
                     <div className="space-y-2 border-t border-g-border/30 pt-2">
-                      <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold">Promo-historikk</p>
+                      <p className="text-[11px] text-g-muted uppercase tracking-wider font-bold">Promo-historikk</p>
                       <div className="grid grid-cols-3 gap-1.5 text-center">
                         {[
                           { l: '7d', v: cl.recent7d },
                           { l: '30d', v: cl.recent30d },
                           { l: 'Totalt', v: cl.total },
                         ].map(s => (
-                          <div key={s.l} className="bg-g-sidebar border border-g-border/40 rounded p-2">
-                            <p className="text-[8px] text-g-muted">{s.l}</p>
+                          <div key={s.l} className="bg-g-card border border-g-border/40 rounded p-2">
+                            <p className="text-[11px] text-g-muted">{s.l}</p>
                             <p className="text-sm font-black text-g-green font-mono">{s.v}</p>
                           </div>
                         ))}
                       </div>
                       {(cl.discord > 0 || cl.twitch > 0) && (
-                        <div className="flex gap-2 text-[10px] text-g-muted">
+                        <div className="flex gap-2 text-xs text-g-muted">
                           {cl.discord > 0 && <span>Discord: {cl.discord}</span>}
                           {cl.twitch > 0  && <span>Twitch: {cl.twitch}</span>}
                           {cl.channels.length > 0 && <span className="text-g-muted/50">· {cl.channels.slice(0, 2).join(', ')}</span>}
                         </div>
                       )}
                       {cl.lastPosted && (
-                        <p className="text-[10px] text-g-muted">Sist sendt: <span className="text-g-text">{tidSiden(cl.lastPosted)} siden</span></p>
+                        <p className="text-xs text-g-muted">Sist sendt: <span className="text-g-text">{tidSiden(cl.lastPosted)} siden</span></p>
                       )}
 
                       {pr.total > 0 && (
                         <>
-                          <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold pt-1">Forslag (AI)</p>
-                          <div className="flex gap-3 text-[10px]">
+                          <p className="text-[11px] text-g-muted uppercase tracking-wider font-bold pt-1">Forslag (AI)</p>
+                          <div className="flex gap-3 text-xs">
                             <span className="text-g-green">{pr.approved + pr.sent} godkjent</span>
                             {pr.rejected > 0 && <span className="text-red-400/70">{pr.rejected} avvist</span>}
                             {pr.pending > 0 && <span className="text-yellow-400">{pr.pending} venter</span>}
@@ -376,8 +376,8 @@ export default function PartnerHubPage() {
 
                       {ld && (
                         <>
-                          <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold pt-1">Siste AI-vurdering</p>
-                          <div className="flex gap-2 text-[10px] flex-wrap">
+                          <p className="text-[11px] text-g-muted uppercase tracking-wider font-bold pt-1">Siste AI-vurdering</p>
+                          <div className="flex gap-2 text-xs flex-wrap">
                             {ld.score !== null && (
                               <span className={`font-bold ${ld.score >= 0.7 ? 'text-g-green' : ld.score >= 0.4 ? 'text-yellow-400' : 'text-red-400/70'}`}>
                                 Score: {Math.round(ld.score * 100)}%
@@ -393,8 +393,8 @@ export default function PartnerHubPage() {
                       )}
 
                       <div className="pt-1 border-t border-g-border/20">
-                        <p className="text-[9px] text-g-muted uppercase tracking-wider font-bold mb-0.5">Anbefaling</p>
-                        <p className="text-[10px] text-g-text leading-relaxed">{stats.recommendation}</p>
+                        <p className="text-[11px] text-g-muted uppercase tracking-wider font-bold mb-0.5">Anbefaling</p>
+                        <p className="text-xs text-g-text leading-relaxed">{stats.recommendation}</p>
                       </div>
                     </div>
                   );
@@ -422,11 +422,11 @@ export default function PartnerHubPage() {
 
               {/* AI Content Studio */}
               <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
-                <p className="text-[10px] text-g-green uppercase tracking-widest font-bold">◆ AI Content Studio</p>
+                <p className="text-xs text-g-green uppercase tracking-widest font-bold">◆ AI Content Studio</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {['discord', 'twitch', 'instagram', 'twitter', 'facebook', 'giveaway'].map(t => (
                     <button key={t} onClick={() => setGenType(t)}
-                      className={`py-1.5 text-[10px] font-bold uppercase rounded border transition-all ${genType === t ? 'bg-g-green/10 border-g-green/30 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>
+                      className={`py-1.5 text-xs font-bold uppercase rounded border transition-all ${genType === t ? 'bg-g-green/10 border-g-green/30 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>
                       {t}
                     </button>
                   ))}
@@ -489,7 +489,7 @@ export default function PartnerHubPage() {
                 { felt: 'affiliateLink', label: 'Affiliate-link', ph: 'https://...' },
               ].map(({ felt, label, ph }) => (
                 <div key={felt}>
-                  <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">{label}</label>
+                  <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">{label}</label>
                   <input value={(form as any)[felt] ?? ''} onChange={e => setForm(p => ({ ...p, [felt]: e.target.value }))}
                     placeholder={ph} className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
                 </div>
@@ -497,14 +497,14 @@ export default function PartnerHubPage() {
             </div>
 
             <div>
-              <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Beskrivelse</label>
+              <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Beskrivelse</label>
               <textarea value={form.beskrivelse ?? ''} onChange={e => setForm(p => ({ ...p, beskrivelse: e.target.value }))} rows={2}
                 className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50 resize-none" />
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Kategori</label>
+                <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Kategori</label>
                 <select value={form.kategori ?? 'gaming'} onChange={e => setForm(p => ({ ...p, kategori: e.target.value as any }))}
                   className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none">
                   {['gaming', 'hardware', 'energidrikk', 'bil', 'jakt', 'ownedBrand', 'annet'].map(k => (
@@ -513,12 +513,12 @@ export default function PartnerHubPage() {
                 </select>
               </div>
               <div>
-                <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Provisjon %</label>
+                <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Provisjon %</label>
                 <input type="number" value={form.provisjon ?? 10} onChange={e => setForm(p => ({ ...p, provisjon: +e.target.value }))}
                   className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none" />
               </div>
               <div>
-                <label className="text-[9px] text-g-muted uppercase tracking-widest block mb-1">Prioritet (1-10)</label>
+                <label className="text-[11px] text-g-muted uppercase tracking-widest block mb-1">Prioritet (1-10)</label>
                 <input type="number" min="1" max="10" value={form.prioritet ?? 5} onChange={e => setForm(p => ({ ...p, prioritet: +e.target.value }))}
                   className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text outline-none" />
               </div>

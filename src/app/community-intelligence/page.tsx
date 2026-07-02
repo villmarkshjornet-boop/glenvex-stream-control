@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { PageHeader, Spinner, ErrorState } from '@/components/ui';
+import { PageHeader, ErrorState } from '@/components/ui';
 import { tidSiden } from '@/components/dashboard/helpers';
 
 interface HealthData {
@@ -58,8 +58,8 @@ function StatCard({ label, value, sub, color = 'text-g-green' }: {
   return (
     <div className="bg-g-card border border-g-border rounded-xl p-3 text-center">
       <p className={`text-2xl font-black font-mono ${color}`}>{value}</p>
-      <p className="text-[9px] text-g-muted uppercase tracking-widest mt-1">{label}</p>
-      {sub && <p className="text-[9px] text-g-muted/60 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-g-muted uppercase tracking-widest mt-1">{label}</p>
+      {sub && <p className="text-[11px] text-g-muted/60 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -76,19 +76,19 @@ function MemberRow({ m, showXP, showMessages, showScore, showSupport, showLastSe
     <div className="flex items-center justify-between py-1.5 border-b border-g-border/20 last:border-0">
       <div className="flex items-center gap-2 min-w-0">
         <div className="w-6 h-6 shrink-0 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center">
-          <span className="text-[9px] font-black text-g-green">{m.username?.[0]?.toUpperCase() ?? '?'}</span>
+          <span className="text-[11px] font-black text-g-green">{m.username?.[0]?.toUpperCase() ?? '?'}</span>
         </div>
         <p className="text-xs font-bold text-g-text truncate">{m.username}</p>
         {m.twitchLinked && (
-          <span className="text-[8px] px-1 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400 shrink-0">
+          <span className="text-[11px] px-1 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400 shrink-0">
             {m.twitchSubStatus ? `SUB T${m.twitchSubTier ?? '1'}` : 'TW'}
           </span>
         )}
         {showLastSeen && lastActivity && (
-          <p className="text-[9px] text-g-muted shrink-0">{tidSiden(lastActivity)}</p>
+          <p className="text-[11px] text-g-muted shrink-0">{tidSiden(lastActivity)}</p>
         )}
       </div>
-      <div className="flex items-center gap-3 text-[9px] text-g-muted font-mono shrink-0">
+      <div className="flex items-center gap-3 text-[11px] text-g-muted font-mono shrink-0">
         {showXP     && <span className="text-g-green">{displayXp.toLocaleString()} XP</span>}
         {m.level !== undefined && <span>Lv {m.level}</span>}
         {showMessages && <span>{(m.messages ?? 0).toLocaleString()} msg</span>}
@@ -108,12 +108,12 @@ function SegmentPanel({ title, desc, color, members, children }: {
   title: string; desc?: string; color: string; members: Member[]; children: React.ReactNode;
 }) {
   return (
-    <div className={`bg-g-card border rounded-2xl p-5 ${color}`}>
-      <p className={`text-[9px] uppercase tracking-widest font-bold mb-1`}
+    <div className={`bg-g-card border rounded-2xl p-6 ${color}`}>
+      <p className="text-xs uppercase tracking-widest font-bold mb-1"
         style={{ color: 'inherit' }}>{title} ({members.length})</p>
-      {desc && <p className="text-[8px] text-g-muted mb-2">{desc}</p>}
+      {desc && <p className="text-[11px] text-g-muted mb-2">{desc}</p>}
       {members.length === 0
-        ? <p className="text-xs text-g-muted">Ingen ennå.</p>
+        ? <p className="text-sm text-g-muted">Ingen ennå.</p>
         : children}
     </div>
   );
@@ -132,7 +132,12 @@ export default function CommunityIntelligencePage() {
   }, []);
 
   if (loading) return (
-    <div className="max-w-5xl mx-auto flex justify-center py-16"><Spinner /></div>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      <div className="animate-pulse space-y-3">
+        <div className="h-4 bg-g-border/40 rounded w-3/4" />
+        <div className="h-4 bg-g-border/40 rounded w-1/2" />
+      </div>
+    </div>
   );
   if (error || !data) return (
     <div className="max-w-5xl mx-auto">
@@ -149,16 +154,16 @@ export default function CommunityIntelligencePage() {
   const churnColor = health.churn > 50 ? 'text-red-400' : health.churn > 30 ? 'text-yellow-400' : 'text-g-green';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="Community Intelligence" subtitle={`Sist oppdatert kl. ${data.generertKl}`}>
-        <Link href="/community-manager" className="text-[9px] text-g-muted hover:text-g-green transition-colors border border-g-border rounded-lg px-2 py-1">
+        <Link href="/community-manager" className="text-xs text-g-muted hover:text-g-green transition-colors border border-g-border rounded-lg px-2 py-1">
           Alle membres →
         </Link>
       </PageHeader>
 
       {/* ── Community Health ───────────────────────────────────────────────── */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Community Health</p>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Community Health</p>
         <div className="grid grid-cols-5 gap-2 mb-2">
           <StatCard label="Totalt"     value={health.total} />
           <StatCard label="Aktive 24t" value={health.aktive24h} />
@@ -177,25 +182,25 @@ export default function CommunityIntelligencePage() {
 
       {/* ── AI Analyse ─────────────────────────────────────────────────────── */}
       {aiAnalyse && (
-        <div className="bg-g-card border border-g-green/20 rounded-2xl p-5">
-          <p className="text-[9px] text-g-green uppercase tracking-widest font-bold mb-2">AI Community Analyse</p>
-          <p className="text-xs text-g-text leading-relaxed whitespace-pre-wrap">{aiAnalyse}</p>
+        <div className="bg-g-card border border-g-green/20 rounded-2xl p-6">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-green mb-2">AI Community Analyse</p>
+          <p className="text-sm text-g-text leading-relaxed whitespace-pre-wrap">{aiAnalyse}</p>
         </div>
       )}
 
       {/* ── Anbefalinger ───────────────────────────────────────────────────── */}
       {anbefalinger.length > 0 && (
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Handlingsanbefalinger</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Handlingsanbefalinger</p>
           <div className="grid grid-cols-2 gap-2">
             {anbefalinger.map((a, i) => (
               <div key={i} className={`rounded-xl border p-3 ${PRIORITET_FARGE[a.prioritet]}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-base">{ANBEFALING_IKON[a.type] ?? '•'}</span>
-                  <span className="text-xs font-bold text-g-text">{a.member}</span>
-                  <span className={`ml-auto text-[8px] font-bold px-1.5 py-0.5 rounded border ${PRIORITET_FARGE[a.prioritet]}`}>{a.prioritet}</span>
+                  <span className="text-sm font-bold text-g-text">{a.member}</span>
+                  <span className={`ml-auto text-[11px] font-bold px-1.5 py-0.5 rounded border ${PRIORITET_FARGE[a.prioritet]}`}>{a.prioritet}</span>
                 </div>
-                <p className="text-[10px] text-g-muted leading-relaxed">{a.begrunnelse}</p>
+                <p className="text-[11px] text-g-muted leading-relaxed">{a.begrunnelse}</p>
               </div>
             ))}
           </div>
@@ -204,7 +209,7 @@ export default function CommunityIntelligencePage() {
 
       {/* ── Eksisterende segmenter ─────────────────────────────────────────── */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Lojalitet & Aktivitet</p>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Lojalitet & Aktivitet</p>
         <div className="grid grid-cols-2 gap-4">
           <SegmentPanel title="Core Members" desc="≥5 streams · aktiv 7d · aktiv chatter"
             color="border-emerald-500/20 text-emerald-400" members={coreMembers}>
@@ -230,7 +235,7 @@ export default function CommunityIntelligencePage() {
 
       {/* ── Nye segmenter — Community Core ────────────────────────────────── */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Community Core — Nye Segmenter</p>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Community Core — Nye Segmenter</p>
         <div className="grid grid-cols-2 gap-4">
           <SegmentPanel title="Collectors" desc="≥5 kort — bygger kortbibliotek"
             color="border-blue-500/20 text-blue-400" members={collectors}>
@@ -276,26 +281,26 @@ export default function CommunityIntelligencePage() {
 
       {/* ── Leaders ────────────────────────────────────────────────────────── */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Ledertabeller</p>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Ledertabeller</p>
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-g-card border border-g-border rounded-2xl p-5">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp XP</p>
+          <div className="bg-g-card border border-g-border rounded-2xl p-6">
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Topp XP</p>
             {leaders.toppXP.slice(0, 8).map(m => <MemberRow key={m.id} m={m} showXP />)}
           </div>
-          <div className="bg-g-card border border-g-border rounded-2xl p-5">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp Chattere</p>
+          <div className="bg-g-card border border-g-border rounded-2xl p-6">
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Topp Chattere</p>
             {leaders.toppChattere.map(m => <MemberRow key={m.id} m={m} showMessages />)}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Topp Støttespillere</p>
+        <div className="bg-g-card border border-g-border rounded-2xl p-6">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Topp Støttespillere</p>
           {leaders.toppSupportere.map(m => <MemberRow key={m.id} m={m} showSupport />)}
         </div>
-        <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Høyest Engasjement</p>
+        <div className="bg-g-card border border-g-border rounded-2xl p-6">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Høyest Engasjement</p>
           {leaders.toppEngasjement.map(m => <MemberRow key={m.id} m={m} showScore />)}
         </div>
       </div>
@@ -314,13 +319,13 @@ export default function CommunityIntelligencePage() {
 
       {/* ── New Members ────────────────────────────────────────────────────── */}
       {newMembers.length > 0 && (
-        <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Nye Membres Siste 30 Dager</p>
+        <div className="bg-g-card border border-g-border rounded-2xl p-6">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Nye Membres Siste 30 Dager</p>
           <div className="grid grid-cols-2 gap-x-6">
             {newMembers.map(m => (
               <div key={m.id} className="flex items-center justify-between py-1 border-b border-g-border/20 last:border-0">
-                <p className="text-xs text-g-text">{m.username}</p>
-                <p className="text-[9px] text-g-muted">{m.joinedAt ? tidSiden(m.joinedAt) : '—'}</p>
+                <p className="text-sm text-g-text">{m.username}</p>
+                <p className="text-[11px] text-g-muted">{m.joinedAt ? tidSiden(m.joinedAt) : '—'}</p>
               </div>
             ))}
           </div>
@@ -331,10 +336,10 @@ export default function CommunityIntelligencePage() {
       {(aiMemoryKontekst.communitySignaler.length > 0 ||
         aiMemoryKontekst.runningJokes.length > 0 ||
         aiMemoryKontekst.kjenteMembres.length > 0) && (
-        <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
+        <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">AI Minne om Community</p>
-            <span className={`text-[8px] px-2 py-0.5 rounded border font-bold ${
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">AI Minne om Community</p>
+            <span className={`text-[11px] px-2 py-0.5 rounded border font-bold ${
               aiMemoryKontekst.dataKvalitet === 'medium' ? 'text-g-green border-g-green/30' :
               aiMemoryKontekst.dataKvalitet === 'lav'    ? 'text-yellow-400 border-yellow-400/30' :
               'text-g-muted border-g-border'
@@ -342,10 +347,10 @@ export default function CommunityIntelligencePage() {
           </div>
           {aiMemoryKontekst.communitySignaler.length > 0 && (
             <div>
-              <p className="text-[8px] text-g-muted uppercase tracking-wider mb-1.5">Signaler</p>
+              <p className="text-[11px] text-g-muted uppercase tracking-wider mb-1.5">Signaler</p>
               <div className="flex flex-wrap gap-1.5">
                 {aiMemoryKontekst.communitySignaler.map(s => (
-                  <span key={s.key} className="text-[9px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text" title={s.summary}>
+                  <span key={s.key} className="text-[11px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text" title={s.summary}>
                     {s.key} <span className="text-g-muted">×{s.occurrences}</span>
                   </span>
                 ))}
@@ -354,26 +359,26 @@ export default function CommunityIntelligencePage() {
           )}
           {aiMemoryKontekst.runningJokes.length > 0 && (
             <div>
-              <p className="text-[8px] text-g-muted uppercase tracking-wider mb-1.5">Running Jokes</p>
+              <p className="text-[11px] text-g-muted uppercase tracking-wider mb-1.5">Running Jokes</p>
               <div className="flex flex-wrap gap-1.5">
                 {aiMemoryKontekst.runningJokes.map(j => (
-                  <span key={j.key} className="text-[9px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text">{j.key}</span>
+                  <span key={j.key} className="text-[11px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text">{j.key}</span>
                 ))}
               </div>
             </div>
           )}
           {aiMemoryKontekst.kjenteMembres.length > 0 && (
             <div>
-              <p className="text-[8px] text-g-muted uppercase tracking-wider mb-1.5">Kjente Membres</p>
+              <p className="text-[11px] text-g-muted uppercase tracking-wider mb-1.5">Kjente Membres</p>
               <div className="flex flex-wrap gap-1.5">
                 {aiMemoryKontekst.kjenteMembres.map(m => (
-                  <span key={m.key} className="text-[9px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text">{m.key}</span>
+                  <span key={m.key} className="text-[11px] px-2 py-0.5 bg-g-bg border border-g-border rounded text-g-text">{m.key}</span>
                 ))}
               </div>
             </div>
           )}
           {aiMemoryKontekst.crossPlatformCount > 0 && (
-            <p className="text-[9px] text-g-muted">{aiMemoryKontekst.crossPlatformCount} Discord↔Twitch koblet</p>
+            <p className="text-[11px] text-g-muted">{aiMemoryKontekst.crossPlatformCount} Discord↔Twitch koblet</p>
           )}
         </div>
       )}

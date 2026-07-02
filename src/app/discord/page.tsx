@@ -137,48 +137,48 @@ export default function DiscordPage() {
   const harValgte = valgtSlett.size > 0 || valgtOpprett.size > 0 || valgtRename.size > 0;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="Discord" subtitle="Discord bot-status og live-varsling" />
 
       {/* Server info */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Server Info</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-4">Server Info</p>
         {guild ? (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-[10px] text-g-muted uppercase tracking-widest">Server navn</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest">Server navn</p>
               <p className="text-g-text font-semibold mt-0.5">{guild.name}</p>
             </div>
             <div>
-              <p className="text-[10px] text-g-muted uppercase tracking-widest">Medlemmer</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest">Medlemmer</p>
               <p className="text-g-green font-bold font-mono mt-0.5">
                 {(guild.approximate_member_count ?? guild.member_count ?? 0).toLocaleString()}
               </p>
             </div>
             <div>
-              <p className="text-[10px] text-g-muted uppercase tracking-widest">Online</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest">Online</p>
               <p className="text-g-green font-bold font-mono mt-0.5">
                 {guild.approximate_presence_count?.toLocaleString() ?? '–'}
               </p>
             </div>
             <div>
-              <p className="text-[10px] text-g-muted uppercase tracking-widest">Server ID</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest">Server ID</p>
               <p className="text-g-muted text-xs font-mono mt-0.5">{guild.id}</p>
             </div>
           </div>
         ) : (
-          <p className="text-xs text-g-muted">Ingen Discord-tilkobling.</p>
+          <p className="text-sm text-g-muted">Ingen Discord-tilkobling.</p>
         )}
       </div>
 
       {/* Kanalstruktur + AI-forslag */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase">Kanalstruktur</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Kanalstruktur</p>
           <button
             onClick={hentKanaler}
             disabled={loadingChannels}
-            className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all"
+            className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200 disabled:opacity-50"
           >
             {loadingChannels ? (
               <span className="flex items-center gap-2">
@@ -193,14 +193,14 @@ export default function DiscordPage() {
           <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
             {kategorier.map(kat => (
               <div key={kat.id}>
-                <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mt-3 mb-1">{kat.name}</p>
+                <p className="text-xs text-g-muted uppercase tracking-widest font-bold mt-3 mb-1">{kat.name}</p>
                 {channels
                   .filter(c => c.parent_id === kat.id)
                   .sort((a, b) => a.position - b.position)
                   .map(ch => (
                     <div key={ch.id} className="flex items-center gap-2 py-0.5 pl-3">
                       <span className="text-g-muted text-xs">{ch.type === 2 ? '🔊' : '#'}</span>
-                      <span className="text-xs text-g-text">{ch.name}</span>
+                      <span className="text-sm text-g-text">{ch.name}</span>
                     </div>
                   ))}
               </div>
@@ -210,21 +210,21 @@ export default function DiscordPage() {
 
         {/* AI-forslag med checkboxer */}
         {suggestions && (
-          <div className="border-t border-g-border pt-4 space-y-4">
-            <p className="text-[10px] text-g-green uppercase tracking-widest font-bold">◆ AI-analyse</p>
-            <p className="text-xs text-g-muted leading-relaxed">{suggestions.tekst}</p>
+          <div className="border-t border-g-border/40 pt-4 mt-4 space-y-4">
+            <p className="text-xs text-g-green uppercase tracking-widest font-bold">◆ AI-analyse</p>
+            <p className="text-sm text-g-muted leading-relaxed">{suggestions.tekst}</p>
 
             {suggestions.slett?.length > 0 && (
               <div>
-                <p className="text-[10px] text-red-400 uppercase tracking-widest font-bold mb-2">Bør slettes</p>
+                <p className="text-xs text-red-400 uppercase tracking-widest font-bold mb-2">Bør slettes</p>
                 {suggestions.slett.map(s => (
                   <label key={s.id} className="flex items-start gap-2 py-1.5 cursor-pointer group">
                     <input type="checkbox" checked={valgtSlett.has(s.id)}
                       onChange={e => { const next = new Set(valgtSlett); e.target.checked ? next.add(s.id) : next.delete(s.id); setValgtSlett(next); }}
                       className="accent-red-400 mt-0.5" />
                     <div>
-                      <span className="text-xs text-g-text font-mono group-hover:text-red-400 transition-colors">#{s.navn}</span>
-                      {(s as any).grunn && <p className="text-[9px] text-g-muted mt-0.5">{(s as any).grunn}</p>}
+                      <span className="text-sm text-g-text font-mono group-hover:text-red-400 transition-colors">#{s.navn}</span>
+                      {(s as any).grunn && <p className="text-[11px] text-g-muted mt-0.5">{(s as any).grunn}</p>}
                     </div>
                   </label>
                 ))}
@@ -233,7 +233,7 @@ export default function DiscordPage() {
 
             {suggestions.rename?.length > 0 && (
               <div>
-                <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold mb-2">Bør omdøpes</p>
+                <p className="text-xs text-yellow-400 uppercase tracking-widest font-bold mb-2">Bør omdøpes</p>
                 {suggestions.rename.map(r => (
                   <label key={r.id} className="flex items-center gap-2 py-1 cursor-pointer group">
                     <input
@@ -246,7 +246,7 @@ export default function DiscordPage() {
                       }}
                       className="accent-yellow-400"
                     />
-                    <span className="text-xs text-g-text font-mono group-hover:text-yellow-400 transition-colors">
+                    <span className="text-sm text-g-text font-mono group-hover:text-yellow-400 transition-colors">
                       #{r.fra} → #{r.til}
                     </span>
                   </label>
@@ -256,7 +256,7 @@ export default function DiscordPage() {
 
             {suggestions.opprett?.length > 0 && (
               <div>
-                <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">Bør opprettes</p>
+                <p className="text-xs text-g-green uppercase tracking-widest font-bold mb-2">Bør opprettes</p>
                 {suggestions.opprett.map((o, i) => (
                   <label key={i} className="flex items-start gap-2 py-1 cursor-pointer group">
                     <input
@@ -270,10 +270,10 @@ export default function DiscordPage() {
                       className="accent-green-400 mt-0.5"
                     />
                     <div>
-                      <span className="text-xs text-g-text font-mono group-hover:text-g-green transition-colors">#{o.navn}</span>
-                      {o.kategori && <span className="text-[10px] text-g-muted ml-2">i {o.kategori}</span>}
-                      {o.emne && <p className="text-[10px] text-g-muted mt-0.5">{o.emne}</p>}
-                      {o.publiser && <span className="text-[10px] text-g-green">↳ Publiserer innhold automatisk</span>}
+                      <span className="text-sm text-g-text font-mono group-hover:text-g-green transition-colors">#{o.navn}</span>
+                      {o.kategori && <span className="text-[11px] text-g-muted ml-2">i {o.kategori}</span>}
+                      {o.emne && <p className="text-[11px] text-g-muted mt-0.5">{o.emne}</p>}
+                      {o.publiser && <span className="text-[11px] text-g-green">↳ Publiserer innhold automatisk</span>}
                     </div>
                   </label>
                 ))}
@@ -284,7 +284,7 @@ export default function DiscordPage() {
               <button
                 onClick={utforEndringer}
                 disabled={executing}
-                className="w-full py-2.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 hover:border-g-green/40 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all"
+                className="w-full py-2.5 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50"
               >
                 {executing ? (
                   <span className="flex items-center justify-center gap-2">
@@ -296,7 +296,7 @@ export default function DiscordPage() {
             )}
 
             {executeResult && (
-              <div className="border border-g-border rounded p-3 space-y-1">
+              <div className="border border-g-border rounded-lg p-3 space-y-1">
                 {executeResult.map((r, i) => (
                   <p key={i} className={`text-xs font-mono ${r.startsWith('✓') ? 'text-g-green' : r.startsWith('  ↳') ? 'text-g-muted pl-3' : 'text-red-400'}`}>
                     {r}
@@ -306,15 +306,15 @@ export default function DiscordPage() {
             )}
 
             {channels.length === 0 && !loadingChannels && (
-              <p className="text-xs text-g-muted">Klikk "Hent + Analyser" for å se kanalstruktur og få AI-forslag.</p>
+              <p className="text-sm text-g-muted">Klikk "Hent + Analyser" for å se kanalstruktur og få AI-forslag.</p>
             )}
           </div>
         )}
       </div>
 
       {/* Bot config */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-4">Bot Konfigurasjon</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-4">Bot Konfigurasjon</p>
         <div className="space-y-2">
           {[
             { label: 'Live Kanal ID', value: settings?.discordLiveChannelId || '–' },
@@ -331,12 +331,12 @@ export default function DiscordPage() {
       </div>
 
       {/* Test embed */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-3">Test Live Varsel</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Test Live Varsel</p>
         <button
           onClick={testAlert}
           disabled={testing}
-          className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 hover:border-g-green/40 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all"
+          className="px-4 py-2 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50"
         >
           {testing ? 'Sender...' : '((•)) Send Test Varsel'}
         </button>
@@ -348,18 +348,18 @@ export default function DiscordPage() {
       </div>
 
       {/* Manuell melding */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-1">Send melding som bot</p>
-        <p className="text-[10px] text-g-muted mb-4">Send en melding direkte på en kanal via Discord-boten.</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-1">Send melding som bot</p>
+        <p className="text-xs text-g-muted mb-4">Send en melding direkte på en kanal via Discord-boten.</p>
         <form onSubmit={sendManuellMelding} className="space-y-3">
           <div>
-            <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Kanal</label>
+            <label className="text-xs text-g-muted uppercase tracking-wider font-bold block mb-1">Kanal</label>
             {channels.filter(c => c.type === 0).length > 0 ? (
               <select
                 value={meldingKanal}
                 onChange={e => setMeldingKanal(e.target.value)}
                 required
-                className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
               >
                 <option value="">Velg kanal...</option>
                 {channels.filter(c => c.type === 0).sort((a, b) => a.position - b.position).map(ch => (
@@ -374,24 +374,24 @@ export default function DiscordPage() {
                   onChange={e => setMeldingKanal(e.target.value)}
                   placeholder="Kanal-ID (hent kanaler ovenfor)"
                   required
-                  className="flex-1 bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/40"
+                  className="flex-1 bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
                 />
                 <button type="button" onClick={hentKanaler}
-                  className="px-3 py-2 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                  className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors">
                   Hent kanaler
                 </button>
               </div>
             )}
           </div>
           <div>
-            <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Melding</label>
+            <label className="text-xs text-g-muted uppercase tracking-wider font-bold block mb-1">Melding</label>
             <textarea
               value={meldingTekst}
               onChange={e => setMeldingTekst(e.target.value)}
               placeholder="Skriv meldingen her..."
               required
               rows={3}
-              className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/40 resize-none"
+              className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 resize-none"
             />
           </div>
           {meldingResult && (
@@ -400,19 +400,19 @@ export default function DiscordPage() {
             </p>
           )}
           <button type="submit" disabled={sendingMelding}
-            className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
+            className="px-4 py-2 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50">
             {sendingMelding ? 'Sender...' : 'Send melding'}
           </button>
         </form>
       </div>
 
       {/* Slash commands */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted font-bold tracking-widest uppercase mb-3">Slash Kommandoer</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Slash Kommandoer</p>
         <div className="grid grid-cols-2 gap-2">
           {['/live', '/twitch', '/promo', '/setup', '/status', '/socials', '/clip', '/kanaler'].map(cmd => (
             <div key={cmd} className="flex items-center gap-2 py-1.5 px-3 bg-g-bg border border-g-border rounded-lg">
-              <span className="text-g-green text-xs font-mono font-bold">{cmd}</span>
+              <span className="text-g-green text-sm font-mono font-bold">{cmd}</span>
             </div>
           ))}
         </div>

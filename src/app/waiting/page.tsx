@@ -15,28 +15,28 @@ export default function WaitingPage() {
 
           <div>
             <h1 className="text-base font-black text-g-text">Du er på ventelisten</h1>
-            <p className="text-xs text-g-muted mt-2 leading-relaxed">
+            <p className="text-sm text-g-muted mt-2 leading-relaxed">
               Onboardingen din er fullført. En administrator vil aktivere tilgangen din snart.
               Du får tilgang til Glenvex Creator OS når du er godkjent som alpha-tester.
             </p>
           </div>
 
           <div className="bg-g-bg border border-g-border/50 rounded-xl p-4 text-left space-y-2">
-            <p className="text-[10px] text-g-muted font-bold uppercase tracking-widest">Hva skjer nå?</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-g-muted">Hva skjer nå?</p>
             {[
               'Vi verifiserer Twitch- og Discord-tilkoblingen din',
               'Du mottar beskjed når tilgangen er aktivert',
               'Frem til da kan du ikke logge inn på dashbordet',
             ].map(t => (
               <div key={t} className="flex items-start gap-2">
-                <span className="text-g-green/60 text-[10px] mt-0.5">◆</span>
+                <span className="text-g-green/60 text-[11px] mt-0.5">◆</span>
                 <p className="text-[11px] text-g-muted">{t}</p>
               </div>
             ))}
           </div>
 
           <a href="/api/auth/logout"
-            className="inline-block px-4 py-2 border border-g-border rounded text-[10px] text-g-muted hover:text-g-text transition-colors">
+            className="inline-block px-4 py-2 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-text transition-colors">
             Logg ut
           </a>
         </div>

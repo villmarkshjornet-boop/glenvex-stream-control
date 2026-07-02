@@ -123,7 +123,7 @@ function Dot({ c, title }: { c: TL; title: string }) {
 }
 
 function Badge({ ok, label, tiny }: { ok: boolean; label: string; tiny?: boolean }) {
-  const size = tiny ? 'px-1 py-0.5 text-[8px]' : 'px-1.5 py-0.5 text-[9px]';
+  const size = tiny ? 'px-1 py-0.5 text-[11px]' : 'px-1.5 py-0.5 text-[11px]';
   return (
     <span className={`inline-flex items-center gap-1 rounded font-bold ${size} ${
       ok
@@ -215,14 +215,14 @@ function DetailSidebar({
 
   const Section = ({ title }: { title: string }) => (
     <div className="px-4 pt-4 pb-1">
-      <p className="text-[9px] font-bold text-g-muted uppercase tracking-widest border-b border-g-border/40 pb-1">{title}</p>
+      <p className="text-[11px] font-bold text-g-muted uppercase tracking-widest border-b border-g-border/40 pb-1">{title}</p>
     </div>
   );
 
   const Row = ({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) => (
     <div className="px-4 py-1 flex items-start justify-between gap-2">
-      <span className="text-[10px] text-g-muted flex-shrink-0 w-28">{label}</span>
-      <span className={`text-[10px] font-semibold text-right leading-tight ${color ?? 'text-g-text'}`}>{value ?? '–'}</span>
+      <span className="text-xs text-g-muted flex-shrink-0 w-28">{label}</span>
+      <span className={`text-xs font-semibold text-right leading-tight ${color ?? 'text-g-text'}`}>{value ?? '–'}</span>
     </div>
   );
 
@@ -237,11 +237,11 @@ function DetailSidebar({
         <div className="sticky top-0 bg-g-card border-b border-g-border px-4 py-3 flex items-center justify-between z-10">
           <div>
             <p className="text-sm font-black text-g-text">{ws.brandName || ws.id}</p>
-            <p className="text-[9px] text-g-muted font-mono">{ws.id}</p>
+            <p className="text-[11px] text-g-muted font-mono">{ws.id}</p>
           </div>
           <div className="flex items-center gap-2">
             {live && <Badge ok label="LIVE" />}
-            <button onClick={onClose} className="w-6 h-6 rounded border border-g-border text-g-muted hover:text-g-text hover:border-g-green/30 text-[10px] flex items-center justify-center transition-colors">✕</button>
+            <button onClick={onClose} className="w-6 h-6 rounded border border-g-border text-g-muted hover:text-g-text hover:border-g-green/30 text-xs flex items-center justify-center transition-colors">✕</button>
           </div>
         </div>
 
@@ -254,7 +254,7 @@ function DetailSidebar({
             ] as [string, TL][]).map(([label, c]) => (
               <div key={label} className="flex flex-col items-center gap-1">
                 <Dot c={c} title={label} />
-                <span className="text-[7px] text-g-muted uppercase tracking-wider">{label}</span>
+                <span className="text-[11px] text-g-muted uppercase tracking-wider">{label}</span>
               </div>
             ))}
           </div>
@@ -263,27 +263,27 @@ function DetailSidebar({
         {/* Quick Actions */}
         <div className="px-4 py-3 border-b border-g-border/50 flex flex-wrap gap-2">
           <a href={`/?workspace=${ws.id}`} target="_blank"
-            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+            className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
             Dashboard ↗
           </a>
           <a href={`/stream-coach?workspace=${ws.id}`} target="_blank"
-            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+            className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
             Stream Coach ↗
           </a>
           <a href="/content-factory-admin" target="_blank"
-            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+            className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
             CF Admin ↗
           </a>
           <button
             onClick={handleLiveCheck}
             disabled={liveChecking}
-            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-purple-400 hover:border-purple-400/30 transition-colors disabled:opacity-50"
+            className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-purple-400 hover:border-purple-400/30 transition-colors disabled:opacity-50"
           >
             {liveChecking ? 'Sjekker…' : 'Test live check ↻'}
           </button>
         </div>
         {liveCheckResult && (
-          <div className={`mx-4 mt-2 mb-1 p-2 rounded text-[9px] border ${liveCheckResult.isLive ? 'border-red-500/30 bg-red-500/5 text-red-400' : liveCheckResult.error ? 'border-red-500/30 bg-red-500/5 text-red-400' : 'border-g-border bg-g-bg/50 text-g-muted'}`}>
+          <div className={`mx-4 mt-2 mb-1 p-2 rounded text-[11px] border ${liveCheckResult.isLive ? 'border-red-500/30 bg-red-500/5 text-red-400' : liveCheckResult.error ? 'border-red-500/30 bg-red-500/5 text-red-400' : 'border-g-border bg-g-bg/50 text-g-muted'}`}>
             {liveCheckResult.error
               ? `Feil: ${liveCheckResult.error}`
               : liveCheckResult.isLive
@@ -325,7 +325,7 @@ function DetailSidebar({
                 <button
                   onClick={() => handleRepair(false)}
                   disabled={repairing}
-                  className="flex-1 py-1.5 text-[9px] bg-g-green/10 border border-g-green/30 rounded text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-50"
+                  className="flex-1 py-1.5 text-[11px] bg-g-green/10 border border-g-green/30 rounded text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-50"
                 >
                   {repairing ? 'Reparerer…' : 'Kjør Repair'}
                 </button>
@@ -333,14 +333,14 @@ function DetailSidebar({
                   <button
                     onClick={() => handleRepair(true)}
                     disabled={repairing}
-                    className="flex-1 py-1.5 text-[9px] bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 hover:bg-yellow-500/20 transition-colors disabled:opacity-50"
+                    className="flex-1 py-1.5 text-[11px] bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 hover:bg-yellow-500/20 transition-colors disabled:opacity-50"
                   >
                     Repair + Alpha
                   </button>
                 )}
               </div>
               {repairResult && (
-                <div className={`mx-4 mb-2 p-2 rounded text-[9px] border ${repairResult.ok ? 'border-g-green/30 bg-g-green/5 text-g-green' : 'border-red-500/30 bg-red-500/5 text-red-400'}`}>
+                <div className={`mx-4 mb-2 p-2 rounded text-[11px] border ${repairResult.ok ? 'border-g-green/30 bg-g-green/5 text-g-green' : 'border-red-500/30 bg-red-500/5 text-red-400'}`}>
                   {repairResult.repairActions?.length > 0
                     ? repairResult.repairActions.join(' · ')
                     : repairResult.nextStep ?? repairResult.error ?? 'Ingen endringer'}
@@ -355,7 +355,7 @@ function DetailSidebar({
         <Row label="Plan" value={ws.plan ?? '–'} />
         <Row label="Onboarding" value={ws.onboardingComplete ? `Ferdig ${timeAgo(ws.onboardingCompletedAt)}` : `Steg ${ws.onboardingStep}/5`} color={ws.onboardingComplete ? 'text-g-green' : 'text-yellow-400'} />
         <Row label="Opprettet" value={timeAgo(ws.createdAt)} />
-        <Row label="Owner ID" value={<span className="font-mono text-[9px]">{ws.ownerUserId?.slice(0, 16) ?? '–'}…</span>} />
+        <Row label="Owner ID" value={<span className="font-mono text-[11px]">{ws.ownerUserId?.slice(0, 16) ?? '–'}…</span>} />
         <Row label="Alpha" value={
           <button
             onClick={() => onAlphaToggle(ws.id, ws.alphaEnabled)}
@@ -367,7 +367,7 @@ function DetailSidebar({
         {/* Twitch */}
         <Section title="Twitch" />
         <Row label="Login" value={ws.twitchLogin ?? '–'} color={ws.integrationStatus.twitch.connected ? 'text-g-green' : 'text-g-muted'} />
-        <Row label="User ID" value={<span className="font-mono text-[9px]">{ws.twitchUserId ?? '–'}</span>} />
+        <Row label="User ID" value={<span className="font-mono text-[11px]">{ws.twitchUserId ?? '–'}</span>} />
         <Row label="OAuth tilkoblet" value={timeAgo(ws.twitchConnectedAt)} />
         <Row label="Bot siste event" value={timeAgo(ws.twitchBotLastEventAt)} color={ws.integrationStatus.twitch.botWatching ? 'text-g-green' : 'text-g-muted'} />
         <Row label="OAuth-tokens" value={ws.integrationStatus.twitch.oauthValid ? '✓ Gyldige' : '✗ Mangler'} color={ws.integrationStatus.twitch.oauthValid ? 'text-g-green' : 'text-red-400'} />
@@ -385,7 +385,7 @@ function DetailSidebar({
         {/* Discord */}
         <Section title="Discord" />
         <Row label="Guild" value={ws.discordGuildName ?? '–'} color={ws.integrationStatus.discord.connected ? 'text-g-green' : 'text-g-muted'} />
-        <Row label="Guild ID" value={<span className="font-mono text-[9px]">{ws.discordGuildId ?? '–'}</span>} />
+        <Row label="Guild ID" value={<span className="font-mono text-[11px]">{ws.discordGuildId ?? '–'}</span>} />
         <Row label="OAuth tilkoblet" value={timeAgo(ws.discordConnectedAt)} />
         <Row label="Bot siste event" value={timeAgo(ws.discordBotLastEventAt)} color={ws.integrationStatus.discord.botInGuild ? 'text-g-green' : 'text-g-muted'} />
         <Row label="Kan poste" value={ws.integrationStatus.discord.canPost ? '✓ Ja' : '✗ Nei'} color={ws.integrationStatus.discord.canPost ? 'text-g-green' : 'text-red-400'} />
@@ -421,7 +421,7 @@ function DetailSidebar({
             {ws.coachReport.metadata?.grade && <Row label="Grade" value={ws.coachReport.metadata.grade} />}
           </>
         ) : (
-          <div className="px-4 py-2 text-[10px] text-g-muted">Ingen analyse registrert</div>
+          <div className="px-4 py-2 text-xs text-g-muted">Ingen analyse registrert</div>
         )}
 
         {/* Content Factory */}
@@ -439,7 +439,7 @@ function DetailSidebar({
         )}
         <div className="px-4 py-2 flex gap-2">
           <a href="/content-factory-admin" target="_blank"
-            className="px-2 py-1 text-[9px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
+            className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-g-green hover:border-g-green/30 transition-colors">
             Åpne CF Admin ↗
           </a>
         </div>
@@ -460,7 +460,7 @@ function DetailSidebar({
             <Row label="Tidspunkt" value={timeAgo(ws.lastError.created_at)} />
             {ws.lastError.metadata?.error && (
               <div className="px-4 pb-2">
-                <p className="text-[9px] text-red-400/70 font-mono bg-red-500/5 border border-red-500/10 rounded p-2 break-all leading-relaxed">
+                <p className="text-[11px] text-red-400/70 font-mono bg-red-500/5 border border-red-500/10 rounded p-2 break-all leading-relaxed">
                   {String(ws.lastError.metadata.error).slice(0, 200)}
                 </p>
               </div>
@@ -471,15 +471,15 @@ function DetailSidebar({
         {/* System Events */}
         <Section title="Siste 50 hendelser" />
         <div className="px-4 pb-6">
-          {evLoading && <p className="text-[10px] text-g-muted animate-pulse py-2">Laster hendelser…</p>}
-          {!evLoading && events.length === 0 && <p className="text-[10px] text-g-muted py-2">Ingen hendelser funnet</p>}
+          {evLoading && <p className="text-xs text-g-muted animate-pulse py-2">Laster hendelser…</p>}
+          {!evLoading && events.length === 0 && <p className="text-xs text-g-muted py-2">Ingen hendelser funnet</p>}
           {!evLoading && events.map((ev, i) => (
             <div key={i} className="py-1.5 border-b border-g-border/20 last:border-0">
               <div className="flex items-start justify-between gap-2">
-                <span className={`text-[9px] font-mono font-bold ${sevColor(ev.severity)}`}>{ev.event_type}</span>
-                <span className="text-[8px] text-g-muted flex-shrink-0">{timeAgo(ev.created_at)}</span>
+                <span className={`text-[11px] font-mono font-bold ${sevColor(ev.severity)}`}>{ev.event_type}</span>
+                <span className="text-[11px] text-g-muted flex-shrink-0">{timeAgo(ev.created_at)}</span>
               </div>
-              {ev.title && <p className="text-[9px] text-g-muted/80 mt-0.5 leading-tight">{ev.title.slice(0, 80)}</p>}
+              {ev.title && <p className="text-[11px] text-g-muted/80 mt-0.5 leading-tight">{ev.title.slice(0, 80)}</p>}
             </div>
           ))}
         </div>
@@ -576,7 +576,7 @@ export default function AdminPage() {
   const StatCard = ({ label, value, color }: { label: string; value: number; color?: string }) => (
     <div className="bg-g-card border border-g-border rounded-2xl p-3 flex flex-col gap-0.5">
       <p className={`text-2xl font-black ${color ?? 'text-g-text'}`}>{value}</p>
-      <p className="text-[9px] text-g-muted uppercase tracking-wider">{label}</p>
+      <p className="text-[11px] text-g-muted uppercase tracking-wider">{label}</p>
     </div>
   );
 
@@ -600,19 +600,19 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-g-bg text-g-text">
       {/* Header */}
-      <div className="sticky top-0 z-30 bg-g-sidebar/90 backdrop-blur-sm border-b border-g-border px-6 py-3 flex items-center justify-between">
+      <div className="sticky top-0 z-30 bg-g-card/90 backdrop-blur-sm border-b border-g-border px-6 py-3 flex items-center justify-between">
         <div>
           <h1 className="text-sm font-black uppercase tracking-widest text-g-text">Admin Control Center</h1>
-          <p className="text-[9px] text-g-muted mt-0.5">
+          <p className="text-[11px] text-g-muted mt-0.5">
             {lastRefresh ? `Oppdatert ${lastRefresh.toLocaleTimeString('no-NO')}` : 'Laster…'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <a href="/" className="text-[10px] text-g-muted hover:text-g-green transition-colors">← Dashboard</a>
+          <a href="/" className="text-xs text-g-muted hover:text-g-green transition-colors">← Dashboard</a>
           <button
             onClick={load}
             disabled={loading}
-            className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40"
+            className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40"
           >
             {loading ? '⟳ Laster…' : '↻ Refresh'}
           </button>
@@ -641,7 +641,7 @@ export default function AdminPage() {
 
         {/* Diagnose User */}
         <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-3">
-          <p className="text-[9px] font-bold text-g-muted uppercase tracking-widest">Diagnose Bruker</p>
+          <p className="text-[11px] font-bold text-g-muted uppercase tracking-widest">Diagnose Bruker</p>
           <div className="flex gap-2">
             <input
               type="email"
@@ -654,14 +654,14 @@ export default function AdminPage() {
             <button
               onClick={diagnoseUser}
               disabled={diagnosing || !diagnoseEmail.trim()}
-              className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[10px] font-bold text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-xs font-bold text-g-green hover:bg-g-green/20 transition-colors disabled:opacity-40"
             >
               {diagnosing ? 'Sjekker…' : 'Diagnose →'}
             </button>
           </div>
           {diagnoseResult && (
             <div className="space-y-1.5">
-              <div className={`p-2.5 rounded-lg border text-[10px] font-semibold ${
+              <div className={`p-2.5 rounded-lg border text-xs font-semibold ${
                 diagnoseResult.error ? 'border-red-500/30 bg-red-500/5 text-red-400' :
                 !diagnoseResult.authUser && diagnoseResult.diagnosis ? 'border-red-500/30 bg-red-500/5 text-red-400' :
                 diagnoseResult.workspace ? 'border-g-border bg-g-bg text-g-text' : 'border-yellow-500/30 bg-yellow-500/5 text-yellow-400'
@@ -669,7 +669,7 @@ export default function AdminPage() {
                 {diagnoseResult.error ?? diagnoseResult.diagnosis ?? 'Ingen diagnose'}
               </div>
               {diagnoseResult.authUid && (
-                <div className="grid grid-cols-2 gap-1.5 text-[9px]">
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
                   <div className="bg-g-bg border border-g-border/50 rounded p-2">
                     <p className="text-g-muted mb-1 font-bold uppercase">Auth</p>
                     <p className="font-mono text-g-text">{diagnoseResult.authUid?.slice(0, 20)}…</p>
@@ -694,9 +694,9 @@ export default function AdminPage() {
               )}
               {diagnoseResult.recentEvents?.length > 0 && (
                 <div className="bg-g-bg border border-g-border/50 rounded p-2 space-y-0.5">
-                  <p className="text-[8px] font-bold text-g-muted uppercase mb-1">Siste hendelser</p>
+                  <p className="text-[11px] font-bold text-g-muted uppercase mb-1">Siste hendelser</p>
                   {(diagnoseResult.recentEvents as any[]).slice(0, 5).map((e: any, i: number) => (
-                    <p key={i} className="text-[9px] text-g-muted"><span className="text-g-text">{e.type}</span> — {e.title?.slice(0, 60)}</p>
+                    <p key={i} className="text-[11px] text-g-muted"><span className="text-g-text">{e.type}</span> — {e.title?.slice(0, 60)}</p>
                   ))}
                 </div>
               )}
@@ -717,7 +717,7 @@ export default function AdminPage() {
             <button
               key={key}
               onClick={() => toggleFilter(key)}
-              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                 filters[key]
                   ? 'bg-g-green/10 border-g-green/30 text-g-green'
                   : 'border-g-border text-g-muted hover:border-g-green/20 hover:text-g-text'
@@ -729,12 +729,12 @@ export default function AdminPage() {
           {(search || Object.values(filters).some(Boolean)) && (
             <button
               onClick={() => { setSearch(''); setFilters({ alphaOnly: false, liveOnly: false, errorsOnly: false, onboardingIncomplete: false }); }}
-              className="px-2 py-1.5 text-[10px] text-g-muted hover:text-red-400 transition-colors"
+              className="px-2 py-1.5 text-xs text-g-muted hover:text-red-400 transition-colors"
             >
               ✕ Nullstill
             </button>
           )}
-          <span className="text-[10px] text-g-muted ml-auto">{filtered.length} workspace{filtered.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-g-muted ml-auto">{filtered.length} workspace{filtered.length !== 1 ? 's' : ''}</span>
         </div>
 
         {/* Table */}
@@ -751,7 +751,7 @@ export default function AdminPage() {
                       'Onboarding', 'Audience', 'Stream Coach', 'Content Factory',
                       'Siste Stream', 'Heartbeat', 'Siste Feil', 'Alpha',
                     ].map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-[8px] font-bold text-g-muted uppercase tracking-widest whitespace-nowrap">
+                      <th key={h} className="px-3 py-2.5 text-left text-[11px] font-bold text-g-muted uppercase tracking-widest whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -782,8 +782,8 @@ export default function AdminPage() {
                         {/* Workspace */}
                         <td className="px-3 py-2.5">
                           <p className="text-[11px] font-bold text-g-text leading-tight">{ws.brandName || ws.id}</p>
-                          <p className="text-[8px] text-g-muted font-mono">{ws.id.slice(0, 18)}…</p>
-                          <span className="text-[7px] text-g-muted/60 uppercase">{ws.plan}</span>
+                          <p className="text-[11px] text-g-muted font-mono">{ws.id.slice(0, 18)}…</p>
+                          <span className="text-[11px] text-g-muted/60 uppercase">{ws.plan}</span>
                         </td>
 
                         {/* Health dots */}
@@ -803,12 +803,12 @@ export default function AdminPage() {
                         <td className="px-3 py-2.5">
                           {ws.integrationStatus.twitch.connected ? (
                             <div className="space-y-0.5">
-                              <p className="text-[10px] text-g-text font-semibold">
+                              <p className="text-xs text-g-text font-semibold">
                                 {ws.twitchLogin ?? (ws.integrationStatus.twitch.botWatching ? 'Bot aktiv' : 'Koblet')}
                               </p>
                               {live
                                 ? <Badge ok label="LIVE" tiny />
-                                : <span className="text-[8px] text-g-muted">Offline</span>
+                                : <span className="text-[11px] text-g-muted">Offline</span>
                               }
                             </div>
                           ) : <Badge ok={false} label="Ikke koblet" tiny />}
@@ -817,7 +817,7 @@ export default function AdminPage() {
                         {/* Discord */}
                         <td className="px-3 py-2.5">
                           {ws.integrationStatus.discord.connected ? (
-                            <p className="text-[10px] text-g-text">
+                            <p className="text-xs text-g-text">
                               {ws.discordGuildName ?? (ws.integrationStatus.discord.botInGuild ? 'Bot aktiv' : 'Koblet')}
                             </p>
                           ) : <Badge ok={false} label="Ikke koblet" tiny />}
@@ -830,7 +830,7 @@ export default function AdminPage() {
                               <div key={s} className={`w-3 h-1 rounded-full ${s <= ws.onboardingStep ? 'bg-g-green' : 'bg-g-border'}`} />
                             ))}
                           </div>
-                          <p className="text-[8px] text-g-muted">
+                          <p className="text-[11px] text-g-muted">
                             {ws.onboardingComplete ? '✓ Ferdig' : `${ws.onboardingStep}/5`}
                           </p>
                         </td>
@@ -841,18 +841,18 @@ export default function AdminPage() {
                             <div>
                               <div className="flex items-center gap-1">
                                 <Dot c={audAge} title="Audience HB" />
-                                <span className="text-[10px] text-g-text">
+                                <span className="text-xs text-g-text">
                                   {audienceUsers !== null ? `${audienceUsers} brukere` : 'Aktiv'}
                                 </span>
                               </div>
-                              <p className="text-[8px] text-g-muted">{timeAgo(ws.audienceHb.created_at)}</p>
+                              <p className="text-[11px] text-g-muted">{timeAgo(ws.audienceHb.created_at)}</p>
                             </div>
                           ) : audienceUsers !== null ? (
                             <div>
-                              <p className="text-[10px] text-g-muted">{audienceUsers} obs.</p>
-                              <p className="text-[8px] text-g-muted">{timeAgo(ws.audienceSnapshot?.created_at)}</p>
+                              <p className="text-xs text-g-muted">{audienceUsers} obs.</p>
+                              <p className="text-[11px] text-g-muted">{timeAgo(ws.audienceSnapshot?.created_at)}</p>
                             </div>
-                          ) : <span className="text-[9px] text-g-muted/50">–</span>}
+                          ) : <span className="text-[11px] text-g-muted/50">–</span>}
                         </td>
 
                         {/* Stream Coach */}
@@ -862,22 +862,22 @@ export default function AdminPage() {
                               {ws.coachReport.metadata?.score !== undefined && (
                                 <p className={`text-[11px] font-bold ${ws.coachReport.metadata.score >= 70 ? 'text-g-green' : ws.coachReport.metadata.score >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
                                   {ws.coachReport.metadata.score}
-                                  <span className="text-[8px] text-g-muted font-normal"> /100</span>
+                                  <span className="text-[11px] text-g-muted font-normal"> /100</span>
                                 </p>
                               )}
-                              <p className="text-[8px] text-g-muted">{timeAgo(ws.coachReport.created_at)}</p>
+                              <p className="text-[11px] text-g-muted">{timeAgo(ws.coachReport.created_at)}</p>
                             </div>
-                          ) : <span className="text-[9px] text-g-muted/50">–</span>}
+                          ) : <span className="text-[11px] text-g-muted/50">–</span>}
                         </td>
 
                         {/* Content Factory */}
                         <td className="px-3 py-2.5">
                           <div className="space-y-0.5">
-                            {ws.cfActive > 0 && <p className="text-[9px] text-g-green">{ws.cfActive} aktiv{ws.cfActive > 1 ? 'e' : ''}</p>}
-                            {ws.cfFailed > 0 && <p className="text-[9px] text-red-400">{ws.cfFailed} feilet</p>}
-                            {ws.cfQueued > 0 && <p className="text-[9px] text-yellow-400">{ws.cfQueued} i kø</p>}
+                            {ws.cfActive > 0 && <p className="text-[11px] text-g-green">{ws.cfActive} aktiv{ws.cfActive > 1 ? 'e' : ''}</p>}
+                            {ws.cfFailed > 0 && <p className="text-[11px] text-red-400">{ws.cfFailed} feilet</p>}
+                            {ws.cfQueued > 0 && <p className="text-[11px] text-yellow-400">{ws.cfQueued} i kø</p>}
                             {ws.cfActive === 0 && ws.cfFailed === 0 && ws.cfQueued === 0 && (
-                              <span className="text-[9px] text-g-muted/50">{ws.cfLastVod ? 'Ferdig' : '–'}</span>
+                              <span className="text-[11px] text-g-muted/50">{ws.cfLastVod ? 'Ferdig' : '–'}</span>
                             )}
                           </div>
                         </td>
@@ -886,11 +886,11 @@ export default function AdminPage() {
                         <td className="px-3 py-2.5 max-w-[160px]">
                           {ws.lastStream ? (
                             <div>
-                              <p className="text-[9px] text-g-text truncate">{ws.lastStream.metadata?.title?.slice(0, 35) ?? '–'}</p>
-                              <p className="text-[8px] text-g-muted">{ws.lastStream.metadata?.game ?? '–'}</p>
-                              <p className="text-[8px] text-g-muted/60">{timeAgo(ws.lastStream.created_at)}</p>
+                              <p className="text-[11px] text-g-text truncate">{ws.lastStream.metadata?.title?.slice(0, 35) ?? '–'}</p>
+                              <p className="text-[11px] text-g-muted">{ws.lastStream.metadata?.game ?? '–'}</p>
+                              <p className="text-[11px] text-g-muted/60">{timeAgo(ws.lastStream.created_at)}</p>
                             </div>
-                          ) : <span className="text-[9px] text-g-muted/50">–</span>}
+                          ) : <span className="text-[11px] text-g-muted/50">–</span>}
                         </td>
 
                         {/* Heartbeat */}
@@ -898,13 +898,13 @@ export default function AdminPage() {
                           <div className="space-y-1">
                             <div className="flex items-center gap-1">
                               <Dot c={botAge} title="Bot HB" />
-                              <span className={`text-[8px] ${botAge === 'red' ? 'text-red-400' : botAge === 'yellow' ? 'text-yellow-400' : 'text-g-muted'}`}>
+                              <span className={`text-[11px] ${botAge === 'red' ? 'text-red-400' : botAge === 'yellow' ? 'text-yellow-400' : 'text-g-muted'}`}>
                                 Bot {timeAgo(ws.botHb?.created_at)}
                               </span>
                             </div>
                             <div className="flex items-center gap-1">
                               <Dot c={audAge} title="Audience HB" />
-                              <span className={`text-[8px] ${audAge === 'red' ? 'text-red-400' : audAge === 'yellow' ? 'text-yellow-400' : 'text-g-muted'}`}>
+                              <span className={`text-[11px] ${audAge === 'red' ? 'text-red-400' : audAge === 'yellow' ? 'text-yellow-400' : 'text-g-muted'}`}>
                                 Aud {timeAgo(ws.audienceHb?.created_at)}
                               </span>
                             </div>
@@ -915,12 +915,12 @@ export default function AdminPage() {
                         <td className="px-3 py-2.5 max-w-[160px]">
                           {ws.lastError ? (
                             <div>
-                              <p className={`text-[9px] font-mono truncate ${errRecent ? 'text-red-400' : 'text-g-muted/60'}`}>
+                              <p className={`text-[11px] font-mono truncate ${errRecent ? 'text-red-400' : 'text-g-muted/60'}`}>
                                 {ws.lastError.event_type}
                               </p>
-                              <p className="text-[8px] text-g-muted">{timeAgo(ws.lastError.created_at)}</p>
+                              <p className="text-[11px] text-g-muted">{timeAgo(ws.lastError.created_at)}</p>
                             </div>
-                          ) : <span className="text-[9px] text-g-green/60">–</span>}
+                          ) : <span className="text-[11px] text-g-green/60">–</span>}
                         </td>
 
                         {/* Alpha toggle */}

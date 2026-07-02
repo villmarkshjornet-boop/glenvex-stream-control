@@ -60,8 +60,8 @@ function NumberInput({
   return (
     <div className="flex items-start justify-between gap-4 py-3 border-b border-g-border/30 last:border-0">
       <div>
-        <p className="text-xs font-bold text-g-text">{label}</p>
-        {description && <p className="text-[10px] text-g-muted mt-0.5">{description}</p>}
+        <p className="text-sm font-bold text-g-text">{label}</p>
+        {description && <p className="text-[11px] text-g-muted mt-0.5">{description}</p>}
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
         <input
@@ -70,9 +70,9 @@ function NumberInput({
           min={min}
           max={max}
           onChange={e => onChange(Number(e.target.value))}
-          className="w-20 bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text text-right font-mono focus:outline-none focus:border-g-green/50"
+          className="w-20 bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text text-right font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
         />
-        {unit && <span className="text-[10px] text-g-muted">{unit}</span>}
+        {unit && <span className="text-[11px] text-g-muted">{unit}</span>}
       </div>
     </div>
   );
@@ -107,12 +107,12 @@ function RewardRolesSection({
     <div>
       <div className="flex items-center justify-between mb-3">
         <div>
-          <p className="text-xs font-bold text-g-text">Reward Roles</p>
-          <p className="text-[10px] text-g-muted mt-0.5">Tildel Discord-roller automatisk ved level-up. Tom liste = standard LEVEL_ROLLER brukes.</p>
+          <p className="text-sm font-bold text-g-text">Reward Roles</p>
+          <p className="text-[11px] text-g-muted mt-0.5">Tildel Discord-roller automatisk ved level-up. Tom liste = standard LEVEL_ROLLER brukes.</p>
         </div>
         {!adding && (
           <button onClick={() => setAdding(true)}
-            className="text-[10px] font-bold text-g-green border border-g-green/30 rounded px-2.5 py-1 hover:bg-g-green/10 transition-all flex-shrink-0">
+            className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200 flex-shrink-0">
             + Legg til
           </button>
         )}
@@ -120,13 +120,13 @@ function RewardRolesSection({
 
       {roles.length === 0 && !adding && (
         <div className="py-4 text-center border border-dashed border-g-border rounded-lg">
-          <p className="text-[10px] text-g-muted">Ingen reward roles. Boten bruker standard LEVEL_ROLLER automatisk.</p>
+          <p className="text-[11px] text-g-muted">Ingen reward roles. Boten bruker standard LEVEL_ROLLER automatisk.</p>
         </div>
       )}
 
       {roles.length > 0 && (
         <div className="border border-g-border rounded-lg overflow-hidden mb-3">
-          <div className="grid grid-cols-[80px_1fr_1fr_40px] gap-0 text-[9px] text-g-muted uppercase tracking-widest font-bold px-3 py-2 bg-g-bg border-b border-g-border">
+          <div className="grid grid-cols-[80px_1fr_1fr_40px] gap-0 text-[11px] text-g-muted uppercase tracking-widest font-bold px-3 py-2 bg-g-bg border-b border-g-border">
             <span>Level</span>
             <span>Discord Role ID</span>
             <span>Rollenavn</span>
@@ -139,59 +139,59 @@ function RewardRolesSection({
                 value={r.level}
                 min={1}
                 onChange={e => updateRole(i, 'level', Number(e.target.value))}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/50"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
               />
               <input
                 type="text"
                 value={r.roleId}
                 placeholder="123456789012345678"
                 onChange={e => updateRole(i, 'roleId', e.target.value)}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/50"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
               />
               <input
                 type="text"
                 value={r.roleName}
                 placeholder="f.eks. VIP"
                 onChange={e => updateRole(i, 'roleName', e.target.value)}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text focus:outline-none focus:border-g-green/50"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
               />
               <button onClick={() => removeRole(i)}
-                className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors text-center">✕</button>
+                className="text-xs text-red-400/60 hover:text-red-400 transition-colors text-center">✕</button>
             </div>
           ))}
         </div>
       )}
 
       {adding && (
-        <div className="border border-g-green/30 rounded-lg p-3 bg-g-green/5 space-y-2 mb-3">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Ny reward role</p>
+        <div className="border border-g-green/30 rounded-lg p-4 bg-g-green/5 space-y-3 mb-3">
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold">Ny reward role</p>
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="text-[9px] text-g-muted block mb-1">Level</label>
+              <label className="text-[11px] text-g-muted block mb-1">Level</label>
               <input type="number" value={draft.level} min={1}
                 onChange={e => setDraft(d => ({ ...d, level: Number(e.target.value) }))}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/50" />
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" />
             </div>
             <div>
-              <label className="text-[9px] text-g-muted block mb-1">Discord Role ID</label>
+              <label className="text-[11px] text-g-muted block mb-1">Discord Role ID</label>
               <input type="text" value={draft.roleId} placeholder="ID fra Discord"
                 onChange={e => setDraft(d => ({ ...d, roleId: e.target.value }))}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/50" />
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" />
             </div>
             <div>
-              <label className="text-[9px] text-g-muted block mb-1">Rollenavn</label>
+              <label className="text-[11px] text-g-muted block mb-1">Rollenavn</label>
               <input type="text" value={draft.roleName} placeholder="Valgfritt"
                 onChange={e => setDraft(d => ({ ...d, roleName: e.target.value }))}
-                className="w-full bg-g-bg border border-g-border rounded px-2 py-1 text-xs text-g-text focus:outline-none focus:border-g-green/50" />
+                className="w-full bg-g-bg border border-g-border rounded-lg px-2 py-1.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200" />
             </div>
           </div>
           <div className="flex gap-2 pt-1">
             <button onClick={addRole}
-              className="text-[10px] font-bold text-g-green border border-g-green/30 rounded px-3 py-1.5 hover:bg-g-green/10 transition-all">
+              className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200">
               Legg til
             </button>
             <button onClick={() => setAdding(false)}
-              className="text-[10px] text-g-muted border border-g-border rounded px-3 py-1.5 hover:text-g-text transition-all">
+              className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors">
               Avbryt
             </button>
           </div>
@@ -255,17 +255,21 @@ export default function CommunitySettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto space-y-4 animate-pulse">
-        {[1, 2, 3].map(i => <div key={i} className="h-40 bg-g-card border border-g-border rounded-xl" />)}
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 bg-g-border/40 rounded w-3/4" />
+          <div className="h-4 bg-g-border/40 rounded w-1/2" />
+        </div>
+        {[1, 2, 3].map(i => <div key={i} className="h-40 bg-g-border/40 border border-g-border rounded-xl" />)}
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="Community-innstillinger" subtitle="XP-system · Automatisk aktivitet · Reward roles">
         <Link href="/community-manager"
-          className="text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg px-2 py-1 transition-colors">
+          className="text-xs text-g-muted hover:text-g-green border border-g-border rounded-lg px-2 py-1 transition-colors">
           ← Dashboard
         </Link>
       </PageHeader>
@@ -274,8 +278,8 @@ export default function CommunitySettingsPage() {
       <div className="bg-g-card border border-yellow-500/20 rounded-2xl p-4 flex items-start gap-3">
         <span className="text-yellow-400 text-sm font-bold flex-shrink-0">i</span>
         <div>
-          <p className="text-xs font-bold text-g-text">Kanal-innstillinger</p>
-          <p className="text-[10px] text-g-muted mt-0.5">
+          <p className="text-sm font-bold text-g-text">Kanal-innstillinger</p>
+          <p className="text-[11px] text-g-muted mt-0.5">
             Community-kanal og Admin-kanal settes under{' '}
             <Link href="/innstillinger" className="text-g-green hover:underline">Innstillinger → Discord Kanaler</Link>.
             Hype og idle-prompts krever at community-kanal er satt.
@@ -284,8 +288,8 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: General */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Generelt</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Generelt</p>
         <Toggle
           label="Community Manager aktiv"
           description="Skrur av/på hele community-systemet inkl. XP, hype og idle-prompts."
@@ -325,8 +329,8 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: Automatic activity */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Automatisk aktivitet</p>
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Automatisk aktivitet</p>
         <Toggle
           label="Community hype aktiv"
           description="Boten poster automatisk hype-meldinger (level-ups, streaks, ukens topp)."
@@ -360,12 +364,12 @@ export default function CommunitySettingsPage() {
       </div>
 
       {/* Section: Reward roles */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
         <RewardRolesSection
           roles={settings.rewardRoles}
           onChange={r => update('rewardRoles', r)}
         />
-        <p className="text-[9px] text-g-muted/60 mt-3 leading-relaxed">
+        <p className="text-[11px] text-g-muted/60 mt-3 leading-relaxed">
           Finn Discord Role ID ved å høyreklikke på en rolle i Discord (Developer Mode må være på).
           Rollen må ligge lavere enn bot-rollen i Discord for at boten skal kunne tildele den.
         </p>
@@ -376,12 +380,12 @@ export default function CommunitySettingsPage() {
         <button
           onClick={save}
           disabled={saving}
-          className="px-5 py-2.5 bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green text-xs font-bold rounded-lg transition-all disabled:opacity-50"
+          className="px-4 py-2 bg-g-green/10 border border-g-green/25 hover:bg-g-green/20 hover:shadow-green-sm text-g-green text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50"
         >
           {saving ? 'Lagrer...' : 'Lagre innstillinger'}
         </button>
-        {status === 'ok'    && <p className="text-xs text-g-green">✓ {statusMsg}</p>}
-        {status === 'error' && <p className="text-xs text-red-400">✗ {statusMsg}</p>}
+        {status === 'ok'    && <p className="text-sm text-g-green">✓ {statusMsg}</p>}
+        {status === 'error' && <p className="text-sm text-red-400">✗ {statusMsg}</p>}
       </div>
     </div>
   );

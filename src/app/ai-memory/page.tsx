@@ -68,7 +68,7 @@ function konfidensBar(score: number) {
       <div className="w-16 h-1 bg-g-border rounded-full overflow-hidden">
         <div className={`h-full ${color} rounded-full`} style={{ width: `${p}%` }} />
       </div>
-      <span className="text-[9px] text-g-muted">{p}%</span>
+      <span className="text-[11px] text-g-muted">{p}%</span>
     </div>
   );
 }
@@ -93,11 +93,11 @@ function ForgetButton({ id, table, onForget }: { id: string; table?: string; onF
     return (
       <span className="flex items-center gap-1">
         <button onClick={forget} disabled={loading}
-          className="px-1.5 py-0.5 text-[9px] text-red-400 border border-red-400/30 rounded bg-red-400/10 transition-all">
+          className="px-1.5 py-0.5 text-[11px] text-red-400 border border-red-400/30 rounded bg-red-400/10 transition-all">
           {loading ? '...' : 'Slett'}
         </button>
         <button onClick={() => setConfirming(false)}
-          className="px-1.5 py-0.5 text-[9px] text-g-muted border border-g-border rounded transition-all">
+          className="px-1.5 py-0.5 text-[11px] text-g-muted border border-g-border rounded transition-all">
           ✕
         </button>
       </span>
@@ -105,7 +105,7 @@ function ForgetButton({ id, table, onForget }: { id: string; table?: string; onF
   }
   return (
     <button onClick={() => setConfirming(true)}
-      className="px-1.5 py-0.5 text-[9px] text-red-400/60 hover:text-red-400 border border-transparent hover:border-red-400/20 rounded transition-all">
+      className="px-1.5 py-0.5 text-[11px] text-red-400/60 hover:text-red-400 border border-transparent hover:border-red-400/20 rounded transition-all">
       Slett
     </button>
   );
@@ -116,28 +116,28 @@ function ForgetButton({ id, table, onForget }: { id: string; table?: string; onF
 function MemorySection({ title, items, onRefresh, icon }: { title: string; items: MemoryEntry[]; onRefresh: () => void; icon?: string }) {
   if (items.length === 0) return (
     <div className="bg-g-card border border-g-border rounded-2xl p-5">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">{icon} {title}</p>
+      <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">{icon} {title}</p>
       <p className="text-xs text-g-muted">Ingen data ennå – dette bygges opp automatisk over tid.</p>
     </div>
   );
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{icon} {title}</p>
-        <span className="text-[9px] text-g-green font-bold">{items.length} oppføringer</span>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">{icon} {title}</p>
+        <span className="text-[11px] text-g-green font-medium">{items.length} oppføringer</span>
       </div>
       <div className="space-y-2 max-h-64 overflow-y-auto">
         {items.map(m => (
-          <div key={m.id} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
-            <div className="flex-1 min-w-0">
+          <div key={m.id} className="py-1.5 border-b border-g-border/20 last:border-0 flex items-start gap-2">
+            <div className="flex-1 min-w-0 border-l-2 border-g-green/40 pl-3">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-bold text-g-text truncate">{m.key}</span>
-                <span className="text-[9px] text-g-muted">{m.occurrence_count}×</span>
+                <span className="text-xs font-medium text-g-text truncate">{m.key}</span>
+                <span className="text-[11px] text-g-muted">{m.occurrence_count}×</span>
               </div>
-              <p className="text-[10px] text-g-muted leading-snug">{m.summary.slice(0, 120)}</p>
+              <p className="text-sm text-g-text leading-relaxed">{m.summary.slice(0, 120)}</p>
               <div className="flex items-center gap-2 mt-1">
                 {konfidensBar(m.confidence_score)}
-                {m.last_seen_at && <span className="text-[9px] text-g-muted/50">{tidSiden(m.last_seen_at)}</span>}
+                {m.last_seen_at && <span className="text-[11px] text-g-muted/50">{tidSiden(m.last_seen_at)}</span>}
               </div>
             </div>
             <ForgetButton id={m.id} onForget={onRefresh} />
@@ -154,8 +154,8 @@ function SummaryCard({ label, value, sub }: { label: string; value: string | num
   return (
     <div className="bg-g-card border border-g-border rounded-2xl p-5 text-center">
       <p className="text-2xl font-black text-g-green">{value}</p>
-      <p className="text-[10px] text-g-text font-bold mt-1">{label}</p>
-      {sub && <p className="text-[9px] text-g-muted mt-0.5">{sub}</p>}
+      <p className="text-xs text-g-text font-medium mt-1">{label}</p>
+      {sub && <p className="text-[11px] text-g-muted mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -207,7 +207,7 @@ function CrossEventRow({ e, source }: { e: CrossEvent; source: 'twitch' | 'disco
   return (
     <div className="flex items-start gap-2 py-1 border-b border-white/5 text-[11px]">
       <span className="font-mono text-g-muted shrink-0 w-10 pt-0.5">{hhMM(e.created_at)}</span>
-      <span className={`font-bold shrink-0 ${typeColors[e.event_type] ?? 'text-gray-400'}`}>
+      <span className={`font-bold shrink-0 ${typeColors[e.event_type] ?? 'text-g-muted'}`}>
         [{typeLabels[e.event_type] ?? e.event_type.toUpperCase().slice(0,5)}]
       </span>
       <span className={`font-medium shrink-0 ${source === 'twitch' ? 'text-purple-300' : 'text-blue-300'}`}>{e.username ?? '?'}</span>
@@ -238,10 +238,15 @@ export default function AiMemoryPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto space-y-4">
-        <div className="h-8 w-48 bg-g-card border border-g-border rounded animate-pulse" />
-        <div className="grid grid-cols-5 gap-3">
-          {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-g-card border border-g-border rounded-xl animate-pulse" />)}
+      <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+        <div className="animate-pulse space-y-3">
+          <div className="h-8 bg-g-border/40 rounded w-48" />
+          <div className="grid grid-cols-5 gap-3">
+            {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-g-border/40 rounded-xl" />)}
+          </div>
+          <div className="h-4 bg-g-border/40 rounded w-3/4" />
+          <div className="h-4 bg-g-border/40 rounded w-1/2" />
+          <div className="h-4 bg-g-border/40 rounded w-2/3" />
         </div>
       </div>
     );
@@ -256,10 +261,10 @@ export default function AiMemoryPage() {
   ] as const;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
 
       <PageHeader title="AI Memory" subtitle="Delt intelligens · Alle agenter lærer sammen">
-        <button onClick={hent} className="px-2.5 py-1.5 border border-g-border rounded-lg text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-bold">
+        <button onClick={hent} className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors">
           ↻ Refresh
         </button>
       </PageHeader>
@@ -287,7 +292,7 @@ export default function AiMemoryPage() {
           <div className="flex gap-1 border-b border-g-border">
             {tabs.map(tab => (
               <button key={tab.id} onClick={() => setAktivTab(tab.id)}
-                className={`px-4 py-2 text-[11px] font-bold transition-all border-b-2 -mb-px ${
+                className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 -mb-px ${
                   aktivTab === tab.id
                     ? 'border-g-green text-g-green'
                     : 'border-transparent text-g-muted hover:text-g-text'
@@ -316,7 +321,7 @@ export default function AiMemoryPage() {
 
               {/* Kanalstatus */}
               <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Kanalstatus</p>
+                <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">◆ Kanalstatus</p>
                 <div className="space-y-3">
                   {(() => {
                     const profile = data.globalMemory.find(m => m.key === 'channel_profile');
@@ -325,14 +330,14 @@ export default function AiMemoryPage() {
                       <>
                         {profile && (
                           <div>
-                            <p className="text-[9px] text-g-muted font-bold mb-1">Kanalprofil</p>
-                            <p className="text-[10px] text-g-text leading-snug">{profile.summary}</p>
+                            <p className="text-[11px] text-g-muted font-medium mb-1">Kanalprofil</p>
+                            <p className="text-sm text-g-text leading-relaxed">{profile.summary}</p>
                           </div>
                         )}
                         {strategy && (
                           <div>
-                            <p className="text-[9px] text-g-muted font-bold mb-1">Innholdsstrategi</p>
-                            <p className="text-[10px] text-g-text leading-snug">{strategy.summary}</p>
+                            <p className="text-[11px] text-g-muted font-medium mb-1">Innholdsstrategi</p>
+                            <p className="text-sm text-g-text leading-relaxed">{strategy.summary}</p>
                           </div>
                         )}
                         {!profile && !strategy && (
@@ -351,7 +356,7 @@ export default function AiMemoryPage() {
             <div className="space-y-4">
               {/* Innsikter */}
               <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Innsikter</p>
+                <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">◆ Innsikter</p>
                 {data.insights.length === 0 ? (
                   <p className="text-xs text-g-muted">Ingen innsikter ennå. Innsikter genereres automatisk etter streams og av learning aggregatoren.</p>
                 ) : (
@@ -359,12 +364,12 @@ export default function AiMemoryPage() {
                     {data.insights.map(ins => (
                       <div key={ins.id} className="border-b border-g-border/20 last:border-0 pb-3 last:pb-0">
                         <div className="flex items-start gap-2">
-                          <div className="flex-1">
-                            <p className="text-[11px] font-bold text-g-text">{ins.title}</p>
-                            <p className="text-[10px] text-g-muted mt-0.5 leading-snug">{ins.summary}</p>
+                          <div className="flex-1 border-l-2 border-g-green/40 pl-3">
+                            <p className="text-xs font-semibold text-g-text">{ins.title}</p>
+                            <p className="text-sm text-g-text leading-relaxed mt-0.5">{ins.summary}</p>
                             <div className="flex items-center gap-3 mt-1">
                               {konfidensBar(ins.confidence_score)}
-                              <span className="text-[9px] text-g-muted">{tidSiden(ins.created_at)}</span>
+                              <span className="text-[11px] text-g-muted">{tidSiden(ins.created_at)}</span>
                             </div>
                           </div>
                           <ForgetButton id={ins.id} table="insights" onForget={hent} />
@@ -377,7 +382,7 @@ export default function AiMemoryPage() {
 
               {/* Beslutninger */}
               <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ AI Beslutninger</p>
+                <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">◆ AI Beslutninger</p>
                 {data.decisions.length === 0 ? (
                   <p className="text-xs text-g-muted">Ingen beslutninger ennå.</p>
                 ) : (
@@ -386,14 +391,14 @@ export default function AiMemoryPage() {
                       <div key={d.id} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-[9px] font-bold text-g-green uppercase">{d.agent_type}</span>
-                            <span className="text-[9px] text-g-muted">{d.decision_type}</span>
-                            <span className={`text-[9px] font-bold ${d.outcome === 'success' ? 'text-g-green' : d.outcome === 'failure' ? 'text-red-400' : 'text-g-muted'}`}>
+                            <span className="text-[11px] font-semibold text-g-green uppercase">{d.agent_type}</span>
+                            <span className="text-[11px] text-g-muted">{d.decision_type}</span>
+                            <span className={`text-[11px] font-semibold ${d.outcome === 'success' ? 'text-g-green' : d.outcome === 'failure' ? 'text-red-400' : 'text-g-muted'}`}>
                               {d.outcome}
                             </span>
                           </div>
-                          <p className="text-[10px] text-g-text leading-snug">{d.decision_summary.slice(0, 140)}</p>
-                          <span className="text-[9px] text-g-muted">{tidSiden(d.created_at)}</span>
+                          <p className="text-sm text-g-text leading-relaxed">{d.decision_summary.slice(0, 140)}</p>
+                          <span className="text-[11px] text-g-muted">{tidSiden(d.created_at)}</span>
                         </div>
                         <ForgetButton id={d.id} table="decisions" onForget={hent} />
                       </div>
@@ -410,7 +415,7 @@ export default function AiMemoryPage() {
               {/* Memory-lesinger */}
               {crossData && crossData.contextReads.length > 0 && (
                 <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                  <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">↗ Siste 10 Memory-lesinger av botene</p>
+                  <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">↗ Siste 10 Memory-lesinger av botene</p>
                   <div className="space-y-1">
                     {crossData.contextReads.map((r, i) => {
                       const t = r.metadata?.type ?? '';
@@ -433,8 +438,8 @@ export default function AiMemoryPage() {
                 <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 rounded-full bg-purple-500" />
-                    <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Twitch Chat (60 min)</p>
-                    <span className="ml-auto text-[9px] text-g-green">{crossData?.twitchEvents.length ?? 0} events</span>
+                    <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Twitch Chat (60 min)</p>
+                    <span className="ml-auto text-[11px] text-g-green">{crossData?.twitchEvents.length ?? 0} events</span>
                   </div>
                   {!crossData?.twitchEvents.length ? (
                     <p className="text-xs text-g-muted">Ingen Twitch-events ennå. Loggres automatisk fra chat.</p>
@@ -449,8 +454,8 @@ export default function AiMemoryPage() {
                 <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 rounded-full bg-blue-500" />
-                    <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Discord (60 min)</p>
-                    <span className="ml-auto text-[9px] text-g-green">{crossData?.discordEvents.length ?? 0} events</span>
+                    <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Discord (60 min)</p>
+                    <span className="ml-auto text-[11px] text-g-green">{crossData?.discordEvents.length ?? 0} events</span>
                   </div>
                   {!crossData?.discordEvents.length ? (
                     <p className="text-xs text-g-muted">Ingen Discord-events ennå. Loggres automatisk fra chat-kanal.</p>
@@ -464,7 +469,7 @@ export default function AiMemoryPage() {
 
               {/* Kommandoguide */}
               <div className="bg-g-card/60 border border-g-border rounded-2xl p-5 text-[11px]">
-                <p className="font-bold text-g-text mb-2">Kommandoer for cross-platform context</p>
+                <p className="font-semibold text-g-text mb-2">Kommandoer for cross-platform context</p>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-1 font-mono text-g-muted">
                   <span><span className="text-blue-400">Discord</span>  !twitchsiste — AI-oppsummering av siste Twitch-chat</span>
                   <span><span className="text-purple-400">Twitch</span>  !discordsiste — oppsummering av siste Discord</span>
@@ -472,7 +477,7 @@ export default function AiMemoryPage() {
                   <span><span className="text-purple-400">Twitch</span>  !discordtema — gjengående Discord-temaer</span>
                   <span><span className="text-blue-400">Discord</span>  !communitymemory — alt AI husker om communityet</span>
                 </div>
-                <p className="mt-2 text-[9px] text-g-muted/60">Alle kommandoer har 30s cooldown per kanal. Generert kl. {crossData?.generertKl ?? '—'}</p>
+                <p className="mt-2 text-[11px] text-g-muted/60">Alle kommandoer har 30s cooldown per kanal. Generert kl. {crossData?.generertKl ?? '—'}</p>
               </div>
             </div>
           )}
@@ -480,7 +485,7 @@ export default function AiMemoryPage() {
           {/* Hendelser-tab */}
           {aktivTab === 'events' && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5">
-              <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">◆ Hendelsesstatistikk – siste 7 dager</p>
+              <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">◆ Hendelsesstatistikk – siste 7 dager</p>
               {Object.keys(data.eventStats).length === 0 ? (
                 <p className="text-xs text-g-muted">Ingen hendelser logget ennå. Hendelser loggres automatisk fra Twitch og Discord.</p>
               ) : (
@@ -489,8 +494,8 @@ export default function AiMemoryPage() {
                     .sort((a, b) => b[1] - a[1])
                     .map(([key, count]) => (
                       <div key={key} className="flex items-center justify-between p-2 bg-g-bg/50 rounded border border-g-border/30">
-                        <span className="text-[10px] text-g-muted font-mono">{key}</span>
-                        <span className="text-[10px] font-bold text-g-green">{count}</span>
+                        <span className="text-[11px] text-g-muted font-mono">{key}</span>
+                        <span className="text-[11px] font-medium text-g-green">{count}</span>
                       </div>
                     ))}
                 </div>

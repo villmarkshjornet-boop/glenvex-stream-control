@@ -147,7 +147,7 @@ const VodTimeline = memo(function VodTimeline({ vodId }: { vodId: string }) {
   );
 
   if (!events.length) return (
-    <p className="text-[9px] text-g-muted py-2">Ingen system-events funnet for denne VOD-en.</p>
+    <p className="text-xs text-g-muted py-2">Ingen system-events funnet for denne VOD-en.</p>
   );
 
   const isError = (e: TimelineEvent) => e.severity === 'error' || e.severity === 'critical' || e.event_type.includes('FAILED');
@@ -164,15 +164,15 @@ const VodTimeline = memo(function VodTimeline({ vodId }: { vodId: string }) {
           {/* Content */}
           <div className={`pb-2 flex-1 min-w-0 ${isError(e) ? 'bg-red-500/5 border border-red-500/10 rounded-lg px-2 py-1 -ml-0.5 mb-0.5' : ''}`}>
             <div className="flex items-baseline gap-1.5 flex-wrap">
-              <span className={`text-[8px] font-bold uppercase font-mono ${isError(e) ? 'text-red-400' : 'text-g-muted/50'}`}>
+              <span className={`text-[11px] font-bold uppercase font-mono ${isError(e) ? 'text-red-400' : 'text-g-muted/50'}`}>
                 {e.event_type}
               </span>
-              <span className="text-[8px] text-g-muted/30 font-mono">{tidKort(e.created_at)}</span>
+              <span className="text-[11px] text-g-muted/30 font-mono">{tidKort(e.created_at)}</span>
             </div>
-            <p className={`text-[10px] leading-snug ${SEV_TEXT_TL[e.severity] ?? SEV_TEXT_TL.info}`}>{e.title}</p>
-            {e.description && <p className="text-[9px] text-g-muted/60 leading-snug">{e.description}</p>}
+            <p className={`text-[11px] leading-snug ${SEV_TEXT_TL[e.severity] ?? SEV_TEXT_TL.info}`}>{e.title}</p>
+            {e.description && <p className="text-[11px] text-g-muted/60 leading-snug">{e.description}</p>}
             {e.metadata && isError(e) && (
-              <p className="text-[9px] text-red-400/60 font-mono mt-0.5 break-all">
+              <p className="text-[11px] text-red-400/60 font-mono mt-0.5 break-all">
                 {e.metadata.possible_reason ?? e.metadata.error ?? ''}
               </p>
             )}
@@ -417,8 +417,8 @@ export default function ContentFactoryAdminPage() {
           { label: 'Totalt', value: vods.length, accent: 'text-g-text' },
         ].map(k => (
           <div key={k.label} className="bg-g-card border border-g-border rounded-2xl p-5">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-1">{k.label}</p>
-            <p className={`text-3xl font-black ${k.accent}`}>{k.value}</p>
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-1">{k.label}</p>
+            <p className={`text-3xl font-black font-mono ${k.accent}`}>{k.value}</p>
           </div>
         ))}
       </div>
@@ -429,9 +429,9 @@ export default function ContentFactoryAdminPage() {
         {/* System Health */}
         <div className="bg-g-card border border-g-border rounded-2xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-black">System Health</p>
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">System Health</p>
             <button onClick={sjekkHealth} disabled={healthLoading}
-              className="text-[9px] text-g-muted hover:text-g-green transition-colors px-2 py-1 border border-g-border rounded-lg">
+              className="text-[11px] text-g-muted hover:text-g-green transition-colors px-2 py-1 border border-g-border rounded-lg">
               {healthLoading ? '⟳ Sjekker...' : '↻ Sjekk nå'}
             </button>
           </div>
@@ -447,7 +447,7 @@ export default function ContentFactoryAdminPage() {
                 <div key={s.label} className="flex items-center gap-3">
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.ok ? 'bg-g-green' : 'bg-red-400'}`} />
                   <span className="text-[11px] font-bold text-g-text w-20 flex-shrink-0">{s.label}</span>
-                  <span className={`text-[10px] truncate ${s.ok ? 'text-g-muted' : 'text-red-400'}`}>{s.melding}</span>
+                  <span className={`text-[11px] truncate ${s.ok ? 'text-g-muted' : 'text-red-400'}`}>{s.melding}</span>
                 </div>
               ))}
             </div>
@@ -458,7 +458,7 @@ export default function ContentFactoryAdminPage() {
           )}
           {health && !health.altOk && (
             <div className="mt-4 p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
-              <p className="text-[10px] text-red-400">Pipeline vil feile inntil alle tjenester er grønne.</p>
+              <p className="text-[11px] text-red-400">Pipeline vil feile inntil alle tjenester er grønne.</p>
             </div>
           )}
         </div>
@@ -468,9 +468,9 @@ export default function ContentFactoryAdminPage() {
           {/* Auto-detect */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[9px] text-g-muted uppercase tracking-widest font-black">Hent siste VOD automatisk</p>
+              <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Hent siste VOD automatisk</p>
               {monitorertKanal && (
-                <span className="text-[9px] text-g-muted font-mono">
+                <span className="text-[11px] text-g-muted font-mono">
                   twitch.tv/<span className="text-g-green">{monitorertKanal}</span>
                 </span>
               )}
@@ -488,7 +488,7 @@ export default function ContentFactoryAdminPage() {
             {sisteVods.length > 0 && (
               <div className="mt-3 space-y-1">
                 {sisteVods.map(v => (
-                  <div key={v.id} className="flex items-center gap-2 p-2 rounded-lg bg-g-bg border border-g-border text-[10px]">
+                  <div key={v.id} className="flex items-center gap-2 p-2 rounded-lg bg-g-bg border border-g-border text-[11px]">
                     <span className="font-mono text-g-muted">{v.id}</span>
                     <span className="flex-1 text-g-text truncate">{v.title}</span>
                     <span className="text-g-muted flex-shrink-0">{v.duration}</span>
@@ -496,14 +496,18 @@ export default function ContentFactoryAdminPage() {
                 ))}
               </div>
             )}
-            {detektFeil && <p className="mt-2 text-[10px] text-red-400 p-2 bg-red-500/5 border border-red-500/20 rounded-lg">{detektFeil}</p>}
+            {detektFeil && (
+              <div className="mt-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+                {detektFeil}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-g-border/40" />
 
           {/* Manuell ID */}
           <div>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">Manuelt med VOD-ID</p>
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Manuelt med VOD-ID</p>
             <div className="flex gap-2">
               <input
                 value={vodInput}
@@ -517,19 +521,19 @@ export default function ContentFactoryAdminPage() {
                 {starter ? <span className="flex items-center gap-1"><span className="w-3 h-3 border border-g-green/30 border-t-g-green rounded-full animate-spin" /> Starter...</span> : '◆ Start'}
               </button>
             </div>
-            <p className="text-[9px] text-g-muted mt-1.5">twitch.tv/videos/[TALL] – ta tallene fra URL</p>
+            <p className="text-[11px] text-g-muted mt-1.5">twitch.tv/videos/[TALL] – ta tallene fra URL</p>
           </div>
 
           {startFeil && (
             <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
-              <p className="text-[10px] text-red-400 font-bold mb-1">Pipeline feilet</p>
-              <p className="text-[10px] text-red-400 font-mono break-all">{startFeil}</p>
+              <p className="text-[11px] text-red-400 font-bold mb-1">Pipeline feilet</p>
+              <p className="text-[11px] text-red-400 font-mono break-all">{startFeil}</p>
             </div>
           )}
           {nyligStartet && (
             <div className="p-3 bg-g-green/5 border border-g-green/20 rounded-xl">
-              <p className="text-[10px] text-g-green font-bold">Pipeline startet! Railway laster ned og transkriberer.</p>
-              <p className="text-[9px] text-g-muted mt-1">10–45 min avhengig av VOD-lengde. Oppdateres automatisk.</p>
+              <p className="text-[11px] text-g-green font-bold">Pipeline startet! Railway laster ned og transkriberer.</p>
+              <p className="text-[11px] text-g-muted mt-1">10–45 min avhengig av VOD-lengde. Oppdateres automatisk.</p>
             </div>
           )}
         </div>
@@ -538,7 +542,7 @@ export default function ContentFactoryAdminPage() {
       {/* ─── Aktive jobber ────────────────────────────────────────────────────── */}
       {aktiveVods.length > 0 && (
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">
             Aktive jobber <span className="text-yellow-400 ml-1">({aktiveVods.length})</span>
           </p>
           <div className="space-y-3">
@@ -560,20 +564,20 @@ export default function ContentFactoryAdminPage() {
                     <span className={`w-4 h-4 border-2 rounded-full flex-shrink-0 mt-1 animate-spin ${erHengt ? 'border-red-500/40 border-t-red-400' : 'border-yellow-400/40 border-t-yellow-400'}`} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-black text-g-text truncate">{v.title}</p>
-                      <p className="text-[10px] text-g-muted mt-0.5">{v.category} · startet {tidSiden(v.created_at)}</p>
+                      <p className="text-[11px] text-g-muted mt-0.5">{v.category} · startet {tidSiden(v.created_at)}</p>
                       <div className="mt-3 h-1.5 bg-g-border rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-1000 ${barFarge(v.status)}`} style={{ width: `${pct}%` }} />
                       </div>
                       <div className="flex items-center justify-between mt-1">
-                        <p className="text-[10px]">
+                        <p className="text-[11px]">
                           {v.status === 'TRANSCRIBED'
                             ? <span className="text-g-green font-bold">✓ Transkribering ferdig – Phase 2 starter...</span>
                             : <span className="text-g-muted">{v.status_message ?? v.current_step ?? v.status}</span>}
                         </p>
-                        <span className="text-[10px] text-g-muted">{pct}%</span>
+                        <span className="text-[11px] text-g-muted font-mono">{pct}%</span>
                       </div>
                       {rs && (
-                        <div className={`mt-2 flex items-center gap-2 text-[10px] p-2 rounded-lg ${erHengt || erStuck ? 'bg-red-500/5 border border-red-500/20' : 'bg-g-bg/50'}`}>
+                        <div className={`mt-2 flex items-center gap-2 text-[11px] p-2 rounded-lg ${erHengt || erStuck ? 'bg-red-500/5 border border-red-500/20' : 'bg-g-bg/50'}`}>
                           <span className="text-g-muted">Railway:</span>
                           <span className={`font-bold ${erRailwayFerdig ? 'text-g-green' : erUkjent ? 'text-red-400' : erStuck ? 'text-red-400' : 'text-yellow-400'}`}>{rs.status}</span>
                           {rs.melding && <span className="text-g-muted truncate">– {rs.melding.slice(0, 60)}</span>}
@@ -608,7 +612,7 @@ export default function ContentFactoryAdminPage() {
                   )}
                   {/* Pipeline-tidslinje for aktiv jobb */}
                   <details className="mt-3 group">
-                    <summary className="text-[9px] text-g-muted cursor-pointer hover:text-g-green transition-colors select-none">
+                    <summary className="text-[11px] text-g-muted cursor-pointer hover:text-g-green transition-colors select-none">
                       ▶ Vis pipeline-tidslinje
                     </summary>
                     <div className="mt-2 pl-2 border-l border-g-border/40">
@@ -625,7 +629,7 @@ export default function ContentFactoryAdminPage() {
       {/* ─── Feilede ──────────────────────────────────────────────────────────── */}
       {feilede.length > 0 && (
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">
             Feilede <span className="text-red-400 ml-1">({feilede.length})</span>
           </p>
           <div className="space-y-2">
@@ -634,24 +638,24 @@ export default function ContentFactoryAdminPage() {
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-black text-red-400 truncate">{v.title}</p>
-                    <p className="text-[9px] text-g-muted">{tidSiden(v.created_at)}</p>
-                    {v.error_message && <p className="text-[9px] text-red-400 mt-1 font-mono break-all">{v.error_message}</p>}
+                    <p className="text-[11px] text-g-muted">{tidSiden(v.created_at)}</p>
+                    {v.error_message && <p className="text-[11px] text-red-400 mt-1 font-mono break-all">{v.error_message}</p>}
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button onClick={() => retryRailway(v.id)}
-                      className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-lg hover:bg-red-500/20 transition-all">
+                      className="px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] font-medium rounded-lg hover:bg-red-500/20 transition-all">
                       ↻ Retry
                     </button>
                     <button onClick={() => resetJob(v.id)}
-                      className="px-3 py-1.5 border border-yellow-400/20 text-yellow-400/70 text-[10px] font-bold rounded-lg hover:border-yellow-400/40 hover:text-yellow-400 transition-all">
+                      className="px-3 py-1.5 border border-yellow-400/20 text-yellow-400/70 text-[11px] font-medium rounded-lg hover:border-yellow-400/40 hover:text-yellow-400 transition-all">
                       ↩ Reset
                     </button>
                     <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
-                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:text-g-green transition-all">
+                      className="px-3 py-1.5 border border-g-border text-g-muted text-[11px] font-medium rounded-lg hover:text-g-green transition-all">
                       {phase2Running === v.id ? '⏳' : 'Phase 2'}
                     </button>
                     <button onClick={() => slettVod(v.id, v.title)}
-                      className="px-3 py-1.5 border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
+                      className="px-3 py-1.5 border border-g-border text-g-muted text-[11px] font-medium rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
                       🗑
                     </button>
                   </div>
@@ -665,14 +669,14 @@ export default function ContentFactoryAdminPage() {
       {/* ─── Fullførte VODs ───────────────────────────────────────────────────── */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-black">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">
             Fullført <span className="text-g-green ml-1">({ferdige.length})</span>
           </p>
           <div className="flex gap-2">
-            <button onClick={hentVods} className="text-[9px] text-g-muted hover:text-g-green transition-colors px-2 py-1 border border-g-border rounded-lg">↻</button>
+            <button onClick={hentVods} className="text-[11px] text-g-muted hover:text-g-green transition-colors px-2 py-1 border border-g-border rounded-lg">↻</button>
             {vods.length > 0 && (
               <button onClick={slettAlle}
-                className="text-[9px] text-red-400/60 hover:text-red-400 transition-colors px-2 py-1 border border-red-500/20 rounded-lg">
+                className="text-[11px] text-red-400/60 hover:text-red-400 transition-colors px-2 py-1 border border-red-500/20 rounded-lg">
                 Slett alt
               </button>
             )}
@@ -682,7 +686,7 @@ export default function ContentFactoryAdminPage() {
         {ferdige.length === 0 ? (
           <div className="bg-g-card border border-g-border rounded-2xl p-10 text-center">
             <p className="text-g-muted text-sm">Ingen fullførte VODs ennå.</p>
-            <p className="text-[10px] text-g-muted/60 mt-1">Start en pipeline ovenfor.</p>
+            <p className="text-[11px] text-g-muted/60 mt-1">Start en pipeline ovenfor.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -691,24 +695,24 @@ export default function ContentFactoryAdminPage() {
               return (
                 <div key={v.id} className={`bg-g-card border rounded-2xl overflow-hidden transition-all ${erÅpen ? 'border-g-green/30' : 'border-g-border'}`}>
                   <div className="p-4 cursor-pointer flex items-center gap-4" onClick={() => setAktivertVod(erÅpen ? null : v.id)}>
-                    <span className="w-5 h-5 rounded-full bg-g-green/10 border border-g-green/30 flex items-center justify-center text-g-green text-[9px] font-black flex-shrink-0">✓</span>
+                    <span className="w-5 h-5 rounded-full bg-g-green/10 border border-g-green/30 flex items-center justify-center text-g-green text-[11px] font-semibold flex-shrink-0">✓</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-black text-g-text truncate">{v.title}</p>
-                      <p className="text-[9px] text-g-muted">{v.category} · {tidSiden(v.created_at)}</p>
+                      <p className="text-[11px] text-g-muted">{v.category} · {tidSiden(v.created_at)}</p>
                     </div>
                     {/* Pipeline steg mini */}
                     <div className="hidden lg:flex items-center gap-1">
                       {PIPELINE_STEG.map(s => (
-                        <span key={s.id} className="text-[8px] text-g-green/60 px-1.5 py-0.5 border border-g-green/20 rounded font-bold">{s.label}</span>
+                        <span key={s.id} className="text-[11px] text-g-green/60 px-1.5 py-0.5 border border-g-green/20 rounded font-medium">{s.label}</span>
                       ))}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <a href="/content-factory-admin/highlights" onClick={e => e.stopPropagation()}
-                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 text-g-green text-[10px] font-bold rounded-lg hover:bg-g-green/20 transition-all">
+                        className="px-3 py-1.5 bg-g-green/10 border border-g-green/25 text-g-green text-[11px] font-medium rounded-lg hover:bg-g-green/20 transition-all duration-200">
                         ▶ Highlights
                       </a>
                       <button onClick={e => { e.stopPropagation(); slettVod(v.id, v.title); }}
-                        className="px-2 py-1.5 border border-g-border text-g-muted text-[10px] rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
+                        className="px-2 py-1.5 border border-g-border text-g-muted text-[11px] rounded-lg hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all">
                         🗑
                       </button>
                       <span className="text-g-muted/60 text-xs">{erÅpen ? '▲' : '▼'}</span>
@@ -719,10 +723,10 @@ export default function ContentFactoryAdminPage() {
                     <div className="border-t border-g-border/40 p-4 space-y-4 bg-g-bg/30">
                       <div className="flex items-center gap-2">
                         <button onClick={() => kjørPhase2(v.id)} disabled={phase2Running === v.id}
-                          className="px-4 py-2 bg-g-bg border border-g-border text-g-muted text-[10px] font-bold rounded-lg hover:text-g-green hover:border-g-green/30 transition-all">
+                          className="px-4 py-2 bg-g-bg border border-g-border text-g-muted text-[11px] font-medium rounded-lg hover:text-g-green hover:border-g-green/30 transition-all">
                           {phase2Running === v.id ? '⏳ Kjører...' : '↻ Re-kjør Phase 2'}
                         </button>
-                        <p className="text-[9px] text-g-muted">Oppdaterer highlights + tekster fra eksisterende transkripsjon</p>
+                        <p className="text-[11px] text-g-muted">Oppdaterer highlights + tekster fra eksisterende transkripsjon</p>
                       </div>
                       {phase2Res[v.id] && (
                         <div className={`p-3 rounded-xl border text-[11px] ${phase2Res[v.id].ok ? 'border-g-green/30 bg-g-green/5 text-g-green' : 'border-red-500/30 bg-red-500/5 text-red-400'}`}>
@@ -733,7 +737,7 @@ export default function ContentFactoryAdminPage() {
                       )}
                       {/* VOD event-tidslinje */}
                       <div>
-                        <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-2">Pipeline-tidslinje</p>
+                        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Pipeline-tidslinje</p>
                         <VodTimeline vodId={v.id} />
                       </div>
                     </div>
@@ -747,7 +751,7 @@ export default function ContentFactoryAdminPage() {
 
       {/* ─── Manuell Phase 2 ──────────────────────────────────────────────────── */}
       <div className="bg-g-card border border-g-border/40 rounded-2xl p-5">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-black mb-3">Manuell Phase 2</p>
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Manuell Phase 2</p>
         <div className="flex gap-2">
           <input
             value={manualPhase2Id}
@@ -767,7 +771,7 @@ export default function ContentFactoryAdminPage() {
           </button>
         </div>
         {phase2Res['manual'] && (
-          <p className={`text-[10px] mt-2 ${phase2Res['manual'].ok ? 'text-g-green' : 'text-red-400'}`}>
+          <p className={`text-[11px] mt-2 ${phase2Res['manual'].ok ? 'text-g-green' : 'text-red-400'}`}>
             {phase2Res['manual'].ok ? '✓ Ferdig' : `✗ ${phase2Res['manual'].error}`}
           </p>
         )}

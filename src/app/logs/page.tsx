@@ -59,7 +59,7 @@ export default function Logs() {
       />
 
       <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
-        <div className="grid grid-cols-[auto_1fr_auto] gap-0 text-[10px] text-g-muted font-bold tracking-widest uppercase border-b border-g-border px-4 py-2.5">
+        <div className="grid grid-cols-[auto_1fr_auto] gap-0 text-[11px] text-g-muted font-bold tracking-widest uppercase border-b border-g-border px-4 py-2.5">
           <span className="w-36">Tidspunkt</span>
           <span>Melding</span>
           <span className="text-right">Status</span>
@@ -86,11 +86,11 @@ export default function Logs() {
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
                     <div>
                       <p className="text-[11px] text-g-text font-mono">{timeStr}</p>
-                      <p className="text-[9px] text-g-muted">{dateStr}</p>
+                      <p className="text-[11px] text-g-muted">{dateStr}</p>
                     </div>
                   </div>
                   <span className="text-xs text-g-text truncate">{log.message}</span>
-                  <span className={`text-[10px] font-mono font-bold ${cfg.text} text-right`}>{log.status}</span>
+                  <span className={`text-xs font-mono font-bold ${cfg.text} text-right`}>{log.status}</span>
                 </div>
               );
             })}
@@ -98,7 +98,7 @@ export default function Logs() {
         )}
       </div>
 
-      <p className="text-[10px] text-g-muted text-right">Viser maks 500 oppføringer. Eldre oppføringer slettes automatisk.</p>
+      <p className="text-xs text-g-muted text-right">Viser maks 500 oppføringer. Eldre oppføringer slettes automatisk.</p>
     </div>
   );
 }

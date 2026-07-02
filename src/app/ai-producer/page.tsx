@@ -57,10 +57,10 @@ const PRIORITET_STIL: Record<string, string> = {
 
 function MetricKort({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-g-bg border border-g-border rounded-2xl p-4 text-center">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest">{label}</p>
+    <div className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
+      <p className="text-[11px] text-g-muted uppercase tracking-widest">{label}</p>
       <p className="text-2xl font-black text-g-green font-mono mt-1">{value}</p>
-      {sub && <p className="text-[9px] text-g-muted mt-0.5">{sub}</p>}
+      {sub && <p className="text-[11px] text-g-muted mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -115,10 +115,10 @@ function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
     <div className="bg-g-card border border-red-500/30 rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-black text-red-400 uppercase tracking-wider">⚠ Live-deteksjon feilet</p>
-          <p className="text-[9px] text-g-muted mt-0.5">Systemet klarer ikke oppdage at du er live. Diagnostikk og manuell override nedenfor.</p>
+          <p className="text-xs font-semibold text-red-400 uppercase tracking-widest">⚠ Live-deteksjon feilet</p>
+          <p className="text-[11px] text-g-muted mt-0.5">Systemet klarer ikke oppdage at du er live. Diagnostikk og manuell override nedenfor.</p>
         </div>
-        <button onClick={hentDiag} className="text-[9px] text-g-muted hover:text-g-green transition-colors">↻ Oppdater</button>
+        <button onClick={hentDiag} className="text-[11px] text-g-muted hover:text-g-text transition-colors">↻ Oppdater</button>
       </div>
 
       {/* Hurtighandlinger */}
@@ -126,34 +126,40 @@ function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
         <button
           onClick={forceNotify}
           disabled={notifying}
-          className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-black rounded hover:bg-red-500/20 transition-all disabled:opacity-50"
+          className="px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium rounded-lg hover:bg-red-500/15 transition-all duration-200 disabled:opacity-50"
         >
           {notifying ? '⏳ Sender...' : '🔴 TVING DISCORD-VARSEL NÅ'}
         </button>
         <button
           onClick={resetId}
           disabled={resetting}
-          className="px-4 py-2 border border-g-border text-g-muted text-xs font-bold rounded hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-50"
+          className="px-4 py-2 text-g-muted text-sm hover:text-g-text transition-colors disabled:opacity-50"
         >
           {resetting ? '⏳...' : '↺ Nullstill live-ID (boten varsler om < 2min)'}
         </button>
       </div>
 
       {melding && (
-        <div className={`p-3 rounded border text-xs font-bold ${melding.ok ? 'border-g-green/30 text-g-green bg-g-green/5' : 'border-red-500/30 text-red-400 bg-red-500/5'}`}>
+        <div className={`px-4 py-3 rounded-lg border text-sm font-medium ${melding.ok ? 'border-g-green/30 text-g-green bg-g-green/5' : 'border-red-500/20 text-red-400 bg-red-500/10'}`}>
           {melding.tekst}
         </div>
       )}
 
       {/* Diagnostikk */}
-      {loading && <div className="h-24 bg-g-bg border border-g-border rounded-lg animate-pulse" />}
+      {loading && (
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 bg-g-border/40 rounded w-3/4" />
+          <div className="h-4 bg-g-border/40 rounded w-1/2" />
+          <div className="h-4 bg-g-border/40 rounded w-2/3" />
+        </div>
+      )}
       {diag && !loading && (
         <div className="space-y-2">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">Diagnostikk</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Diagnostikk</p>
           {Object.entries(diag.detaljer).map(([key, val]) => (
-            <div key={key} className={`flex items-start gap-2 p-2 rounded border text-[10px] ${val.ok ? 'border-g-border' : 'border-red-500/30 bg-red-500/5'}`}>
-              <span className={`flex-shrink-0 font-black ${val.ok ? 'text-g-green' : 'text-red-400'}`}>{val.ok ? '✓' : '✗'}</span>
-              <span className={`flex-shrink-0 w-40 font-mono ${val.ok ? 'text-g-muted' : 'text-red-400 font-bold'}`}>{key.replace(/_/g, ' ')}</span>
+            <div key={key} className={`flex items-start gap-2 p-2 rounded border text-xs ${val.ok ? 'border-g-border' : 'border-red-500/30 bg-red-500/5'}`}>
+              <span className={`flex-shrink-0 font-semibold ${val.ok ? 'text-g-green' : 'text-red-400'}`}>{val.ok ? '✓' : '✗'}</span>
+              <span className={`flex-shrink-0 w-40 font-mono ${val.ok ? 'text-g-muted' : 'text-red-400 font-semibold'}`}>{key.replace(/_/g, ' ')}</span>
               <span className={val.ok ? 'text-g-muted' : 'text-red-400'}>{val.melding}</span>
               {val.verdi && <span className="ml-auto text-g-muted/50 font-mono">{val.verdi}</span>}
             </div>
@@ -163,21 +169,21 @@ function LiveNødpanel({ onRefresh }: { onRefresh: () => void }) {
 
       {diag?.kritiskeFeil && diag.kritiskeFeil.length > 0 && (
         <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-          <p className="text-[9px] text-red-400 font-black uppercase mb-2">Slik fikser du det:</p>
+          <p className="text-[11px] text-red-400 font-semibold uppercase mb-2">Slik fikser du det:</p>
           {!diag.detaljer.twitch_client_id?.ok && (
-            <p className="text-[9px] text-g-muted mb-1">• Legg til <code className="text-yellow-400">TWITCH_CLIENT_ID</code> og <code className="text-yellow-400">TWITCH_CLIENT_SECRET</code> i Vercel Environment Variables</p>
+            <p className="text-xs text-g-muted mb-1">• Legg til <code className="text-yellow-400">TWITCH_CLIENT_ID</code> og <code className="text-yellow-400">TWITCH_CLIENT_SECRET</code> i Vercel Environment Variables</p>
           )}
           {!diag.detaljer.discord_live_channel?.ok && (
-            <p className="text-[9px] text-g-muted mb-1">• Gå til <a href="/innstillinger" className="text-g-green underline">Innstillinger</a> og sett Discord Live-kanal ID</p>
+            <p className="text-xs text-g-muted mb-1">• Gå til <a href="/innstillinger" className="text-g-green underline">Innstillinger</a> og sett Discord Live-kanal ID</p>
           )}
           {!diag.detaljer.auto_post_live?.ok && (
-            <p className="text-[9px] text-g-muted mb-1">• Skru på «Auto Post Live» i <a href="/innstillinger" className="text-g-green underline">Innstillinger</a></p>
+            <p className="text-xs text-g-muted mb-1">• Skru på «Auto Post Live» i <a href="/innstillinger" className="text-g-green underline">Innstillinger</a></p>
           )}
           {diag.settings.lastNotifiedStreamId && (
-            <p className="text-[9px] text-g-muted mb-1">• Klikk «Nullstill live-ID» ovenfor – forrige stream-ID blokkerer nytt varsel</p>
+            <p className="text-xs text-g-muted mb-1">• Klikk «Nullstill live-ID» ovenfor – forrige stream-ID blokkerer nytt varsel</p>
           )}
           {!diag.detaljer.discord_bot_token?.ok && (
-            <p className="text-[9px] text-g-muted mb-1">• Legg til <code className="text-yellow-400">DISCORD_BOT_TOKEN</code> i Vercel og Railway Environment Variables</p>
+            <p className="text-xs text-g-muted mb-1">• Legg til <code className="text-yellow-400">DISCORD_BOT_TOKEN</code> i Vercel og Railway Environment Variables</p>
           )}
         </div>
       )}
@@ -230,24 +236,24 @@ function TiltakKort({ tiltak, streamGame, streamViewers }: { tiltak: Tiltak; str
           className="flex items-center gap-3 flex-1 text-left"
           onClick={() => harInnhold && setÅpen(o => !o)}
         >
-          <span className="text-[10px] font-black uppercase tracking-widest w-16 flex-shrink-0">{tiltak.prioritet}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-widest w-16 flex-shrink-0">{tiltak.prioritet}</span>
           <p className={`text-xs font-semibold flex-1 ${status === 'done' ? 'line-through opacity-70' : ''}`}>{tiltak.tekst}</p>
           {harInnhold && (
-            <span className="text-[9px] text-current/60 flex-shrink-0">{åpen ? '▲' : '▼ innhold'}</span>
+            <span className="text-[11px] text-current/60 flex-shrink-0">{åpen ? '▲' : '▼ innhold'}</span>
           )}
         </button>
         {status === 'suggested' && (
           <div className="flex gap-1 flex-shrink-0">
             <button
               onClick={() => settStatus('done')}
-              className="px-2 py-0.5 text-[9px] font-black bg-g-green/20 border border-g-green/40 text-g-green rounded hover:bg-g-green/30 transition-all"
+              className="px-2 py-0.5 text-[11px] font-semibold bg-g-green/20 border border-g-green/40 text-g-green rounded hover:bg-g-green/30 transition-all"
               title="Merk som utført"
             >
               Utført
             </button>
             <button
               onClick={() => settStatus('dismissed')}
-              className="px-2 py-0.5 text-[9px] font-black border border-current/20 text-current/50 rounded hover:bg-black/20 transition-all"
+              className="px-2 py-0.5 text-[11px] font-semibold border border-current/20 text-current/50 rounded hover:bg-black/20 transition-all"
               title="Avvis"
             >
               Avvis
@@ -255,10 +261,10 @@ function TiltakKort({ tiltak, streamGame, streamViewers }: { tiltak: Tiltak; str
           </div>
         )}
         {status === 'done' && (
-          <span className="text-[9px] text-g-green font-bold flex-shrink-0">✓ Utført</span>
+          <span className="text-[11px] text-g-green font-semibold flex-shrink-0">✓ Utført</span>
         )}
         {status === 'dismissed' && (
-          <span className="text-[9px] text-g-muted flex-shrink-0">Avvist</span>
+          <span className="text-[11px] text-g-muted flex-shrink-0">Avvist</span>
         )}
       </div>
 
@@ -267,12 +273,12 @@ function TiltakKort({ tiltak, streamGame, streamViewers }: { tiltak: Tiltak; str
           {Object.entries(tiltak.innhold!).map(([platform, tekst]) => tekst ? (
             <div key={platform} className="bg-black/30 rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-black uppercase tracking-widest text-current/70">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-current/70">
                   {PLATTFORM_IKON[platform] ?? platform}
                 </span>
                 <button
                   onClick={() => kopier(tekst, platform)}
-                  className="text-[9px] font-bold px-2 py-0.5 rounded border border-current/30 hover:bg-current/10 transition-all"
+                  className="text-[11px] font-semibold px-2 py-0.5 rounded border border-current/30 hover:bg-current/10 transition-all"
                 >
                   {kopiert === platform ? '✓ Kopiert!' : 'Kopier'}
                 </button>
@@ -293,8 +299,8 @@ function StatusKort({ label, ok, melding, href }: { label: string; ok: boolean; 
     <div className="bg-g-card border border-g-border rounded-lg p-3 flex items-center gap-3">
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ok ? 'bg-g-green' : 'bg-yellow-400'}`} />
       <div className="min-w-0">
-        <p className="text-[9px] text-g-muted uppercase tracking-widest">{label}</p>
-        <p className={`text-[10px] font-bold truncate ${ok ? 'text-g-text' : 'text-yellow-400'}`}>{melding}</p>
+        <p className="text-[11px] text-g-muted uppercase tracking-widest">{label}</p>
+        <p className={`text-xs font-medium truncate ${ok ? 'text-g-text' : 'text-yellow-400'}`}>{melding}</p>
       </div>
     </div>
   );
@@ -309,23 +315,23 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
       <div className="bg-g-card border border-g-border rounded-2xl p-8 text-center">
         <div className="flex items-center justify-center gap-2 mb-4">
           <span className="w-2.5 h-2.5 rounded-full bg-g-muted" />
-          <p className="text-xs font-black text-g-muted uppercase tracking-widest">NO_ACTIVE_STREAM</p>
+          <p className="text-xs font-semibold text-g-muted uppercase tracking-widest">NO_ACTIVE_STREAM</p>
         </div>
-        <h2 className="text-base font-black text-g-text">Venter på at du skal gå live</h2>
-        <p className="text-xs text-g-muted mt-2 max-w-sm mx-auto leading-relaxed">
+        <h2 className="text-base font-semibold text-g-text">Venter på at du skal gå live</h2>
+        <p className="text-sm text-g-muted mt-2 max-w-sm mx-auto leading-relaxed">
           AI Producer aktiveres automatisk når Twitch registrerer at du er live.
         </p>
         {standby?.nesteStream && (
           <a href="/streamplan" className="mt-5 inline-flex items-center gap-2.5 px-4 py-2 bg-g-bg border border-g-border rounded-lg hover:border-g-green/40 transition-colors">
-            <span className="text-[9px] text-g-muted uppercase tracking-widest">Neste stream</span>
-            <span className="text-xs font-black text-g-text">{standby.nesteStream.dag} kl. {standby.nesteStream.tid}</span>
+            <span className="text-[11px] text-g-muted uppercase tracking-widest">Neste stream</span>
+            <span className="text-xs font-semibold text-g-text">{standby.nesteStream.dag} kl. {standby.nesteStream.tid}</span>
           </a>
         )}
       </div>
 
       {/* Systemstatus */}
       <div>
-        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Systemstatus</p>
+        <p className="text-[11px] text-g-muted uppercase tracking-widest font-semibold mb-2">Systemstatus</p>
         <div className="grid grid-cols-2 gap-2">
           <StatusKort
             label="AI Producer"
@@ -354,15 +360,15 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
       {/* Siste stream-score */}
       {standby?.sisteStreamScore && (
         <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Siste stream-score</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Siste stream-score</p>
           <div className="flex items-end gap-4">
             <div>
               <p className="text-3xl font-black text-g-green font-mono">{standby.sisteStreamScore.seere}</p>
-              <p className="text-[9px] text-g-muted mt-0.5">peak seere</p>
+              <p className="text-[11px] text-g-muted mt-0.5">peak seere</p>
             </div>
             <div className="pb-1">
-              <p className="text-xs font-bold text-g-text">{standby.sisteStreamScore.spill}</p>
-              <p className="text-[9px] text-g-muted">
+              <p className="text-sm font-semibold text-g-text">{standby.sisteStreamScore.spill}</p>
+              <p className="text-[11px] text-g-muted">
                 {new Date(standby.sisteStreamScore.startetAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
               </p>
             </div>
@@ -373,15 +379,15 @@ function StandbyPage({ standby, onRefresh }: { standby: StandbyData | null | und
       {/* Siste AI-læring */}
       {standby?.sisteAiLaering && (
         <div className="bg-g-card border border-g-border rounded-2xl p-5">
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Siste AI-læring</p>
-          <p className="text-xs font-bold text-g-text">{standby.sisteAiLaering.title}</p>
-          <p className="text-xs text-g-muted mt-1 leading-relaxed">{standby.sisteAiLaering.summary}</p>
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">Siste AI-læring</p>
+          <p className="text-sm font-semibold text-g-text">{standby.sisteAiLaering.title}</p>
+          <p className="text-sm text-g-text leading-relaxed mt-1">{standby.sisteAiLaering.summary}</p>
         </div>
       )}
 
       <button
         onClick={onRefresh}
-        className="w-full py-2 text-[9px] text-g-muted hover:text-g-green border border-g-border rounded-lg hover:border-g-green/30 transition-all uppercase tracking-widest"
+        className="w-full py-2 text-xs text-g-muted hover:text-g-text border border-g-border rounded-lg hover:border-g-green/30 transition-all uppercase tracking-widest"
       >
         ↻ Sjekk om du er live nå
       </button>
@@ -414,15 +420,15 @@ export default function AIProducerPage() {
   }, [hent]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="AI Producer" subtitle="Sanntids stream-analyse og AI-anbefalinger">
         <div className="text-right">
           {sisteOppdatert && (
-            <p className="text-[9px] text-g-muted">Oppdatert {sisteOppdatert.toLocaleTimeString('no-NO')}</p>
+            <p className="text-[11px] text-g-muted">Oppdatert {sisteOppdatert.toLocaleTimeString('no-NO')}</p>
           )}
           <div className={`flex items-center gap-1.5 justify-end mt-1 ${data?.isLive ? 'text-red-400' : 'text-g-muted'}`}>
             <span className={`w-2 h-2 rounded-full ${data?.isLive ? 'bg-red-400 animate-pulse' : 'bg-g-muted'}`} />
-            <span className="text-xs font-bold">{data?.isLive ? 'LIVE NÅ' : 'OFFLINE'}</span>
+            <span className="text-xs font-semibold">{data?.isLive ? 'LIVE NÅ' : 'OFFLINE'}</span>
           </div>
         </div>
       </PageHeader>
@@ -439,7 +445,7 @@ export default function AIProducerPage() {
           <div className="bg-g-card border border-red-500/20 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse" />
-              <p className="text-xs font-black text-red-400 uppercase tracking-widest">LIVE NÅ</p>
+              <p className="text-xs font-semibold text-red-400 uppercase tracking-widest">LIVE NÅ</p>
             </div>
             {data.stream && (
               <div className="flex gap-4 items-start">
@@ -447,8 +453,8 @@ export default function AIProducerPage() {
                   <img src={data.stream.thumbnailUrl} alt="Stream" className="w-32 rounded border border-g-border flex-shrink-0" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[9px] text-g-muted uppercase tracking-widest">{data.stream.game}</p>
-                  <p className="text-sm font-bold text-g-text mt-0.5">{data.stream.title}</p>
+                  <p className="text-[11px] text-g-muted uppercase tracking-widest">{data.stream.game}</p>
+                  <p className="text-sm font-semibold text-g-text mt-0.5">{data.stream.title}</p>
                 </div>
               </div>
             )}
@@ -468,7 +474,7 @@ export default function AIProducerPage() {
           {/* AI Analyse */}
           {data.analyse && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5">
-              <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">◆ AI Analyse</p>
+              <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-2">◆ AI Analyse</p>
               <p className="text-sm text-g-text leading-relaxed">{data.analyse}</p>
             </div>
           )}
@@ -477,9 +483,9 @@ export default function AIProducerPage() {
           {data.tiltak.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">AI Tiltak</p>
+                <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">AI Tiltak</p>
                 {data.harHistorikk && (
-                  <span className="text-[9px] text-g-green/70 flex items-center gap-1">
+                  <span className="text-[11px] text-g-green/70 flex items-center gap-1">
                     <span className="w-1 h-1 rounded-full bg-g-green/70" /> Basert på din Stream Coach-historikk
                   </span>
                 )}

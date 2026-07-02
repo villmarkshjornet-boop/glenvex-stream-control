@@ -233,7 +233,7 @@ function ScoreBar({ score }: { score: number }) {
   return (
     <div className="space-y-2">
       <div className="flex justify-between items-end">
-        <span className="text-[10px] text-g-muted uppercase tracking-widest">Sponsor Readiness Score</span>
+        <span className="text-xs text-g-muted uppercase tracking-widest">Sponsor Readiness Score</span>
         <span className="text-3xl font-black font-mono" style={{ color }}>{score}<span className="text-sm text-g-muted">/100</span></span>
       </div>
       <div className="relative w-full bg-g-border rounded-full h-4">
@@ -242,7 +242,7 @@ function ScoreBar({ score }: { score: number }) {
         ))}
         <div className="h-4 rounded-full transition-all duration-700" style={{ width: `${score}%`, backgroundColor: color }} />
       </div>
-      <div className="flex justify-between text-[9px] text-g-muted/60">
+      <div className="flex justify-between text-[11px] text-g-muted/60">
         <span>Nybegynner</span><span>Etablert</span><span>Seriøs</span><span>Klar</span>
       </div>
     </div>
@@ -252,8 +252,8 @@ function ScoreBar({ score }: { score: number }) {
 function PeriodeKort({ label, data }: { label: string; data: PeriodeData }) {
   if (!data) return null;
   return (
-    <div className="bg-g-sidebar border border-g-border rounded-lg p-4 space-y-2">
-      <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">{label}</p>
+    <div className="bg-g-card border border-g-border rounded-lg p-4 space-y-2">
+      <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold">{label}</p>
       <div className="grid grid-cols-3 gap-2">
         {[
           { l: 'Streams', v: data.streams ?? 0 },
@@ -264,7 +264,7 @@ function PeriodeKort({ label, data }: { label: string; data: PeriodeData }) {
           { l: 'Klipp', v: data.klipp ?? 0 },
         ].map(s => (
           <div key={s.l} className="text-center">
-            <p className="text-[8px] text-g-muted/70 uppercase tracking-wider">{s.l}</p>
+            <p className="text-[11px] text-g-muted/70 uppercase tracking-wider">{s.l}</p>
             <p className="text-sm font-black font-mono text-g-green">{s.v}</p>
           </div>
         ))}
@@ -282,16 +282,16 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
   return (
     <div className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-g-border bg-g-sidebar">
+      <div className="flex items-center justify-between p-4 border-b border-g-border bg-g-card">
         <div>
           <h2 className="text-sm font-black tracking-wide text-g-text uppercase">
             Partnerrapport — {report.partnerName}
           </h2>
-          <p className="text-[10px] text-g-muted mt-0.5">
+          <p className="text-xs text-g-muted mt-0.5">
             Periode: siste {report.periode === '7d' ? '7 dager' : '30 dager'}
             &nbsp;·&nbsp; Generert {tidSiden(report.generertAt)}
             &nbsp;·&nbsp;
-            <span className={`px-1.5 py-0.5 border rounded text-[9px] font-bold ${styrkeKlasse(dg.styrke)}`}>
+            <span className={`px-1.5 py-0.5 border rounded text-[11px] font-bold ${styrkeKlasse(dg.styrke)}`}>
               {dg.styrke}
             </span>
           </p>
@@ -299,13 +299,13 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
         <div className="flex items-center gap-2">
           <button
             onClick={() => exportPDF(report)}
-            className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all"
+            className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all"
           >
             ↓ PDF
           </button>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 border border-g-border rounded text-[10px] text-g-muted hover:text-red-400 hover:border-red-400/30 transition-all"
+            className="px-3 py-1.5 border border-g-border rounded text-xs text-g-muted hover:text-red-400 hover:border-red-400/30 transition-all"
           >
             ✕ Lukk
           </button>
@@ -315,7 +315,7 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
       <div className="p-4 space-y-5">
         {/* Section 2: Sammendrag */}
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Sammendrag</p>
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Sammendrag</p>
           <div className="grid grid-cols-3 gap-2">
             {[
               { l: 'Promoer totalt', v: s.totalePromoer },
@@ -325,13 +325,13 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
               { l: 'Avvist',         v: s.avvist },
               { l: 'Venter',         v: s.venter },
             ].map(x => (
-              <div key={x.l} className="bg-g-sidebar border border-g-border rounded-lg p-3 text-center">
-                <p className="text-[8px] text-g-muted uppercase tracking-wider">{x.l}</p>
+              <div key={x.l} className="bg-g-card border border-g-border rounded-lg p-3 text-center">
+                <p className="text-[11px] text-g-muted uppercase tracking-wider">{x.l}</p>
                 <p className="text-xl font-black text-g-green font-mono mt-0.5">{x.v}</p>
               </div>
             ))}
           </div>
-          <div className="flex gap-4 mt-2 text-[10px] text-g-muted">
+          <div className="flex gap-4 mt-2 text-xs text-g-muted">
             <span>Streams med partner: <span className="text-g-text font-bold">{s.streamerMedPartner}</span></span>
             {s.sistePromo && <span>Siste promo: <span className="text-g-text">{dato(s.sistePromo)}</span></span>}
             {decided > 0 && p.godkjentRate !== null && <span>Godkjennelsesrate: <span className="text-g-green font-bold">{p.godkjentRate}%</span></span>}
@@ -340,7 +340,7 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
 
         {/* Section 3: Partneroversikt */}
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Partneroversikt</p>
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Partneroversikt</p>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             {[
               { l: 'Promoer 7d',      v: p.promoer7d },
@@ -366,12 +366,12 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
 
         {/* Section 4: Historisk utvikling */}
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Historisk utvikling</p>
-          <table className="w-full text-[10px]">
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Historisk utvikling</p>
+          <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-g-border/40">
                 {['Periode', 'Promoer', 'Godkjennelser', 'Eksponering'].map(c => (
-                  <th key={c} className="py-1.5 pr-3 text-left text-[9px] text-g-muted uppercase tracking-wider font-bold">{c}</th>
+                  <th key={c} className="py-1.5 pr-3 text-left text-[11px] text-g-muted uppercase tracking-wider font-bold">{c}</th>
                 ))}
               </tr>
             </thead>
@@ -395,10 +395,10 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
         {/* Section 5: Stream-historikk */}
         {report.streamHistorikk.length > 0 && (
           <div>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Streamhistorikk</p>
+            <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Streamhistorikk</p>
             <div className="space-y-1.5">
               {report.streamHistorikk.map((s2, i) => (
-                <div key={i} className="flex items-center justify-between py-1.5 border-b border-g-border/10 text-[10px]">
+                <div key={i} className="flex items-center justify-between py-1.5 border-b border-g-border/10 text-xs">
                   <div>
                     <span className="text-g-text font-medium">{s2.title}</span>
                     {s2.game && <span className="text-g-muted/60 ml-1">({s2.game})</span>}
@@ -417,11 +417,11 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
 
         {/* Section 6: Highlights */}
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Highlights</p>
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Highlights</p>
           {report.highlights.length > 0 ? (
             <div className="space-y-1">
               {report.highlights.map(hl => (
-                <div key={hl.id} className="flex items-center justify-between py-1 border-b border-g-border/10 text-[10px]">
+                <div key={hl.id} className="flex items-center justify-between py-1 border-b border-g-border/10 text-xs">
                   <span className="text-g-text">{hl.title ?? '(uten tittel)'}</span>
                   <div className="flex gap-3 text-g-muted/60 flex-shrink-0">
                     <span>{dato(hl.createdAt)}</span>
@@ -432,21 +432,21 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
               ))}
             </div>
           ) : (
-            <p className="text-[10px] text-g-muted/40">Ingen highlights funnet i streams der partneren var med.</p>
+            <p className="text-xs text-g-muted/40">Ingen highlights funnet i streams der partneren var med.</p>
           )}
         </div>
 
         {/* Section 7: Creator Brain Learning */}
         {(cl.approvalPattern || cl.partnerPerformance || cl.besteTidspunkt || cl.bestePlattform || cl.historiskeMonstre.length > 0) && (
           <div>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Creator Brain Learning</p>
+            <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Creator Brain Learning</p>
             <div className="space-y-2">
               {cl.approvalPattern && (
                 <div className="flex items-start gap-2">
                   <span className="text-emerald-400 text-xs mt-0.5 flex-shrink-0">✓</span>
                   <div>
                     <p className="text-[11px] text-g-text">{cl.approvalPattern.finding}</p>
-                    <p className="text-[9px] mt-0.5" style={{ color: konfFarge(cl.approvalPattern.confidence) }}>
+                    <p className="text-[11px] mt-0.5" style={{ color: konfFarge(cl.approvalPattern.confidence) }}>
                       {cl.approvalPattern.confidence}% konfidensgrad · {cl.approvalPattern.evidenceCount} datapunkt
                     </p>
                   </div>
@@ -457,7 +457,7 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
                   <span className="text-amber-400 text-xs mt-0.5 flex-shrink-0">★</span>
                   <div>
                     <p className="text-[11px] text-g-text">{cl.partnerPerformance.finding}</p>
-                    <p className="text-[9px] text-g-muted/50 mt-0.5">{cl.partnerPerformance.evidenceCount} datapunkt</p>
+                    <p className="text-[11px] text-g-muted/50 mt-0.5">{cl.partnerPerformance.evidenceCount} datapunkt</p>
                   </div>
                 </div>
               )}
@@ -490,8 +490,8 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
         {/* Section 8: AI-anbefaling */}
         {report.aiAnbefaling && (
           <div>
-            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">AI-anbefaling</p>
-            <div className="bg-g-sidebar border border-g-border/40 rounded-lg p-3">
+            <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">AI-anbefaling</p>
+            <div className="bg-g-card border border-g-border/40 rounded-lg p-3">
               <p className="text-[11px] text-g-text/90 leading-relaxed italic">{report.aiAnbefaling}</p>
             </div>
           </div>
@@ -499,12 +499,12 @@ function PartnerReportView({ report, onClose }: { report: PartnerReport; onClose
 
         {/* Section 9: Datagrunnlag */}
         <div>
-          <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-2">Datagrunnlag</p>
+          <p className="text-[11px] text-g-muted uppercase tracking-widest font-bold mb-2">Datagrunnlag</p>
           <div className="flex items-center gap-2 mb-1.5">
-            <span className={`px-2 py-0.5 border rounded text-[9px] font-bold ${styrkeKlasse(dg.styrke)}`}>{dg.styrke.toUpperCase()}</span>
-            <p className="text-[10px] text-g-text">{dg.forklaring}</p>
+            <span className={`px-2 py-0.5 border rounded text-[11px] font-bold ${styrkeKlasse(dg.styrke)}`}>{dg.styrke.toUpperCase()}</span>
+            <p className="text-xs text-g-text">{dg.forklaring}</p>
           </div>
-          <p className="text-[10px] text-g-muted/50">
+          <p className="text-xs text-g-muted/50">
             Basert på {dg.basertPa.streams} streams
             · {dg.basertPa.proposals} forslag
             · {dg.basertPa.promoer} promoer
@@ -583,33 +583,33 @@ export default function SponsorManagerPage() {
 
           {/* Milestones */}
           <div className="bg-g-card border border-g-border rounded-2xl p-4">
-            <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">Milestones</p>
+            <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-3">Milestones</p>
             <div className="flex items-center gap-0">
               {data.milestones.map((m, i) => (
                 <div key={m.poeng} className="flex-1 flex items-center">
                   <div className="flex flex-col items-center gap-1 w-full">
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all ${m.nådd ? 'bg-g-green/20 border-g-green text-g-green' : 'border-g-border text-g-muted'}`}>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${m.nådd ? 'bg-g-green/20 border-g-green text-g-green' : 'border-g-border text-g-muted'}`}>
                       {m.nådd ? '✓' : m.poeng}
                     </div>
-                    <p className={`text-[8px] text-center ${m.nådd ? 'text-g-green' : 'text-g-muted/50'}`}>{m.label}</p>
+                    <p className={`text-[11px] text-center ${m.nådd ? 'text-g-green' : 'text-g-muted/50'}`}>{m.label}</p>
                   </div>
                   {i < data.milestones.length - 1 && <div className={`h-px flex-1 mx-1 ${m.nådd ? 'bg-g-green/40' : 'bg-g-border'}`} />}
                 </div>
               ))}
             </div>
             {data.nesteMillestone && (
-              <p className="text-[10px] text-g-muted mt-3">Neste: <span className="text-g-text">{data.nesteMillestone.label}</span> ({data.nesteMillestone.poeng} poeng)</p>
+              <p className="text-xs text-g-muted mt-3">Neste: <span className="text-g-text">{data.nesteMillestone.label}</span> ({data.nesteMillestone.poeng} poeng)</p>
             )}
           </div>
 
           {/* Score breakdown */}
           <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
-            <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">Score Breakdown</p>
+            <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Score Breakdown</p>
             <div className="space-y-2">
               {data.scoreKomponenter.map(k => (
                 <div key={k.navn} className="flex items-center gap-3">
                   <div className="flex-1">
-                    <div className="flex justify-between text-[10px] mb-0.5">
+                    <div className="flex justify-between text-xs mb-0.5">
                       <span className="text-g-muted">{k.navn}</span>
                       <span className="font-mono text-g-text">{k.oppnådd}/{k.maks}</span>
                     </div>
@@ -617,7 +617,7 @@ export default function SponsorManagerPage() {
                       <div className="h-1.5 rounded-full transition-all" style={{ width: `${(k.oppnådd / k.maks) * 100}%`, backgroundColor: k.oppnådd >= k.maks * 0.8 ? '#00ff41' : k.oppnådd >= k.maks * 0.4 ? '#ffd700' : '#ff8c00' }} />
                     </div>
                   </div>
-                  {k.mangler && <span className="text-[9px] text-g-muted/60 w-32 text-right flex-shrink-0">{k.mangler}</span>}
+                  {k.mangler && <span className="text-[11px] text-g-muted/60 w-32 text-right flex-shrink-0">{k.mangler}</span>}
                 </div>
               ))}
             </div>
@@ -625,14 +625,14 @@ export default function SponsorManagerPage() {
               <div className="grid grid-cols-2 gap-3 pt-2 border-t border-g-border">
                 {data.hvaOkerScoren && (
                   <div>
-                    <p className="text-[9px] text-g-green uppercase font-bold mb-1">Øker score</p>
-                    <p className="text-[10px] text-g-text leading-relaxed">{data.hvaOkerScoren}</p>
+                    <p className="text-[11px] text-g-green uppercase font-bold mb-1">Øker score</p>
+                    <p className="text-xs text-g-text leading-relaxed">{data.hvaOkerScoren}</p>
                   </div>
                 )}
                 {data.hvaRedusererScoren && (
                   <div>
-                    <p className="text-[9px] text-yellow-400 uppercase font-bold mb-1">Holder tilbake</p>
-                    <p className="text-[10px] text-g-text leading-relaxed">{data.hvaRedusererScoren}</p>
+                    <p className="text-[11px] text-yellow-400 uppercase font-bold mb-1">Holder tilbake</p>
+                    <p className="text-xs text-g-text leading-relaxed">{data.hvaRedusererScoren}</p>
                   </div>
                 )}
               </div>
@@ -642,10 +642,10 @@ export default function SponsorManagerPage() {
           {/* Historikk-tabs */}
           <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold">Veksthistorikk</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest font-bold">Veksthistorikk</p>
               <div className="flex gap-1">
                 {(['7d', '30d', '90d'] as Fane[]).map(f => (
-                  <button key={f} onClick={() => setFane(f)} className={`px-3 py-1 text-[10px] rounded border transition-all ${fane === f ? 'border-g-green/30 bg-g-green/10 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>{f}</button>
+                  <button key={f} onClick={() => setFane(f)} className={`px-3 py-1 text-xs rounded border transition-all ${fane === f ? 'border-g-green/30 bg-g-green/10 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>{f}</button>
                 ))}
               </div>
             </div>
@@ -660,13 +660,13 @@ export default function SponsorManagerPage() {
                 { label: 'Følgere',  t: data.trends.followers },
               ].map(({ label, t }) => (
                 <div key={label} className="text-center">
-                  <p className="text-[8px] text-g-muted uppercase">{label}</p>
+                  <p className="text-[11px] text-g-muted uppercase">{label}</p>
                   <p className="text-xl font-bold" style={{ color: trendFarge(t as any) }}>{t}</p>
                 </div>
               ))}
             </div>
             {data.trend.topSpill.length > 0 && (
-              <p className="text-[10px] text-g-muted">Topp spill: <span className="text-g-text">{data.trend.topSpill.join(', ')}</span></p>
+              <p className="text-xs text-g-muted">Topp spill: <span className="text-g-text">{data.trend.topSpill.join(', ')}</span></p>
             )}
           </div>
 
@@ -681,7 +681,7 @@ export default function SponsorManagerPage() {
               { label: 'Klipp publisert', value: data.contentStats.totaleKlipp, trend: data.trends.klipp },
             ].map(s => (
               <div key={s.label} className="bg-g-card border border-g-border rounded-2xl p-4 text-center">
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">{s.label}</p>
+                <p className="text-[11px] text-g-muted uppercase tracking-widest">{s.label}</p>
                 <div className="flex items-center justify-center gap-1 mt-1">
                   <p className="text-xl font-black text-g-green font-mono">{s.value}</p>
                   {s.trend && <span className="text-sm font-bold" style={{ color: trendFarge(s.trend as any) }}>{s.trend}</span>}
@@ -694,11 +694,11 @@ export default function SponsorManagerPage() {
           {(data.sterktePunkter.length > 0 || data.forbedringer.length > 0) && (
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-1.5">
-                <p className="text-[10px] text-g-green uppercase tracking-widest font-bold mb-2">✓ Sterke punkter</p>
+                <p className="text-xs text-g-green uppercase tracking-widest font-bold mb-2">✓ Sterke punkter</p>
                 {data.sterktePunkter.map((s2, i) => <p key={i} className="text-[11px] text-g-text leading-snug">{s2}</p>)}
               </div>
               <div className="bg-g-card border border-g-border rounded-2xl p-4 space-y-1.5">
-                <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold mb-2">⚠ Kan forbedres</p>
+                <p className="text-xs text-yellow-400 uppercase tracking-widest font-bold mb-2">⚠ Kan forbedres</p>
                 {data.forbedringer.map((s2, i) => <p key={i} className="text-[11px] text-g-text leading-snug">{s2}</p>)}
               </div>
             </div>
@@ -708,13 +708,13 @@ export default function SponsorManagerPage() {
           {data.rapport && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">AI Sponsorrapport</p>
+                <p className="text-xs text-g-muted font-bold tracking-widest uppercase">AI Sponsorrapport</p>
                 <button onClick={() => {
                   const blob = new Blob([data.rapport], { type: 'text/plain' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url; a.download = 'sponsor-rapport.txt'; a.click();
-                }} className="px-3 py-1 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                }} className="px-3 py-1 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                   ↓ Last ned
                 </button>
               </div>
@@ -725,7 +725,7 @@ export default function SponsorManagerPage() {
           {/* Målgruppe */}
           {data.malgruppe && (
             <div className="bg-g-card border border-g-border rounded-2xl p-4">
-              <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-2">Målgruppe</p>
+              <p className="text-xs text-g-muted uppercase tracking-widest font-bold mb-2">Målgruppe</p>
               <p className="text-xs text-g-text leading-relaxed">{data.malgruppe}</p>
             </div>
           )}
@@ -734,15 +734,15 @@ export default function SponsorManagerPage() {
           {data.pitchEmail && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Pitch e-post</p>
-                <button onClick={() => setVisEmail(v => !v)} className="px-3 py-1 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                <p className="text-xs text-g-muted font-bold tracking-widest uppercase">Pitch e-post</p>
+                <button onClick={() => setVisEmail(v => !v)} className="px-3 py-1 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                   {visEmail ? 'Skjul' : 'Vis e-post'}
                 </button>
               </div>
               {visEmail && (
                 <div className="space-y-2">
-                  <pre className="text-[10px] text-g-text leading-relaxed whitespace-pre-wrap font-mono bg-g-sidebar rounded p-3 border border-g-border">{data.pitchEmail}</pre>
-                  <button onClick={() => navigator.clipboard.writeText(data.pitchEmail)} className="px-3 py-1 border border-g-border rounded text-[10px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+                  <pre className="text-xs text-g-text leading-relaxed whitespace-pre-wrap font-mono bg-g-card rounded p-3 border border-g-border">{data.pitchEmail}</pre>
+                  <button onClick={() => navigator.clipboard.writeText(data.pitchEmail)} className="px-3 py-1 border border-g-border rounded text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
                     Kopier tekst
                   </button>
                 </div>
@@ -754,9 +754,9 @@ export default function SponsorManagerPage() {
           {data.partnerHistorikk?.length > 0 && (
             <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase">Partner-historikk (ekte data)</p>
+                <p className="text-xs text-g-muted font-bold tracking-widest uppercase">Partner-historikk (ekte data)</p>
                 {data.partnerTotaler && (
-                  <span className="text-[10px] text-g-muted/60">
+                  <span className="text-xs text-g-muted/60">
                     {data.partnerTotaler.totalePromoer} promoer totalt
                     {data.partnerTotaler.godkjentRate !== null && ` · ${data.partnerTotaler.godkjentRate}% godkjent`}
                   </span>
@@ -771,8 +771,8 @@ export default function SponsorManagerPage() {
                     { label: 'Totale forslag',    value: data.partnerTotaler.totaleForslag },
                     { label: 'Mest aktiv',         value: data.partnerTotaler.mestAktiv ?? '–' },
                   ].map(s2 => (
-                    <div key={s2.label} className="bg-g-sidebar border border-g-border rounded p-3 text-center">
-                      <p className="text-[8px] text-g-muted uppercase tracking-wider">{s2.label}</p>
+                    <div key={s2.label} className="bg-g-card border border-g-border rounded p-3 text-center">
+                      <p className="text-[11px] text-g-muted uppercase tracking-wider">{s2.label}</p>
                       <p className="text-sm font-black text-g-green font-mono mt-0.5 truncate">{s2.value}</p>
                     </div>
                   ))}
@@ -781,19 +781,19 @@ export default function SponsorManagerPage() {
 
               {/* Periode-velger for rapport */}
               <div className="flex items-center gap-2">
-                <span className="text-[9px] text-g-muted uppercase">Rapport-periode:</span>
+                <span className="text-[11px] text-g-muted uppercase">Rapport-periode:</span>
                 {(['7d', '30d'] as const).map(p => (
-                  <button key={p} onClick={() => setReportPeriod(p)} className={`px-2 py-0.5 text-[9px] rounded border transition-all ${reportPeriod === p ? 'border-g-green/30 bg-g-green/10 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>{p}</button>
+                  <button key={p} onClick={() => setReportPeriod(p)} className={`px-2 py-0.5 text-[11px] rounded border transition-all ${reportPeriod === p ? 'border-g-green/30 bg-g-green/10 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'}`}>{p}</button>
                 ))}
               </div>
 
               {/* Per-partner tabell */}
               <div className="overflow-x-auto">
-                <table className="w-full text-[10px]">
+                <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-g-border/40">
                       {['Partner', 'Promoer 30d', 'Totalt', 'Siste sendt', 'Godkjent %', 'Avvisninger', 'Datagrunnlag', 'Rapport'].map(h2 => (
-                        <th key={h2} className="py-1.5 pr-3 text-left text-[9px] text-g-muted uppercase tracking-wider font-bold">{h2}</th>
+                        <th key={h2} className="py-1.5 pr-3 text-left text-[11px] text-g-muted uppercase tracking-wider font-bold">{h2}</th>
                       ))}
                     </tr>
                   </thead>
@@ -820,13 +820,13 @@ export default function SponsorManagerPage() {
                             </td>
                             <td className="py-2 pr-3 text-g-muted">{p2.avvisninger > 0 ? p2.avvisninger : '–'}</td>
                             <td className="py-2 pr-3">
-                              <span className={`px-1.5 py-0.5 border rounded text-[9px] font-bold ${styrkeKlasse(p2.dataStyrke)}`}>{p2.dataStyrke}</span>
+                              <span className={`px-1.5 py-0.5 border rounded text-[11px] font-bold ${styrkeKlasse(p2.dataStyrke)}`}>{p2.dataStyrke}</span>
                             </td>
                             <td className="py-2 pr-3">
                               <button
                                 onClick={() => genererPartnerRapport(p2.navn)}
                                 disabled={isLoading}
-                                className={`px-2 py-1 border rounded text-[9px] transition-all ${isLoading ? 'border-g-border text-g-muted/40 cursor-wait' : 'border-g-green/30 text-g-green hover:bg-g-green/10'}`}
+                                className={`px-2 py-1 border rounded text-[11px] transition-all ${isLoading ? 'border-g-border text-g-muted/40 cursor-wait' : 'border-g-green/30 text-g-green hover:bg-g-green/10'}`}
                               >
                                 {isLoading ? '...' : 'Generer'}
                               </button>
@@ -837,7 +837,7 @@ export default function SponsorManagerPage() {
                   </tbody>
                 </table>
               </div>
-              <p className="text-[9px] text-g-muted/40">
+              <p className="text-[11px] text-g-muted/40">
                 Basert på partner_content_log og partner_proposals · siste 90 dager
               </p>
             </div>
@@ -845,8 +845,8 @@ export default function SponsorManagerPage() {
 
           {/* Partner Report display */}
           {reportError && (
-            <div className="bg-red-900/10 border border-red-400/20 rounded-lg p-4">
-              <p className="text-xs text-red-400">Rapport feilet: {reportError}</p>
+            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+              Rapport feilet: {reportError}
             </div>
           )}
           {partnerReport && (
@@ -858,7 +858,7 @@ export default function SponsorManagerPage() {
 
           {/* AI Memory info */}
           {data.contentStats.aiMemoryStreams > 0 && (
-            <p className="text-[10px] text-g-muted/50 text-right">
+            <p className="text-xs text-g-muted/50 text-right">
               Analyse basert på {data.contentStats.aiMemoryStreams} streams i AI Memory · {data.contentStats.streamsHistorikk} streams i historikk
             </p>
           )}

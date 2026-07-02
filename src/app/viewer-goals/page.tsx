@@ -81,7 +81,7 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
               width: '18px', height: '18px', borderRadius: '3px', flexShrink: 0,
               border: `1.5px solid ${goal.aktiv ? goal.farge : '#2a3d2a'}`,
               background: goal.aktiv ? goal.farge + '18' : 'transparent',
-              cursor: 'pointer', fontSize: '10px', color: goal.aktiv ? goal.farge : '#2a3d2a',
+              cursor: 'pointer', fontSize: '11px', color: goal.aktiv ? goal.farge : '#2a3d2a',
               display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s',
             }}>{goal.aktiv ? '✓' : ''}</button>
 
@@ -114,21 +114,21 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
             <>
               <SegBar pct={pct} farge={goal.farge} />
               <div style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0 12px' }}>
-                <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>{igjen.toLocaleString('no-NO')} igjen</span>
-                <span style={{ fontSize: '10px', color: goal.manuell ? '#4a6a4a' : '#00ff4145', fontFamily: 'monospace' }}>{goal.manuell ? 'Manuell' : '● Live'}</span>
+                <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>{igjen.toLocaleString('no-NO')} igjen</span>
+                <span style={{ fontSize: '11px', color: goal.manuell ? '#4a6a4a' : '#00ff4145', fontFamily: 'monospace' }}>{goal.manuell ? 'Manuell' : '● Live'}</span>
               </div>
 
               {/* Edit fields */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
                 <div>
-                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Tekst / Navn</div>
+                  <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Tekst / Navn</div>
                   <input type="text" value={goal.label} onChange={e => onUpdate(index, { label: e.target.value })}
                     style={{ width: '100%', background: '#050505', border: '1px solid #1a2f1a', borderRadius: '5px', padding: '5px 9px', fontSize: '12px', color: '#c8f5c8', fontFamily: 'monospace', outline: 'none' }}
                     onFocus={e => e.target.style.borderColor = goal.farge + '50'}
                     onBlur={e => e.target.style.borderColor = '#1a2f1a'} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Mål</div>
+                  <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Mål</div>
                   <input type="number" value={goal.mal} onChange={e => onUpdate(index, { mal: Math.max(1, +e.target.value || 1) })}
                     style={{ width: '100%', background: '#050505', border: '1px solid #1a2f1a', borderRadius: '5px', padding: '5px 9px', fontSize: '13px', color: '#c8f5c8', fontFamily: 'monospace', outline: 'none' }}
                     onFocus={e => e.target.style.borderColor = goal.farge + '50'}
@@ -138,7 +138,7 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
-                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>
+                  <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>
                     {goal.manuell ? 'Gjeldende' : 'Gjeldende (auto)'}
                   </div>
                   <input type="number" value={gjeldende} disabled={!goal.manuell}
@@ -146,7 +146,7 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
                     style={{ width: '100%', background: '#050505', border: `1px solid ${goal.manuell ? goal.farge + '30' : '#141f14'}`, borderRadius: '5px', padding: '5px 9px', fontSize: '13px', color: goal.manuell ? '#c8f5c8' : '#2a3d2a', fontFamily: 'monospace', outline: 'none', cursor: goal.manuell ? 'text' : 'default' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Farge</div>
+                  <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Farge</div>
                   <div style={{ display: 'flex', gap: '4px', paddingTop: '3px', flexWrap: 'wrap' }}>
                     {FARGER.map(f => (
                       <button key={f} onClick={() => onUpdate(index, { farge: f })} title={f} style={{
@@ -311,19 +311,19 @@ export default function ViewerGoalsPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="flex items-center justify-between">
         <div>
-          <h1 style={{ fontSize: '20px', fontWeight: 900, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c8f5c8', fontFamily: 'monospace' }}>
-            <span style={{ color: '#00ff41' }}>◈</span> Viewer Goals
+          <h1 className="text-2xl font-semibold text-g-text">
+            <span className="text-g-green">◈</span> Viewer Goals
           </h1>
-          <p style={{ fontSize: '10px', color: '#3a5a3a', letterSpacing: '0.06em', marginTop: '2px', fontFamily: 'monospace' }}>
+          <p className="text-xs text-g-muted mt-1 font-mono">
             Progressbarer til OBS — automatisk oppdatering hvert 30s
           </p>
         </div>
         {lastRefresh && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#00ff41', boxShadow: '0 0 6px #00ff41', animation: 'lp 2s infinite' }} />
-            <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>{lastRefresh.toLocaleTimeString('no-NO')}</span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
+            <span className="text-xs text-g-muted font-mono">{lastRefresh.toLocaleTimeString('no-NO')}</span>
           </div>
         )}
       </div>
@@ -335,11 +335,11 @@ export default function ViewerGoalsPage() {
       {(liveF !== null || liveSub !== null) && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div style={{ background: 'linear-gradient(135deg,#0d1117,#00ff4108)', border: '1px solid #00ff4120', borderRadius: '10px', padding: '14px 18px' }}>
-            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Følgere nå</div>
+            <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Følgere nå</div>
             <div style={{ fontSize: '36px', fontWeight: 900, color: '#00ff41', fontFamily: 'monospace', lineHeight: 1 }}>{(liveF ?? 0).toLocaleString('no-NO')}</div>
           </div>
           <div style={{ background: 'linear-gradient(135deg,#0d1117,#9b77cf08)', border: '1px solid #9b77cf20', borderRadius: '10px', padding: '14px 18px' }}>
-            <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Subscribers nå</div>
+            <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Subscribers nå</div>
             {liveSub !== null
               ? <div style={{ fontSize: '36px', fontWeight: 900, color: '#9b77cf', fontFamily: 'monospace', lineHeight: 1 }}>{liveSub.toLocaleString('no-NO')}</div>
               : <div style={{ fontSize: '11px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>
@@ -397,13 +397,13 @@ export default function ViewerGoalsPage() {
       {/* OBS Section */}
       <div style={{ background: '#0d1117', border: '1px solid #1a2f1a', borderRadius: '10px', overflow: 'hidden' }}>
         <div style={{ padding: '12px 18px', borderBottom: '1px solid #1a2f1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '10px', color: '#00ff41', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>OBS Browser Source</span>
-          <span style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>— live forhåndsvisning + effekter</span>
+          <span style={{ fontSize: '11px', color: '#00ff41', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>OBS Browser Source</span>
+          <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>— live forhåndsvisning + effekter</span>
         </div>
 
         {/* ── Effekter-panel ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
-          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>Animasjons-effekter</span>
             {fxLagret && <span style={{ color: '#00ff41' }}>✓ Lagret</span>}
           </div>
@@ -415,7 +415,7 @@ export default function ViewerGoalsPage() {
                 padding: '7px', border: `1px solid ${fx.preset === p ? '#00ff41' : '#1a2f1a'}`,
                 background: fx.preset === p ? '#00ff4112' : 'transparent',
                 borderRadius: '6px', color: fx.preset === p ? '#00ff41' : '#4a6a4a',
-                fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase',
+                fontSize: '11px', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase',
                 cursor: 'pointer', letterSpacing: '0.06em', transition: 'all 0.2s',
               }}>
                 {p === 'classic' ? 'Classic' : p === 'neon' ? '⚡ Neon' : p === 'cinematic' ? '🎬 Cinematic' : '○ Minimal'}
@@ -445,7 +445,7 @@ export default function ViewerGoalsPage() {
                   border: `1px solid ${fx[key as keyof OverlayFx] ? '#00ff41' : '#3a5a3a'}`,
                   flexShrink: 0,
                 }} />
-                <span style={{ fontSize: '10px', color: fx[key as keyof OverlayFx] ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace' }}>{label}</span>
+                <span style={{ fontSize: '11px', color: fx[key as keyof OverlayFx] ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace' }}>{label}</span>
               </button>
             ))}
           </div>
@@ -453,11 +453,11 @@ export default function ViewerGoalsPage() {
           {/* Glow intensitet + scan interval */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
             <div>
-              <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Glow-styrke</div>
+              <div style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Glow-styrke</div>
               <div style={{ display: 'flex', gap: '4px' }}>
                 {(['low','medium','high'] as const).map(v => (
                   <button key={v} onClick={() => lagreFx({ ...fx, glowIntensity: v })} style={{
-                    flex: 1, padding: '5px', fontSize: '9px', fontFamily: 'monospace',
+                    flex: 1, padding: '5px', fontSize: '11px', fontFamily: 'monospace',
                     border: `1px solid ${fx.glowIntensity === v ? '#00ff41' : '#1a2f1a'}`,
                     background: fx.glowIntensity === v ? '#00ff4112' : 'transparent',
                     color: fx.glowIntensity === v ? '#00ff41' : '#4a6a4a',
@@ -467,11 +467,11 @@ export default function ViewerGoalsPage() {
               </div>
             </div>
             <div>
-              <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Scan-interval (sek)</div>
+              <div style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Scan-interval (sek)</div>
               <div style={{ display: 'flex', gap: '4px' }}>
                 {[5,7,10,15].map(v => (
                   <button key={v} onClick={() => lagreFx({ ...fx, scanInterval: v })} style={{
-                    flex: 1, padding: '5px', fontSize: '9px', fontFamily: 'monospace',
+                    flex: 1, padding: '5px', fontSize: '11px', fontFamily: 'monospace',
                     border: `1px solid ${fx.scanInterval === v ? '#00ff41' : '#1a2f1a'}`,
                     background: fx.scanInterval === v ? '#00ff4112' : 'transparent',
                     color: fx.scanInterval === v ? '#00ff41' : '#4a6a4a',
@@ -485,7 +485,7 @@ export default function ViewerGoalsPage() {
 
         {/* ── Live preview ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
-          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace' }}>
+          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace' }}>
             Forhåndsvisning — oppdaterer i sanntid
           </div>
           <div style={{
@@ -496,20 +496,20 @@ export default function ViewerGoalsPage() {
             <FxStyles />
             <GoalBarsPreview goals={previewGoals} compact fx={fx} />
           </div>
-          <p style={{ fontSize: '9px', color: '#3a5a3a', marginTop: '6px', fontFamily: 'monospace' }}>
+          <p style={{ fontSize: '11px', color: '#3a5a3a', marginTop: '6px', fontFamily: 'monospace' }}>
             ↑ Slik ser det ut i OBS over din stream (transparent bakgrunn)
           </p>
         </div>
 
         {/* ── Alle mål — felles URL ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
-          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '8px' }}>
+          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '8px' }}>
             Felles URL — alle aktive mål
           </div>
           <UrlRad url={fullOverlayUrl} kopiert={kopierteUrls['all'] ?? false} onKopier={() => kopierUrl('all', fullOverlayUrl)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginTop: '8px' }}>
             {[['Bredde', '380px'], ['Høyde', previewGoals.filter(g=>g.aktiv&&g.mal>0).length > 1 ? `${previewGoals.filter(g=>g.aktiv&&g.mal>0).length * 56}px` : '80px'], ['FPS', '30'], ['Huk av', '«Transparent bakgrunn»']].map(([k, v]) => (
-              <div key={k} style={{ fontSize: '10px', fontFamily: 'monospace' }}>
+              <div key={k} style={{ fontSize: '11px', fontFamily: 'monospace' }}>
                 <span style={{ color: '#3a5a3a' }}>{k}: </span><span style={{ color: '#c8f5c8' }}>{v}</span>
               </div>
             ))}
@@ -518,7 +518,7 @@ export default function ViewerGoalsPage() {
 
         {/* ── Per-bar URLs ── */}
         <div style={{ padding: '14px 18px' }}>
-          <div style={{ fontSize: '9px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '10px' }}>
+          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '10px' }}>
             Individuelle browser sources — én bar per kilde
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -528,23 +528,22 @@ export default function ViewerGoalsPage() {
                 <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.farge ?? '#00ff41'}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '10px', color: g.farge ?? '#00ff41' }}>{g.icon ?? '◆'}</span>
-                      <span style={{ fontSize: '10px', color: '#c8f5c8', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
+                      <span style={{ fontSize: '11px', color: g.farge ?? '#00ff41' }}>{g.icon ?? '◆'}</span>
+                      <span style={{ fontSize: '11px', color: '#c8f5c8', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
                     </div>
-                    <span style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace' }}>380×80px</span>
+                    <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>380×80px</span>
                   </div>
                   <UrlRad url={url} kopiert={kopierteUrls[g.type] ?? false} onKopier={() => kopierUrl(g.type, url)} small />
                 </div>
               );
             })}
             {previewGoals.filter(g => g.aktiv && g.mal > 0).length === 0 && (
-              <p style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace' }}>Ingen aktive mål ennå</p>
+              <p style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>Ingen aktive mål ennå</p>
             )}
           </div>
         </div>
       </div>
 
-      <style>{`@keyframes lp{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
     </div>
   );
 }
