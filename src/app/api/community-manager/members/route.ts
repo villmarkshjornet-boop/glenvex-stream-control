@@ -9,6 +9,7 @@ const SORT_MAP: Record<string, string> = {
   coins:    'coins_balance',
   activity: 'last_activity_at',
   level:    'level',
+  cards:    'total_cards',
 };
 
 export async function GET(req: NextRequest) {

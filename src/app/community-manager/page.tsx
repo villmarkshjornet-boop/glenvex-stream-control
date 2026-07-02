@@ -13,6 +13,21 @@ interface Member {
   voiceMinutes: number; streamsAttended: number; subs: number; giftSubs: number;
   raids: number; engagementScore: number; communityScore: number;
   badges: string[]; lastSeen: string; joinedAt: string;
+  // Extended (from /api/members/[id])
+  discordXp?: number; twitchXp?: number; totalXp?: number;
+  coinsBalance?: number; totalCards?: number;
+  commonCards?: number; rareCards?: number; epicCards?: number;
+  legendaryCards?: number; mythicCards?: number;
+  twitchLinked?: boolean; twitchSubStatus?: boolean;
+}
+
+interface CardEntry {
+  id: string; user_id: string; display_name: string;
+  card_type: string; rarity: string; title: string;
+  class: string | null; archetype: string | null;
+  card_image_url: string | null; card_number: number | null;
+  source: string; is_active: boolean; is_tradeable: boolean;
+  created_at: string;
 }
 
 interface MemberOverview {
@@ -173,6 +188,13 @@ const PRIO_DOT: Record<string, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const XP_PER_LEVEL = 500;
+
+// NEVER trust a stored level column — always recompute from XP.
+function xpToLevel(xp: number): number {
+  return Math.floor(Math.max(0, xp) / XP_PER_LEVEL) + 1;
+}
+
 function getRolle(level: number) { return LEVEL_ROLLER.find(r => level >= r.level) ?? null; }
 
 
@@ -308,8 +330,11 @@ function MemberDetailView({
 
       {!loading && detail && (() => {
         const { member: m, aiProfil, historikk, kontekst } = detail;
-        const rolle = getRolle(m.level);
-        const segs  = getMemberSegments(m);
+        // Recompute level from total XP — never trust stored level.
+        const displayXp    = m.totalXp ?? m.xp ?? 0;
+        const displayLevel = xpToLevel(displayXp);
+        const rolle = getRolle(displayLevel);
+        const segs  = getMemberSegments({ ...m, level: displayLevel });
         const trend = TREND_CONFIG[aiProfil.trend];
 
         return (
@@ -339,16 +364,36 @@ function MemberDetailView({
                 </div>
               </div>
               <div className="mt-4">
-                <XPBar xp={m.xp} level={m.level} />
+                <XPBar xp={displayXp} level={displayLevel} />
               </div>
             </div>
 
             <div className="grid grid-cols-4 gap-2">
-              <StatCell label="XP" value={m.xp.toLocaleString()} color="text-g-green" />
+              <StatCell label="Total XP" value={displayXp.toLocaleString()} color="text-g-green" />
               <StatCell label="Meldinger" value={m.messages} />
               <StatCell label="Streams" value={m.streamsAttended} />
-              <StatCell label="Level" value={m.level} color="text-yellow-400" />
+              <StatCell label="Level" value={displayLevel} color="text-yellow-400" />
             </div>
+
+            {/* XP-breakdown + kort */}
+            {(m.twitchLinked || (m.totalCards ?? 0) > 0) && (
+              <div className="bg-g-card border border-g-border rounded-2xl p-5 space-y-3">
+                <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold">XP & Samling</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <StatCell label="Discord XP" value={(m.discordXp ?? m.xp ?? 0).toLocaleString()} />
+                  <StatCell label="Twitch XP" value={(m.twitchXp ?? 0).toLocaleString()} color="text-purple-400" />
+                </div>
+                {(m.totalCards ?? 0) > 0 && (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    <StatCell label="⚡ Myt" value={m.mythicCards ?? 0} color="text-red-400" />
+                    <StatCell label="✨ Leg" value={m.legendaryCards ?? 0} color="text-yellow-400" />
+                    <StatCell label="🔮 Epic" value={m.epicCards ?? 0} color="text-purple-400" />
+                    <StatCell label="💎 Rare" value={m.rareCards ?? 0} color="text-blue-400" />
+                    <StatCell label="🎴 Com" value={m.commonCards ?? 0} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {aiProfil.aiBeskrivelse && (
               <div className="bg-g-card border border-g-border rounded-2xl p-5">
@@ -497,7 +542,8 @@ function TopMembersWidget({ members }: { members: TopMember7d[] }) {
       ) : (
         <div className="space-y-2">
           {members.map((m, i) => {
-            const rolle = getRolle(m.level);
+            const mLevel = xpToLevel(m.totalXp ?? 0);
+            const rolle = getRolle(mLevel);
             return (
               <div key={m.userId} className="flex items-center gap-3 py-2 border-b border-g-border/20 last:border-0">
                 <span className={`text-[10px] font-black font-mono w-5 text-center flex-shrink-0 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-400' : i === 2 ? 'text-orange-400' : 'text-g-muted'}`}>
@@ -513,7 +559,7 @@ function TopMembersWidget({ members }: { members: TopMember7d[] }) {
                     {m.streakDays >= 2 && <span className="text-[9px] text-orange-400">▲ {m.streakDays}d</span>}
                   </div>
                 </div>
-                <span className="text-[9px] text-g-muted font-mono flex-shrink-0">Lv {m.level}</span>
+                <span className="text-[9px] text-g-muted font-mono flex-shrink-0">Lv {mLevel}</span>
               </div>
             );
           })}
@@ -602,7 +648,41 @@ function RecommendationsWidget({ recs }: { recs: Recommendation[] }) {
   );
 }
 
-function DashboardTab({ summary, loading }: { summary: SummaryData | null; loading: boolean }) {
+function KpiCard({ label, value, accent, muted }: { label: string; value: string | number; accent?: boolean; muted?: boolean }) {
+  return (
+    <div className="bg-g-card border border-g-border rounded-xl p-3 text-center">
+      <p className="text-[8px] text-g-muted uppercase tracking-widest">{label}</p>
+      <p className={`text-lg font-black font-mono mt-0.5 ${accent ? 'text-g-green' : muted ? 'text-g-muted/50' : 'text-g-text'}`}>{value}</p>
+    </div>
+  );
+}
+
+function ActionCard({ priority, message, actionLabel, onAction }: {
+  priority: 'high' | 'medium' | 'low'; type?: string; message: string;
+  action?: string; actionLabel?: string; onAction?: () => void;
+}) {
+  const styles = { high: 'border-red-500/30 bg-red-500/5', medium: 'border-yellow-500/30 bg-yellow-500/5', low: 'border-g-border bg-g-card' };
+  const dot = { high: 'text-red-400', medium: 'text-yellow-400', low: 'text-g-muted' };
+  return (
+    <div className={`flex items-start gap-3 p-4 rounded-xl border ${styles[priority]}`}>
+      <span className={`text-sm flex-shrink-0 ${dot[priority]}`}>●</span>
+      <div className="flex-1">
+        <p className="text-[11px] text-g-text leading-snug">{message}</p>
+      </div>
+      {onAction && actionLabel && (
+        <button onClick={onAction} className="flex-shrink-0 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-g-green/30 text-g-green hover:bg-g-green/10 transition-all">
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DashboardTab({ summary, loading, cardStats, setTab }: {
+  summary: SummaryData | null; loading: boolean;
+  cardStats: { total: number; linkedSubs?: number };
+  setTab: (t: 'dashboard' | 'membres' | 'kort' | 'samlekort') => void;
+}) {
   if (loading) {
     return (
       <div className="space-y-4 animate-pulse">
@@ -621,19 +701,396 @@ function DashboardTab({ summary, loading }: { summary: SummaryData | null; loadi
     );
   }
 
+  const { health, recentLevelUps, botActivity, recommendations } = summary;
+
+  const feedItems = [
+    ...recentLevelUps.map(lu => ({
+      icon: '⭐', text: `${lu.username || lu.userId.slice(0, 8)} nådde Level ${lu.newLevel}`,
+      time: lu.timestamp, color: 'text-yellow-400',
+    })),
+    ...botActivity.slice(0, 10).map(e => ({
+      icon: ACTIVITY_ICONS[e.eventType] ?? '·', text: e.title,
+      time: e.timestamp, color: e.severity === 'error' ? 'text-red-400' : 'text-g-muted',
+    })),
+  ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 15);
+
   return (
     <div className="space-y-4">
-      {summary.recommendations.length > 0 && (
-        <RecommendationsWidget recs={summary.recommendations} />
+      {/* Hero header */}
+      <div className="bg-gradient-to-r from-g-card to-g-bg border border-g-border rounded-2xl p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-black text-g-text">Community Manager</h1>
+            <p className="text-xs text-g-muted mt-0.5">Workspace · Discord · Bot · Samlekort</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-[10px] text-g-green font-bold px-2.5 py-1 rounded-full border border-g-green/30 bg-g-green/5">
+              <span className="w-1.5 h-1.5 rounded-full bg-g-green animate-pulse" />
+              Bot Online
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+        <KpiCard label="Aktive 24t" value={health.activeMembers24h} accent />
+        <KpiCard label="Aktive 7d" value={health.activeMembers7d} />
+        <KpiCard label="XP 7d" value={health.xpGranted7d.toLocaleString()} />
+        <KpiCard label="Level-ups" value={health.levelUps7d} />
+        <KpiCard label="Kort totalt" value={cardStats.total} />
+        <KpiCard label="Trades" value={0} muted />
+        <KpiCard label="Subs koblet" value={cardStats.linkedSubs ?? 0} />
+        <KpiCard label="Bot status" value={health.idleStatus === 'active' ? 'Online' : 'Idle'} accent={health.idleStatus === 'active'} />
+      </div>
+
+      {/* Action cards */}
+      {recommendations.length > 0 && (
+        <div className="space-y-2">
+          {recommendations.map((r, i) => (
+            <ActionCard key={i} priority={r.priority} type={r.type} message={r.message} />
+          ))}
+        </div>
       )}
+
       <HealthWidget health={summary.health} diagnostics={summary.diagnostics} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TopMembersWidget members={summary.topMembers7d} />
+        <div className="space-y-4">
+          <TopMembersWidget members={summary.topMembers7d} />
+          {/* Activity feed */}
+          <div className="bg-g-card border border-g-border rounded-2xl p-5">
+            <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Hva skjer nå</p>
+            {feedItems.length === 0 ? (
+              <p className="text-[10px] text-g-muted py-2">Ingen aktivitet registrert ennå.</p>
+            ) : (
+              <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                {feedItems.map((item, i) => (
+                  <div key={i} className="flex items-start gap-2.5 py-1.5 border-b border-g-border/20 last:border-0">
+                    <span className="text-sm flex-shrink-0 mt-0.5">{item.icon}</span>
+                    <p className={`text-[10px] flex-1 leading-snug ${item.color}`}>{item.text}</p>
+                    <span className="text-[9px] text-g-muted/50 flex-shrink-0">{tidSiden(item.time)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="space-y-4">
           <RecentLevelUpsWidget levelUps={summary.recentLevelUps} />
           <BotActivityWidget activity={summary.botActivity} />
         </div>
       </div>
+
+      {/* Quick actions */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">Quick Actions</p>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/community-settings" className="px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green rounded-lg transition-all">⚙️ Innstillinger</Link>
+          <Link href="/community-intelligence" className="px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green rounded-lg transition-all">🧠 Intelligence</Link>
+          <button onClick={() => setTab('membres')} className="px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green rounded-lg transition-all">👥 Membres</button>
+          <button onClick={() => setTab('kort')} className="px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted hover:border-g-green/30 hover:text-g-green rounded-lg transition-all">🎴 Samlekort</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Kort Tab (kortsamling) ────────────────────────────────────────────────────
+
+const CARD_RARITY_GLOW: Record<string, string> = {
+  Mythic: 'border-red-500/40 shadow-red-500/10',
+  Legendary: 'border-yellow-500/40 shadow-yellow-500/10',
+  Epic: 'border-purple-500/40 shadow-purple-500/10',
+  Rare: 'border-blue-500/40 shadow-blue-500/10',
+  Common: 'border-g-border',
+};
+
+const CARD_RARITY_BADGE: Record<string, string> = {
+  Mythic: 'text-red-400 bg-red-500/10 border-red-500/30',
+  Legendary: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
+  Epic: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+  Rare: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
+  Common: 'text-gray-400 bg-gray-500/10 border-gray-500/30',
+};
+
+const CARD_KORT_RARITY_ORDER = ['Mythic', 'Legendary', 'Epic', 'Rare', 'Common'];
+
+function KortTab() {
+  const [cards, setCards]                 = useState<CardEntry[]>([]);
+  const [cardsLoading, setCardsLoading]   = useState(true);
+  const [cardsError, setCardsError]       = useState<string | null>(null);
+  const [cardFilter, setCardFilter]       = useState<'all' | 'active' | 'Mythic' | 'Legendary' | 'Epic' | 'Rare' | 'Common'>('all');
+  const [cardSearch, setCardSearch]       = useState('');
+  const [cardSort, setCardSort]           = useState<'created_at' | 'rarity' | 'title'>('created_at');
+  const [selectedCard, setSelectedCard]   = useState<CardEntry | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<CardEntry | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const loadCards = useCallback(() => {
+    setCardsLoading(true);
+    setCardsError(null);
+    const params = new URLSearchParams({ sort: cardSort });
+    if (cardSearch) params.set('search', cardSearch);
+    if (cardFilter !== 'all' && cardFilter !== 'active') params.set('rarity', cardFilter);
+    if (cardFilter === 'active') params.set('active', 'true');
+    fetch(`/api/community-manager/cards?${params}`)
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+      .then(d => { setCards(d.cards ?? []); })
+      .catch(e => setCardsError(e.message ?? 'Feil ved lasting'))
+      .finally(() => setCardsLoading(false));
+  }, [cardSort, cardSearch, cardFilter]);
+
+  useEffect(() => { loadCards(); }, [loadCards]);
+
+  const doCardAction = async (card: CardEntry, action: string) => {
+    setActionLoading(card.id);
+    try {
+      const res = await fetch(`/api/community-manager/cards/${card.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setSelectedCard(null);
+        setConfirmDelete(null);
+        loadCards();
+      } else {
+        alert(d.error ?? 'Handling feilet');
+      }
+    } catch {
+      alert('Nettverksfeil');
+    }
+    setActionLoading(null);
+  };
+
+  const sorted = [...cards].sort((a, b) => {
+    if (cardSort === 'rarity') return CARD_KORT_RARITY_ORDER.indexOf(a.rarity) - CARD_KORT_RARITY_ORDER.indexOf(b.rarity);
+    if (cardSort === 'title') return a.title.localeCompare(b.title);
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {(['all', 'active', 'Mythic', 'Legendary', 'Epic', 'Rare', 'Common'] as const).map(f => (
+          <button key={f} onClick={() => setCardFilter(f)}
+            className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all ${
+              cardFilter === f ? 'bg-g-green/10 border-g-green/30 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'
+            }`}>
+            {f === 'all' ? 'Alle' : f === 'active' ? '★ Aktive' : f}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <input value={cardSearch} onChange={e => setCardSearch(e.target.value)}
+          placeholder="Søk kort eller bruker..."
+          className="bg-g-card border border-g-border rounded-lg px-2.5 py-1.5 text-xs text-g-text outline-none focus:border-g-green/50 w-48" />
+        <select value={cardSort} onChange={e => setCardSort(e.target.value as 'created_at' | 'rarity' | 'title')}
+          className="bg-g-card border border-g-border rounded-lg px-2 py-1.5 text-[10px] text-g-muted outline-none">
+          <option value="created_at">Nyeste</option>
+          <option value="rarity">Rarity</option>
+          <option value="title">Tittel</option>
+        </select>
+      </div>
+
+      {/* Rarity stats bar */}
+      {!cardsLoading && cards.length > 0 && (
+        <div className="flex items-center gap-3 text-[10px]">
+          {['Mythic', 'Legendary', 'Epic', 'Rare', 'Common'].map(r => {
+            const count = cards.filter(c => c.rarity === r).length;
+            if (!count) return null;
+            return (
+              <span key={r} className="text-g-muted">
+                {r === 'Mythic' ? '⚡' : r === 'Legendary' ? '✨' : r === 'Epic' ? '🔮' : r === 'Rare' ? '💎' : '🎴'}{' '}
+                <span className="font-mono text-g-text">{count}</span>
+              </span>
+            );
+          })}
+          <span className="text-g-muted ml-auto">{cards.length} kort totalt</span>
+        </div>
+      )}
+
+      {/* Loading skeleton */}
+      {cardsLoading && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 animate-pulse">
+          {[...Array(10)].map((_, i) => (
+            <div key={i} className="bg-g-card border border-g-border rounded-xl aspect-[3/4]" />
+          ))}
+        </div>
+      )}
+
+      {/* Error state */}
+      {!cardsLoading && cardsError && (
+        <div className="bg-g-card border border-red-500/30 rounded-2xl p-8 text-center">
+          <p className="text-sm text-red-400 mb-3">⚠️ {cardsError}</p>
+          <button onClick={loadCards} className="px-4 py-2 text-xs border border-g-border text-g-muted hover:text-g-text rounded-lg transition-all">
+            Prøv igjen
+          </button>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!cardsLoading && !cardsError && sorted.length === 0 && (
+        <div className="bg-g-card border border-g-border rounded-2xl p-12 text-center">
+          <p className="text-4xl mb-3">🎴</p>
+          <p className="text-sm font-bold text-g-text">Ingen kort ennå</p>
+          <p className="text-xs text-g-muted mt-1">Kort genereres når membres bruker /persona kommandoen i Discord.</p>
+        </div>
+      )}
+
+      {/* Card grid */}
+      {!cardsLoading && !cardsError && sorted.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          {sorted.map(card => (
+            <div key={card.id}
+              onClick={() => setSelectedCard(card)}
+              className={`relative bg-g-card border rounded-xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-all shadow-lg group ${CARD_RARITY_GLOW[card.rarity] ?? 'border-g-border'}`}>
+              {/* Card image */}
+              <div className="aspect-[3/4] relative">
+                {card.card_image_url ? (
+                  <img src={card.card_image_url} alt={card.title}
+                    className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-g-bg flex items-center justify-center">
+                    <span className="text-4xl opacity-20">🎴</span>
+                  </div>
+                )}
+                {/* Active badge */}
+                {card.is_active && (
+                  <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-g-green rounded-full flex items-center justify-center shadow-lg shadow-g-green/30">
+                    <span className="text-[8px] text-black font-black">★</span>
+                  </div>
+                )}
+                {/* Lock badge */}
+                {!card.is_tradeable && (
+                  <div className="absolute top-1.5 left-1.5 w-4 h-4 bg-gray-800/80 rounded-full flex items-center justify-center">
+                    <span className="text-[8px]">🔒</span>
+                  </div>
+                )}
+              </div>
+              {/* Card footer */}
+              <div className="p-2">
+                <p className="text-[10px] font-bold text-g-text truncate leading-tight">{card.title}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${CARD_RARITY_BADGE[card.rarity] ?? 'text-g-muted border-g-border'}`}>
+                    {card.rarity}
+                  </span>
+                  <span className="text-[8px] text-g-muted truncate ml-1">{card.display_name}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Card detail drawer/modal */}
+      {selectedCard && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedCard(null); }}>
+          <div className="bg-g-card border border-g-border rounded-2xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-g-border">
+              <h3 className="font-black text-g-text">{selectedCard.title}</h3>
+              <button onClick={() => setSelectedCard(null)} className="text-g-muted hover:text-g-text text-lg">×</button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Image */}
+              {selectedCard.card_image_url && (
+                <img src={selectedCard.card_image_url} alt={selectedCard.title}
+                  className="w-full max-h-64 object-contain rounded-xl border border-g-border" />
+              )}
+              {/* Info grid */}
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                  <p className="text-g-muted">Eier</p>
+                  <p className="text-g-text font-bold">{selectedCard.display_name}</p>
+                </div>
+                <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                  <p className="text-g-muted">Rarity</p>
+                  <p className="text-g-text font-bold">{selectedCard.rarity}</p>
+                </div>
+                <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                  <p className="text-g-muted">Kilde</p>
+                  <p className="text-g-text font-bold">{selectedCard.source}</p>
+                </div>
+                <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                  <p className="text-g-muted">Generert</p>
+                  <p className="text-g-text font-bold">{tidSiden(selectedCard.created_at)}</p>
+                </div>
+                {selectedCard.class && (
+                  <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                    <p className="text-g-muted">Class</p>
+                    <p className="text-g-text font-bold">{selectedCard.class}</p>
+                  </div>
+                )}
+                {selectedCard.card_number && (
+                  <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                    <p className="text-g-muted">Kortnr</p>
+                    <p className="text-g-text font-bold">#{String(selectedCard.card_number).padStart(3, '0')}</p>
+                  </div>
+                )}
+              </div>
+              {/* Status badges */}
+              <div className="flex gap-2">
+                {selectedCard.is_active && <span className="text-[9px] px-2 py-0.5 rounded-full border border-g-green/30 text-g-green bg-g-green/5 font-bold">★ Aktivt</span>}
+                {!selectedCard.is_tradeable && <span className="text-[9px] px-2 py-0.5 rounded-full border border-gray-500/30 text-gray-400 bg-gray-500/5 font-bold">🔒 Låst</span>}
+              </div>
+              {/* Actions */}
+              <div className="grid grid-cols-2 gap-2">
+                {!selectedCard.is_active && (
+                  <button onClick={() => doCardAction(selectedCard, 'set_active')}
+                    disabled={actionLoading === selectedCard.id}
+                    className="px-3 py-2 text-[10px] font-bold border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/10 transition-all disabled:opacity-50">
+                    {actionLoading === selectedCard.id ? '...' : '★ Sett aktiv'}
+                  </button>
+                )}
+                {selectedCard.is_tradeable ? (
+                  <button onClick={() => doCardAction(selectedCard, 'lock')}
+                    disabled={actionLoading === selectedCard.id}
+                    className="px-3 py-2 text-[10px] font-bold border border-gray-500/30 text-gray-400 rounded-lg hover:bg-gray-500/10 transition-all disabled:opacity-50">
+                    🔒 Lås
+                  </button>
+                ) : (
+                  <button onClick={() => doCardAction(selectedCard, 'unlock')}
+                    disabled={actionLoading === selectedCard.id}
+                    className="px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted rounded-lg hover:bg-g-green/10 hover:text-g-green transition-all disabled:opacity-50">
+                    🔓 Lås opp
+                  </button>
+                )}
+                <button onClick={() => setConfirmDelete(selectedCard)}
+                  className="col-span-2 px-3 py-2 text-[10px] font-bold border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/10 transition-all">
+                  🗑 Slett kort
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-g-card border border-red-500/30 rounded-2xl p-6 max-w-sm w-full">
+            <p className="text-sm font-black text-g-text mb-2">Slett kort</p>
+            <p className="text-xs text-g-muted mb-4">
+              Er du sikker på at du vil slette <strong className="text-g-text">{confirmDelete.title}</strong>?
+              {confirmDelete.is_active && <span className="text-red-400"> Dette er aktivt kort!</span>}
+              {' '}Handlingen kan ikke angres.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)}
+                className="flex-1 px-3 py-2 text-[10px] font-bold border border-g-border text-g-muted rounded-lg hover:text-g-text transition-all">
+                Avbryt
+              </button>
+              <button onClick={() => doCardAction(confirmDelete, 'delete')}
+                disabled={actionLoading === confirmDelete.id}
+                className="flex-1 px-3 py-2 text-[10px] font-bold bg-red-500/10 border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/20 transition-all disabled:opacity-50">
+                {actionLoading === confirmDelete.id ? 'Sletter...' : 'Slett'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1003,7 +1460,7 @@ function SamlekortTab() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] font-bold text-g-text truncate">{p.displayName}</span>
-                    <span className="text-[9px] text-g-muted/60 font-mono">Lv {p.level}</span>
+                    <span className="text-[9px] text-g-muted/60 font-mono">Lv {xpToLevel(p.xp ?? 0)}</span>
                     {p.rarity && rarityStyle && (
                       <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${rarityStyle}`}>
                         {p.rarity}
@@ -1065,13 +1522,14 @@ function SamlekortTab() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CommunityManagerPage() {
-  const [tab, setTab]                     = useState<'dashboard' | 'membres' | 'samlekort'>('dashboard');
+  const [tab, setTab]                     = useState<'dashboard' | 'membres' | 'kort' | 'samlekort'>('dashboard');
   const [summary, setSummary]             = useState<SummaryData | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [cardStats, setCardStats]         = useState<{ total: number; linkedSubs?: number }>({ total: 0 });
   const [members, setMembers]             = useState<MemberOverview[]>([]);
   const [membresLoading, setMembresLoading] = useState(false);
   const [search, setSearch]               = useState('');
-  const [sorter, setSorter]               = useState<'xp' | 'coins' | 'activity' | 'level'>('xp');
+  const [sorter, setSorter]               = useState<'xp' | 'coins' | 'activity' | 'level' | 'cards'>('xp');
   const [filterSub, setFilterSub]         = useState(false);
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [detail, setDetail]               = useState<MemberDetail | null>(null);
@@ -1083,6 +1541,15 @@ export default function CommunityManagerPage() {
       .then(setSummary)
       .catch(() => {})
       .finally(() => setSummaryLoading(false));
+    // Card KPIs for dashboard strip
+    fetch('/api/community-manager/cards')
+      .then(r => r.ok ? r.json() : { cards: [], total: 0 })
+      .then(d => {
+        const cards = (d.cards ?? []) as CardEntry[];
+        const linkedSubs = cards.filter(c => c.card_type === 'sub' || c.source === 'twitch_sub').length;
+        setCardStats({ total: d.total ?? cards.length, linkedSubs });
+      })
+      .catch(() => {});
   }, []);
 
   const loadMembres = useCallback(() => {
@@ -1158,20 +1625,23 @@ export default function CommunityManagerPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-g-border">
-        {(['dashboard', 'membres', 'samlekort'] as const).map(t => (
+        {(['dashboard', 'membres', 'kort', 'samlekort'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all -mb-px ${
               tab === t
                 ? 'border-g-green text-g-green'
                 : 'border-transparent text-g-muted hover:text-g-text'
             }`}>
-            {t === 'dashboard' ? 'Dashboard' : t === 'membres' ? 'Membres' : 'Samlekort'}
+            {t === 'dashboard' ? 'Dashboard' : t === 'membres' ? 'Membres' : t === 'kort' ? 'Kort' : 'Samlekort'}
           </button>
         ))}
       </div>
 
       {/* Dashboard tab */}
-      {tab === 'dashboard' && <DashboardTab summary={summary} loading={summaryLoading} />}
+      {tab === 'dashboard' && <DashboardTab summary={summary} loading={summaryLoading} cardStats={cardStats} setTab={setTab} />}
+
+      {/* Kort tab */}
+      {tab === 'kort' && <KortTab />}
 
       {/* Samlekort tab */}
       {tab === 'samlekort' && <SamlekortTab />}
@@ -1191,16 +1661,18 @@ export default function CommunityManagerPage() {
               {topp3.length > 0 && (
                 <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">
-                    Topp 3 — {sorter === 'xp' ? 'XP' : sorter === 'coins' ? 'Coins' : sorter === 'activity' ? 'Aktivitet' : 'Level'}
+                    Topp 3 — {sorter === 'xp' ? 'XP' : sorter === 'coins' ? 'Coins' : sorter === 'activity' ? 'Aktivitet' : sorter === 'cards' ? 'Kort' : 'Level'}
                   </p>
                   <div className="grid grid-cols-3 gap-3">
                     {topp3.map((m, i) => {
-                      const rolle    = getRolle(m.level);
+                      const mLevel   = xpToLevel(m.discord_xp ?? m.xp ?? 0);
+                      const rolle    = getRolle(mLevel);
                       const valLabel =
                         sorter === 'xp'       ? `${m.xp.toLocaleString()} XP` :
                         sorter === 'coins'    ? `${m.coins_balance} coins` :
                         sorter === 'activity' ? tidSiden(m.last_activity_at ?? m.last_seen ?? '') :
-                                                `Lv ${m.level}`;
+                        sorter === 'cards'    ? `${m.total_cards} kort` :
+                                                `Lv ${mLevel}`;
                       return (
                         <div key={m.discord_id} onClick={() => selectMember(m.discord_id)}
                           className="p-3 bg-g-bg border border-g-border rounded-lg cursor-pointer hover:border-g-green/30 transition-all text-center">
@@ -1230,12 +1702,12 @@ export default function CommunityManagerPage() {
                   {filterSub ? '● Kun SUB' : '○ SUB'}
                 </button>
                 <div className="flex gap-1 flex-shrink-0">
-                  {(['xp', 'coins', 'activity', 'level'] as const).map(s => (
+                  {(['xp', 'coins', 'activity', 'level', 'cards'] as const).map(s => (
                     <button key={s} onClick={() => setSorter(s)}
                       className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all ${
                         sorter === s ? 'bg-g-green/10 border-g-green/30 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'
                       }`}>
-                      {s === 'xp' ? 'XP' : s === 'coins' ? 'Coins' : s === 'activity' ? 'Aktivitet' : 'Level'}
+                      {s === 'xp' ? 'XP' : s === 'coins' ? 'Coins' : s === 'activity' ? 'Aktivitet' : s === 'level' ? 'Level' : 'Kort'}
                     </button>
                   ))}
                 </div>
@@ -1254,7 +1726,8 @@ export default function CommunityManagerPage() {
                   </div>
                 ) : (
                   filtrerte.map((m, i) => {
-                    const rolle = getRolle(m.level);
+                    const mLevel = xpToLevel(m.discord_xp ?? m.xp ?? 0);
+                    const rolle = getRolle(mLevel);
                     const topRarityEmoji =
                       m.mythic_cards    > 0 ? '⚡' :
                       m.legendary_cards > 0 ? '✨' :
@@ -1288,7 +1761,7 @@ export default function CommunityManagerPage() {
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[9px]">
                             {rolle && <span className={`font-bold flex-shrink-0 ${rolle.farge.split(' ')[0]}`}>{rolle.navn}</span>}
-                            <span className="text-g-muted font-mono">Lv {m.level}</span>
+                            <span className="text-g-muted font-mono">Lv {mLevel}</span>
                             {m.member_type === 'linked' ? (
                               <span className="text-g-green font-mono" title={`Discord: ${m.discord_xp} · Twitch: ${m.twitch_xp}`}>
                                 {m.total_xp.toLocaleString()} XP
