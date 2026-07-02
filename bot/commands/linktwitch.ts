@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
 } from 'discord.js';
 import { createLinkRequest, getPendingLink } from '../lib/twitchLinkService';
+import { logSystemEvent } from '../lib/systemEvents';
 
 export const linktwitchCommand = {
   data: new SlashCommandBuilder()
@@ -16,14 +17,21 @@ export const linktwitchCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
+    // LINKTWITCH_START — console log BEFORE deferReply so Railway logs confirm execute is reached
+    console.log(`[linktwitch] LINKTWITCH_START userId=${interaction.user.id} username=${interaction.user.username}`);
+
     await interaction.deferReply({ ephemeral: true });
+    console.log(`[linktwitch] LINKTWITCH_DEFERRED userId=${interaction.user.id}`);
+
     try {
       const twitchUsername = interaction.options.getString('twitch_bruker', true).toLowerCase().replace(/^@/, '');
       const user           = interaction.user;
+      console.log(`[linktwitch] LINKTWITCH_CHECKING_PENDING userId=${user.id} twitch=${twitchUsername}`);
 
       // Check for existing pending link
       const existing = await getPendingLink(user.id);
       if (existing) {
+        console.log(`[linktwitch] LINKTWITCH_EXISTING_PENDING code=${existing.verify_code}`);
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(0xf9a825)
@@ -35,10 +43,13 @@ export const linktwitchCommand = {
               `\n\nUtløper: <t:${Math.floor(new Date(existing.expires_at).getTime() / 1000)}:R>`,
             )],
         });
+        console.log(`[linktwitch] LINKTWITCH_REPLY_SENT (existing pending)`);
         return;
       }
 
+      console.log(`[linktwitch] LINKTWITCH_CREATING_REQUEST userId=${user.id} twitch=${twitchUsername}`);
       const result = await createLinkRequest(user.id, user.username, twitchUsername);
+      console.log(`[linktwitch] LINKTWITCH_REQUEST_RESULT hasError=${'error' in result}`);
 
       if ('error' in result) {
         await interaction.editReply({
@@ -47,6 +58,7 @@ export const linktwitchCommand = {
             .setTitle('❌ Feil')
             .setDescription(result.error)],
         });
+        console.log(`[linktwitch] LINKTWITCH_REPLY_SENT (error: ${result.error})`);
         return;
       }
 
@@ -66,8 +78,12 @@ export const linktwitchCommand = {
           )
           .setFooter({ text: 'Kun du kan se denne meldingen.' })],
       });
+      console.log(`[linktwitch] LINKTWITCH_REPLY_SENT code=${result.code}`);
+      console.log(`[linktwitch] LINKTWITCH_FINISHED userId=${user.id}`);
+
     } catch (err: any) {
       const msg = err?.message ?? 'Ukjent feil';
+      console.error(`[linktwitch] LINKTWITCH_EXCEPTION: ${msg}`, err?.stack?.slice(0, 500));
       try {
         await interaction.editReply({
           embeds: [new EmbedBuilder()
@@ -76,7 +92,6 @@ export const linktwitchCommand = {
             .setDescription('Noe gikk galt. Prøv igjen om litt.')],
         });
       } catch {}
-      const { logSystemEvent } = await import('../lib/systemEvents');
       logSystemEvent({
         source:     'bot_command',
         event_type: 'LINKTWITCH_COMMAND_FAILED',

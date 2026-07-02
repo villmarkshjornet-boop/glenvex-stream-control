@@ -2053,7 +2053,10 @@ client.once('clientReady', () => {
   setTimeout(() => startDiscordHistoryBootstrap(client).catch(() => {}), 5 * 60_000);
   // Workspace-diagnose: logg til Railway-konsollen slik at man ser om WORKSPACE_ID er feil
   logWorkspaceIdDiagnose().catch(() => {});
-  logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info' });
+  const botVersion = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? process.env.GIT_SHA?.slice(0, 8) ?? 'unknown';
+  const deployId   = process.env.RAILWAY_DEPLOYMENT_ID ?? 'local';
+  console.log(`[startup] BOT_VERSION git=${botVersion} deploy=${deployId} node=${process.version}`);
+  logSystemEvent({ source: 'discord_bot', event_type: 'BOT_STARTED', title: `${BOT_BRAND} Bot startet`, severity: 'info', metadata: { gitSha: botVersion, deployId } });
   resetAnalyzerendeVods('Railway restartet – klikk Retry for å kjøre på nytt').catch(() => {});
 
   // ── Canvas/Railway startup-sjekk ─────────────────────────────────────────

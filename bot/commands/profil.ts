@@ -6,6 +6,8 @@ import {
 } from 'discord.js';
 import { getMember, getAllMembers, upsertMember, ALLE_BADGES, nesteBadge } from '../lib/memberTracker';
 import { XP_PER_LEVEL, levelFromXP, xpIntoCurrentLevel, levelProgress } from '@/lib/xp';
+import { getBalance } from '../lib/coinService';
+import { logSystemEvent } from '../lib/systemEvents';
 
 function progressBar(pct: number, len = 14): string {
   const filled = Math.max(0, Math.round((pct / 100) * len));
@@ -70,16 +72,37 @@ export const profilCommand = {
       member = upsertMember(target.id, target.username, dn);
     }
 
+    // Coins — hent parallelt (uavhengig av XP)
+    const coins = await getBalance(target.id);
+
     // ── XP og level ──────────────────────────────────────────────────────────
-    const level     = levelFromXP(member.xp);
-    const xpInLevel = xpIntoCurrentLevel(member.xp);
+    // If raw xp is suspiciously large, fall back to discordXp (Discord-specific column)
+    const rawXp       = member.xp;
+    const discordXp   = member.discordXp;
+    const suspicious  = rawXp > 100_000;
+    const displayXp   = (suspicious && discordXp < rawXp) ? discordXp : rawXp;
+
+    const level     = levelFromXP(displayXp);
+    const xpInLevel = xpIntoCurrentLevel(displayXp);
     const xpForNext = XP_PER_LEVEL;
-    const levelPct  = levelProgress(member.xp);
+    const levelPct  = levelProgress(displayXp);
+
+    // PROFILE_XP_DEBUG — logg alltid, kritisk for feilsøking
+    console.log(`[profil] PROFILE_XP_DEBUG userId=${target.id} rawXp=${rawXp} discordXp=${discordXp} displayXp=${displayXp} dbLevel=${member.level} computedLevel=${level} coins=${coins}`);
+    if (suspicious) {
+      logSystemEvent({
+        source:     'bot_command',
+        event_type: 'PROFILE_XP_SUSPICIOUS',
+        title:      `Mistenkelig høy XP for ${target.username}: rawXp=${rawXp} discordXp=${discordXp} displayXp=${displayXp}`,
+        severity:   'warning',
+        metadata:   { discordId: target.id, rawXp, discordXp, displayXp, dbLevel: member.level, computedLevel: level, coins },
+      });
+    }
 
     // ── Rang ─────────────────────────────────────────────────────────────────
     const { rank, total, pct: rankPct } = rankOf(member.id);
-    const rangTittel = xpRangTittel(member.xp);
-    const farge      = xpFargeKode(member.xp);
+    const rangTittel = xpRangTittel(displayXp);
+    const farge      = xpFargeKode(displayXp);
 
     // ── Badges ───────────────────────────────────────────────────────────────
     const opptjentBadges = ALLE_BADGES.filter(b => member!.badges.includes(b.navn));
@@ -108,6 +131,8 @@ export const profilCommand = {
       member.reactions     > 0 ? `⚡ ${member.reactions} reaksjoner (+${member.reactions * 2} XP)` : '',
     ].filter(Boolean).slice(0, 4).join('\n') || '— Ingen aktivitet registrert ennå';
 
+    const coinsTekst = `${coins.toLocaleString('no-NO')} coins`;
+
     // ── Neste badge-fremgang ──────────────────────────────────────────────────
     const nesteBadgeTekst = nesteMål
       ? `${nesteMål.badge.emoji} **${nesteMål.badge.navn}** — ${nesteMål.mangler}\n${progressBar(nesteMål.pct)} ${Math.round(nesteMål.pct)}%\n*${nesteMål.badge.beskrivelse}*`
@@ -124,7 +149,12 @@ export const profilCommand = {
       .addFields(
         {
           name: '📊 Total XP',
-          value: `**${member.xp.toLocaleString('no-NO')} XP**\n${xpForNext - xpInLevel} XP til Level ${level + 1}`,
+          value: `**${displayXp.toLocaleString('no-NO')} XP**\n${xpForNext - xpInLevel} XP til Level ${level + 1}`,
+          inline: true,
+        },
+        {
+          name: '🪙 Coins',
+          value: coinsTekst,
           inline: true,
         },
         {
@@ -165,6 +195,7 @@ export const profilCommand = {
     return interaction.editReply({ embeds: [embed] });
     } catch (err: any) {
       const msg = err?.message ?? 'Ukjent feil';
+      console.error(`[profil] PROFILE_COMMAND_FAILED userId=${interaction.user.id}: ${msg}`);
       try {
         await interaction.editReply({
           embeds: [new EmbedBuilder()
@@ -173,7 +204,6 @@ export const profilCommand = {
             .setDescription('Kunne ikke laste profil akkurat nå. Prøv igjen.')],
         });
       } catch {}
-      const { logSystemEvent } = await import('../lib/systemEvents');
       logSystemEvent({
         source:     'bot_command',
         event_type: 'PROFILE_COMMAND_FAILED',

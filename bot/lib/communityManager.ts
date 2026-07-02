@@ -87,10 +87,48 @@ async function hentAiMemory(): Promise<string> {
 
 // ─── C1: Dagens MVP ───────────────────────────────────────────────────────────
 
+function osloTodayCutoffUTC(): string {
+  const today = osloDateISO();
+  for (const ofs of ['+02:00', '+01:00']) {
+    const d = new Date(`${today}T00:00:00${ofs}`);
+    if (new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(d) === today) {
+      return d.toISOString();
+    }
+  }
+  return new Date(Date.now() - 24 * 3_600_000).toISOString();
+}
+
 export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> {
   ensureFreshDay();
 
   if (dayState.mvpSentToday) return;
+
+  // DB-backed idempotency — survives bot restarts
+  {
+    const dbIdempotency = getDb();
+    if (dbIdempotency) {
+      try {
+        const cutoff = osloTodayCutoffUTC();
+        const { data: existing } = await dbIdempotency
+          .from('system_events')
+          .select('id')
+          .eq('workspace_id', WORKSPACE_ID)
+          .eq('event_type', 'COMMUNITY_MVP_SELECTED')
+          .gte('created_at', cutoff)
+          .limit(1);
+        if (existing && existing.length > 0) {
+          dayState.mvpSentToday = true;
+          logSystemEvent({
+            source: 'community_manager', event_type: 'MVP_ALREADY_EXISTS',
+            title: 'MVP allerede valgt i dag (Europe/Oslo) — hopper over',
+            severity: 'info',
+            metadata: { date: osloDateISO(), workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
+          });
+          return;
+        }
+      } catch {}
+    }
+  }
 
   if (!gapOk()) {
     logSystemEvent({
@@ -196,6 +234,12 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
   dayState.mvpSentToday = true;
   dayState.lastPostAt   = Date.now();
 
+  logSystemEvent({
+    source: 'community_manager', event_type: 'MVP_DAILY_AWARDED',
+    title: `Dagens MVP tildelt: ${mvp.displayName} (+${topXpToday} XP i dag)`,
+    severity: 'info',
+    metadata: { userId: mvp.id, username: mvp.displayName, xpToday: topXpToday, level: mvp.level, date: osloDateISO(), workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
+  });
   logSystemEvent({
     source: 'community_manager', event_type: 'COMMUNITY_MVP_SELECTED',
     title: `Dagens MVP: ${mvp.displayName} (+${topXpToday} XP i dag)`,

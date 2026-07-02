@@ -53,6 +53,8 @@ import {
 } from '../lib/personaService';
 import { getBalance } from '../lib/coinService';
 import { publishCardDrop } from '../lib/cardDropPublisher';
+import { getActiveCard } from '../lib/cardCollectionService';
+import { logSystemEvent } from '../lib/systemEvents';
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
 
@@ -249,6 +251,29 @@ export const personaCommand = {
 
       // Reroll
       if (btn.customId.startsWith('persona_reroll_')) {
+        logSystemEvent({
+          source: 'bot_button', event_type: 'CARD_REROLL_STARTED',
+          title: `Reroll startet for ${user.username}`,
+          severity: 'info',
+          metadata: { discordId: user.id, username: user.username },
+        });
+
+        // Lock check — cannot reroll a locked card
+        const activeCard = await getActiveCard(user.id, 'persona');
+        if (activeCard && activeCard.is_tradeable === false) {
+          await btn.editReply({
+            content: '🔒 Kortet ditt er låst og kan ikke rerulles. Lås det opp i kortsamlingen først.',
+            embeds: [], files: [], components: [],
+          });
+          logSystemEvent({
+            source: 'bot_button', event_type: 'CARD_REROLL_FAILED',
+            title: `Reroll avvist — kort er låst for ${user.username}`,
+            severity: 'warning',
+            metadata: { discordId: user.id, cardId: activeCard.id },
+          });
+          return;
+        }
+
         const oppdatertMedlem = getMember(user.id) ?? member!;
 
         await btn.editReply({
@@ -260,8 +285,21 @@ export const personaCommand = {
 
         if ('feil' in ny) {
           await btn.editReply({ content: `❌ ${ny.feil}`, embeds: [], files: [], components: [] });
+          logSystemEvent({
+            source: 'bot_button', event_type: 'CARD_REROLL_FAILED',
+            title: `Reroll feilet for ${user.username}: ${ny.feil}`,
+            severity: 'error',
+            metadata: { discordId: user.id, reason: ny.feil },
+          });
           return;
         }
+
+        logSystemEvent({
+          source: 'bot_button', event_type: 'CARD_REROLL_COMPLETED',
+          title: `Reroll fullført for ${user.username}: ${ny.card.rarity} ${ny.card.title}`,
+          severity: 'info',
+          metadata: { discordId: user.id, rarity: ny.card.rarity, title: ny.card.title, collectionNumber: ny.collectionNumber },
+        });
 
         const nyBalance     = await getBalance(user.id);
         const nyHarNokCoins = nyBalance >= REROLL_COIN_COST;
