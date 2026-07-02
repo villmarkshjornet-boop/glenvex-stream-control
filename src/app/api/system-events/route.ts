@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, isDbAvailable } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+import { requireAuth } from '@/lib/requireAuth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
@@ -41,6 +42,9 @@ export async function GET(req: NextRequest) {
 
 // POST — allows client-side code to log system events
 export async function POST(req: NextRequest) {
+  const authError = requireAuth(req);
+  if (authError) return authError;
+
   const db = getDb();
   if (!db) return NextResponse.json({ ok: false, error: 'Supabase ikke tilkoblet' });
 

@@ -21,7 +21,7 @@ export async function GET() {
 
   const [wsRes, eventsRes, vodsRes, snapshotsRes] = await Promise.allSettled([
     db.from('workspaces')
-      .select('id,brand_name,streamer_name,twitch_login,twitch_user_id,twitch_display_name,twitch_connected_at,twitch_access_token,twitch_refresh_token,discord_guild_id,discord_guild_name,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,created_at,updated_at,owner_user_id,plan,settings_json')
+      .select('id,brand_name,streamer_name,twitch_login,twitch_user_id,twitch_display_name,twitch_connected_at,discord_guild_id,discord_guild_name,discord_connected_at,live_channel_id,alpha_enabled,onboarding_completed_at,onboarding_step,created_at,updated_at,owner_user_id,plan,settings_json')
       .order('created_at', { ascending: false })
       .limit(200),
 
