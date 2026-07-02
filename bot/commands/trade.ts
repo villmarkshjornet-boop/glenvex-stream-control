@@ -16,29 +16,49 @@ import {
 } from '../lib/tradeService';
 import { logSystemEvent } from '../lib/systemEvents';
 
-const DISCORD_API = 'https://discord.com/api/v10';
+const DISCORD_API  = 'https://discord.com/api/v10';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
 
 function botToken() { return process.env.DISCORD_TOKEN ?? process.env.DISCORD_BOT_TOKEN ?? ''; }
 
-async function sendDM(userId: string, content: string, embeds?: object[], components?: object[]): Promise<void> {
+// ── DM helper — returns ok/false, logs TRADE_DM_FAILED on any failure ─────────
+
+async function sendDM(
+  userId: string,
+  content: string,
+  embeds?: object[],
+  components?: object[],
+  ctx?: { tradeId?: string },
+): Promise<{ ok: boolean }> {
   const token = botToken();
-  if (!token) return;
+  if (!token) return { ok: false };
   try {
     const dmRes = await fetch(`${DISCORD_API}/users/@me/channels`, {
-      method: 'POST',
+      method:  'POST',
       headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipient_id: userId }),
-      signal: AbortSignal.timeout(8_000),
+      body:    JSON.stringify({ recipient_id: userId }),
+      signal:  AbortSignal.timeout(8_000),
     });
-    if (!dmRes.ok) return;
+    if (!dmRes.ok) throw new Error(`DM-kanal feilet: ${dmRes.status}`);
     const { id: channelId } = await dmRes.json() as { id: string };
-    await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
-      method: 'POST',
+    const msgRes = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
+      method:  'POST',
       headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, embeds: embeds ?? [], components: components ?? [] }),
-      signal: AbortSignal.timeout(8_000),
+      body:    JSON.stringify({ content, embeds: embeds ?? [], components: components ?? [] }),
+      signal:  AbortSignal.timeout(8_000),
     });
-  } catch {}
+    if (!msgRes.ok) throw new Error(`DM-sending feilet: ${msgRes.status}`);
+    return { ok: true };
+  } catch (e: any) {
+    logSystemEvent({
+      source:     'trade',
+      event_type: 'TRADE_DM_FAILED',
+      title:      `DM til userId ${userId} feilet: ${e?.message ?? 'ukjent'}`,
+      severity:   'warning',
+      metadata:   { userId, tradeId: ctx?.tradeId ?? null, reason: e?.message ?? 'ukjent', workspaceId: WORKSPACE_ID },
+    });
+    return { ok: false };
+  }
 }
 
 // ── /trade command ────────────────────────────────────────────────────────────
@@ -63,6 +83,7 @@ export const tradeCommand = {
     try {
       const sub = interaction.options.getSubcommand();
 
+      // ── /trade mine ──────────────────────────────────────────────────────────
       if (sub === 'mine') {
         const offers = await getPendingOffers(interaction.user.id);
         if (offers.length === 0) {
@@ -83,18 +104,18 @@ export const tradeCommand = {
         return;
       }
 
+      // ── /trade tilby ─────────────────────────────────────────────────────────
       if (sub === 'tilby') {
-        const targetUser  = interaction.options.getUser('bruker', true);
-        const kortQuery   = interaction.options.getString('kort', true);
-        const fromId      = interaction.user.id;
-        const toId        = targetUser.id;
+        const targetUser = interaction.options.getUser('bruker', true);
+        const kortQuery  = interaction.options.getString('kort', true);
+        const fromId     = interaction.user.id;
+        const toId       = targetUser.id;
 
         if (fromId === toId) {
           await interaction.editReply({ content: '❌ Du kan ikke handle med deg selv.' });
           return;
         }
 
-        // Find card by title for the sender
         const card = await findUserCardByTitle(fromId, kortQuery);
         if (!card) {
           await interaction.editReply({
@@ -122,33 +143,22 @@ export const tradeCommand = {
           }
           logSystemEvent({
             source: 'trade', event_type: 'TRADE_FAILED',
-            title: `/trade tilby feilet: ${result.reason}`,
+            title:  `/trade tilby feilet: ${result.reason}`,
             severity: 'warning',
-            metadata: { from_user: fromId, to_user: toId, card_id: card.id, reason: result.reason },
+            metadata: { from_user: fromId, to_user: toId, card_id: card.id, reason: result.reason, workspaceId: WORKSPACE_ID },
           });
           return;
         }
 
-        const tradeId  = result.trade!.id;
+        const tradeId   = result.trade!.id;
         const expiresTs = result.trade!.expires_at
           ? Math.floor(new Date(result.trade!.expires_at).getTime() / 1000)
           : null;
 
-        // Confirm to sender
-        await interaction.editReply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x00ff41)
-            .setTitle('🤝 Handelstilbud sendt!')
-            .setDescription(
-              `Du tilbyr **${card.title}** (${card.rarity}) til <@${toId}>.\n` +
-              (expiresTs ? `Tilbudet utløper <t:${expiresTs}:R>.` : ''),
-            )],
-        });
-
-        // DM receiver with accept/decline buttons
+        // ── DM til mottaker med Godta/Avslå-knapper ──────────────────────────
         const acceptBtn = new ButtonBuilder()
           .setCustomId(`trade_accept:${tradeId}:${toId}`)
-          .setLabel('✅ Aksepter')
+          .setLabel('✅ Godta')
           .setStyle(ButtonStyle.Success);
         const declineBtn = new ButtonBuilder()
           .setCustomId(`trade_decline:${tradeId}:${toId}`)
@@ -156,7 +166,7 @@ export const tradeCommand = {
           .setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(acceptBtn, declineBtn);
 
-        await sendDM(
+        const receiverDmResult = await sendDM(
           toId,
           '',
           [new EmbedBuilder()
@@ -165,32 +175,67 @@ export const tradeCommand = {
             .setDescription(
               `**<@${fromId}>** vil gi deg kortet:\n` +
               `**${card.title}** (${card.rarity})\n\n` +
-              (expiresTs ? `Tilbudet utløper <t:${expiresTs}:R>.` : '') +
-              `\n\nGå til Discord-serveren for å akseptere eller avslå.`,
+              (expiresTs ? `Tilbudet utløper <t:${expiresTs}:R>.\n\n` : '') +
+              `Trykk på knappene under for å godta eller avslå.`,
             ).toJSON()],
           [row.toJSON()],
+          { tradeId },
         );
+
+        // ── Bekreftelse til avsender ──────────────────────────────────────────
+        const dmWarning = receiverDmResult.ok
+          ? ''
+          : `\n\n⚠️ Kunne ikke sende DM til mottaker — be dem bruke \`/trade mine\` for å se tilbudet.`;
+
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(0x00ff41)
+            .setTitle('🤝 Handelstilbud sendt!')
+            .setDescription(
+              `Du tilbyr **${card.title}** (${card.rarity}) til <@${toId}>.\n` +
+              (expiresTs ? `Tilbudet utløper <t:${expiresTs}:R>.` : '') +
+              dmWarning,
+            )],
+        });
+
+        // DM-bekreftelse til avsender (fire-and-forget etter editReply)
+        sendDM(
+          fromId,
+          '',
+          [new EmbedBuilder()
+            .setColor(0x00ff41)
+            .setTitle('📤 Handelstilbud sendt!')
+            .setDescription(
+              `Du har sendt et tilbud til <@${toId}>:\n` +
+              `**${card.title}** (${card.rarity})\n\n` +
+              (expiresTs ? `Utløper <t:${expiresTs}:R>.` : '') +
+              `\n\nDu får DM når mottaker svarer. Bruk \`/trade mine\` for å se status.`,
+            ).toJSON()],
+          [],
+          { tradeId },
+        ).catch(() => {});
       }
+
     } catch (err: any) {
       const msg = err?.message ?? 'Ukjent feil';
       try { await interaction.editReply({ content: '⚠️ Handel feilet. Prøv igjen.' }); } catch {}
       logSystemEvent({
         source: 'trade', event_type: 'TRADE_FAILED',
-        title: `/trade kastet feil: ${msg}`,
+        title:  `/trade kastet feil: ${msg}`,
         severity: 'error',
-        metadata: { discordId: interaction.user.id, error: msg, stack: err?.stack?.slice(0, 500) },
+        metadata: { discordId: interaction.user.id, error: msg, stack: err?.stack?.slice(0, 500), workspaceId: WORKSPACE_ID },
       });
     }
   },
 };
 
-// ── Button handler ────────────────────────────────────────────────────────────
+// ── Button handler (brukes fra index.ts interactionCreate) ────────────────────
 
 export async function handleTradeButton(interaction: ButtonInteraction): Promise<void> {
-  const parts    = interaction.customId.split(':');
-  const action   = parts[0];
-  const tradeId  = parts[1];
-  const ownerId  = parts[2];
+  const parts   = interaction.customId.split(':');
+  const action  = parts[0];
+  const tradeId = parts[1];
+  const ownerId = parts[2];
 
   await interaction.deferReply({ ephemeral: true });
   try {
@@ -201,54 +246,103 @@ export async function handleTradeButton(interaction: ButtonInteraction): Promise
       return;
     }
 
+    // ── Aksepter ─────────────────────────────────────────────────────────────
     if (action === 'trade_accept') {
       const result = await acceptTradeOffer(tradeId, userId);
       if (!result.ok) {
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setColor(0xff3333).setTitle('❌ Aksept feilet').setDescription(result.reason ?? 'Ukjent feil')],
+          embeds: [new EmbedBuilder()
+            .setColor(0xff3333)
+            .setTitle('❌ Aksept feilet')
+            .setDescription(result.reason ?? 'Ukjent feil')],
         });
         return;
       }
 
       const trade = result.trade!;
+
+      // Bekreft til mottaker (den som trykket aksepter) via editReply
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setColor(0x00ff41).setTitle('✅ Handel fullført!').setDescription('Kortet er overført til deg.')],
+        embeds: [new EmbedBuilder()
+          .setColor(0x00ff41)
+          .setTitle('✅ Handel fullført!')
+          .setDescription('Kortet er overført til deg. Sjekk \`/minekort\` for å se det.')],
       });
 
-      // Notify sender
-      await sendDM(trade.from_user_id, '', [
-        new EmbedBuilder()
+      // DM til avsender
+      sendDM(
+        trade.from_user_id,
+        '',
+        [new EmbedBuilder()
           .setColor(0x00ff41)
           .setTitle('✅ Handelstilbud akseptert!')
-          .setDescription(`<@${userId}> aksepterte tilbudet. Kortet er overført.`)
-          .toJSON(),
-      ]);
+          .setDescription(`<@${userId}> godtok tilbudet ditt. Kortet er overført.`)
+          .toJSON()],
+        [],
+        { tradeId },
+      ).catch(() => {});
 
+      // DM til mottaker som bekreftelse (de trykket knappen, men DM gir bedre synlighet)
+      sendDM(
+        userId,
+        '',
+        [new EmbedBuilder()
+          .setColor(0x00ff41)
+          .setTitle('✅ Handel godtatt!')
+          .setDescription(`Du godtok handelstilbudet fra <@${trade.from_user_id}>. Kortet er i din samling.`)
+          .toJSON()],
+        [],
+        { tradeId },
+      ).catch(() => {});
+
+    // ── Avslå ─────────────────────────────────────────────────────────────────
     } else if (action === 'trade_decline') {
       const result = await declineTradeOffer(tradeId, userId);
-      await interaction.editReply({
-        content: result.ok ? '❌ Tilbud avslått.' : (result.reason ?? 'Feil ved avslag.'),
-      });
 
-      if (result.ok) {
-        const trade = result.trade!;
-        await sendDM(trade.from_user_id, '', [
-          new EmbedBuilder()
-            .setColor(0xff3333)
-            .setTitle('❌ Handelstilbud avslått')
-            .setDescription(`<@${userId}> avslo handelstilbudet ditt.`)
-            .toJSON(),
-        ]);
+      if (!result.ok) {
+        await interaction.editReply({ content: result.reason ?? 'Feil ved avslag.' });
+        return;
       }
+
+      await interaction.editReply({ content: '❌ Handelstilbud avslått.' });
+
+      const trade = result.trade!;
+
+      // DM til avsender
+      sendDM(
+        trade.from_user_id,
+        '',
+        [new EmbedBuilder()
+          .setColor(0xff3333)
+          .setTitle('❌ Handelstilbud avslått')
+          .setDescription(`<@${userId}> avslo handelstilbudet ditt.`)
+          .toJSON()],
+        [],
+        { tradeId },
+      ).catch(() => {});
+
+      // DM til mottaker (som avslå) som kvittering
+      sendDM(
+        userId,
+        '',
+        [new EmbedBuilder()
+          .setColor(0xff3333)
+          .setTitle('❌ Du avslo et handelstilbud')
+          .setDescription(`Du avslo tilbudet fra <@${trade.from_user_id}>.`)
+          .toJSON()],
+        [],
+        { tradeId },
+      ).catch(() => {});
     }
+
   } catch (err: any) {
     const msg = err?.message ?? 'Ukjent feil';
     try { await interaction.editReply({ content: '⚠️ Noe gikk galt. Prøv igjen.' }); } catch {}
     logSystemEvent({
       source: 'trade', event_type: 'TRADE_FAILED',
-      title: `Trade-knapp feilet: ${msg}`,
+      title:  `Trade-knapp feilet: ${msg}`,
       severity: 'error',
-      metadata: { discordId: interaction.user.id, action, tradeId, error: msg },
+      metadata: { discordId: interaction.user.id, action, tradeId, error: msg, workspaceId: WORKSPACE_ID },
     });
   }
 }
