@@ -122,7 +122,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, tradeCommand, adminCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
