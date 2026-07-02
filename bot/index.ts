@@ -27,6 +27,7 @@ import { profilCommand } from './commands/profil';
 import { personaCommand } from './commands/persona';
 import { minekortCommand, handleMinekortButton } from './commands/minekort';
 import { linktwitchCommand } from './commands/linktwitch';
+import { tradeCommand, handleTradeButton } from './commands/trade';
 import { adminCommand }   from './commands/admin';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins, getBalance } from './lib/coinService';
@@ -121,7 +122,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, adminCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, tradeCommand, adminCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
@@ -2073,7 +2074,7 @@ client.once('clientReady', () => {
       const commandData = [
         liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand,
         socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand,
-        personaCommand, minekortCommand, linktwitchCommand, adminCommand,
+        personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand,
       ].map(c => c.data.toJSON());
 
       const clientId = process.env.DISCORD_CLIENT_ID ?? '';
@@ -2195,17 +2196,93 @@ client.once('clientReady', () => {
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
 
   setOnSubCallback(tildelTwitchSubRolle);
-  setOnLinkVerifiedCallback(async (discordId, _twitchUserId, twitchUsername) => {
-    // When a Discord ↔ Twitch link is verified via !verify, check for pending unlinked subs
-    // and award the Twitch Sub role if applicable
-    const guild = client.guilds.cache.first();
-    if (!guild) return;
-    const ROLLE_NAVN = '⭐ Twitch Sub';
-    const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
-    if (!rolle) return;
-    const guildMember = await guild.members.fetch(discordId).catch(() => null);
-    if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
-      await guildMember.roles.add(rolle, `Twitch-kobling verifisert: ${twitchUsername}`).catch(() => {});
+  setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername) => {
+    try {
+      const guild = client.guilds.cache.first();
+      if (!guild) return;
+
+      // Check if this user is a Twitch subscriber (already in DB from prior sub event)
+      const sb = (() => {
+        const url = process.env.SUPABASE_URL;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!url || !key) return null;
+        const wsLib = require('ws');
+        return require('@supabase/supabase-js').createClient(url, key, {
+          realtime: { transport: wsLib },
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+      })();
+
+      let isSub = false;
+      let subTier = '1000';
+      if (sb) {
+        const { data: cm } = await sb
+          .from('community_members')
+          .select('twitch_sub_status,twitch_sub_tier,subs')
+          .eq('workspace_id', process.env.WORKSPACE_ID ?? 'glenvex-default')
+          .eq('discord_id', discordId)
+          .single();
+        isSub    = !!(cm?.twitch_sub_status || (cm?.subs ?? 0) > 0);
+        subTier  = cm?.twitch_sub_tier ?? '1000';
+      }
+
+      // Award Twitch Sub role if user is a sub
+      if (isSub) {
+        const ROLLE_NAVN = '⭐ Twitch Sub';
+        const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
+        const guildMember = await guild.members.fetch(discordId).catch(() => null);
+        if (rolle && guildMember && !guildMember.roles.cache.has(rolle.id)) {
+          await guildMember.roles.add(rolle, `Twitch-kobling verifisert + sub bekreftet: ${twitchUsername}`).catch(() => {});
+        }
+
+        // Generate SUB card and notify
+        const member = getMember(discordId);
+        awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
+          if (!subCard) return;
+          const coinBal = await getBalance(discordId).catch(() => 0);
+          publishCardDrop({
+            userId:          discordId,
+            discordUsername: member?.displayName ?? twitchUsername,
+            twitchUsername,
+            cardId:          subCard.id,
+            cardType:        'sub',
+            rarity:          subCard.rarity,
+            title:           subCard.title,
+            klass:           subCard.class ?? null,
+            level:           member?.level ?? 1,
+            xp:              member?.xp ?? 0,
+            coinsBalance:    coinBal,
+            cardImageUrl:    subCard.card_image_url ?? null,
+            source:          'sub',
+          }).catch(() => {});
+        }).catch(() => {});
+      } else {
+        // Not a sub — still give them the verified link confirmation role if applicable
+        const ROLLE_NAVN = '⭐ Twitch Sub';
+        const rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
+        if (rolle) {
+          const guildMember = await guild.members.fetch(discordId).catch(() => null);
+          if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
+            await guildMember.roles.add(rolle, `Twitch-kobling verifisert: ${twitchUsername}`).catch(() => {});
+          }
+        }
+      }
+
+      logSystemEvent({
+        source:     'twitch_link',
+        event_type: 'TWITCH_LINK_VERIFIED',
+        title:      `Discord ${discordId} koblet til Twitch ${twitchUsername} — isSub: ${isSub}`,
+        severity:   'info',
+        metadata:   { discordId, twitchUserId, twitchUsername, isSub, subTier },
+      });
+    } catch (err: any) {
+      logSystemEvent({
+        source:     'twitch_link',
+        event_type: 'TWITCH_LINK_CALLBACK_FAILED',
+        title:      `Link-callback feilet for ${twitchUsername}: ${err?.message}`,
+        severity:   'error',
+        metadata:   { discordId, twitchUsername, error: err?.message },
+      });
     }
   });
   sikkerAdminTilGkarlsen().catch(() => {});
@@ -2398,8 +2475,12 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       await handleDuplikatKnapp(interaction).catch(console.error);
       return;
     }
-    if (interaction.customId === 'minekort_vis_aktivt' || interaction.customId === 'minekort_vis_alle') {
+    if (interaction.customId.startsWith('minekort_vis_aktivt') || interaction.customId.startsWith('minekort_vis_alle')) {
       await handleMinekortButton(interaction).catch(console.error);
+      return;
+    }
+    if (interaction.customId.startsWith('trade_accept:') || interaction.customId.startsWith('trade_decline:')) {
+      await handleTradeButton(interaction).catch(console.error);
       return;
     }
     return;

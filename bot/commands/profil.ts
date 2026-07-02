@@ -61,7 +61,7 @@ export const profilCommand = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply({ ephemeral: false });
-
+    try {
     const target  = interaction.options.getUser('bruker') ?? interaction.user;
     let member    = getMember(target.id);
 
@@ -165,5 +165,24 @@ export const profilCommand = {
     }
 
     return interaction.editReply({ embeds: [embed] });
+    } catch (err: any) {
+      const msg = err?.message ?? 'Ukjent feil';
+      try {
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(Colors.Red)
+            .setTitle('❌ Profil utilgjengelig')
+            .setDescription('Kunne ikke laste profil akkurat nå. Prøv igjen.')],
+        });
+      } catch {}
+      const { logSystemEvent } = await import('../lib/systemEvents');
+      logSystemEvent({
+        source:     'bot_command',
+        event_type: 'PROFILE_COMMAND_FAILED',
+        title:      `/profil feilet for ${interaction.user.username}: ${msg}`,
+        severity:   'error',
+        metadata:   { discordId: interaction.user.id, error: msg, stack: err?.stack?.slice(0, 500) },
+      });
+    }
   },
 };

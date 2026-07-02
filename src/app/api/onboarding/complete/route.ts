@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         title: `[Auth] Claim avvist — workspace tilhører annen bruker`,
         severity: 'warning',
         metadata: { reason: 'owned_by_other', existingOwnerId: existing.owner_user_id, requestingUserId: userId },
-      }).catch(() => {});
+      }).then(() => {}, () => {});
       return NextResponse.json({ error: `Workspace "${workspaceSlug}" tilhører allerede en annen bruker.` }, { status: 409 });
     }
 
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
         title: `[Auth] Claim avvist — workspace er konfigurert uten eier`,
         severity: 'warning',
         metadata: { reason: 'configured_without_owner', twitchLogin: existing.twitch_login ?? null, requestingUserId: userId },
-      }).catch(() => {});
+      }).then(() => {}, () => {});
       return NextResponse.json({
         error: `Workspace "${workspaceSlug}" er konfigurert for en annen konto. Velg et annet workspace-ID.`,
       }, { status: 409 });
@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
       brandName,
       twitchUsername,
     },
-  }).catch(() => {});
+  }).then(() => {}, () => {});
 
   await db.from('system_events').insert({
     workspace_id: workspaceSlug,
@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
     title: `Workspace ${workspaceSlug} opprettet`,
     severity: 'info',
     metadata: { user_id: userId, twitch_username: twitchUsername },
-  }).catch(() => {});
+  }).then(() => {}, () => {});
 
   return NextResponse.json({ ok: true, workspaceId: workspaceSlug });
 }

@@ -272,8 +272,8 @@ export async function publishCardDrop(event: CardDropEvent): Promise<void> {
   const hasBuf   = !!event.cardImageBuffer;
   const result   = { channelPosted: false, dmSent: false, twitchSent: false, error: undefined as string | undefined };
 
-  // ── 1. Discord channel ────────────────────────────────────────────────────
-  if (settings.discordCardDropChannelEnabled && settings.discordCardDropChannelId) {
+  // ── 1. Discord channel — post hvis channelId er konfigurert (enabled-flagg valgfritt) ──
+  if (settings.discordCardDropChannelId) {
     try {
       const ok = await discordPost(
         settings.discordCardDropChannelId,
@@ -281,19 +281,24 @@ export async function publishCardDrop(event: CardDropEvent): Promise<void> {
         event.cardImageBuffer,
       );
       result.channelPosted = ok;
+      const isPurchase = event.source === 'persona_reroll';
       logSystemEvent({
         source:     'card_drop',
-        event_type: ok ? 'CARD_DROP_CHANNEL_POSTED' : 'CARD_DROP_CHANNEL_FAILED',
-        title:      ok ? `Kort postet i kanal: ${event.title}` : `Kanalpost feilet: ${event.title}`,
+        event_type: ok
+          ? (isPurchase ? 'CARD_PURCHASE_POSTED' : 'CARD_DRAW_POSTED')
+          : 'CARD_CHANNEL_SEND_FAILED',
+        title:      ok
+          ? `${isPurchase ? 'Kjøp' : 'Korttrekk'} postet i kanal: ${event.title}`
+          : `Kanalpost feilet: ${event.title}`,
         severity:   ok ? 'info' : 'warning',
-        metadata:   { channelId: settings.discordCardDropChannelId },
+        metadata:   { channelId: settings.discordCardDropChannelId, source: event.source },
       });
     } catch (e: any) {
       result.error = e?.message;
-      logSystemEvent({ source: 'card_drop', event_type: 'CARD_DROP_CHANNEL_FAILED', title: `Kanalpost kastet feil: ${e?.message}`, severity: 'error', metadata: {} });
+      logSystemEvent({ source: 'card_drop', event_type: 'CARD_CHANNEL_SEND_FAILED', title: `Kanalpost kastet feil: ${e?.message}`, severity: 'error', metadata: {} });
     }
   } else {
-    logSystemEvent({ source: 'card_drop', event_type: 'CARD_DROP_CHANNEL_SKIPPED', title: 'Kanalpost ikke aktivert', severity: 'info', metadata: {} });
+    logSystemEvent({ source: 'card_drop', event_type: 'CARD_DROP_CHANNEL_SKIPPED', title: 'Kanalpost ikke aktivert (ingen channelId i settings)', severity: 'info', metadata: {} });
   }
 
   // ── 2. DM ─────────────────────────────────────────────────────────────────
@@ -305,16 +310,16 @@ export async function publishCardDrop(event: CardDropEvent): Promise<void> {
         result.dmSent = ok;
         logSystemEvent({
           source:     'card_drop',
-          event_type: ok ? 'CARD_DROP_DM_SENT' : 'CARD_DROP_DM_FAILED',
+          event_type: ok ? 'CARD_DROP_DM_SENT' : 'CARD_DM_FAILED',
           title:      ok ? `DM sendt for ${event.title}` : `DM feilet for ${event.title}`,
           severity:   ok ? 'info' : 'warning',
           metadata:   {},
         });
       } else {
-        logSystemEvent({ source: 'card_drop', event_type: 'CARD_DROP_DM_FAILED', title: 'Kunne ikke åpne DM-kanal', severity: 'warning', metadata: {} });
+        logSystemEvent({ source: 'card_drop', event_type: 'CARD_DM_FAILED', title: 'Kunne ikke åpne DM-kanal', severity: 'warning', metadata: {} });
       }
     } catch (e: any) {
-      logSystemEvent({ source: 'card_drop', event_type: 'CARD_DROP_DM_FAILED', title: `DM kastet feil: ${e?.message}`, severity: 'warning', metadata: {} });
+      logSystemEvent({ source: 'card_drop', event_type: 'CARD_DM_FAILED', title: `DM kastet feil: ${e?.message}`, severity: 'warning', metadata: {} });
     }
   }
 

@@ -18,6 +18,8 @@ import {
   CollectionCard,
 } from '../lib/cardCollectionService';
 import { hentSistePersona, renderPersonaCard, RARITY_COLOR, RARITY_BANNER } from '../lib/personaService';
+import { publishCardDrop } from '../lib/cardDropPublisher';
+import { logSystemEvent } from '../lib/systemEvents';
 
 // ── Rarity sort order ─────────────────────────────────────────────────────────
 
@@ -224,12 +226,12 @@ export const minekortCommand = {
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId('minekort_vis_aktivt')
+        .setCustomId(`minekort_vis_aktivt:${user.id}`)
         .setLabel('🎴 Vis aktivt kort')
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!aktivt),
       new ButtonBuilder()
-        .setCustomId('minekort_vis_alle')
+        .setCustomId(`minekort_vis_alle:${user.id}`)
         .setLabel('📦 Alle kort')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(totalKort === 0),
@@ -242,84 +244,108 @@ export const minekortCommand = {
 // ── Button handler (kalles fra global interactionCreate i index.ts) ───────────
 
 export async function handleMinekortButton(interaction: ButtonInteraction): Promise<void> {
-  const user      = interaction.user;
-  const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
+  const [action, ownerId] = interaction.customId.split(':');
+  const user              = interaction.user;
 
-  if (interaction.customId === 'minekort_vis_aktivt') {
-    await interaction.deferReply({ ephemeral: false });
+  // Validate that the user who clicked owns the card collection
+  if (ownerId && ownerId !== user.id) {
+    await interaction.reply({
+      content: '❌ Disse kortene tilhører en annen bruker.',
+      ephemeral: true,
+    });
+    return;
+  }
 
-    const eksisterende = await hentSistePersona(user.id);
-    if (!eksisterende || !eksisterende.imageUrl) {
-      await interaction.editReply({ content: '❌ Ingen aktivt persona-kort. Bruk `/persona` for å lage ditt første!' });
-      return;
-    }
+  if (action === 'minekort_vis_aktivt') {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const avatarUrl    = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
+      const eksisterende = await hentSistePersona(user.id);
 
-    const member = getMember(user.id);
-    let png: Buffer | null = null;
-    if (member) {
-      try {
-        png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber, avatarUrl);
-      } catch {}
-    }
+      if (!eksisterende || !eksisterende.imageUrl) {
+        await interaction.editReply({ content: '❌ Ingen aktivt persona-kort. Bruk `/persona` for å lage ditt første!' });
+        return;
+      }
 
-    if (png) {
-      const banner = RARITY_BANNER[eksisterende.card.rarity as keyof typeof RARITY_BANNER] ?? eksisterende.card.rarity;
-      const fil    = new AttachmentBuilder(png, { name: 'persona-card.png' });
-      await interaction.editReply({
-        content: `🎴 ${banner}  **${eksisterende.card.title}**  ·  *${eksisterende.card.class}*`,
-        files:   [fil],
-      });
-    } else {
-      await interaction.editReply({
-        embeds: [{
-          color:       RARITY_COLOR[eksisterende.card.rarity as keyof typeof RARITY_COLOR],
-          title:       eksisterende.card.title,
-          description: `**${eksisterende.card.class}** · ${eksisterende.card.rarity}\n\n*${eksisterende.card.quote}*`,
-          image:       { url: eksisterende.imageUrl },
-        }],
+      const member = getMember(user.id);
+      let png: Buffer | null = null;
+      if (member) {
+        try {
+          png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber, avatarUrl);
+        } catch {}
+      }
+
+      // Fire-and-forget: publish card via DM + settings channel
+      publishCardDrop({
+        userId:          user.id,
+        discordUsername: member?.displayName ?? user.username,
+        twitchUsername:  member?.twitchUsername ?? null,
+        cardType:        'persona',
+        rarity:          eksisterende.card.rarity,
+        title:           eksisterende.card.title,
+        klass:           eksisterende.card.class ?? null,
+        archetype:       eksisterende.card.archetype ?? null,
+        level:           member?.level ?? 1,
+        xp:              member?.xp ?? 0,
+        coinsBalance:    0,
+        cardImageUrl:    eksisterende.imageUrl,
+        cardImageBuffer: png,
+        source:          'persona_reroll',
+      }).catch(() => {});
+
+      await interaction.editReply({ content: '🎴 Kortet ditt er sendt til kortkanalen og via DM!' });
+    } catch (err: any) {
+      try { await interaction.editReply({ content: '⚠️ Noe gikk galt. Prøv igjen.' }); } catch {}
+      logSystemEvent({
+        source: 'bot_button', event_type: 'CARD_DM_FAILED',
+        title: `minekort_vis_aktivt feilet: ${err?.message}`,
+        severity: 'error', metadata: { discordId: user.id, error: err?.message },
       });
     }
     return;
   }
 
-  if (interaction.customId === 'minekort_vis_alle') {
-    await interaction.deferReply({ ephemeral: false });
+  if (action === 'minekort_vis_alle') {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const [alleKort, rarityMap, totalKort] = await Promise.all([
+        getUserCards(user.id, 50),
+        getRarityCounts(user.id),
+        getTotalCardCount(user.id),
+      ]);
 
-    const [alleKort, rarityMap, totalKort] = await Promise.all([
-      getUserCards(user.id, 50),
-      getRarityCounts(user.id),
-      getTotalCardCount(user.id),
-    ]);
+      if (alleKort.length === 0) {
+        await interaction.editReply({ content: '🎴 Ingen kort ennå. Bruk `/persona` for å lage ditt første!' });
+        return;
+      }
 
-    if (alleKort.length === 0) {
-      await interaction.editReply({ content: '🎴 Ingen kort ennå. Bruk `/persona` for å lage ditt første!' });
-      return;
+      const sorted  = [...alleKort].sort(raritySort);
+      const chunks: string[] = [];
+      let current = '';
+      for (const k of sorted) {
+        const linje = kortLinje(k) + '\n';
+        if ((current + linje).length > 900) { chunks.push(current.trimEnd()); current = linje; }
+        else { current += linje; }
+      }
+      if (current.trim()) chunks.push(current.trimEnd());
+
+      const rarityLine = [
+        rarityMap['Mythic']    ? `⚡ ${rarityMap['Mythic']} Mythic`    : '',
+        rarityMap['Legendary'] ? `✨ ${rarityMap['Legendary']} Legendary` : '',
+        rarityMap['Epic']      ? `🔮 ${rarityMap['Epic']} Epic`         : '',
+        rarityMap['Rare']      ? `💎 ${rarityMap['Rare']} Rare`         : '',
+        rarityMap['Common']    ? `🎴 ${rarityMap['Common']} Common`     : '',
+      ].filter(Boolean).join('  ');
+
+      const embed = new EmbedBuilder()
+        .setColor(0xf9a825)
+        .setTitle(`🎴 ${user.displayName ?? user.username} sin kortsamling`)
+        .setDescription(`**${totalKort} kort totalt**\n${rarityLine}`)
+        .addFields(...chunks.map((chunk, i) => ({ name: i === 0 ? 'Kort' : '​', value: chunk, inline: false })));
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err: any) {
+      try { await interaction.editReply({ content: '⚠️ Noe gikk galt. Prøv igjen.' }); } catch {}
     }
-
-    const sorted  = [...alleKort].sort(raritySort);
-    const chunks: string[] = [];
-    let current = '';
-    for (const k of sorted) {
-      const linje = kortLinje(k) + '\n';
-      if ((current + linje).length > 900) { chunks.push(current.trimEnd()); current = linje; }
-      else { current += linje; }
-    }
-    if (current.trim()) chunks.push(current.trimEnd());
-
-    const rarityLine = [
-      rarityMap['Mythic']    ? `⚡ ${rarityMap['Mythic']} Mythic`    : '',
-      rarityMap['Legendary'] ? `✨ ${rarityMap['Legendary']} Legendary` : '',
-      rarityMap['Epic']      ? `🔮 ${rarityMap['Epic']} Epic`         : '',
-      rarityMap['Rare']      ? `💎 ${rarityMap['Rare']} Rare`         : '',
-      rarityMap['Common']    ? `🎴 ${rarityMap['Common']} Common`     : '',
-    ].filter(Boolean).join('  ');
-
-    const embed = new EmbedBuilder()
-      .setColor(0xf9a825)
-      .setTitle(`🎴 ${user.displayName ?? user.username} sin kortsamling`)
-      .setDescription(`**${totalKort} kort totalt**\n${rarityLine}`)
-      .addFields(...chunks.map((chunk, i) => ({ name: i === 0 ? 'Kort' : '​', value: chunk, inline: false })));
-
-    await interaction.editReply({ embeds: [embed] });
   }
 }

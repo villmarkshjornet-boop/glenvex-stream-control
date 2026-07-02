@@ -84,38 +84,6 @@ export async function GET(req: NextRequest) {
     dbWorkspaceFound = false;
   }
 
-  // Step 4: Hent første workspace fra DB — fallback når JWT mangler workspace_id
-  // og owner_user_id ikke er satt (enkelt-bruker-system, alltid én workspace).
-  // Synkroniserer JWT og owner_user_id automatisk etter suksess.
-  if (!wsId && db) {
-    const { data } = await db
-      .from('workspaces')
-      .select('id, owner_user_id')
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single();
-
-    if (data) {
-      wsId = data.id;
-      dbWorkspaceFound = true;
-
-      // Self-heal: skriv owner_user_id og synk JWT workspace_id
-      const sbUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-      if (userId && sbUrl && sbKey) {
-        const admin = createClient(sbUrl, sbKey, { auth: { autoRefreshToken: false, persistSession: false } });
-        if (!data.owner_user_id) {
-          db.from('workspaces').update({ owner_user_id: userId, updated_at: new Date().toISOString() })
-            .eq('id', wsId).then(() => {}, () => {});
-        }
-        void admin.auth.admin.updateUserById(userId, {
-          user_metadata: { workspace_id: wsId },
-        }).catch(() => {});
-        syncedMetadata = true;
-      }
-    }
-  }
-
   if (!wsId) {
     const url = req.nextUrl.clone();
     url.pathname = '/onboarding';

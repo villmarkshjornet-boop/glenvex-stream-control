@@ -9,33 +9,47 @@ export const statusCommand = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
+    try {
+      const [twitchOk, discordOk, stream] = await Promise.allSettled([
+        checkTwitchApiHealth(),
+        checkDiscordBotHealth(),
+        getStreamInfo(),
+      ]);
 
-    const [twitchOk, discordOk, stream] = await Promise.allSettled([
-      checkTwitchApiHealth(),
-      checkDiscordBotHealth(),
-      getStreamInfo(),
-    ]);
+      const twitchStatus  = twitchOk.status === 'fulfilled' && twitchOk.value ? '🟢 Online' : '🔴 Feil';
+      const discordStatus = discordOk.status === 'fulfilled' && discordOk.value ? '🟢 Online' : '🟡 Sjekk bot-token';
+      const streamData    = stream.status === 'fulfilled' ? stream.value : null;
+      const liveStatus    = streamData?.isLive ? '🔴 LIVE' : '⚫ Offline';
 
-    const twitchStatus = twitchOk.status === 'fulfilled' && twitchOk.value ? '🟢 Online' : '🔴 Feil';
-    const discordStatus = discordOk.status === 'fulfilled' && discordOk.value ? '🟢 Online' : '🟡 Sjekk bot-token';
-    const streamData = stream.status === 'fulfilled' ? stream.value : null;
-    const liveStatus = streamData?.isLive ? '🔴 LIVE' : '⚫ Offline';
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff41)
+        .setTitle('⊛ Systemstatus')
+        .addFields(
+          { name: 'Twitch API',   value: twitchStatus,  inline: true },
+          { name: 'Discord Bot',  value: discordStatus, inline: true },
+          { name: 'Stream',       value: liveStatus,    inline: true },
+          ...(streamData?.isLive ? [
+            { name: '🎮 Spill',  value: streamData.game || '–',                         inline: true },
+            { name: '👁️ Seere', value: streamData.viewerCount?.toLocaleString() || '–', inline: true },
+          ] : [])
+        )
+        .setFooter({ text: 'Stream Control' })
+        .setTimestamp();
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00ff41)
-      .setTitle('⊛ Systemstatus')
-      .addFields(
-        { name: 'Twitch API', value: twitchStatus, inline: true },
-        { name: 'Discord Bot', value: discordStatus, inline: true },
-        { name: 'Stream', value: liveStatus, inline: true },
-        ...(streamData?.isLive ? [
-          { name: '🎮 Spill', value: streamData.game || '–', inline: true },
-          { name: '👁️ Seere', value: streamData.viewerCount?.toLocaleString() || '–', inline: true },
-        ] : [])
-      )
-      .setFooter({ text: 'Stream Control' })
-      .setTimestamp();
-
-    return interaction.editReply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [embed] });
+    } catch (err: any) {
+      const msg = err?.message ?? 'Ukjent feil';
+      try {
+        await interaction.editReply({ content: '⚠️ Kunne ikke hente systemstatus akkurat nå.' });
+      } catch {}
+      const { logSystemEvent } = await import('../lib/systemEvents');
+      logSystemEvent({
+        source:     'bot_command',
+        event_type: 'PROFILE_COMMAND_FAILED',
+        title:      `/status feilet: ${msg}`,
+        severity:   'error',
+        metadata:   { discordId: interaction.user.id, error: msg },
+      });
+    }
   },
 };
