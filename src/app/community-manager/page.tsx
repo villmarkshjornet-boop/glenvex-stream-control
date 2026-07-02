@@ -15,6 +15,42 @@ interface Member {
   badges: string[]; lastSeen: string; joinedAt: string;
 }
 
+interface MemberOverview {
+  discord_id:            string;
+  workspace_id:          string;
+  display_name:          string;
+  username:              string;
+  nickname:              string | null;
+  top_role:              string;
+  xp:                    number;
+  level:                 number;
+  messages:              number;
+  voice_minutes:         number;
+  streams_attended:      number;
+  streak_days:           number;
+  coins_balance:         number;
+  total_coins_earned:    number;
+  total_coins_spent:     number;
+  twitch_sub_status:     boolean;
+  twitch_sub_tier:       string | null;
+  twitch_sub_since:      string | null;
+  badges:                string[];
+  joined_at:             string | null;
+  last_seen:             string | null;
+  last_coin_earned_at:   string | null;
+  last_activity_at:      string | null;
+  total_cards:           number;
+  common_cards:          number;
+  rare_cards:            number;
+  epic_cards:            number;
+  legendary_cards:       number;
+  mythic_cards:          number;
+  active_card_image_url: string | null;
+  active_card_title:     string | null;
+  active_card_rarity:    string | null;
+  active_card_class:     string | null;
+}
+
 interface AiProfil {
   viktighetScore: number; trend: 'vekst' | 'stabil' | 'fallende';
   atRisk: boolean; erHero: boolean; erCore: boolean; erSupporter: boolean; erRetention: boolean;
@@ -901,10 +937,11 @@ export default function CommunityManagerPage() {
   const [tab, setTab]                     = useState<'dashboard' | 'membres' | 'samlekort'>('dashboard');
   const [summary, setSummary]             = useState<SummaryData | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
-  const [members, setMembers]             = useState<Member[]>([]);
+  const [members, setMembers]             = useState<MemberOverview[]>([]);
   const [membresLoading, setMembresLoading] = useState(false);
   const [search, setSearch]               = useState('');
-  const [sorter, setSorter]               = useState<'xp' | 'engagement' | 'messages' | 'community'>('xp');
+  const [sorter, setSorter]               = useState<'xp' | 'coins' | 'activity' | 'level'>('xp');
+  const [filterSub, setFilterSub]         = useState(false);
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [detail, setDetail]               = useState<MemberDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -918,14 +955,15 @@ export default function CommunityManagerPage() {
   }, []);
 
   const loadMembres = useCallback(() => {
-    if (members.length > 0) return;
     setMembresLoading(true);
-    fetch('/api/members')
+    const params = new URLSearchParams({ sort: sorter });
+    if (filterSub) params.set('sub', 'true');
+    fetch(`/api/community-manager/members?${params}`)
       .then(r => r.json())
-      .then(d => setMembers(Array.isArray(d) ? d : []))
+      .then(d => setMembers(d.members ?? []))
       .catch(() => {})
       .finally(() => setMembresLoading(false));
-  }, [members.length]);
+  }, [sorter, filterSub]);
 
   useEffect(() => {
     if (tab === 'membres') loadMembres();
@@ -964,15 +1002,13 @@ export default function CommunityManagerPage() {
     );
   }
 
-  const sortertFelt: Record<typeof sorter, keyof Member> = {
-    xp: 'xp', engagement: 'engagementScore', messages: 'messages', community: 'communityScore',
-  };
-  const sortert   = [...members].sort((a, b) => (b[sortertFelt[sorter]] as number) - (a[sortertFelt[sorter]] as number));
-  const filtrerte = sortert.filter(m =>
-    m.displayName.toLowerCase().includes(search.toLowerCase()) ||
-    m.username.toLowerCase().includes(search.toLowerCase())
+  const filtrerte = members.filter(m =>
+    !search ||
+    (m.display_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (m.username     ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (m.nickname     ?? '').toLowerCase().includes(search.toLowerCase()),
   );
-  const topp3 = sortert.slice(0, 3);
+  const topp3 = members.slice(0, 3);
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
@@ -1024,21 +1060,22 @@ export default function CommunityManagerPage() {
               {topp3.length > 0 && (
                 <div className="bg-g-card border border-g-border rounded-2xl p-5">
                   <p className="text-[9px] text-g-muted uppercase tracking-widest font-bold mb-3">
-                    Topp 3 — {sorter === 'xp' ? 'XP' : sorter === 'engagement' ? 'Engasjement' : sorter === 'messages' ? 'Chat' : 'Community-score'}
+                    Topp 3 — {sorter === 'xp' ? 'XP' : sorter === 'coins' ? 'Coins' : sorter === 'activity' ? 'Aktivitet' : 'Level'}
                   </p>
                   <div className="grid grid-cols-3 gap-3">
                     {topp3.map((m, i) => {
-                      const rolle = getRolle(m.level);
+                      const rolle    = getRolle(m.level);
+                      const valLabel =
+                        sorter === 'xp'       ? `${m.xp.toLocaleString()} XP` :
+                        sorter === 'coins'    ? `${m.coins_balance} coins` :
+                        sorter === 'activity' ? tidSiden(m.last_activity_at ?? m.last_seen ?? '') :
+                                                `Lv ${m.level}`;
                       return (
-                        <div key={m.id} onClick={() => selectMember(m.id)}
+                        <div key={m.discord_id} onClick={() => selectMember(m.discord_id)}
                           className="p-3 bg-g-bg border border-g-border rounded-lg cursor-pointer hover:border-g-green/30 transition-all text-center">
                           <p className={`text-xl font-black font-mono ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-gray-400' : 'text-orange-400'}`}>{i + 1}</p>
-                          <p className="text-xs font-bold text-g-text mt-1 truncate">{m.displayName}</p>
-                          <p className="text-[10px] text-g-green font-mono">
-                            {sorter === 'xp' ? `${m.xp.toLocaleString()} XP` :
-                             sorter === 'engagement' ? `${m.engagementScore}` :
-                             sorter === 'messages' ? `${m.messages} msg` : `${m.communityScore}`}
-                          </p>
+                          <p className="text-xs font-bold text-g-text mt-1 truncate">{m.display_name}</p>
+                          <p className="text-[10px] text-g-green font-mono">{valLabel}</p>
                           {rolle && <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border mt-1 inline-block ${rolle.farge}`}>{rolle.navn}</span>}
                         </div>
                       );
@@ -1047,20 +1084,35 @@ export default function CommunityManagerPage() {
                 </div>
               )}
 
-              {/* Search + sort */}
-              <div className="flex items-center gap-3">
+              {/* Search + filter + sort */}
+              <div className="flex items-center gap-2 flex-wrap">
                 <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Søk på navn..." className="flex-1 bg-g-card border border-g-border rounded-lg px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
-                <div className="flex gap-1">
-                  {(['xp', 'engagement', 'messages', 'community'] as const).map(s => (
+                  placeholder="Søk på navn..." className="flex-1 min-w-[160px] bg-g-card border border-g-border rounded-lg px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50" />
+                <button
+                  onClick={() => setFilterSub(f => !f)}
+                  className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all flex-shrink-0 ${
+                    filterSub
+                      ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                      : 'border-g-border text-g-muted hover:text-g-text'
+                  }`}
+                >
+                  {filterSub ? '● Kun SUB' : '○ SUB'}
+                </button>
+                <div className="flex gap-1 flex-shrink-0">
+                  {(['xp', 'coins', 'activity', 'level'] as const).map(s => (
                     <button key={s} onClick={() => setSorter(s)}
                       className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all ${
                         sorter === s ? 'bg-g-green/10 border-g-green/30 text-g-green' : 'border-g-border text-g-muted hover:text-g-text'
                       }`}>
-                      {s === 'xp' ? 'XP' : s === 'engagement' ? 'Engage' : s === 'messages' ? 'Chat' : 'Community'}
+                      {s === 'xp' ? 'XP' : s === 'coins' ? 'Coins' : s === 'activity' ? 'Aktivitet' : 'Level'}
                     </button>
                   ))}
                 </div>
+                <button onClick={loadMembres}
+                  className="px-2.5 py-1.5 rounded text-[10px] border border-g-border text-g-muted hover:text-g-text transition-all flex-shrink-0"
+                  title="Oppdater">
+                  ↻
+                </button>
               </div>
 
               {/* Member list */}
@@ -1072,23 +1124,42 @@ export default function CommunityManagerPage() {
                 ) : (
                   filtrerte.map((m, i) => {
                     const rolle = getRolle(m.level);
+                    const topRarityEmoji =
+                      m.mythic_cards    > 0 ? '⚡' :
+                      m.legendary_cards > 0 ? '✨' :
+                      m.epic_cards      > 0 ? '🔮' :
+                      m.rare_cards      > 0 ? '💎' :
+                      m.total_cards     > 0 ? '🎴' : null;
                     return (
-                      <div key={m.id} onClick={() => selectMember(m.id)}
+                      <div key={m.discord_id} onClick={() => selectMember(m.discord_id)}
                         className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-g-bg transition-colors ${i < filtrerte.length - 1 ? 'border-b border-g-border/50' : ''}`}>
                         <span className="text-[9px] font-mono text-g-muted/40 w-5 text-right flex-shrink-0">{i + 1}</span>
                         <div className="w-7 h-7 rounded-full bg-g-green/10 border border-g-green/20 flex items-center justify-center flex-shrink-0">
-                          <span className="text-[10px] font-black text-g-green">{m.displayName?.[0]?.toUpperCase() ?? '?'}</span>
+                          <span className="text-[10px] font-black text-g-green">{m.display_name?.[0]?.toUpperCase() ?? '?'}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-bold text-g-text truncate">{m.displayName}</span>
-                            {rolle && <span className={`text-[8px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${rolle.farge}`}>{rolle.navn}</span>}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[11px] font-bold text-g-text truncate">{m.display_name}</span>
+                            {m.twitch_sub_status && (
+                              <span className="text-[8px] px-1.5 py-0.5 rounded-full border border-purple-500/40 text-purple-400 bg-purple-500/5 flex-shrink-0">SUB</span>
+                            )}
+                            {m.top_role !== 'MEMBER' && (
+                              <span className="text-[8px] px-1.5 py-0.5 rounded-full border border-g-border text-g-muted flex-shrink-0">{m.top_role}</span>
+                            )}
                           </div>
-                          <p className="text-[9px] text-g-muted">Lv {m.level} · sett {tidSiden(m.lastSeen)}</p>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[9px]">
+                            {rolle && <span className={`font-bold flex-shrink-0 ${rolle.farge.split(' ')[0]}`}>{rolle.navn}</span>}
+                            <span className="text-g-muted font-mono">Lv {m.level}</span>
+                            <span className="text-g-green font-mono">{m.xp.toLocaleString()} XP</span>
+                            <span className="text-yellow-400/80 font-mono">💰{m.coins_balance}</span>
+                            {topRarityEmoji && <span className="text-g-muted">{topRarityEmoji} {m.total_cards}</span>}
+                          </div>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <p className="text-[11px] font-mono text-g-green font-bold">{m.xp.toLocaleString()}</p>
-                          <p className="text-[8px] text-g-muted">XP</p>
+                          <p className="text-[9px] text-g-muted">{tidSiden(m.last_activity_at ?? m.last_seen ?? '')}</p>
+                          {m.active_card_title && (
+                            <p className="text-[8px] text-g-muted/50 truncate max-w-[80px]">{m.active_card_title}</p>
+                          )}
                         </div>
                       </div>
                     );
