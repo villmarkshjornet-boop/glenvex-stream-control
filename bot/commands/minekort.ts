@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
+  ButtonInteraction,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -237,3 +238,88 @@ export const minekortCommand = {
     await interaction.editReply({ embeds: [embed], components: [row] });
   },
 };
+
+// ── Button handler (kalles fra global interactionCreate i index.ts) ───────────
+
+export async function handleMinekortButton(interaction: ButtonInteraction): Promise<void> {
+  const user      = interaction.user;
+  const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 } as any);
+
+  if (interaction.customId === 'minekort_vis_aktivt') {
+    await interaction.deferReply({ ephemeral: false });
+
+    const eksisterende = await hentSistePersona(user.id);
+    if (!eksisterende || !eksisterende.imageUrl) {
+      await interaction.editReply({ content: '❌ Ingen aktivt persona-kort. Bruk `/persona` for å lage ditt første!' });
+      return;
+    }
+
+    const member = getMember(user.id);
+    let png: Buffer | null = null;
+    if (member) {
+      try {
+        png = await renderPersonaCard(eksisterende.card, eksisterende.imageUrl, member, eksisterende.collectionNumber, avatarUrl);
+      } catch {}
+    }
+
+    if (png) {
+      const banner = RARITY_BANNER[eksisterende.card.rarity as keyof typeof RARITY_BANNER] ?? eksisterende.card.rarity;
+      const fil    = new AttachmentBuilder(png, { name: 'persona-card.png' });
+      await interaction.editReply({
+        content: `🎴 ${banner}  **${eksisterende.card.title}**  ·  *${eksisterende.card.class}*`,
+        files:   [fil],
+      });
+    } else {
+      await interaction.editReply({
+        embeds: [{
+          color:       RARITY_COLOR[eksisterende.card.rarity as keyof typeof RARITY_COLOR],
+          title:       eksisterende.card.title,
+          description: `**${eksisterende.card.class}** · ${eksisterende.card.rarity}\n\n*${eksisterende.card.quote}*`,
+          image:       { url: eksisterende.imageUrl },
+        }],
+      });
+    }
+    return;
+  }
+
+  if (interaction.customId === 'minekort_vis_alle') {
+    await interaction.deferReply({ ephemeral: false });
+
+    const [alleKort, rarityMap, totalKort] = await Promise.all([
+      getUserCards(user.id, 50),
+      getRarityCounts(user.id),
+      getTotalCardCount(user.id),
+    ]);
+
+    if (alleKort.length === 0) {
+      await interaction.editReply({ content: '🎴 Ingen kort ennå. Bruk `/persona` for å lage ditt første!' });
+      return;
+    }
+
+    const sorted  = [...alleKort].sort(raritySort);
+    const chunks: string[] = [];
+    let current = '';
+    for (const k of sorted) {
+      const linje = kortLinje(k) + '\n';
+      if ((current + linje).length > 900) { chunks.push(current.trimEnd()); current = linje; }
+      else { current += linje; }
+    }
+    if (current.trim()) chunks.push(current.trimEnd());
+
+    const rarityLine = [
+      rarityMap['Mythic']    ? `⚡ ${rarityMap['Mythic']} Mythic`    : '',
+      rarityMap['Legendary'] ? `✨ ${rarityMap['Legendary']} Legendary` : '',
+      rarityMap['Epic']      ? `🔮 ${rarityMap['Epic']} Epic`         : '',
+      rarityMap['Rare']      ? `💎 ${rarityMap['Rare']} Rare`         : '',
+      rarityMap['Common']    ? `🎴 ${rarityMap['Common']} Common`     : '',
+    ].filter(Boolean).join('  ');
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf9a825)
+      .setTitle(`🎴 ${user.displayName ?? user.username} sin kortsamling`)
+      .setDescription(`**${totalKort} kort totalt**\n${rarityLine}`)
+      .addFields(...chunks.map((chunk, i) => ({ name: i === 0 ? 'Kort' : '​', value: chunk, inline: false })));
+
+    await interaction.editReply({ embeds: [embed] });
+  }
+}

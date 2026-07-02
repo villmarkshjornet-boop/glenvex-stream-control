@@ -25,7 +25,7 @@ import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { profilCommand } from './commands/profil';
 import { personaCommand } from './commands/persona';
-import { minekortCommand } from './commands/minekort';
+import { minekortCommand, handleMinekortButton } from './commands/minekort';
 import { adminCommand }   from './commands/admin';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins } from './lib/coinService';
@@ -2330,6 +2330,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
     if (interaction.customId.startsWith('dup_slett_') || interaction.customId.startsWith('dup_ignorer_')) {
       await handleDuplikatKnapp(interaction).catch(console.error);
+      return;
+    }
+    if (interaction.customId === 'minekort_vis_aktivt' || interaction.customId === 'minekort_vis_alle') {
+      await handleMinekortButton(interaction).catch(console.error);
       return;
     }
     return;
