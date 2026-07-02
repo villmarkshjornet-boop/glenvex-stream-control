@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { BrandLogo } from '@/components/ui';
 
 type Mode = 'signin' | 'signup';
 
@@ -63,17 +62,21 @@ export default function LoginPage() {
   if (magicSent) {
     return (
       <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
-        <div className="w-full max-w-sm text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-g-green/10 border border-g-green/30 flex items-center justify-center mx-auto">
-            <span className="text-g-green text-xl">✓</span>
+        <div className="w-full max-w-sm text-center space-y-5">
+          <div className="w-14 h-14 rounded-full bg-g-green/10 border border-g-green/30 flex items-center justify-center mx-auto">
+            <span className="text-g-green text-2xl">✓</span>
           </div>
-          <h2 className="text-lg font-black text-g-text">Sjekk e-posten din</h2>
-          <p className="text-sm text-g-muted">
-            Vi har sendt en lenke til <span className="text-g-text font-bold">{email}</span>.
-            Klikk lenken for å logge inn.
-          </p>
-          <button onClick={() => setMagicSent(false)}
-            className="text-xs text-g-muted hover:text-g-green transition-colors">
+          <div>
+            <h2 className="text-lg font-semibold text-g-text">Sjekk e-posten din</h2>
+            <p className="text-sm text-g-muted mt-2 leading-relaxed">
+              Vi har sendt en innloggingslenke til{' '}
+              <span className="text-g-text font-medium">{email}</span>.
+            </p>
+          </div>
+          <button
+            onClick={() => setMagicSent(false)}
+            className="text-xs text-g-muted/60 hover:text-g-muted transition-colors"
+          >
             ← Tilbake
           </button>
         </div>
@@ -82,25 +85,29 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-6">
+    <div className="min-h-screen flex items-center justify-center bg-g-bg p-4">
+      <div className="w-full max-w-sm">
 
-        <div className="text-center"><BrandLogo size="lg" /></div>
+        {/* Brand */}
+        <div className="text-center mb-8">
+          <p className="text-xl font-bold tracking-widest text-g-green font-mono">GLENVEX</p>
+          <p className="text-xs text-g-muted mt-1">Creator OS</p>
+        </div>
 
         {/* Card */}
-        <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-5">
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 space-y-5">
           <div>
-            <h1 className="text-sm font-black text-g-text">
+            <h1 className="text-base font-semibold text-g-text">
               {mode === 'signin' ? 'Logg inn' : 'Opprett konto'}
             </h1>
-            <p className="text-[11px] text-g-muted mt-0.5">
+            <p className="text-sm text-g-muted mt-1">
               {mode === 'signin' ? 'Velkommen tilbake' : 'Kom i gang på under 5 minutter'}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1.5">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium tracking-wide text-g-muted block">
                 E-post
               </label>
               <input
@@ -109,13 +116,13 @@ export default function LoginPage() {
                 onChange={e => setEmail(e.target.value)}
                 placeholder="din@epost.no"
                 required
-                className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 transition-colors"
+                className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
               />
             </div>
 
             {!useMagic && (
-              <div>
-                <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1.5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium tracking-wide text-g-muted block">
                   Passord
                 </label>
                 <input
@@ -125,13 +132,13 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   required={!useMagic}
                   minLength={6}
-                  className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 transition-colors"
+                  className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
                 />
               </div>
             )}
 
             {error && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                 {error}
               </p>
             )}
@@ -139,31 +146,40 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 hover:border-g-green/50 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
             >
-              {loading ? 'Venter...' : useMagic ? 'Send innloggingslenke' : mode === 'signin' ? 'Logg inn' : 'Opprett konto'}
+              {loading
+                ? 'Venter...'
+                : useMagic
+                ? 'Send innloggingslenke'
+                : mode === 'signin'
+                ? 'Logg inn'
+                : 'Opprett konto'}
             </button>
           </form>
 
           {/* Magic link toggle */}
           <button
             onClick={() => { setUseMagic(v => !v); setError(''); }}
-            className="w-full text-[11px] text-g-muted hover:text-g-text transition-colors text-center"
+            className="w-full text-xs text-g-muted/60 hover:text-g-muted transition-colors text-center"
           >
             {useMagic ? 'Bruk passord i stedet' : 'Logg inn uten passord (e-postlenke)'}
           </button>
         </div>
 
-        {/* Toggle mode */}
-        <p className="text-center text-[11px] text-g-muted">
-          {mode === 'signin' ? 'Har du ikke konto?' : 'Har du allerede konto?'}{' '}
+        {/* Footer — toggle mode */}
+        <div className="text-center mt-6">
+          <span className="text-xs text-g-muted/60">
+            {mode === 'signin' ? 'Har du ikke konto?' : 'Har du allerede konto?'}{' '}
+          </span>
           <button
             onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }}
-            className="text-g-green hover:underline font-bold"
+            className="text-xs text-g-muted hover:text-g-text transition-colors font-medium"
           >
             {mode === 'signin' ? 'Registrer deg' : 'Logg inn'}
           </button>
-        </p>
+        </div>
+
       </div>
     </div>
   );
