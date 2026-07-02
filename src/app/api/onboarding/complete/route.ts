@@ -7,10 +7,8 @@ export const dynamic = 'force-dynamic';
 
 function parseSessionFromCookies(cookieStore: ReturnType<typeof cookies>): string | null {
   const all = cookieStore.getAll();
-  // Enkelt-cookie
   const single = all.find(c => /^sb-.+-auth-token$/.test(c.name));
   if (single?.value) return single.value;
-  // Chunked cookie
   const chunk0 = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
   if (!chunk0) return null;
   const base = chunk0.name.replace('.0', '');
@@ -34,6 +32,7 @@ export async function POST(req: NextRequest) {
   });
 
   let userId: string | null = null;
+  let previousWorkspaceId: string | null = null;
   if (rawCookie) {
     try {
       const session = JSON.parse(decodeURIComponent(rawCookie));
@@ -41,6 +40,7 @@ export async function POST(req: NextRequest) {
       if (accessToken) {
         const { data: { user } } = await adminClient.auth.getUser(accessToken);
         userId = user?.id ?? null;
+        previousWorkspaceId = user?.user_metadata?.workspace_id ?? null;
       }
     } catch {}
   }
@@ -62,48 +62,56 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'Database ikke tilgjengelig' }, { status: 500 });
 
-  // Check if workspace exists — if it does but has no owner, allow claiming it
-  const { data: existing } = await db.from('workspaces').select('id,owner_user_id').eq('id', workspaceSlug).single();
-  if (existing && existing.owner_user_id) {
-    return NextResponse.json({ error: `Workspace "${workspaceSlug}" tilhører allerede en annen bruker.` }, { status: 409 });
+  // ── Ownership checks — same logic as onboarding/workspace ─────────────────
+  const { data: existing } = await db.from('workspaces')
+    .select('id,owner_user_id,twitch_login,discord_guild_id')
+    .eq('id', workspaceSlug)
+    .single();
+
+  if (existing) {
+    // Owned by different user
+    if (existing.owner_user_id && existing.owner_user_id !== userId) {
+      await db.from('system_events').insert({
+        workspace_id: workspaceSlug,
+        source: 'onboarding',
+        event_type: 'WORKSPACE_CLAIM_REJECTED_OWNED',
+        title: `[Auth] Claim avvist — workspace tilhører annen bruker`,
+        severity: 'warning',
+        metadata: { reason: 'owned_by_other', existingOwnerId: existing.owner_user_id, requestingUserId: userId },
+      }).catch(() => {});
+      return NextResponse.json({ error: `Workspace "${workspaceSlug}" tilhører allerede en annen bruker.` }, { status: 409 });
+    }
+
+    // Configured but no owner — this is a bootstrapped workspace, block claiming
+    if (!existing.owner_user_id && (existing.twitch_login || existing.discord_guild_id)) {
+      await db.from('system_events').insert({
+        workspace_id: workspaceSlug,
+        source: 'onboarding',
+        event_type: 'WORKSPACE_CLAIM_REJECTED_CONFIGURED',
+        title: `[Auth] Claim avvist — workspace er konfigurert uten eier`,
+        severity: 'warning',
+        metadata: { reason: 'configured_without_owner', twitchLogin: existing.twitch_login ?? null, requestingUserId: userId },
+      }).catch(() => {});
+      return NextResponse.json({
+        error: `Workspace "${workspaceSlug}" er konfigurert for en annen konto. Velg et annet workspace-ID.`,
+      }, { status: 409 });
+    }
   }
 
   const isClaiming = !!existing;
 
-  // Create or claim workspace
-  const credentials = {
-    twitchClientId,
-    twitchClientSecret,
-    discordBotToken,
-    discordGuildId,
-    discordInviteUrl,
-    discordLiveChannelId,
-    discordChatChannelId,
-  };
-
-  const kanalPreferanser = {
-    live: discordLiveChannelId || null,
-    chat: discordChatChannelId || null,
-    klipp: null,
-    partner: null,
-    subs: null,
-    raid: null,
-    streamplan: null,
-    content_factory: null,
-    feil: null,
-  };
+  const credentials = { twitchClientId, twitchClientSecret, discordBotToken, discordGuildId, discordInviteUrl, discordLiveChannelId, discordChatChannelId };
+  const kanalPreferanser = { live: discordLiveChannelId || null, chat: discordChatChannelId || null, klipp: null, partner: null, subs: null, raid: null, streamplan: null, content_factory: null, feil: null };
 
   let wsError: any = null;
 
   if (isClaiming) {
-    // Workspace exists (no owner) — claim it but preserve existing settings_json
     const { error } = await db.from('workspaces').update({
       owner_user_id: userId,
       updated_at: new Date().toISOString(),
     }).eq('id', workspaceSlug);
     wsError = error;
   } else {
-    // New workspace — insert
     const { error } = await db.from('workspaces').insert({
       id: workspaceSlug,
       owner_user_id: userId,
@@ -114,41 +122,47 @@ export async function POST(req: NextRequest) {
       live_channel_id: discordLiveChannelId || null,
       bot_personality: 'dark_gaming',
       plan: 'alpha',
-      settings_json: {
-        credentials,
-        kanalPreferanser,
-        stream_syklus: {},
-      },
+      settings_json: { credentials, kanalPreferanser, stream_syklus: {} },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
     wsError = error;
   }
 
-  if (wsError) {
-    return NextResponse.json({ error: wsError.message }, { status: 500 });
-  }
+  if (wsError) return NextResponse.json({ error: wsError.message }, { status: 500 });
 
-  // Store workspace_id in user metadata — middleware reads this to inject x-workspace-id
+  // ── Write workspace_id into user_metadata ─────────────────────────────────
   const { error: metaError } = await adminClient.auth.admin.updateUserById(userId!, {
     user_metadata: { workspace_id: workspaceSlug, brand_name: brandName },
   });
+  if (metaError) return NextResponse.json({ error: metaError.message }, { status: 500 });
 
-  if (metaError) {
-    return NextResponse.json({ error: metaError.message }, { status: 500 });
-  }
+  // ── Audit log — always record workspace_id changes ────────────────────────
+  await db.from('system_events').insert({
+    workspace_id: workspaceSlug,
+    source: 'onboarding',
+    event_type: 'WORKSPACE_ID_ASSIGNED',
+    title: `[Auth] workspace_id-tilordning via onboarding/complete for user ${userId}`,
+    severity: 'info',
+    metadata: {
+      source: 'onboarding_complete',
+      action: isClaiming ? 'claimed' : 'created',
+      userId,
+      previousWorkspaceId,
+      newWorkspaceId: workspaceSlug,
+      brandName,
+      twitchUsername,
+    },
+  }).catch(() => {});
 
-  // Emit system event so the dashboard knows the workspace is live
-  try {
-    await db.from('system_events').insert({
-      workspace_id: workspaceSlug,
-      source: 'system',
-      event_type: 'WORKSPACE_CREATED',
-      title: `Workspace ${workspaceSlug} opprettet`,
-      severity: 'info',
-      metadata: { user_id: userId, twitch_username: twitchUsername },
-    });
-  } catch {}
+  await db.from('system_events').insert({
+    workspace_id: workspaceSlug,
+    source: 'system',
+    event_type: 'WORKSPACE_CREATED',
+    title: `Workspace ${workspaceSlug} opprettet`,
+    severity: 'info',
+    metadata: { user_id: userId, twitch_username: twitchUsername },
+  }).catch(() => {});
 
   return NextResponse.json({ ok: true, workspaceId: workspaceSlug });
 }
