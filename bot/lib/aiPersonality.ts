@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
 import { getRecentCrossPlatformContext } from './crossPlatformContext';
 import { logBotAgentEvent } from './agentLogger';
+import { getMemoryContext } from './aiMemory';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -95,34 +95,13 @@ async function hentTopTwitchSpill(): Promise<string[]> {
 }
 
 // ── Community-kontekst fra Supabase ──────────────────────────────────────────
-
-let _kontekstCache: string | null = null;
-let _sistHentetKontekst = 0;
-const KONTEKST_CACHE_MS = 5 * 60 * 1000;
+// Delegated to aiMemory.ts (unified read path for ai_agent_memory).
+// The old inline hentKommunitetKontekst() is replaced by getMemoryContext()
+// which covers all memory_types (viewer, member, joke, topic, feedback_pattern)
+// and caches with the same 5-minute TTL.
 
 async function hentKommunitetKontekst(): Promise<string> {
-  if (_kontekstCache !== null && Date.now() - _sistHentetKontekst < KONTEKST_CACHE_MS) return _kontekstCache;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return '';
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const wsTransport = require('ws');
-    const sb = createClient(url, key, { realtime: { transport: wsTransport }, auth: { persistSession: false, autoRefreshToken: false } });
-    const ws = process.env.WORKSPACE_ID || 'glenvex-default';
-    const [viewersRes, jokesRes, insightsRes] = await Promise.all([
-      sb.from('ai_agent_memory').select('key,summary').eq('workspace_id', ws).eq('memory_type', 'viewer').order('occurrence_count', { ascending: false }).limit(5),
-      sb.from('ai_agent_memory').select('summary').eq('workspace_id', ws).in('memory_type', ['joke', 'topic']).order('occurrence_count', { ascending: false }).limit(4),
-      sb.from('ai_agent_insights').select('title,summary').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(2),
-    ]);
-    const deler: string[] = [];
-    if (viewersRes.data?.length) deler.push('Kjente community-folk: ' + viewersRes.data.map((v: any) => `${v.key} (${v.summary})`).join(', '));
-    if (jokesRes.data?.length) deler.push('Community-temaer/inside jokes: ' + jokesRes.data.map((j: any) => j.summary).join('; '));
-    if (insightsRes.data?.length) deler.push('Ferske innsikter: ' + insightsRes.data.map((i: any) => `${i.title} – ${i.summary}`).join('. '));
-    _kontekstCache = deler.join('\n');
-    _sistHentetKontekst = Date.now();
-    return _kontekstCache;
-  } catch { return ''; }
+  return getMemoryContext();
 }
 
 // ── Hjelpefunksjoner ──────────────────────────────────────────────────────────
