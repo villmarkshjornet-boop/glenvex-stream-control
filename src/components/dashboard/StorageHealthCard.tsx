@@ -39,7 +39,7 @@ export function StorageHealthCard() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="h-24 bg-g-card border border-g-border rounded-2xl animate-pulse" />;
+  if (loading) return <div className="h-24 bg-g-card border border-g-border rounded-xl animate-pulse" />;
   if (!data) return null;
 
   const warnings = data.databaseCategories.filter(c => c.warning);
@@ -53,50 +53,75 @@ export function StorageHealthCard() {
   };
 
   return (
-    <section className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
+    <section className="bg-g-card border border-g-border rounded-xl overflow-hidden">
       <button
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-g-bg/30 transition-all"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-g-bg/30 transition-all"
         onClick={() => setExpanded(v => !v)}
       >
-        <div className="flex items-center gap-3">
-          <HardDrive size={14} className="text-g-muted/50 flex-shrink-0" />
-          <div>
-            <p className="text-xs font-bold text-g-text/80">{t('storage.title')}</p>
-            <p className="text-[10px] text-g-muted/50 mt-0.5">
-              {t('storage.totalRows', { n: fmt(totalRows) })}
-              {data.storageReachable && totalFiles > 0 && ` · ${totalFiles}+ ${t('storage.filesCount', { n: '' }).replace('  ', ' ').trim()}`}
-              {!data.storageReachable && ` · ${t('storage.unreachable')}`}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
           {warnings.length > 0 ? (
-            <span className="flex items-center gap-1 text-amber-400/80 text-[10px] font-bold">
-              <AlertTriangle size={11} />
-              {t('storage.warnings', { n: warnings.length })}
-            </span>
+            <AlertTriangle size={12} className="text-amber-400/80 flex-shrink-0" />
           ) : (
-            <span className="flex items-center gap-1 text-g-green/60 text-[10px]">
-              <CheckCircle size={11} />
-              OK
-            </span>
+            <CheckCircle size={12} className="text-g-green/60 flex-shrink-0" />
           )}
-          <span className="text-g-muted/30 text-xs">{expanded ? '▲' : '▼'}</span>
+          <h3 className="text-xs font-semibold tracking-widest uppercase text-g-muted">
+            {t('storage.title')}
+          </h3>
         </div>
+        <span className="text-[11px] text-g-muted/40">{expanded ? '▲' : '▼'}</span>
       </button>
 
+      {!expanded && (
+        <div className="px-4 pb-4 space-y-2">
+          {/* Summary items */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-g-muted">Rader</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${warnings.length > 0 ? 'bg-amber-400' : 'bg-g-green'}`} />
+              <span className="text-xs text-g-text font-mono">{fmt(totalRows)}</span>
+            </div>
+          </div>
+          {data.storageReachable && totalFiles > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-g-muted">Filer</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-g-green" />
+                <span className="text-xs text-g-text font-mono">{totalFiles}+</span>
+              </div>
+            </div>
+          )}
+          {!data.storageReachable && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-g-muted">Storage</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="text-xs text-red-400">{t('storage.unreachable')}</span>
+              </div>
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-g-muted">Advarsler</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-xs text-amber-400">{warnings.length}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {expanded && (
-        <div className="border-t border-g-border/40 p-5 space-y-5">
+        <div className="border-t border-g-border/40 p-4 space-y-4">
 
           {warnings.length > 0 && (
             <div className="space-y-2">
               {warnings.map(c => (
-                <div key={c.label} className="flex items-start gap-2 p-3 bg-amber-400/5 border border-amber-400/15 rounded-xl">
-                  <AlertTriangle size={12} className="text-amber-400/70 flex-shrink-0 mt-0.5" />
+                <div key={c.label} className="flex items-start gap-2 p-2.5 bg-amber-400/5 border border-amber-400/15 rounded-lg">
+                  <AlertTriangle size={11} className="text-amber-400/70 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-xs font-bold text-amber-400/80">{c.label}</p>
-                    <p className="text-[10px] text-g-muted/60 mt-0.5">{c.warning}</p>
+                    <p className="text-[11px] text-g-muted/60 mt-0.5">{c.warning}</p>
                   </div>
                 </div>
               ))}
@@ -104,7 +129,7 @@ export function StorageHealthCard() {
           )}
 
           <div>
-            <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold mb-3">
+            <div className="flex items-center gap-1.5 text-[11px] text-g-muted uppercase tracking-wider font-bold mb-3">
               <Database size={10} /> Database
             </div>
             <div className="space-y-2">
@@ -113,12 +138,12 @@ export function StorageHealthCard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-g-text/80 font-medium">{c.label}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${TIER_BADGE[c.tier]}`}>
+                      <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${TIER_BADGE[c.tier]}`}>
                         {tierLabel[c.tier]}
                       </span>
                     </div>
                     {c.note && (
-                      <p className="text-[10px] text-g-muted/40 mt-0.5 truncate">{c.note}</p>
+                      <p className="text-[11px] text-g-muted/40 mt-0.5 truncate">{c.note}</p>
                     )}
                   </div>
                   <span className={`text-sm font-black flex-shrink-0 tabular-nums ${c.rowCount < 0 ? 'text-g-muted/30' : TIER_COLOR[c.tier]}`}>
@@ -131,7 +156,7 @@ export function StorageHealthCard() {
 
           {data.storageReachable && (
             <div>
-              <div className="flex items-center gap-1.5 text-[10px] text-g-muted uppercase tracking-wider font-bold mb-3">
+              <div className="flex items-center gap-1.5 text-[11px] text-g-muted uppercase tracking-wider font-bold mb-3">
                 <HardDrive size={10} /> {t('storage.supabaseStorage')} ({STORAGE_BUCKET_LABEL})
               </div>
               {data.storageFiles.length === 0 ? (
@@ -146,10 +171,10 @@ export function StorageHealthCard() {
                       </div>
                       <div className="space-y-0.5">
                         {g.examplePaths.map(p => (
-                          <p key={p} className="text-[10px] text-g-muted/40 font-mono truncate">{p}</p>
+                          <p key={p} className="text-[11px] text-g-muted/40 font-mono truncate">{p}</p>
                         ))}
                         {g.fileCount > 3 && (
-                          <p className="text-[9px] text-g-muted/30">… og {g.fileCount - 3}+ til</p>
+                          <p className="text-[11px] text-g-muted/30">… og {g.fileCount - 3}+ til</p>
                         )}
                       </div>
                     </div>
@@ -167,14 +192,14 @@ export function StorageHealthCard() {
           )}
 
           <div className="pt-3 border-t border-g-border/30 space-y-1.5">
-            <p className="text-[10px] text-g-muted/50 font-bold uppercase tracking-wider">{t('storage.retentionPolicy')}</p>
-            <p className="text-[10px] text-g-muted/40">
+            <p className="text-[11px] text-g-muted/50 font-bold uppercase tracking-wider">{t('storage.retentionPolicy')}</p>
+            <p className="text-[11px] text-g-muted/40">
               <span className="text-g-green font-bold">{t('storage.permanent')}:</span> Aldri slett — grunnlaget for AI-læring over tid
             </p>
-            <p className="text-[10px] text-g-muted/40">
+            <p className="text-[11px] text-g-muted/40">
               <span className="text-amber-400 font-bold">{t('storage.activeMedia')}:</span> Hold klipp til bruker har lastet ned; flytt til kald lagring (R2) etter 60 dager
             </p>
-            <p className="text-[10px] text-g-muted/40">
+            <p className="text-[11px] text-g-muted/40">
               <span className="text-red-400/70 font-bold">Railway-disk:</span> {t('storage.ephemeral')} — raw VODs og lydfiler forsvinner ved restart
             </p>
           </div>

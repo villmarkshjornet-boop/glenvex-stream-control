@@ -39,16 +39,16 @@ export function NextStreamBrief() {
     const STEPS = [1, 2, 3, 4, 5, 6] as const;
 
     return (
-      <section className="bg-g-card border border-g-green/10 rounded-2xl p-5">
+      <div className="bg-g-card border border-g-border rounded-xl p-5 h-full">
         <div className="flex items-start justify-between mb-4">
-          <div>
-            <p className="text-base font-black text-g-text">{t('nextBrief.title')}</p>
-            <p className="text-xs text-amber-400/70 mt-0.5">{t('nextBrief.onboardingNote')}</p>
-          </div>
-          <span className="text-[10px] text-g-green/40 uppercase tracking-widest font-bold mt-0.5">
+          <h3 className="text-xs font-semibold tracking-widest uppercase text-g-muted">
+            {t('nextBrief.title')}
+          </h3>
+          <span className="text-[11px] text-g-green/40 uppercase tracking-widest font-bold">
             {t('nextBrief.aiProducer')}
           </span>
         </div>
+        <p className="text-xs text-amber-400/70 mb-4">{t('nextBrief.onboardingNote')}</p>
 
         <ol className="space-y-3">
           {STEPS.map(n => (
@@ -59,41 +59,42 @@ export function NextStreamBrief() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-g-text/80 leading-tight">{t(`nextBrief.onboarding.${n}_action`)}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-g-muted/50">{t(`nextBrief.onboarding.${n}_timing`)}</span>
+                  <span className="text-[11px] text-g-muted/50">{t(`nextBrief.onboarding.${n}_timing`)}</span>
                   <span className="text-g-muted/20">·</span>
-                  <span className="text-[10px] text-g-muted/40">{t(`nextBrief.onboarding.${n}_note`)}</span>
+                  <span className="text-[11px] text-g-muted/40">{t(`nextBrief.onboarding.${n}_note`)}</span>
                 </div>
               </div>
             </li>
           ))}
         </ol>
 
-        <p className="text-[10px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
+        <p className="text-[11px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
           {t('nextBrief.afterFirstStream')}
         </p>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="bg-g-card border border-g-green/15 rounded-2xl p-5">
-      <div className="flex items-start justify-between mb-5">
-        <div>
-          <p className="text-base font-black text-g-text">{t('nextBrief.title')}</p>
-          <p className="text-xs text-g-muted/50 mt-0.5">
-            {t('nextBrief.forNextStream')}
-            {data.basedOnStreams >= 2 && (
-              <span className="ml-1">· {t('nextBrief.basedOn', { count: data.basedOnStreams })}</span>
-            )}
-            {durationLabel && (
-              <span className="ml-1">· {durationLabel}</span>
-            )}
-          </p>
-        </div>
-        <span className="text-[10px] text-g-green/50 uppercase tracking-widest font-bold mt-0.5">
+    <div className="bg-g-card border border-g-border rounded-xl p-5 h-full">
+      <div className="flex items-start justify-between mb-4">
+        <h3 className="text-xs font-semibold tracking-widest uppercase text-g-muted">
+          {t('nextBrief.title')}
+        </h3>
+        <span className="text-[11px] text-g-green/50 uppercase tracking-widest font-bold">
           {t('nextBrief.aiProducer')}
         </span>
       </div>
+
+      <p className="text-xs text-g-muted/50 mb-5">
+        {t('nextBrief.forNextStream')}
+        {data.basedOnStreams >= 2 && (
+          <span className="ml-1">· {t('nextBrief.basedOn', { count: data.basedOnStreams })}</span>
+        )}
+        {durationLabel && (
+          <span className="ml-1">· {durationLabel}</span>
+        )}
+      </p>
 
       <ol className="space-y-4">
         {data.actions.map((a, i) => (
@@ -109,15 +110,15 @@ export function NextStreamBrief() {
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
-                <span className={`text-[10px] font-black tracking-tight ${STAR_COLOR[a.stars]}`}>
+                <span className={`text-[11px] font-black tracking-tight ${STAR_COLOR[a.stars]}`}>
                   {'★'.repeat(a.stars)}{'☆'.repeat(3 - a.stars)}
                 </span>
                 <span className="text-[11px] text-g-muted/70 font-medium">{a.timing}</span>
                 <span className="text-g-muted/20">·</span>
-                <span className="text-[10px] text-g-muted/50 leading-tight">{a.reason}</span>
+                <span className="text-[11px] text-g-muted/50 leading-tight">{a.reason}</span>
                 <div className="flex items-center gap-1 ml-auto flex-shrink-0">
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${CONFIDENCE_DOT[a.confidence]}`} />
-                  <span className="text-[9px] text-g-muted/30 uppercase tracking-wider">{a.dataSource}</span>
+                  <span className="text-[11px] text-g-muted/30 uppercase tracking-wider">{a.dataSource}</span>
                 </div>
               </div>
             </div>
@@ -126,12 +127,12 @@ export function NextStreamBrief() {
       </ol>
 
       {data.basedOnStreams < 3 && (
-        <p className="text-[10px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
+        <p className="text-[11px] text-g-muted/30 mt-4 pt-3 border-t border-g-border/20">
           {t('nextBrief.becomesMorePrecise', {
             streams: data.basedOnStreams === 1 ? '1 stream' : `${data.basedOnStreams} streams`,
           })}
         </p>
       )}
-    </section>
+    </div>
   );
 }
