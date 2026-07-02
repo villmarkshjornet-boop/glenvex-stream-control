@@ -41,15 +41,34 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
 
   if (!heroStream) {
     return (
-      <div className="bg-g-card border border-g-border rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-2 h-2 rounded-full bg-g-muted/40" />
-          <span className="text-[11px] font-semibold tracking-widest uppercase text-g-muted/50">Offline</span>
+      <div className="glass-card rounded-2xl p-8 relative overflow-hidden shadow-green-sm">
+        {/* Ambient green glow */}
+        <div className="absolute inset-0 bg-gradient-to-br from-g-green/[0.05] via-transparent to-transparent pointer-events-none" />
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-6">
+            <span className="w-2 h-2 rounded-full bg-g-muted/30" />
+            <span className="text-[11px] font-semibold tracking-widest uppercase text-g-muted/40">Offline</span>
+          </div>
+          <h2 className="text-4xl font-bold gradient-text mb-2 leading-tight">Creator OS</h2>
+          <p className="text-sm text-g-muted mb-8">{t('hero.noStream')}</p>
+          <div className="grid grid-cols-3 gap-3">
+            <Link href="/streamplan"
+              className="flex flex-col gap-1 px-4 py-3 bg-g-bg/80 border border-g-border rounded-xl hover:border-g-green/30 hover:bg-g-card-hover transition-all duration-200 group">
+              <span className="text-[11px] font-semibold tracking-widest uppercase text-g-muted group-hover:text-g-green transition-colors">Streamplan</span>
+              <span className="text-xs text-g-muted/50">Planlegg neste stream</span>
+            </Link>
+            <Link href="/stream-briefing"
+              className="flex flex-col gap-1 px-4 py-3 bg-g-bg/80 border border-g-border rounded-xl hover:border-g-green/30 hover:bg-g-card-hover transition-all duration-200 group">
+              <span className="text-[11px] font-semibold tracking-widest uppercase text-g-muted group-hover:text-g-green transition-colors">Briefing</span>
+              <span className="text-xs text-g-muted/50">AI pre-stream analyse</span>
+            </Link>
+            <Link href="/statistikk"
+              className="flex flex-col gap-1 px-4 py-3 bg-g-bg/80 border border-g-border rounded-xl hover:border-g-green/30 hover:bg-g-card-hover transition-all duration-200 group">
+              <span className="text-[11px] font-semibold tracking-widest uppercase text-g-muted group-hover:text-g-green transition-colors">Statistikk</span>
+              <span className="text-xs text-g-muted/50">Se ytelse over tid</span>
+            </Link>
+          </div>
         </div>
-        <p className="text-g-muted text-sm mb-2">{t('hero.noStream')}</p>
-        <Link href="/streamplan" className="text-xs text-g-green hover:underline inline-block">
-          {t('hero.viewStreamplan')}
-        </Link>
       </div>
     );
   }
@@ -58,7 +77,7 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
   const isEstimate = !heroStream.checklist.streamHistory;
 
   return (
-    <div className="bg-g-card border border-g-border rounded-2xl p-6 shadow-green-sm">
+    <div className="glass-card rounded-2xl p-6 shadow-green-sm">
       <div className="flex items-start justify-between gap-6">
         <div className="min-w-0 flex-1 space-y-4">
           {/* Label */}

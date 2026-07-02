@@ -74,7 +74,7 @@ export default function Dashboard() {
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-black tracking-wider text-g-text uppercase">
+        <h1 className="text-2xl font-semibold gradient-text">
           {isLive ? 'Live Command Center' : 'Creator Command Center'}
         </h1>
         <div className="flex items-center gap-3">

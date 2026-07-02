@@ -114,7 +114,7 @@ export default function StatistikkPage() {
       {/* Page header */}
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-g-text">Statistikk</h1>
+          <h1 className="text-2xl font-semibold gradient-text">Statistikk</h1>
           <p className="text-sm text-g-muted mt-1">
             Uke {events?.weekNumber ?? '–'} · Vekstanalyse og events
           </p>
@@ -131,7 +131,7 @@ export default function StatistikkPage() {
 
       {/* Hero metrics row */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-g-card border border-g-border rounded-xl p-5">
+        <div className="glass-card rounded-xl p-5 shadow-green-sm">
           <p className="text-[11px] font-medium tracking-widest uppercase text-g-muted mb-2">Følgere totalt</p>
           {growthLoading ? (
             <div className="animate-pulse h-10 bg-g-border/50 rounded w-3/4" />

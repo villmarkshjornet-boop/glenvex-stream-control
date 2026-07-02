@@ -142,7 +142,7 @@ export default function StreamplanPage() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-g-text">Streamplan</h1>
+          <h1 className="text-2xl font-semibold gradient-text">Streamplan</h1>
           <p className="text-sm text-g-muted mt-1">Ukentlige faste streams + enkeltdatoer</p>
         </div>
         <button
@@ -341,7 +341,7 @@ export default function StreamplanPage() {
 
       {/* Discord preview */}
       {totalAktive > 0 && (
-        <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <div className="glass-card rounded-2xl p-6 shadow-green-sm">
           <h2 className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-4 pb-3 border-b border-g-border/40">
             Forhåndsvisning — Discord embed
           </h2>

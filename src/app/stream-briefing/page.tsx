@@ -43,12 +43,12 @@ export default function StreamBriefingPage() {
 
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-semibold text-g-text">Stream Briefing</h1>
+        <h1 className="text-2xl font-semibold gradient-text">Stream Briefing</h1>
         <p className="text-sm text-g-muted mt-1">AI-generert briefing for neste stream</p>
       </div>
 
       {/* Generator card */}
-      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+      <div className="glass-card rounded-2xl p-6 shadow-green-sm">
         <p className="text-sm text-g-muted leading-relaxed mb-5">
           Generer en AI-basert pre-stream briefing basert på alt systemet vet om communityet ditt akkurat nå.
           Inkluderer: community-stemning, topp-topics, AI-innsikter, highlights-status og strategisk anbefaling.

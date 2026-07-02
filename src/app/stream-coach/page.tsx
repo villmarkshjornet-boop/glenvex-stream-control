@@ -307,7 +307,7 @@ function StreamCoachInner() {
       {/* Page header */}
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-g-text">Stream Coach</h1>
+          <h1 className="text-2xl font-semibold gradient-text">Stream Coach</h1>
           <p className="text-sm text-g-muted mt-1">Creator intelligence — hva fungerte, hvem var der, hva gjøres neste gang</p>
         </div>
         {!loading && data && data.history.length > 0 && (
@@ -367,7 +367,7 @@ function StreamCoachInner() {
               {/* KPI-rad */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 {/* Score ring */}
-                <div className="col-span-2 lg:col-span-1 bg-g-card border border-g-border rounded-2xl p-4 flex flex-col items-center justify-center">
+                <div className="col-span-2 lg:col-span-1 glass-card rounded-2xl p-4 flex flex-col items-center justify-center shadow-green-sm">
                   {score ? (
                     <>
                       <ScoreRing score={score.total} grade={score.grade} />
