@@ -29,26 +29,47 @@ function PassordPanel() {
   }
 
   return (
-    <div id="passord" className="bg-g-card border border-g-border rounded-2xl p-5">
-      <h2 className="text-xs font-bold text-g-text mb-1">Sett passord</h2>
-      <p className="text-[9px] text-g-muted mb-4">Sett et passord så du kan logge inn direkte neste gang.</p>
-      <form onSubmit={settPassord} className="space-y-3 max-w-sm">
-        <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Nytt passord</label>
-          <input type="password" value={passord} onChange={e => setPassord(e.target.value)}
-            minLength={6} required placeholder="Minst 6 tegn"
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40" />
+    <div id="passord" className="bg-g-card border border-g-border rounded-2xl p-6">
+      <h2 className="text-sm font-semibold text-g-text pb-4 mb-5 border-b border-g-border/40">Sett passord</h2>
+      <p className="text-sm text-g-muted mb-5">Sett et passord så du kan logge inn direkte neste gang.</p>
+      <form onSubmit={settPassord} className="space-y-4 max-w-sm">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">Nytt passord</label>
+          <input
+            type="password"
+            value={passord}
+            onChange={e => setPassord(e.target.value)}
+            minLength={6}
+            required
+            placeholder="Minst 6 tegn"
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+          />
         </div>
-        <div>
-          <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Bekreft passord</label>
-          <input type="password" value={bekreft} onChange={e => setBekreft(e.target.value)}
-            minLength={6} required placeholder="Gjenta passord"
-            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text focus:outline-none focus:border-g-green/40" />
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">Bekreft passord</label>
+          <input
+            type="password"
+            value={bekreft}
+            onChange={e => setBekreft(e.target.value)}
+            minLength={6}
+            required
+            placeholder="Gjenta passord"
+            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+          />
         </div>
-        {feil && <p className="text-xs text-red-400">{feil}</p>}
-        {status === 'ok' && <p className="text-xs text-g-green">✓ Passord satt! Du kan nå logge inn med e-post og passord.</p>}
-        <button type="submit" disabled={status === 'loading'}
-          className="px-4 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold rounded transition-all disabled:opacity-50">
+        {feil && (
+          <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{feil}</p>
+        )}
+        {status === 'ok' && (
+          <p className="text-sm text-g-green bg-g-green/10 border border-g-green/20 rounded-lg px-3 py-2">
+            ✓ Passord satt! Du kan nå logge inn med e-post og passord.
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={status === 'loading'}
+          className="px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+        >
           {status === 'loading' ? 'Lagrer...' : 'Sett passord'}
         </button>
       </form>
@@ -112,14 +133,15 @@ function TwitchBotAdminPanel() {
   function Toggle({ felt, label, desc, invertert = false }: { felt: string; label: string; desc?: string; invertert?: boolean }) {
     const aktiv = invertert ? !settings?.[felt] : !!settings?.[felt];
     return (
-      <div className="flex items-center justify-between py-2 border-b border-g-border/30 last:border-0">
+      <div className="flex items-center justify-between py-3 border-b border-g-border/30 last:border-0">
         <div>
-          <p className="text-xs text-g-text">{label}</p>
-          {desc && <p className="text-[9px] text-g-muted">{desc}</p>}
+          <p className="text-sm text-g-text">{label}</p>
+          {desc && <p className="text-xs text-g-muted mt-0.5">{desc}</p>}
         </div>
         <button
           onClick={() => lagreFelt(felt, invertert ? aktiv : !aktiv)}
-          className={`relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}>
+          className={`relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}
+        >
           <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 ${aktiv ? 'left-5 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
         </button>
       </div>
@@ -138,18 +160,18 @@ function TwitchBotAdminPanel() {
   };
 
   return (
-    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-2xloverflow-hidden">
+    <div id="twitch-bot" className="bg-g-card border border-g-border rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-g-border flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-g-border flex items-center justify-between">
         <div>
-          <h2 className="text-xs font-bold text-g-text">Twitch Bot Admin</h2>
-          <p className="text-[9px] text-g-muted mt-0.5">Full kontroll over Twitch-boten — chat-atferd, toggle-er og live aktivitet</p>
+          <h2 className="text-sm font-semibold text-g-text">Twitch Bot Admin</h2>
+          <p className="text-xs text-g-muted mt-0.5">Chat-atferd, toggle-er og live aktivitet</p>
         </div>
-        <div className="flex items-center gap-2">
-          {saving && <span className="text-[9px] text-g-muted">Lagrer...</span>}
-          {saved && <span className="text-[9px] text-g-green">✓ Lagret!</span>}
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-[9px] font-bold border ${
-            botOnline === true ? 'text-g-green border-g-green/20 bg-g-green/5' :
+        <div className="flex items-center gap-3">
+          {saving && <span className="text-xs text-g-muted">Lagrer...</span>}
+          {saved && <span className="text-xs text-g-green">✓ Lagret</span>}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+            botOnline === true  ? 'text-g-green border-g-green/20 bg-g-green/5' :
             botOnline === false ? 'text-red-400 border-red-500/20 bg-red-500/5' :
             'text-g-muted border-g-border'
           }`}>
@@ -160,21 +182,22 @@ function TwitchBotAdminPanel() {
       </div>
 
       {!settings ? (
-        <div className="p-5"><p className="text-xs text-g-muted">Laster...</p></div>
+        <div className="p-6"><p className="text-sm text-g-muted">Laster...</p></div>
       ) : (
-        <div className="p-5 space-y-6">
+        <div className="p-6 space-y-6">
 
           {/* Master toggle */}
           <div>
-            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Master-kontroll</p>
-            <div className="flex items-center justify-between p-3 rounded-lg border border-g-border bg-g-bg">
+            <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Master-kontroll</p>
+            <div className="flex items-center justify-between p-4 rounded-lg border border-g-border bg-g-bg">
               <div>
-                <p className="text-xs font-bold text-g-text">Bot aktiv</p>
-                <p className="text-[9px] text-g-muted">Skrur av/på all bot-aktivitet (Twitch + Discord)</p>
+                <p className="text-sm font-medium text-g-text">Bot aktiv</p>
+                <p className="text-xs text-g-muted mt-0.5">Skrur av/på all bot-aktivitet (Twitch + Discord)</p>
               </div>
               <button
                 onClick={() => lagreFelt('aktiv', !settings.aktiv)}
-                className={`relative w-12 h-6 rounded-full transition-all duration-200 ${settings.aktiv ? 'bg-g-green/70' : 'bg-g-bg border-2 border-g-border'}`}>
+                className={`relative w-12 h-6 rounded-full transition-all duration-200 ${settings.aktiv ? 'bg-g-green/70' : 'bg-g-bg border-2 border-g-border'}`}
+              >
                 <span className={`absolute top-0.5 w-5 h-5 rounded-full transition-all duration-200 ${settings.aktiv ? 'left-6 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
               </button>
             </div>
@@ -182,8 +205,8 @@ function TwitchBotAdminPanel() {
 
           {/* Twitch chat toggles */}
           <div>
-            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Twitch Chat</p>
-            <div className="bg-g-bg border border-g-border rounded-lg px-3 divide-y divide-g-border/30">
+            <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Twitch Chat</p>
+            <div className="bg-g-bg border border-g-border rounded-lg px-4 divide-y divide-g-border/30">
               <Toggle felt="pauseTwitch" label="Twitch chat-svar" desc="Boten svarer i Twitch-chat" invertert />
               <Toggle felt="pausePartnerPromo" label="Partner-promo i chat" desc="AI-generert partner-reklame hvert 60 min" invertert />
               <Toggle felt="pauseLiveVarsler" label="Live-varsler til Discord" desc="Poster embed når stream starter" invertert />
@@ -193,10 +216,10 @@ function TwitchBotAdminPanel() {
 
           {/* Chat-atferd */}
           <div>
-            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Chat-atferd</p>
+            <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Chat-atferd</p>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-g-bg border border-g-border rounded-lg p-3">
-                <label className="text-[9px] text-g-muted uppercase tracking-wider font-bold block mb-2">
+              <div className="bg-g-bg border border-g-border rounded-lg p-4">
+                <label className="text-xs font-medium text-g-muted block mb-2">
                   Svar-sjanse: <span className="text-g-green">{Math.round((settings.svarSjanse ?? 0.35) * 100)}%</span>
                 </label>
                 <input
@@ -205,33 +228,35 @@ function TwitchBotAdminPanel() {
                   onChange={e => lagreFelt('svarSjanse', parseInt(e.target.value) / 100)}
                   className="w-full accent-green-500"
                 />
-                <p className="text-[8px] text-g-muted mt-1">Sjanse for at boten svarer på tilfeldige meldinger</p>
+                <p className="text-xs text-g-muted mt-2">Sjanse for at boten svarer på tilfeldige meldinger</p>
               </div>
-              <div className="bg-g-bg border border-g-border rounded-lg p-3">
-                <label className="text-[9px] text-g-muted uppercase tracking-wider font-bold block mb-2">
+              <div className="bg-g-bg border border-g-border rounded-lg p-4">
+                <label className="text-xs font-medium text-g-muted block mb-2">
                   Cooldown: <span className="text-g-green">{settings.cooldownSek ?? 15}s</span>
                 </label>
                 <input
                   type="number" min="5" max="300" step="5"
                   value={settings.cooldownSek ?? 15}
                   onChange={e => lagreFelt('cooldownSek', parseInt(e.target.value) || 15)}
-                  className="w-full bg-transparent text-xs text-g-text border-0 outline-none focus:border-0"
+                  className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2 text-sm text-g-text focus:outline-none focus:border-g-green/40 transition-all"
                 />
-                <p className="text-[8px] text-g-muted mt-1">Sekunder mellom svar til samme bruker</p>
+                <p className="text-xs text-g-muted mt-2">Sekunder mellom svar til samme bruker</p>
               </div>
             </div>
           </div>
 
           {/* Tone */}
           <div>
-            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Bot-tone i Twitch-chat</p>
+            <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Bot-tone i Twitch-chat</p>
             <div className="grid grid-cols-3 gap-2">
               {TONER_TWITCH.map(t => (
-                <button key={t.verdi}
+                <button
+                  key={t.verdi}
                   onClick={() => lagreFelt('tone', t.verdi)}
-                  className={`p-2.5 rounded-lg border text-left transition-all ${settings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}>
-                  <p className={`text-[10px] font-bold ${settings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
-                  <p className="text-[8px] text-g-muted mt-0.5 leading-tight">{t.desc}</p>
+                  className={`p-3 rounded-lg border text-left transition-all ${settings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}
+                >
+                  <p className={`text-xs font-semibold ${settings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
+                  <p className="text-xs text-g-muted mt-0.5 leading-tight">{t.desc}</p>
                 </button>
               ))}
             </div>
@@ -239,7 +264,7 @@ function TwitchBotAdminPanel() {
 
           {/* Chat-kommandoer */}
           <div>
-            <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Tilgjengelige chat-kommandoer</p>
+            <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Tilgjengelige chat-kommandoer</p>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { cmd: '!discordsiste', desc: 'Oppsummerer siste Discord-aktivitet', plattform: 'Twitch' },
@@ -248,22 +273,22 @@ function TwitchBotAdminPanel() {
                 { cmd: '!twitchtema', desc: 'Viser aktuelle Twitch-temaer', plattform: 'Discord' },
                 { cmd: '!communitymemory', desc: 'AI-oppsummering av community-hukommelse', plattform: 'Discord' },
               ].map(c => (
-                <div key={c.cmd} className="bg-g-bg border border-g-border rounded p-2">
-                  <p className="text-[10px] font-mono font-bold text-g-green">{c.cmd}</p>
-                  <p className="text-[8px] text-g-muted mt-0.5">{c.desc}</p>
-                  <span className="text-[7px] text-g-muted/60 uppercase tracking-wider">{c.plattform}</span>
+                <div key={c.cmd} className="bg-g-bg border border-g-border rounded-lg p-3">
+                  <p className="text-xs font-mono font-semibold text-g-green">{c.cmd}</p>
+                  <p className="text-xs text-g-muted mt-1">{c.desc}</p>
+                  <span className="text-xs text-g-muted/50 uppercase tracking-wide">{c.plattform}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Tøm Discord bot-logs */}
-          <div className="flex items-center justify-between p-3 rounded-lg border border-g-border bg-g-bg">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-g-border bg-g-bg">
             <div>
-              <p className="text-xs text-g-text">Tøm Discord bot-logs</p>
-              <p className="text-[9px] text-g-muted">Sletter alle meldinger i admin-kanalen. Kun siste oppstartsmelding beholdes.</p>
+              <p className="text-sm text-g-text">Tøm Discord bot-logs</p>
+              <p className="text-xs text-g-muted mt-0.5">Sletter alle meldinger i admin-kanalen. Kun siste oppstartsmelding beholdes.</p>
               {clearResult && (
-                <p className={`text-[9px] mt-1 ${clearResult.ok ? 'text-g-green' : 'text-red-400'}`}>{clearResult.tekst}</p>
+                <p className={`text-xs mt-1.5 ${clearResult.ok ? 'text-g-green' : 'text-red-400'}`}>{clearResult.tekst}</p>
               )}
             </div>
             <button
@@ -276,33 +301,37 @@ function TwitchBotAdminPanel() {
                 setClearingLogs(false);
               }}
               disabled={clearingLogs}
-              className="px-3 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-red-400 hover:border-red-500/30 transition-all disabled:opacity-50 flex-shrink-0">
+              className="px-3 py-1.5 border border-g-border rounded-lg text-xs text-g-muted hover:text-red-400 hover:border-red-500/30 transition-all disabled:opacity-50 flex-shrink-0"
+            >
               {clearingLogs ? '⟳ Sletter...' : '🗑 Tøm nå'}
             </button>
           </div>
 
           {/* Live aktivitetsfeed */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold">Bot-aktivitet (siste 24t)</p>
-              <button onClick={hentEvents} disabled={loadingEvents}
-                className="text-[9px] text-g-muted hover:text-g-green transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-medium text-g-muted tracking-wide uppercase">Bot-aktivitet (siste 24t)</p>
+              <button
+                onClick={hentEvents}
+                disabled={loadingEvents}
+                className="text-xs text-g-muted hover:text-g-green transition-colors"
+              >
                 {loadingEvents ? '⟳ Laster...' : '↻ Oppdater'}
               </button>
             </div>
             {events.length === 0 ? (
-              <p className="text-[9px] text-g-muted">Ingen registrert aktivitet de siste 24 timene.</p>
+              <p className="text-xs text-g-muted">Ingen registrert aktivitet de siste 24 timene.</p>
             ) : (
               <div className="space-y-1 max-h-64 overflow-y-auto">
                 {events.map(e => (
-                  <div key={e.id} className="flex items-start gap-2 py-1.5 border-b border-g-border/20 last:border-0">
-                    <span className="text-[9px] text-g-muted flex-shrink-0 w-24 mt-0.5">
+                  <div key={e.id} className="flex items-start gap-2 py-2 border-b border-g-border/20 last:border-0">
+                    <span className="text-xs text-g-muted flex-shrink-0 w-16 mt-0.5">
                       {new Date(e.created_at).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' })}
                     </span>
-                    <span className="text-[9px] text-g-muted flex-shrink-0 w-24">
+                    <span className="text-xs text-g-muted flex-shrink-0 w-28">
                       {eventTypeLabel[e.event_type] ?? e.event_type.replace(/_/g, ' ')}
                     </span>
-                    <span className="text-[9px] text-g-text flex-1 leading-tight">{e.title}</span>
+                    <span className="text-xs text-g-text flex-1 leading-tight">{e.title}</span>
                   </div>
                 ))}
               </div>
@@ -325,55 +354,54 @@ function TwitchBroadcasterPanel() {
     fetch('/api/auth/twitch/status').then(r => r.json()).then(d => { setStatus(d); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
-  const ok       = status?.connected === true;
-  const expired  = status?.reason === 'token_expired';
-  const missing  = !ok && !expired;
-  const hasF     = status?.hasFollowerScope;
-  const hasSub   = status?.hasSubScope;
-  const wsId     = status?.workspaceId;
+  const ok      = status?.connected === true;
+  const expired = status?.reason === 'token_expired';
+  const hasF    = status?.hasFollowerScope;
+  const hasSub  = status?.hasSubScope;
+  const wsId    = status?.workspaceId;
 
   const connectUrl = `/api/auth/twitch?returnUrl=${encodeURIComponent('/innstillinger?tab=integrasjoner')}`;
 
   return (
-    <div style={{ background: '#0d1117', border: `1px solid ${ok ? '#00ff4125' : '#ff444420'}`, borderRadius: '12px', overflow: 'hidden' }}>
+    <div className={`bg-g-card border rounded-2xl overflow-hidden ${ok ? 'border-g-green/15' : 'border-red-500/20'}`}>
       {/* Header */}
-      <div style={{ padding: '12px 18px', borderBottom: '1px solid #1a2f1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="px-6 py-4 border-b border-g-border/40 flex items-center justify-between">
         <div>
-          <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', color: '#c8f5c8' }}>
-            Twitch Broadcaster Token
-          </span>
-          <p style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginTop: '2px' }}>
-            Kreves for følgere, subscribers og kanaldata
-          </p>
+          <h2 className="text-sm font-semibold text-g-text">Twitch Broadcaster Token</h2>
+          <p className="text-xs text-g-muted mt-0.5">Kreves for følgere, subscribers og kanaldata</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${ok ? '#00ff4125' : expired ? '#ffd70025' : '#ff444425'}`, background: ok ? '#00ff4108' : expired ? '#ffd70008' : '#ff444408', fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, color: ok ? '#00ff41' : expired ? '#ffd700' : '#ff6b6b' }}>
-          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: ok ? '#00ff41' : expired ? '#ffd700' : '#ff6b6b', display: 'inline-block', boxShadow: ok ? '0 0 6px #00ff41' : 'none' }} />
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+          ok      ? 'text-g-green border-g-green/20 bg-g-green/5' :
+          expired ? 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5' :
+          'text-red-400 border-red-500/20 bg-red-500/5'
+        }`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-g-green shadow-[0_0_6px_#00ff41]' : expired ? 'bg-yellow-400' : 'bg-red-400'}`} />
           {loading ? 'Sjekker...' : ok ? 'Tilkoblet' : expired ? 'Token utløpt' : 'Ikke tilkoblet'}
         </div>
       </div>
 
-      <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div className="p-6 space-y-4">
 
-        {/* Status */}
+        {/* Status grid */}
         {!loading && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div className="grid grid-cols-2 gap-3">
             {[
               { label: 'Workspace ID', value: wsId ?? '—', mono: true },
               { label: 'Twitch-konto', value: status?.twitchLogin ? `@${status.twitchLogin}` : '—', mono: true },
               {
                 label: 'moderator:read:followers',
                 value: hasF === true ? '✓ OK' : hasF === false ? '✗ Mangler' : '—',
-                color: hasF === true ? '#00ff41' : '#ff6b6b',
+                color: hasF === true ? 'text-g-green' : 'text-red-400',
               },
               {
                 label: 'channel:read:subscriptions',
                 value: hasSub === true ? '✓ OK' : hasSub === false ? '✗ Mangler (Affiliate)' : '—',
-                color: hasSub === true ? '#00ff41' : '#ffd700',
+                color: hasSub === true ? 'text-g-green' : 'text-yellow-400',
               },
             ].map(r => (
-              <div key={r.label} style={{ background: '#070d07', border: '1px solid #141f14', borderRadius: '6px', padding: '8px 12px' }}>
-                <div style={{ fontSize: '8px', color: '#3a5a3a', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: 'monospace', marginBottom: '3px' }}>{r.label}</div>
-                <div style={{ fontSize: '11px', fontFamily: 'monospace', color: (r as any).color ?? '#c8f5c8', fontWeight: 700 }}>{r.value}</div>
+              <div key={r.label} className="bg-g-bg border border-g-border/60 rounded-lg p-3">
+                <div className="text-xs text-g-muted uppercase tracking-wide mb-1.5">{r.label}</div>
+                <div className={`text-sm font-medium font-mono ${(r as any).color ?? 'text-g-text'}`}>{r.value}</div>
               </div>
             ))}
           </div>
@@ -381,34 +409,34 @@ function TwitchBroadcasterPanel() {
 
         {/* Forklaring */}
         {!ok && !loading && (
-          <div style={{ padding: '10px 12px', background: '#ff444408', border: '1px solid #ff444420', borderRadius: '7px', fontSize: '10px', color: '#ff9999', fontFamily: 'monospace', lineHeight: 1.6 }}>
+          <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg text-xs text-red-400/80 leading-relaxed">
             {expired
               ? '⚠ Tokenet ditt er utløpt. Klikk "Koble til Twitch" for å fornye det — dette tar 10 sekunder og fikser følgere og subscribers.'
-              : `✗ Ingen broadcaster-token funnet for workspace "${wsId}". Boten bruker et eget Railway-token for chat, men followers/subs krever et personlig brukertoken. Koble til nedenfor.`
+              : `✗ Ingen broadcaster-token funnet for workspace "${wsId}". Boten bruker et eget Railway-token for chat, men followers/subs krever et personlig brukertoken.`
             }
           </div>
         )}
 
         {ok && !hasF && (
-          <div style={{ padding: '10px 12px', background: '#ffd70008', border: '1px solid #ffd70020', borderRadius: '7px', fontSize: '10px', color: '#ffd700', fontFamily: 'monospace' }}>
+          <div className="p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg text-xs text-yellow-400 leading-relaxed">
             ⚠ Tokenet mangler <strong>moderator:read:followers</strong>-scope. Koble til på nytt nedenfor for å gi riktig tilgang.
           </div>
         )}
 
         {/* Koble til-knapp */}
-        <a href={connectUrl} style={{
-          display: 'block', textAlign: 'center', padding: '11px',
-          background: ok ? '#00ff4108' : '#9147ff18',
-          border: `1px solid ${ok ? '#00ff4130' : '#9147ff40'}`,
-          borderRadius: '7px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 700,
-          letterSpacing: '0.1em', textTransform: 'uppercase', color: ok ? '#00ff41' : '#bf94ff',
-          textDecoration: 'none', transition: 'all 0.2s',
-        }}>
+        <a
+          href={connectUrl}
+          className={`block text-center px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 border ${
+            ok
+              ? 'bg-g-green/10 border-g-green/25 text-g-green hover:bg-g-green/20 hover:border-g-green/40'
+              : 'bg-purple-500/5 border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/50'
+          }`}
+        >
           {ok ? '↻ Forny Twitch-token' : '⚡ Koble til Twitch (broadcaster)'}
         </a>
 
-        <p style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', textAlign: 'center' }}>
-          Dette er <strong style={{ color: '#4a6a4a' }}>ikke</strong> bot-tilkoblingen — dette er broadcaster-token for å lese kanalstatistikk.
+        <p className="text-xs text-g-muted/50 text-center">
+          Dette er <strong className="text-g-muted/70">ikke</strong> bot-tilkoblingen — dette er broadcaster-token for å lese kanalstatistikk.
         </p>
       </div>
     </div>
@@ -431,33 +459,36 @@ function HelsePanel() {
   useEffect(() => { sjekk(); }, [sjekk]);
 
   const tjenester = health ? [
-    { label: 'Railway', ...health.railway },
+    { label: 'Railway',  ...health.railway },
     { label: 'Supabase', ...health.supabase },
-    { label: 'Storage', ...health.storage },
-    { label: 'OpenAI', ...health.openai },
-    { label: 'Twitch', ...health.twitch },
+    { label: 'Storage',  ...health.storage },
+    { label: 'OpenAI',   ...health.openai },
+    { label: 'Twitch',   ...health.twitch },
   ] : [];
 
   return (
-    <div id="helse" className="bg-g-card border border-g-border rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div id="helse" className="bg-g-card border border-g-border rounded-2xl p-6">
+      <div className="flex items-center justify-between pb-4 mb-5 border-b border-g-border/40">
         <div>
-          <h2 className="text-xs font-bold text-g-text">Systemstatus og API-status</h2>
-          <p className="text-[9px] text-g-muted mt-0.5">Alle integrasjoner og tjenester</p>
+          <h2 className="text-sm font-semibold text-g-text">Systemstatus og API-status</h2>
+          <p className="text-xs text-g-muted mt-0.5">Alle integrasjoner og tjenester</p>
         </div>
-        <button onClick={sjekk} disabled={loading}
-          className="px-3 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+        <button
+          onClick={sjekk}
+          disabled={loading}
+          className="px-3 py-1.5 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all"
+        >
           {loading ? '⟳ Sjekker...' : '↻ Sjekk alle'}
         </button>
       </div>
 
       {!health && !loading && (
-        <p className="text-xs text-g-muted">Klikk «Sjekk alle» for å teste tilkobling.</p>
+        <p className="text-sm text-g-muted">Klikk «Sjekk alle» for å teste tilkobling.</p>
       )}
 
       {loading && (
         <div className="grid grid-cols-5 gap-2">
-          {[1,2,3,4,5].map(i => <div key={i} className="h-16 bg-g-bg border border-g-border rounded-lg animate-pulse" />)}
+          {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-g-bg border border-g-border rounded-lg animate-pulse" />)}
         </div>
       )}
 
@@ -465,18 +496,20 @@ function HelsePanel() {
         <div className="grid grid-cols-5 gap-2">
           {tjenester.map(t => (
             <div key={t.label} className={`p-3 rounded-lg border text-center ${t.ok ? 'border-g-green/20 bg-g-green/5' : 'border-red-500/30 bg-red-500/5'}`}>
-              <p className={`text-xl mb-1 ${t.ok ? 'text-g-green' : 'text-red-400'}`}>{t.ok ? '✓' : '✗'}</p>
-              <p className={`text-[10px] font-black ${t.ok ? 'text-g-green' : 'text-red-400'}`}>{t.label}</p>
-              <p className="text-[8px] text-g-muted mt-1 break-all leading-tight">{t.melding}</p>
+              <div className="flex items-center justify-center mb-2">
+                <span className={`w-2 h-2 rounded-full ${t.ok ? 'bg-g-green' : 'bg-red-500'}`} />
+              </div>
+              <p className={`text-xs font-semibold ${t.ok ? 'text-g-green' : 'text-red-400'}`}>{t.label}</p>
+              <p className="text-xs text-g-muted mt-1 break-all leading-tight">{t.melding}</p>
             </div>
           ))}
         </div>
       )}
 
       {health && !health.altOk && (
-        <div className="mt-3 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-          <p className="text-[10px] text-red-400 font-bold">⚠ En eller flere tjenester er nede</p>
-          <p className="text-[9px] text-g-muted mt-1">Pipeline vil feile. Fiks tilkoblingen og kjør sjekk på nytt.</p>
+        <div className="mt-4 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+          <p className="text-sm text-red-400 font-medium">⚠ En eller flere tjenester er nede</p>
+          <p className="text-xs text-g-muted mt-1">Pipeline vil feile. Fiks tilkoblingen og kjør sjekk på nytt.</p>
         </div>
       )}
     </div>
@@ -502,19 +535,21 @@ function DebugPanel() {
   };
 
   return (
-    <div id="debug" className="bg-g-card border border-g-border rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div id="debug" className="bg-g-card border border-g-border rounded-2xl p-6">
+      <div className="flex items-center justify-between pb-4 mb-5 border-b border-g-border/40">
         <div>
-          <h2 className="text-xs font-bold text-g-text">Debug</h2>
-          <p className="text-[9px] text-g-muted mt-0.5">Rådata fra API for feilsøking</p>
+          <h2 className="text-sm font-semibold text-g-text">Debug</h2>
+          <p className="text-xs text-g-muted mt-0.5">Rådata fra API for feilsøking</p>
         </div>
-        <button onClick={hent}
-          className="px-3 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all">
+        <button
+          onClick={hent}
+          className="px-3 py-1.5 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all"
+        >
           Hent debug-data
         </button>
       </div>
 
-      <div className="flex gap-2 flex-wrap mb-4">
+      <div className="flex gap-2 flex-wrap mb-5">
         {[
           { label: 'API Status', href: '/api/status' },
           { label: 'Dashboard API', href: '/api/dashboard' },
@@ -522,15 +557,20 @@ function DebugPanel() {
           { label: 'Bot Activity', href: '/api/bot-activity' },
           { label: 'Bot Health', href: '/api/bot-health' },
         ].map(l => (
-          <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
-            className="px-2.5 py-1.5 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-mono">
+          <a
+            key={l.href}
+            href={l.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-2.5 py-1.5 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-mono"
+          >
             {l.label} ↗
           </a>
         ))}
       </div>
 
       {vis && data && (
-        <pre className="text-[8px] text-g-muted bg-g-bg border border-g-border rounded p-3 overflow-auto max-h-64 font-mono leading-relaxed">
+        <pre className="text-xs text-g-muted bg-g-bg border border-g-border rounded-lg p-3 overflow-auto max-h-64 font-mono leading-relaxed">
           {JSON.stringify(data, null, 2)}
         </pre>
       )}
@@ -592,30 +632,31 @@ function DiscordKanalerPanel() {
     { felt: 'admin',           label: 'Admin / Bot-analyse',  desc: 'Kanal-analyse og bot-rapporter (kun admin)' },
   ];
 
-  const ingenKanal = { id: '', navn: '— Ikke satt —' };
-
   return (
-    <div id="discord-kanaler" className="bg-g-card border border-g-border rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xs font-bold text-g-text">Discord Kanaler</h2>
-        {kanaler.length === 0 && (
-          <span className="text-[9px] text-yellow-400/70">DISCORD_BOT_TOKEN eller DISCORD_GUILD_ID mangler</span>
-        )}
+    <div id="discord-kanaler" className="bg-g-card border border-g-border rounded-2xl p-6">
+      <div className="flex items-center justify-between pb-4 mb-5 border-b border-g-border/40">
+        <div>
+          <h2 className="text-sm font-semibold text-g-text">Discord Kanaler</h2>
+          {kanaler.length === 0 && (
+            <p className="text-xs text-yellow-400/70 mt-0.5">DISCORD_BOT_TOKEN eller DISCORD_GUILD_ID mangler</p>
+          )}
+        </div>
       </div>
-      <p className="text-[9px] text-g-muted mb-4">Velg hvilken Discord-kanal boten bruker for hver hendelsestype. Lagres til Supabase og synces til boten innen 5 min.</p>
+      <p className="text-xs text-g-muted mb-5">Velg hvilken Discord-kanal boten bruker for hver hendelsestype. Lagres til Supabase og synces til boten innen 5 min.</p>
 
       <div className="space-y-2">
         {kanalTyper.map(({ felt, label, desc }) => (
-          <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-2 border-b border-g-border/30 last:border-0">
+          <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-2.5 border-b border-g-border/30 last:border-0">
             <div>
-              <p className="text-xs text-g-text">{label}</p>
-              <p className="text-[9px] text-g-muted">{desc}</p>
+              <p className="text-sm text-g-text">{label}</p>
+              <p className="text-xs text-g-muted mt-0.5">{desc}</p>
             </div>
             <select
               value={prefs[felt] ?? ''}
               onChange={e => setPrefs(p => ({ ...p, [felt]: e.target.value }))}
-              className="bg-g-bg border border-g-border rounded px-2 py-1.5 text-[10px] text-g-text font-mono focus:outline-none focus:border-g-green/40 min-w-[180px]">
-              <option value={ingenKanal.id}>{ingenKanal.navn}</option>
+              className="bg-g-bg border border-g-border rounded-lg px-2 py-2 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 min-w-[180px] transition-all"
+            >
+              <option value="">— Ikke satt —</option>
               {kanaler.map(k => (
                 <option key={k.id} value={k.id}>#{k.navn} ({k.kategori})</option>
               ))}
@@ -624,13 +665,16 @@ function DiscordKanalerPanel() {
         ))}
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
-        <button onClick={lagre} disabled={lagrer}
-          className="px-5 py-2 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-xs font-bold tracking-widest uppercase rounded transition-all disabled:opacity-50">
+      <div className="mt-5 flex items-center gap-3">
+        <button
+          onClick={lagre}
+          disabled={lagrer}
+          className="px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+        >
           {lagrer ? 'Lagrer...' : lagret ? '✓ Lagret!' : 'Lagre kanalvalg'}
         </button>
         {lagreFeil && (
-          <span className="text-[10px] text-red-400">⚠ {lagreFeil}</span>
+          <span className="text-sm text-red-400">⚠ {lagreFeil}</span>
         )}
       </div>
     </div>
@@ -672,25 +716,26 @@ function AutomatiseringerPanel() {
   ] : [];
 
   return (
-    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-2xl p-5 space-y-5">
-      <div>
-        <h2 className="text-xs font-bold text-g-text mb-1">Bot-innstillinger</h2>
-        <p className="text-[9px] text-g-muted">Skru av/på handlinger og velg bot-tone. Synces til Railway-boten via Supabase.</p>
+    <div id="automatiseringer" className="bg-g-card border border-g-border rounded-2xl p-6 space-y-5">
+      <div className="pb-4 border-b border-g-border/40">
+        <h2 className="text-sm font-semibold text-g-text">Bot-innstillinger</h2>
+        <p className="text-xs text-g-muted mt-0.5">Skru av/på handlinger og velg bot-tone. Synces til Railway-boten via Supabase.</p>
       </div>
 
       {/* Av/på-flagg */}
       {!botSettings ? (
-        <p className="text-xs text-g-muted">Laster...</p>
+        <p className="text-sm text-g-muted">Laster...</p>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {flagg.map(f => {
             const aktiv = f.aktivtNårFalse ? !botSettings[f.felt] : !!botSettings[f.felt];
             return (
-              <div key={f.felt} className="flex items-center justify-between py-2 border-b border-g-border/40 last:border-0">
-                <span className="text-xs text-g-text">{f.label}</span>
+              <div key={f.felt} className="flex items-center justify-between py-3 border-b border-g-border/40 last:border-0">
+                <span className="text-sm text-g-text">{f.label}</span>
                 <button
                   onClick={() => lagreFelt(f.felt, f.aktivtNårFalse ? aktiv : !aktiv)}
-                  className={`relative w-10 h-5 rounded-full transition-all duration-200 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}>
+                  className={`relative w-10 h-5 rounded-full transition-all duration-200 ${aktiv ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}
+                >
                   <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-200 ${aktiv ? 'left-5 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
                 </button>
               </div>
@@ -702,14 +747,16 @@ function AutomatiseringerPanel() {
       {/* Tone-velger */}
       {botSettings && (
         <div>
-          <p className="text-[10px] text-g-muted tracking-widest uppercase font-bold mb-2">Bot-tone / Personlighet</p>
+          <p className="text-xs font-medium text-g-muted tracking-wide uppercase mb-3">Bot-tone / Personlighet</p>
           <div className="grid grid-cols-3 gap-2">
             {TONER.map(t => (
-              <button key={t.verdi}
+              <button
+                key={t.verdi}
                 onClick={() => lagreFelt('tone', t.verdi)}
-                className={`p-2.5 rounded-lg border text-left transition-all ${botSettings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}>
-                <p className={`text-[10px] font-bold ${botSettings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
-                <p className="text-[8px] text-g-muted mt-0.5 leading-tight">{t.desc}</p>
+                className={`p-3 rounded-lg border text-left transition-all ${botSettings.tone === t.verdi ? 'border-g-green/40 bg-g-green/10' : 'border-g-border bg-g-bg hover:border-g-green/20'}`}
+              >
+                <p className={`text-xs font-semibold ${botSettings.tone === t.verdi ? 'text-g-green' : 'text-g-text'}`}>{t.label}</p>
+                <p className="text-xs text-g-muted mt-0.5 leading-tight">{t.desc}</p>
               </button>
             ))}
           </div>
@@ -768,9 +815,11 @@ export default function InnstillingerSide() {
     const checked = settings?.[field] as boolean ?? false;
     return (
       <div className="flex items-center justify-between py-3 border-b border-g-border/50 last:border-0">
-        <span className="text-xs text-g-text">{label}</span>
-        <button onClick={() => update(field, !checked as Settings[typeof field])}
-          className={`relative w-10 h-5 rounded-full transition-all ${checked ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}>
+        <span className="text-sm text-g-text">{label}</span>
+        <button
+          onClick={() => update(field, !checked as Settings[typeof field])}
+          className={`relative w-10 h-5 rounded-full transition-all ${checked ? 'bg-g-green/70' : 'bg-g-bg border border-g-border'}`}
+        >
           <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${checked ? 'left-5 bg-g-bg' : 'left-0.5 bg-g-muted'}`} />
         </button>
       </div>
@@ -782,17 +831,24 @@ export default function InnstillingerSide() {
 
       {/* ─── Topptekst + fane-nav ─────────────────────────────────────────────── */}
       <div className="border-b border-g-border bg-g-sidebar/40 px-6 pb-0 pt-5">
-        <div className="flex items-end justify-between mb-4">
+        <div className="flex items-end justify-between mb-5">
           <div>
-            <h1 className="text-lg font-black tracking-wider text-g-text uppercase">Innstillinger</h1>
-            <p className="text-[9px] text-g-muted mt-0.5">{FANER.find(f => f.id === aktivFane)?.desc}</p>
+            <h1 className="text-2xl font-semibold text-g-text">Innstillinger</h1>
+            <p className="text-sm text-g-muted mt-1">{FANER.find(f => f.id === aktivFane)?.desc}</p>
           </div>
-          <div className="flex items-center gap-2 pb-1">
-            {aktivFane === 'integrasjoner' && saved && <span className="text-[9px] text-g-green">✓ Lagret</span>}
-            {aktivFane === 'integrasjoner' && error && <span className="text-[9px] text-red-400">✗ {error}</span>}
+          <div className="flex items-center gap-3 pb-1">
+            {aktivFane === 'integrasjoner' && saved && (
+              <span className="text-sm text-g-green bg-g-green/10 border border-g-green/20 rounded-lg px-3 py-1">✓ Lagret</span>
+            )}
+            {aktivFane === 'integrasjoner' && error && (
+              <span className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1">✗ {error}</span>
+            )}
             {aktivFane === 'integrasjoner' && (
-              <button onClick={save} disabled={saving}
-                className="px-3 py-1.5 bg-g-green/10 border border-g-green/20 hover:bg-g-green/20 text-g-green text-[10px] font-bold uppercase tracking-widest rounded transition-all">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+              >
                 {saving ? 'Lagrer...' : 'Lagre'}
               </button>
             )}
@@ -802,13 +858,16 @@ export default function InnstillingerSide() {
         {/* Fane-knapper */}
         <div className="flex gap-0">
           {FANER.map(fane => (
-            <button key={fane.id} onClick={() => setAktivFane(fane.id)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+            <button
+              key={fane.id}
+              onClick={() => setAktivFane(fane.id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
                 aktivFane === fane.id
                   ? 'border-g-green text-g-green'
                   : 'border-transparent text-g-muted hover:text-g-text hover:border-g-border'
-              }`}>
-              <span className="text-sm">{fane.ikon}</span>
+              }`}
+            >
+              <span>{fane.ikon}</span>
               {fane.label}
             </button>
           ))}
@@ -824,18 +883,13 @@ export default function InnstillingerSide() {
             <div className="grid grid-cols-2 gap-5 items-start">
               {/* Venstre: Twitch */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-g-muted">Twitch Bot</span>
-                </div>
+                <p className="text-xs font-medium uppercase tracking-wide text-g-muted">Twitch Bot</p>
                 <TwitchBotAdminPanel />
               </div>
 
               {/* Høyre: Discord */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-base">🔵</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-g-muted">Discord Bot</span>
-                </div>
+                <p className="text-xs font-medium uppercase tracking-wide text-g-muted">Discord Bot</p>
                 <DiscordKanalerPanel />
                 <AutomatiseringerPanel />
               </div>
@@ -860,12 +914,12 @@ export default function InnstillingerSide() {
                   tekst: '!discordsiste (Twitch) og !twitchsiste (Discord) gir AI-oppsummering på tvers.',
                 },
               ].map(w => (
-                <div key={w.tittel} className="bg-g-card border border-g-border rounded-2xlp-4">
+                <div key={w.tittel} className="bg-g-card border border-g-border rounded-2xl p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-g-green text-sm">{w.ikon}</span>
-                    <p className="text-[10px] font-bold text-g-text">{w.tittel}</p>
+                    <p className="text-xs font-semibold text-g-text">{w.tittel}</p>
                   </div>
-                  <p className="text-[9px] text-g-muted leading-relaxed">{w.tekst}</p>
+                  <p className="text-xs text-g-muted leading-relaxed">{w.tekst}</p>
                 </div>
               ))}
             </div>
@@ -883,44 +937,52 @@ export default function InnstillingerSide() {
               <div className="grid grid-cols-2 gap-5 items-start">
                 {/* Venstre kolonne */}
                 <div className="space-y-5">
-                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Discord</p>
-                    <div className="space-y-3">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                    <h2 className="text-sm font-semibold text-g-text pb-4 mb-5 border-b border-g-border/40">Discord</h2>
+                    <div className="space-y-4">
                       {[
                         { label: 'Live Kanal ID', field: 'discordLiveChannelId' as keyof Settings, placeholder: '123456789012345678' },
                         { label: 'Varsel Rolle ID', field: 'discordLiveRoleId' as keyof Settings, placeholder: '123456789012345678' },
                       ].map(({ label, field, placeholder }) => (
-                        <div key={field}>
-                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
-                          <input type="text" value={(settings[field] as string) || ''}
+                        <div key={field} className="space-y-1.5">
+                          <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">{label}</label>
+                          <input
+                            type="text"
+                            value={(settings[field] as string) || ''}
                             onChange={e => update(field, e.target.value as Settings[typeof field])}
                             placeholder={placeholder}
-                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+                          />
                         </div>
                       ))}
-                      <SettingsToggle label="Auto Post Live" field="autoPostLive" />
-                      <SettingsToggle label="Auto Post Promo" field="autoPostPromo" />
-                      <SettingsToggle label="Ping Rolle ved Live" field="pingRole" />
+                      <div className="pt-2 border-t border-g-border/40 space-y-1">
+                        <SettingsToggle label="Auto Post Live" field="autoPostLive" />
+                        <SettingsToggle label="Auto Post Promo" field="autoPostPromo" />
+                        <SettingsToggle label="Ping Rolle ved Live" field="pingRole" />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Twitch</p>
-                    <div className="space-y-3">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                    <h2 className="text-sm font-semibold text-g-text pb-4 mb-5 border-b border-g-border/40">Twitch</h2>
+                    <div className="space-y-4">
                       {[
                         { label: 'Twitch Brukernavn', field: 'twitchUsername' as keyof Settings, placeholder: 'ditt-brukernavn' },
                         { label: 'Twitch URL', field: 'twitchUrl' as keyof Settings, placeholder: 'https://twitch.tv/ditt-brukernavn' },
                       ].map(({ label, field, placeholder }) => (
-                        <div key={field}>
-                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{label}</label>
-                          <input type="text" value={(settings[field] as string) || ''}
+                        <div key={field} className="space-y-1.5">
+                          <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">{label}</label>
+                          <input
+                            type="text"
+                            value={(settings[field] as string) || ''}
                             onChange={e => update(field, e.target.value as Settings[typeof field])}
                             placeholder={placeholder}
-                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+                          />
                         </div>
                       ))}
-                      <div className="pt-2 border-t border-g-border/40">
-                        <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">
+                      <div className="pt-2 border-t border-g-border/40 space-y-1.5">
+                        <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">
                           Content Factory – overvåk kanal
                         </label>
                         <input
@@ -928,9 +990,9 @@ export default function InnstillingerSide() {
                           value={(settings.contentFactoryChannel as string) || ''}
                           onChange={e => update('contentFactoryChannel', e.target.value as Settings['contentFactoryChannel'])}
                           placeholder={settings.twitchUsername || 'ditt-brukernavn'}
-                          className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40"
+                          className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
                         />
-                        <p className="text-[9px] text-g-muted mt-1 leading-relaxed">
+                        <p className="text-xs text-g-muted/70 leading-relaxed">
                           Hvilken Twitch-kanal Content Factory henter VODs fra. Standard: samme som bot-kanalen ({settings.twitchUsername || 'Twitch Brukernavn ovenfor'}).
                         </p>
                       </div>
@@ -940,40 +1002,45 @@ export default function InnstillingerSide() {
 
                 {/* Høyre kolonne */}
                 <div className="space-y-5">
-                  <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                    <p className="text-[10px] text-g-muted font-bold tracking-widest uppercase mb-4">Sosiale Medier</p>
-                    <div className="space-y-3">
+                  <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                    <h2 className="text-sm font-semibold text-g-text pb-4 mb-5 border-b border-g-border/40">Sosiale Medier</h2>
+                    <div className="space-y-4">
                       {(['tiktok', 'instagram', 'twitter', 'youtube', 'discord'] as const).map(platform => (
-                        <div key={platform}>
-                          <label className="text-[10px] text-g-muted tracking-widest uppercase block mb-1">{platform}</label>
-                          <input type="text" value={settings.socials?.[platform] || ''}
+                        <div key={platform} className="space-y-1.5">
+                          <label className="text-xs font-medium tracking-wide uppercase text-g-muted block">{platform}</label>
+                          <input
+                            type="text"
+                            value={settings.socials?.[platform] || ''}
                             onChange={e => updateSocial(platform, e.target.value)}
                             placeholder={`https://${platform}.com/ditt-brukernavn`}
-                            className="w-full bg-g-bg border border-g-border rounded px-3 py-2 text-xs text-g-text font-mono placeholder-g-muted/50 focus:outline-none focus:border-g-green/40" />
+                            className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text font-mono placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+                          />
                         </div>
                       ))}
                     </div>
                   </div>
 
                   {/* Tips-widget */}
-                  <div className="bg-g-card border border-g-border rounded-2xlp-4 space-y-3">
-                    <p className="text-[10px] font-bold text-g-text uppercase tracking-widest">Hvor finner jeg IDer?</p>
-                    {[
-                      { label: 'Discord Kanal-ID', tip: 'Discord → Høyreklikk kanal → Kopier kanal-ID (developer mode på)' },
-                      { label: 'Discord Rolle-ID', tip: 'Discord → Serverinnstillinger → Roller → Høyreklikk rolle' },
-                      { label: 'Twitch Credentials', tip: 'dev.twitch.tv → Your Console → Applications' },
-                    ].map(t => (
-                      <div key={t.label} className="border-b border-g-border/30 pb-2 last:border-0 last:pb-0">
-                        <p className="text-[9px] font-bold text-g-muted uppercase">{t.label}</p>
-                        <p className="text-[9px] text-g-muted/70 mt-0.5 leading-relaxed">{t.tip}</p>
-                      </div>
-                    ))}
+                  <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                    <h2 className="text-sm font-semibold text-g-text pb-4 mb-4 border-b border-g-border/40">Hvor finner jeg IDer?</h2>
+                    <div className="space-y-4">
+                      {[
+                        { label: 'Discord Kanal-ID', tip: 'Discord → Høyreklikk kanal → Kopier kanal-ID (developer mode på)' },
+                        { label: 'Discord Rolle-ID', tip: 'Discord → Serverinnstillinger → Roller → Høyreklikk rolle' },
+                        { label: 'Twitch Credentials', tip: 'dev.twitch.tv → Your Console → Applications' },
+                      ].map(t => (
+                        <div key={t.label} className="border-b border-g-border/30 pb-4 last:border-0 last:pb-0">
+                          <p className="text-xs font-semibold text-g-muted uppercase tracking-wide">{t.label}</p>
+                          <p className="text-xs text-g-muted/70 mt-1 leading-relaxed">{t.tip}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-5">
-                {[1, 2].map(i => <div key={i} className="h-64 bg-g-card border border-g-border rounded-2xlanimate-pulse" />)}
+                {[1, 2].map(i => <div key={i} className="h-64 bg-g-card border border-g-border rounded-2xl animate-pulse" />)}
               </div>
             )}
           </div>
@@ -988,31 +1055,34 @@ export default function InnstillingerSide() {
               <DebugPanel />
 
               {/* Systemsider + tips */}
-              <div className="space-y-3">
-                <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                  <p className="text-[10px] text-g-muted uppercase tracking-widest font-bold mb-3">Systemsider</p>
-                  <div className="space-y-1">
+              <div className="space-y-5">
+                <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                  <h2 className="text-sm font-semibold text-g-text pb-4 mb-4 border-b border-g-border/40">Systemsider</h2>
+                  <div className="space-y-0.5">
                     {[
-                      { label: 'Logging',           href: '/logs',                        desc: 'Alle bot-logger og feilmeldinger' },
+                      { label: 'Logging',            href: '/logs',                       desc: 'Alle bot-logger og feilmeldinger' },
                       { label: 'Systemhelse (full)', href: '/system-health',              desc: 'Detaljert helsesjekk' },
                       { label: 'QA-oversikt',        href: '/content-factory-admin/qa',   desc: 'Content factory kvalitetskontroll' },
                       { label: 'Setup Wizard',        href: '/setup-wizard',              desc: 'Oppsett av workspace' },
                     ].map(l => (
-                      <Link key={l.href} href={l.href}
-                        className="flex items-center justify-between py-2 border-b border-g-border/30 last:border-0 group">
+                      <Link
+                        key={l.href}
+                        href={l.href}
+                        className="flex items-center justify-between py-3 border-b border-g-border/30 last:border-0 group"
+                      >
                         <div>
-                          <p className="text-xs text-g-text group-hover:text-g-green transition-colors">{l.label}</p>
-                          <p className="text-[9px] text-g-muted">{l.desc}</p>
+                          <p className="text-sm text-g-text group-hover:text-g-green transition-colors">{l.label}</p>
+                          <p className="text-xs text-g-muted mt-0.5">{l.desc}</p>
                         </div>
-                        <span className="text-g-muted group-hover:text-g-green transition-colors text-xs">↗</span>
+                        <span className="text-g-muted group-hover:text-g-green transition-colors text-sm">↗</span>
                       </Link>
                     ))}
                   </div>
                 </div>
 
-                <div className="bg-g-card border border-g-border rounded-2xlp-4">
-                  <p className="text-[10px] font-bold text-g-text mb-2">API-snarveier</p>
-                  <div className="flex flex-wrap gap-1.5">
+                <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                  <h2 className="text-sm font-semibold text-g-text pb-4 mb-4 border-b border-g-border/40">API-snarveier</h2>
+                  <div className="flex flex-wrap gap-2">
                     {[
                       { label: 'Status', href: '/api/status' },
                       { label: 'Dashboard', href: '/api/dashboard' },
@@ -1021,8 +1091,13 @@ export default function InnstillingerSide() {
                       { label: 'Bot Health', href: '/api/bot-health' },
                       { label: 'System Events', href: '/api/system-events?limit=20' },
                     ].map(l => (
-                      <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
-                        className="px-2 py-1 border border-g-border rounded text-[9px] text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-mono">
+                      <a
+                        key={l.href}
+                        href={l.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 border border-g-border rounded-lg text-xs text-g-muted hover:text-g-green hover:border-g-green/30 transition-all font-mono"
+                      >
                         {l.label} ↗
                       </a>
                     ))}
@@ -1038,28 +1113,30 @@ export default function InnstillingerSide() {
           <div className="grid grid-cols-2 gap-5 items-start">
             <PassordPanel />
 
-            <div className="space-y-3">
-              <div className="bg-g-card border border-g-border rounded-2xl p-5">
-                <p className="text-[10px] font-bold text-g-text mb-3">Tilgang og sikkerhet</p>
-                <div className="space-y-3">
+            <div className="space-y-5">
+              <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                <h2 className="text-sm font-semibold text-g-text pb-4 mb-5 border-b border-g-border/40">Tilgang og sikkerhet</h2>
+                <div className="space-y-4">
                   {[
                     { tittel: 'Passord-basert innlogging', tekst: 'Sett et passord for raskere innlogging. Magic link (e-post) er alltid tilgjengelig som backup.' },
                     { tittel: 'Én bruker per workspace', tekst: 'Creator OS er bygget for én administrator per workspace. Kontakt support for flerbruker-oppsett.' },
                     { tittel: 'Supabase-autentisering', tekst: 'Innlogging håndteres av Supabase Auth. Sessions er kryptert og utløper automatisk.' },
                   ].map(t => (
-                    <div key={t.tittel} className="border-b border-g-border/30 pb-3 last:border-0 last:pb-0">
-                      <p className="text-[10px] font-bold text-g-text">{t.tittel}</p>
-                      <p className="text-[9px] text-g-muted mt-1 leading-relaxed">{t.tekst}</p>
+                    <div key={t.tittel} className="border-b border-g-border/30 pb-4 last:border-0 last:pb-0">
+                      <p className="text-sm font-medium text-g-text">{t.tittel}</p>
+                      <p className="text-xs text-g-muted mt-1 leading-relaxed">{t.tekst}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-g-card border border-g-border rounded-2xlp-4">
-                <p className="text-[10px] font-bold text-g-text mb-2">Logg ut</p>
-                <p className="text-[9px] text-g-muted mb-3">Avslutter gjeldende session og sletter auth-cookie.</p>
-                <a href="/api/auth/logout"
-                  className="inline-block px-4 py-2 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded transition-all">
+              <div className="bg-g-card border border-g-border rounded-2xl p-6">
+                <h2 className="text-sm font-semibold text-g-text pb-4 mb-4 border-b border-g-border/40">Logg ut</h2>
+                <p className="text-sm text-g-muted mb-4">Avslutter gjeldende session og sletter auth-cookie.</p>
+                <a
+                  href="/api/auth/logout"
+                  className="inline-block px-4 py-2 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 text-sm font-medium rounded-lg transition-all"
+                >
                   Logg ut
                 </a>
               </div>

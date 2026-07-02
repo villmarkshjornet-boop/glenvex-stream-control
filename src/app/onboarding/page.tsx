@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { BrandLogo } from '@/components/ui';
 
 interface OboardingStatus {
   workspaceId: string | null;
@@ -35,20 +34,20 @@ const STEPS = [
   { n: 5, label: 'Aktiver' },
 ];
 
-function ProgressBar({ step }: { step: number }) {
+function StepIndicator({ step }: { step: number }) {
   return (
     <div className="flex items-center gap-2 w-full">
       {STEPS.map((s, i) => (
         <div key={s.n} className="flex items-center flex-1 last:flex-none gap-2">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 transition-all ${
+          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 transition-all ${
             step > s.n  ? 'bg-g-green text-g-bg' :
-            step === s.n ? 'bg-g-green/20 border border-g-green text-g-green' :
+            step === s.n ? 'bg-g-green/15 border border-g-green text-g-green' :
             'bg-g-bg border border-g-border text-g-muted'
           }`}>
             {step > s.n ? '✓' : s.n}
           </div>
           {i < STEPS.length - 1 && (
-            <div className={`h-0.5 flex-1 rounded-full transition-all ${step > s.n ? 'bg-g-green' : 'bg-g-border'}`} />
+            <div className={`h-px flex-1 rounded-full transition-all ${step > s.n ? 'bg-g-green' : 'bg-g-border'}`} />
           )}
         </div>
       ))}
@@ -56,33 +55,37 @@ function ProgressBar({ step }: { step: number }) {
   );
 }
 
-function ConnectButton({ href, icon, label, connected, connectedLabel, disabled = false }: {
-  href: string; icon: string; label: string; connected: boolean; connectedLabel: string; disabled?: boolean;
+function ConnectButton({ href, label, connected, connectedLabel, variant = 'default', disabled = false }: {
+  href: string; label: string; connected: boolean; connectedLabel: string; variant?: 'twitch' | 'discord' | 'default'; disabled?: boolean;
 }) {
+  const variantStyles = {
+    twitch:  'border-purple-500/30 text-purple-400 bg-purple-500/5 hover:bg-purple-500/10',
+    discord: 'border-indigo-400/30 text-indigo-400 bg-indigo-400/5 hover:bg-indigo-400/10',
+    default: 'border-g-border hover:border-g-green/30 hover:bg-g-green/5 text-g-text',
+  };
+
   if (connected) {
     return (
       <div className="flex items-center gap-3 p-4 bg-g-green/5 border border-g-green/20 rounded-xl">
-        <span className="text-2xl">{icon}</span>
-        <div>
-          <p className="text-sm font-bold text-g-green">✓ {connectedLabel}</p>
-          <p className="text-[9px] text-g-muted">Tilkoblet</p>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-g-green">✓ {connectedLabel}</p>
+          <p className="text-xs text-g-muted mt-0.5">Tilkoblet</p>
         </div>
       </div>
     );
   }
+
   return (
-    <a href={disabled ? undefined : href}
-      className={`flex items-center gap-3 p-4 border rounded-xl transition-all ${
+    <a
+      href={disabled ? undefined : href}
+      className={`flex items-center justify-between p-4 border rounded-xl transition-all ${
         disabled
-          ? 'border-g-border/30 opacity-40 cursor-not-allowed'
-          : 'border-g-border hover:border-g-green/30 hover:bg-g-green/5 cursor-pointer'
-      }`}>
-      <span className="text-2xl">{icon}</span>
-      <div className="flex-1">
-        <p className="text-sm font-bold text-g-text">{label}</p>
-        <p className="text-[9px] text-g-muted">Klikk for å koble til</p>
-      </div>
-      <span className="text-g-muted text-xs">→</span>
+          ? 'border-g-border/30 opacity-40 cursor-not-allowed text-g-muted'
+          : `cursor-pointer ${variantStyles[variant]}`
+      }`}
+    >
+      <span className="text-sm font-medium">{label}</span>
+      {!disabled && <span className="text-sm opacity-60">→</span>}
     </a>
   );
 }
@@ -211,56 +214,85 @@ function OnboardingInner() {
     { felt: 'errors',          label: 'Feil & Varsler',  desc: 'Tekniske feil fra boten' },
   ];
 
+  const stepMeta: Record<number, { title: string; description: string }> = {
+    1: { title: 'Velkommen til Glenvex', description: 'Sett opp ditt creator workspace.' },
+    2: { title: 'Koble til Twitch', description: 'Autoriser Glenvex til å lese din Twitch-kanal.' },
+    3: { title: 'Koble til Discord', description: 'Legg til Glenvex-boten på Discord-serveren din.' },
+    4: { title: 'Velg kanaler', description: 'Hvilke Discord-kanaler skal boten bruke?' },
+    5: { title: 'Aktiver Glenvex', description: 'Se over og send inn forespørselen.' },
+  };
+
   return (
-    <div className="min-h-screen bg-g-bg flex items-center justify-center p-4">
-      <div className="w-full max-w-lg space-y-5">
+    <div className="min-h-screen bg-g-bg">
+      <div className="max-w-lg mx-auto pt-16 px-6 pb-16">
 
-        <div className="text-center"><BrandLogo subtitle="Creator OS · Oppsett" /></div>
+        {/* Brand */}
+        <div className="text-center mb-10">
+          <p className="text-xl font-bold tracking-widest text-g-green font-mono">GLENVEX</p>
+          <p className="text-xs text-g-muted mt-1">Creator OS · Oppsett</p>
+        </div>
 
-        <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-6">
+        {/* Step indicator */}
+        <p className="text-xs font-medium text-g-muted mb-6">
+          Steg <span className="text-g-green">{step}</span> av {STEPS.length}
+        </p>
 
-          <ProgressBar step={step} />
+        {/* Step content card */}
+        <div className="bg-g-card border border-g-border rounded-2xl p-8 space-y-6">
+
+          <StepIndicator step={step} />
 
           {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5 space-y-1">
-              <p className="text-xs font-bold text-red-400">{error.heading}</p>
-              <p className="text-[11px] text-red-400/70">{error.detail}</p>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 space-y-1">
+              <p className="text-sm font-medium text-red-400">{error.heading}</p>
+              <p className="text-xs text-red-400/70 leading-relaxed">{error.detail}</p>
               <button
                 onClick={() => setError(null)}
-                className="text-[10px] text-red-400/50 hover:text-red-400 underline underline-offset-2 transition-colors"
+                className="text-xs text-red-400/50 hover:text-red-400 underline underline-offset-2 transition-colors mt-1 block"
               >
                 Lukk
               </button>
             </div>
           )}
 
+          <div>
+            <h1 className="text-2xl font-semibold text-g-text">{stepMeta[step]?.title}</h1>
+            <p className="text-sm text-g-muted mt-1">{stepMeta[step]?.description}</p>
+          </div>
+
           {/* ── Step 1: Workspace ── */}
           {step === 1 && (
             <div className="space-y-4">
-              <div>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 1 av 5</p>
-                <h2 className="text-base font-black text-g-text mt-0.5">Velkommen til Glenvex</h2>
-                <p className="text-xs text-g-muted mt-0.5">Sett opp ditt creator workspace.</p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium tracking-wide text-g-muted block">
+                  Ditt navn / kanalnavn
+                </label>
+                <input
+                  type="text"
+                  value={brandName}
+                  onChange={e => { setBrandName(e.target.value); setWsSlug(slugify(e.target.value)); }}
+                  placeholder="f.eks. NordicGamer"
+                  className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200"
+                />
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Ditt navn / kanalnavn</label>
-                  <input type="text" value={brandName}
-                    onChange={e => { setBrandName(e.target.value); setWsSlug(slugify(e.target.value)); }}
-                    placeholder="f.eks. NordicGamer"
-                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 transition-colors" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-g-muted uppercase tracking-wider font-bold block mb-1">Workspace ID</label>
-                  <input type="text" value={wsSlug}
-                    onChange={e => setWsSlug(slugify(e.target.value))}
-                    placeholder="nordicgamer"
-                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder-g-muted/40 focus:outline-none focus:border-g-green/50 font-mono text-xs transition-colors" />
-                  <p className="text-[9px] text-g-muted mt-1">Kun små bokstaver og bindestrek. Kan ikke endres etter opprettelse.</p>
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium tracking-wide text-g-muted block">
+                  Workspace ID
+                </label>
+                <input
+                  type="text"
+                  value={wsSlug}
+                  onChange={e => setWsSlug(slugify(e.target.value))}
+                  placeholder="nordicgamer"
+                  className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 font-mono"
+                />
+                <p className="text-xs text-g-muted/70">Kun små bokstaver og bindestrek. Kan ikke endres etter opprettelse.</p>
               </div>
-              <button onClick={saveWorkspace} disabled={loading || brandName.length < 2 || wsSlug.length < 2}
-                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+              <button
+                onClick={saveWorkspace}
+                disabled={loading || brandName.length < 2 || wsSlug.length < 2}
+                className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+              >
                 {loading ? 'Oppretter workspace...' : 'Opprett workspace →'}
               </button>
             </div>
@@ -269,21 +301,18 @@ function OnboardingInner() {
           {/* ── Step 2: Twitch ── */}
           {step === 2 && (
             <div className="space-y-4">
-              <div>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 2 av 5</p>
-                <h2 className="text-base font-black text-g-text mt-0.5">Koble til Twitch</h2>
-                <p className="text-xs text-g-muted mt-0.5">Autoriser Glenvex til å lese din Twitch-kanal.</p>
-              </div>
               <ConnectButton
                 href="/api/auth/twitch"
-                icon="🟣"
                 label="Koble til Twitch"
                 connected={!!status?.twitchConnected}
                 connectedLabel={status?.twitchDisplayName ?? status?.twitchLogin ?? 'Tilkoblet'}
+                variant="twitch"
               />
               {status?.twitchConnected && (
-                <button onClick={() => setStep(3)}
-                  className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all">
+                <button
+                  onClick={() => setStep(3)}
+                  className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200"
+                >
                   Neste →
                 </button>
               )}
@@ -293,21 +322,18 @@ function OnboardingInner() {
           {/* ── Step 3: Discord ── */}
           {step === 3 && (
             <div className="space-y-4">
-              <div>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 3 av 5</p>
-                <h2 className="text-base font-black text-g-text mt-0.5">Koble til Discord</h2>
-                <p className="text-xs text-g-muted mt-0.5">Legg til Glenvex-boten på Discord-serveren din.</p>
-              </div>
               <ConnectButton
                 href="/api/auth/discord-bot"
-                icon="🔵"
                 label="Legg til Discord-bot"
                 connected={!!status?.discordConnected}
                 connectedLabel={status?.guildName ?? 'Server tilkoblet'}
+                variant="discord"
               />
               {status?.discordConnected && (
-                <button onClick={() => setStep(4)}
-                  className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all">
+                <button
+                  onClick={() => setStep(4)}
+                  className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200"
+                >
                   Neste →
                 </button>
               )}
@@ -317,22 +343,18 @@ function OnboardingInner() {
           {/* ── Step 4: Channels ── */}
           {step === 4 && (
             <div className="space-y-4">
-              <div>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 4 av 5</p>
-                <h2 className="text-base font-black text-g-text mt-0.5">Velg kanaler</h2>
-                <p className="text-xs text-g-muted mt-0.5">Hvilke Discord-kanaler skal boten bruke?</p>
-              </div>
               <div className="space-y-2">
                 {CHANNEL_TYPES.map(({ felt, label, desc }) => (
-                  <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-1.5 border-b border-g-border/30 last:border-0">
+                  <div key={felt} className="grid grid-cols-[1fr_auto] gap-3 items-center py-2 border-b border-g-border/30 last:border-0">
                     <div>
-                      <p className="text-xs text-g-text">{label}</p>
-                      <p className="text-[9px] text-g-muted">{desc}</p>
+                      <p className="text-sm text-g-text">{label}</p>
+                      <p className="text-xs text-g-muted mt-0.5">{desc}</p>
                     </div>
                     <select
                       value={prefs[felt] ?? ''}
                       onChange={e => setPrefs(p => ({ ...p, [felt]: e.target.value }))}
-                      className="bg-g-bg border border-g-border rounded px-2 py-1.5 text-[10px] text-g-text font-mono focus:outline-none focus:border-g-green/40 min-w-[160px]">
+                      className="bg-g-bg border border-g-border rounded-lg px-2 py-2 text-xs text-g-text font-mono focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 min-w-[160px] transition-all"
+                    >
                       <option value="">— Ikke satt —</option>
                       {channels.map(k => (
                         <option key={k.id} value={k.id}>#{k.navn} ({k.kategori})</option>
@@ -341,40 +363,50 @@ function OnboardingInner() {
                   </div>
                 ))}
               </div>
+
               {channelsLoading && (
-                <p className="text-[10px] text-g-muted">Henter kanaler fra Discord...</p>
+                <p className="text-xs text-g-muted">Henter kanaler fra Discord...</p>
               )}
+
               {!channelsLoading && channelsLoaded && channels.length === 0 && (
                 <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 space-y-3">
-                  <p className="text-xs font-bold text-yellow-400">Ingen kanaler funnet</p>
-                  <p className="text-[11px] text-g-muted/70 leading-snug">
+                  <p className="text-sm font-medium text-yellow-400">Ingen kanaler funnet</p>
+                  <p className="text-xs text-g-muted/70 leading-relaxed">
                     Dette kan skyldes at boten ikke er riktig invitert, mangler rettigheter til å lese kanaler, eller Discord-serveren har ingen tekstkanaler.
                   </p>
                   <div className="flex flex-wrap gap-2 pt-1">
                     <a
                       href="/api/auth/discord-bot"
-                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-[11px] text-g-green font-bold hover:bg-g-green/20 transition-colors"
+                      className="px-3 py-1.5 bg-g-green/10 border border-g-green/30 rounded-lg text-xs text-g-green font-medium hover:bg-g-green/20 transition-colors"
                     >
                       Inviter bot på nytt
                     </a>
                     <button
                       onClick={loadChannels}
-                      className="px-3 py-1.5 border border-g-border rounded-lg text-[11px] text-g-muted font-bold hover:text-g-text hover:border-g-border/80 transition-colors"
+                      className="px-3 py-1.5 border border-g-border rounded-lg text-xs text-g-muted font-medium hover:text-g-text hover:border-g-border/80 transition-colors"
                     >
                       Prøv å hente kanaler igjen
                     </button>
                   </div>
-                  <p className="text-[10px] text-g-muted/40">
+                  <p className="text-xs text-g-muted/50">
                     Boten trenger: <span className="font-mono">Read Messages</span> og <span className="font-mono">Send Messages</span>
                   </p>
                 </div>
               )}
-              <button onClick={saveChannels} disabled={savingCh}
-                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-2.5 rounded-lg transition-all disabled:opacity-50">
+
+              <button
+                onClick={saveChannels}
+                disabled={savingCh}
+                className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+              >
                 {savingCh ? 'Lagrer...' : 'Lagre og fortsett →'}
               </button>
-              <button onClick={() => setStep(5)} disabled={savingCh}
-                className="w-full text-[11px] text-g-muted hover:text-g-text transition-colors py-1">
+
+              <button
+                onClick={() => setStep(5)}
+                disabled={savingCh}
+                className="w-full text-xs text-g-muted/60 hover:text-g-muted transition-colors py-1"
+              >
                 Hopp over for nå
               </button>
             </div>
@@ -383,51 +415,53 @@ function OnboardingInner() {
           {/* ── Step 5: Activate ── */}
           {step === 5 && (
             <div className="space-y-5">
-              <div>
-                <p className="text-[9px] text-g-muted uppercase tracking-widest">Steg 5 av 5</p>
-                <h2 className="text-base font-black text-g-text mt-0.5">Aktiver Glenvex</h2>
-                <p className="text-xs text-g-muted mt-0.5">Se over og send inn forespørselen.</p>
-              </div>
-
               <div className="bg-g-bg border border-g-border rounded-xl p-4 space-y-3">
-                <p className="text-[10px] font-bold text-g-muted uppercase tracking-widest">Oppsummering</p>
+                <p className="text-xs font-medium text-g-muted uppercase tracking-wide">Oppsummering</p>
                 {[
                   { label: 'Workspace', val: status?.workspaceId ?? '–', ok: !!status?.workspaceId },
                   { label: 'Twitch', val: status?.twitchDisplayName ?? status?.twitchLogin ?? 'Ikke tilkoblet', ok: !!status?.twitchConnected },
                   { label: 'Discord', val: status?.guildName ?? 'Ikke tilkoblet', ok: !!status?.discordConnected },
                   { label: 'Kanaler', val: status?.channelsSaved ? 'Lagret' : 'Ikke satt', ok: !!status?.channelsSaved },
                 ].map(r => (
-                  <div key={r.label} className="flex items-center justify-between">
-                    <span className="text-[11px] text-g-muted">{r.label}</span>
-                    <span className={`text-[11px] font-bold ${r.ok ? 'text-g-green' : 'text-g-muted'}`}>
+                  <div key={r.label} className="flex items-center justify-between py-1.5 border-b border-g-border/20 last:border-0">
+                    <span className="text-sm text-g-muted">{r.label}</span>
+                    <span className={`text-sm font-medium ${r.ok ? 'text-g-green' : 'text-g-muted'}`}>
                       {r.ok ? '✓' : '○'} {r.val}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <div className="bg-g-bg/50 border border-g-border/30 rounded-lg p-3">
-                <p className="text-[10px] text-g-muted leading-relaxed">
+              <div className="bg-g-bg/50 border border-g-border/30 rounded-lg p-4">
+                <p className="text-xs text-g-muted leading-relaxed">
                   Etter aktivering går du til ventelisten. En administrator vil godkjenne deg som alpha-tester og åpne tilgangen.
                 </p>
               </div>
 
-              <button onClick={activate} disabled={loading}
-                className="w-full bg-g-green/10 border border-g-green/30 hover:bg-g-green/20 text-g-green font-bold text-sm py-3 rounded-lg transition-all disabled:opacity-50">
+              <button
+                onClick={activate}
+                disabled={loading}
+                className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
+              >
                 {loading ? 'Aktiverer...' : '→ Send inn og vent på godkjenning'}
               </button>
             </div>
           )}
 
-          {/* Back navigation */}
-          {step > 1 && step < 5 && (
-            <button onClick={() => setStep(s => s - 1)}
-              className="w-full py-2 text-[11px] text-g-muted hover:text-g-text transition-colors">
+        </div>
+
+        {/* Navigation */}
+        {step > 1 && step < 5 && (
+          <div className="mt-6">
+            <button
+              onClick={() => setStep(s => s - 1)}
+              className="text-sm text-g-muted hover:text-g-text transition-colors"
+            >
               ← Tilbake
             </button>
-          )}
+          </div>
+        )}
 
-        </div>
       </div>
     </div>
   );
