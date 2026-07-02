@@ -5,13 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { MemberProfile } from './memberTracker';
-import { deductXP, ALLE_BADGES } from './memberTracker';
+import { ALLE_BADGES } from './memberTracker';
+import { spendCoins, COIN_RATES } from './coinService';
+import { addCardToCollection } from './cardCollectionService';
 import { renderPersonaCard } from './cardRenderer';
 import { logSystemEvent } from './systemEvents';
 import { selectArchetypeCandidates, getArchetype, archetypeExists, scoreAllArchetypes } from './archetypeLibrary';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
-const REROLL_XP_COST = 250;
+const REROLL_COIN_COST = COIN_RATES.CARD_REROLL_COST;  // 100 coins
 
 // ── Season ────────────────────────────────────────────────────────────────────
 
@@ -118,11 +120,6 @@ function getSb() {
   if (!url || !key) return null;
   const ws = require('ws');
   return createClient(url, key, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
-}
-
-function trekkFraXP(member: MemberProfile, antall: number): void {
-  member.xp = Math.max(0, member.xp - antall);
-  deductXP(member.id, antall);
 }
 
 // ── Collection number ─────────────────────────────────────────────────────────
@@ -1064,7 +1061,8 @@ export interface PersonaResult {
   card:             PersonaCard;
   imageUrl:         string | null;
   cardPng:          Buffer | null;   // ferdig PNG-samlekort
-  xpCost:           number;
+  xpCost:           number;          // always 0 (XP no longer deducted for reroll)
+  coinCost:         number;          // 0 for first gen, REROLL_COIN_COST for rerolls
   rerollCount:      number;
   collectionNumber: number;
   ersteGang:        boolean;
@@ -1078,14 +1076,14 @@ export async function genererPersona(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { feil: 'OPENAI_API_KEY mangler på Railway.' };
 
-  const eksisterende   = await hentSistePersona(member.id);
-  const rerollCount    = (eksisterende?.rerollCount ?? 0) + (erReroll ? 1 : 0);
-  const xpCost         = erReroll ? REROLL_XP_COST : 0;
+  const eksisterende = await hentSistePersona(member.id);
+  const rerollCount  = (eksisterende?.rerollCount ?? 0) + (erReroll ? 1 : 0);
+  const coinCost     = erReroll ? REROLL_COIN_COST : 0;
 
   if (erReroll) {
     if (!eksisterende) return { feil: 'Du har ingen eksisterende persona å rerulle. Bruk `/persona` uten parametere først.' };
-    if (member.xp < REROLL_XP_COST) return { feil: `Du trenger ${REROLL_XP_COST} XP for å rerulle. Du har ${member.xp} XP.` };
-    trekkFraXP(member, REROLL_XP_COST);
+    const { ok, error } = await spendCoins(member.id, REROLL_COIN_COST, 'card_reroll', { username: member.username });
+    if (!ok) return { feil: error ?? `Du trenger ${REROLL_COIN_COST} coins for å rerulle.` };
   }
 
   const openai           = new OpenAI({ apiKey });
@@ -1107,7 +1105,30 @@ export async function genererPersona(
   }
 
   const collectionNumber = await hentCollectionNumber(member.id);
-  await lagrePersona(member, card, imageUrl, xpCost, rerollCount);
+  await lagrePersona(member, card, imageUrl, 0, rerollCount);
+
+  // Save to card collection — all cards are kept, rerolls create new rows
+  addCardToCollection({
+    userId:      member.id,
+    cardType:    'persona',
+    rarity:      card.rarity,
+    title:       card.title,
+    klass:       card.class,
+    archetype:   card.archetype,
+    imageUrl,
+    season:      SEASON,
+    source:      rerollCount > 1 ? 'reroll' : 'generated',
+    isActive:    true,
+    isTradeable: true,
+    stats:       card.stats as unknown as Record<string, number>,
+    metadata:    {
+      archetype:     card.archetype,
+      signatureMove: card.signatureMove,
+      quote:         card.quote,
+      rerollCount,
+      collectionNumber,
+    },
+  }).catch(() => {});
 
   // Render PNG — write imageBuf to temp file first so loadPersonaImage
   // can load via path (avoids @napi-rs/canvas Buffer bug on Windows).
@@ -1136,8 +1157,8 @@ export async function genererPersona(
     }
   }
 
-  return { card, imageUrl, cardPng, xpCost, rerollCount, collectionNumber, ersteGang: !eksisterende };
+  return { card, imageUrl, cardPng, xpCost: 0, coinCost, rerollCount, collectionNumber, ersteGang: !eksisterende };
 }
 
 export { renderPersonaCard } from './cardRenderer';
-export { RARITY_STARS, RARITY_BANNER, REROLL_XP_COST };
+export { RARITY_STARS, RARITY_BANNER, REROLL_COIN_COST };

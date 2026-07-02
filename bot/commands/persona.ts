@@ -47,22 +47,23 @@ import {
   genererPersona,
   hentSistePersona,
   renderPersonaCard,
-  REROLL_XP_COST,
+  REROLL_COIN_COST,
   RARITY_COLOR,
   RARITY_BANNER,
 } from '../lib/personaService';
+import { getBalance } from '../lib/coinService';
 
 const SHOWCASE_KANAL_ID = process.env.DISCORD_PERSONA_SHOWCASE_CHANNEL_ID ?? '';
 
 // ── Knapper ───────────────────────────────────────────────────────────────────
 
-function lagKnappeRad(kortId: string, harNokXP: boolean): ActionRowBuilder<ButtonBuilder> {
+function lagKnappeRad(kortId: string, harNokCoins: boolean): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`persona_reroll_${kortId}`)
-      .setLabel(`🔁 Reroll (${REROLL_XP_COST} XP)`)
+      .setLabel(`🔁 Reroll (${REROLL_COIN_COST} coins)`)
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!harNokXP),
+      .setDisabled(!harNokCoins),
     new ButtonBuilder()
       .setCustomId(`persona_share_${kortId}`)
       .setLabel('📢 Del i #persona-showcase')
@@ -114,7 +115,7 @@ export const personaCommand = {
     .setDescription('Generer ditt AI Persona Card — et unikt GLENVEX samlekort.')
     .addBooleanOption(opt =>
       opt.setName('reroll')
-        .setDescription(`Reroll persona for ${REROLL_XP_COST} XP?`)
+        .setDescription(`Reroll persona for ${REROLL_COIN_COST} coins?`)
         .setRequired(false),
     ),
 
@@ -141,6 +142,9 @@ export const personaCommand = {
 
     await interaction.deferReply({ ephemeral: false });
 
+    // Fetch coin balance once — used for button state throughout
+    const coinBalance = await getBalance(user.id);
+
     // ── Vis eksisterende kort (bare hvis det har et bilde) ────────────────────
     // Hvis imageUrl er null (forrige generering feilet) faller vi gjennom til
     // ny generering slik at brukeren får et ekte kort uten å måtte rerulle.
@@ -148,8 +152,8 @@ export const personaCommand = {
       const res = await hentOgRenderEksisterende(user.id, user.username, avatarUrl);
       if (res && res.eksisterende.imageUrl) {
         const { eksisterende, member: m, png } = res;
-        const harNokXP  = m.xp >= REROLL_XP_COST;
-        const knappeRad = lagKnappeRad(user.id, harNokXP);
+        const harNokCoins = coinBalance >= REROLL_COIN_COST;
+        const knappeRad   = lagKnappeRad(user.id, harNokCoins);
 
         if (png) {
           const fil       = new AttachmentBuilder(png, { name: 'persona-card.png' });
@@ -175,7 +179,7 @@ export const personaCommand = {
       .setTitle('🎴 GLENVEX Persona Card Generator')
       .setDescription(
         erReroll
-          ? `Regenererer samlekort — **${REROLL_XP_COST} XP** trekkes. Vennligst vent... ⏳\n*Ca. 20–40 sekunder*`
+          ? `Regenererer samlekort — **${REROLL_COIN_COST} coins** trekkes. Vennligst vent... ⏳\n*Ca. 20–40 sekunder*`
           : `Analyserer Discord-aktivitet og genererer ditt unike samlekort...\n\n*Ca. 20–40 sekunder — bildegenerering inkludert* ⏳`
       );
     await interaction.editReply({ embeds: [venteEmbed] });
@@ -190,13 +194,12 @@ export const personaCommand = {
       return;
     }
 
-    const harNokXP  = (member!.xp - resultat.xpCost) >= REROLL_XP_COST;
-    const knappeRad = lagKnappeRad(user.id, harNokXP);
+    const harNokCoins = (coinBalance - resultat.coinCost) >= REROLL_COIN_COST;
+    const knappeRad   = lagKnappeRad(user.id, harNokCoins);
 
     if (resultat.cardPng) {
       const fil       = new AttachmentBuilder(resultat.cardPng, { name: 'persona-card.png' });
-      const xpAfter   = member!.xp - resultat.xpCost;
-      const miniEmbed = byggMiniEmbed(resultat.card, { ...member!, xp: xpAfter }, resultat.rerollCount, resultat.collectionNumber);
+      const miniEmbed = byggMiniEmbed(resultat.card, member!, resultat.rerollCount, resultat.collectionNumber);
       await interaction.editReply({
         files:      [fil],
         embeds:     [miniEmbed as any],
@@ -229,7 +232,7 @@ export const personaCommand = {
         const oppdatertMedlem = getMember(user.id) ?? member!;
 
         await btn.editReply({
-          content: `🔁 Regenererer kort... **${REROLL_XP_COST} XP** trekkes ⏳`,
+          content: `🔁 Regenererer kort... **${REROLL_COIN_COST} coins** trekkes ⏳`,
           embeds: [], files: [], components: [],
         });
 
@@ -240,21 +243,21 @@ export const personaCommand = {
           return;
         }
 
-        const nyHarNokXP = (oppdatertMedlem.xp - ny.xpCost) >= REROLL_XP_COST;
+        const nyBalance     = await getBalance(user.id);
+        const nyHarNokCoins = nyBalance >= REROLL_COIN_COST;
 
         if (ny.cardPng) {
-          const fil       = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
-          const xpAfter   = oppdatertMedlem.xp - ny.xpCost;
-          const nyEmbed   = byggMiniEmbed(ny.card, { ...oppdatertMedlem, xp: xpAfter }, ny.rerollCount, ny.collectionNumber);
+          const fil     = new AttachmentBuilder(ny.cardPng, { name: 'persona-card.png' });
+          const nyEmbed = byggMiniEmbed(ny.card, oppdatertMedlem, ny.rerollCount, ny.collectionNumber);
           await btn.editReply({
             files:      [fil],
             embeds:     [nyEmbed as any],
-            components: [lagKnappeRad(user.id, nyHarNokXP)],
+            components: [lagKnappeRad(user.id, nyHarNokCoins)],
           });
         } else {
           await btn.editReply({
-            content:    `🔁 Rerollet! **${ny.card.rarity}** · Card #${String(ny.collectionNumber).padStart(3, '0')} (-${REROLL_XP_COST} XP)`,
-            components: [lagKnappeRad(user.id, nyHarNokXP)],
+            content:    `🔁 Rerollet! **${ny.card.rarity}** · Card #${String(ny.collectionNumber).padStart(3, '0')} (-${REROLL_COIN_COST} coins)`,
+            components: [lagKnappeRad(user.id, nyHarNokCoins)],
           });
         }
         return;

@@ -25,8 +25,11 @@ import { tweetLiveNå } from './lib/twitter';
 import { innsendCommand } from './commands/innsend';
 import { profilCommand } from './commands/profil';
 import { personaCommand } from './commands/persona';
+import { minekortCommand } from './commands/minekort';
 import { adminCommand }   from './commands/admin';
-import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance } from './lib/memberTracker';
+import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
+import { awardCoins } from './lib/coinService';
+import { awardSubCard } from './lib/cardCollectionService';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
 import { tildeltRolle, tildeltRolleKonfigurert } from './lib/roleManager';
@@ -115,7 +118,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, adminCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, adminCommand]) {
   commands.set(cmd.data.name, cmd);
 }
 
@@ -1831,7 +1834,7 @@ async function sjekkPreHype() {
 const BOT_ADMIN_USERNAME = process.env.BOT_ADMIN_USERNAME ?? 'gkarlsen';
 const STATUS_KANAL_ID = process.env.STATUS_CHANNEL_ID ?? '1511722714623381645';
 
-async function tildelTwitchSubRolle(twitchUsername: string): Promise<void> {
+async function tildelTwitchSubRolle(twitchUsername: string, subTier?: string): Promise<void> {
   const guild = client.guilds.cache.first();
   if (!guild) return;
   const ROLLE_NAVN = '⭐ Twitch Sub';
@@ -1839,14 +1842,23 @@ async function tildelTwitchSubRolle(twitchUsername: string): Promise<void> {
   if (!rolle) {
     rolle = await guild.roles.create({ name: ROLLE_NAVN, color: 0x9146FF, reason: 'Auto-opprettet for Twitch subs' });
   }
-  const lower = twitchUsername.toLowerCase();
+  const lower   = twitchUsername.toLowerCase();
   const members = await guild.members.fetch().catch(() => guild.members.cache);
-  const match = [...members.values()].find(m =>
+  const match   = [...members.values()].find(m =>
     m.user.username.toLowerCase() === lower ||
     (m.nickname ?? '').toLowerCase() === lower
   );
   if (match && !match.roles.cache.has(rolle.id)) {
     await match.roles.add(rolle, 'Twitch sub verifisert').catch(() => {});
+  }
+
+  // Award coins + sub card to the matched Discord member (fire-and-forget)
+  if (match) {
+    const discordId   = match.user.id;
+    const displayName = match.displayName;
+    addSub(discordId, match.user.username, displayName);
+    awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
+    awardSubCard(discordId, twitchUsername, subTier).catch(() => {});
   }
 }
 

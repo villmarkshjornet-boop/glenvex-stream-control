@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { logSystemEvent } from './systemEvents';
 import { createClient } from '@supabase/supabase-js';
+import { awardCoins, xpToCoins, COIN_RATES } from './coinService';
 
 function getSb() {
   const url = process.env.SUPABASE_URL;
@@ -394,6 +395,15 @@ export function addMessageXP(
   save(members);
   syncToSupabase(m);
 
+  // Fire-and-forget coin awards (coins are proportional to XP, never replace XP)
+  const coinsEarned = xpToCoins(xpTildelt);
+  if (coinsEarned > 0) {
+    awardCoins(id, coinsEarned, 'discord_message', { xpEarned: xpTildelt }).catch(() => {});
+  }
+  if (dagligBonus) {
+    awardCoins(id, COIN_RATES.DAILY_BONUS, 'daily_bonus', { username: displayName }).catch(() => {});
+  }
+
   logSystemEvent({
     source:     'community_manager',
     event_type: 'COMMUNITY_XP_GRANTED',
@@ -470,6 +480,14 @@ export function addTwitchMessageXP(
   save(members);
   syncToSupabase(m);
 
+  const twitchCoins = xpToCoins(xpTildelt);
+  if (twitchCoins > 0) {
+    awardCoins(id, twitchCoins, 'twitch_message', { xpEarned: xpTildelt }).catch(() => {});
+  }
+  if (dagligBonus) {
+    awardCoins(id, COIN_RATES.DAILY_BONUS, 'daily_bonus', { username: twitchUsername }).catch(() => {});
+  }
+
   const leveledUp = m.level > oldLevel;
   return { leveledUp, newLevel: m.level, xpGitt: xpTildelt, dagligBonus, nyeBadges };
 }
@@ -540,6 +558,12 @@ export function addVoiceMinutes(id: string, username: string, displayName: strin
   computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
+
+  const voiceCoins = Math.floor(minutes / 10) * COIN_RATES.VOICE_PER_10MIN;
+  if (voiceCoins > 0) {
+    awardCoins(id, voiceCoins, 'voice', { minutes }).catch(() => {});
+  }
+
   if (minutes >= 5) {
     logSystemEvent({
       source: 'community_manager', event_type: 'COMMUNITY_XP_GRANTED',
@@ -562,6 +586,7 @@ export function addStreamAttendance(id: string, username: string, displayName: s
   computeScores(members[id]);
   save(members);
   syncToSupabase(members[id]);
+  awardCoins(id, COIN_RATES.STREAM_ATTENDANCE, 'stream_attendance', { username: displayName }).catch(() => {});
   logSystemEvent({
     source: 'community_manager', event_type: 'COMMUNITY_XP_GRANTED',
     title: `XP tildelt (stream-deltakelse): ${displayName} +100 XP`,
