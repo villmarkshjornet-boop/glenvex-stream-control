@@ -19,6 +19,11 @@ dist-bot/
 # Data (runtime files – not committed)
 data/*.json
 
+# Persona test assets (lokale testartefakter, ikke for versjonering)
+data/test-*.png
+data/debug-*.png
+data/tmp-*
+
 # Logs
 *.log
 npm-debug.log*
