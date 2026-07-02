@@ -57,8 +57,10 @@ UPDATE community_members SET
 WHERE discord_id NOT LIKE 'tw_%';
 
 -- ─── 4. Oppdater community_member_overview view med alle nye kolonner ─────────
+-- DROP first because CREATE OR REPLACE cannot reorder/rename existing columns
 
-CREATE OR REPLACE VIEW community_member_overview AS
+DROP VIEW IF EXISTS community_member_overview;
+CREATE VIEW community_member_overview AS
 SELECT
   m.discord_id,
   m.workspace_id,
