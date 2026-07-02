@@ -6,10 +6,10 @@ import {
 } from 'discord.js';
 import { getMember, getAllMembers, upsertMember, ALLE_BADGES, nesteBadge, levelFromXP } from '../lib/memberTracker';
 
-const XP_PER_LEVEL = 500;
+const XP_PER_LEVEL = 250; // must match memberTracker.ts
 
 function progressBar(pct: number, len = 14): string {
-  const filled = Math.round((pct / 100) * len);
+  const filled = Math.max(0, Math.round((pct / 100) * len));
   return '█'.repeat(filled) + '░'.repeat(Math.max(0, len - filled));
 }
 
@@ -76,7 +76,7 @@ export const profilCommand = {
     const currentBase = (level - 1) * XP_PER_LEVEL;
     const xpInLevel   = member.xp - currentBase;
     const xpForNext   = XP_PER_LEVEL;
-    const levelPct    = Math.round((xpInLevel / xpForNext) * 100);
+    const levelPct    = Math.min(100, Math.max(0, Math.round((xpInLevel / xpForNext) * 100)));
 
     // ── Rang ─────────────────────────────────────────────────────────────────
     const { rank, total, pct: rankPct } = rankOf(member.id);
