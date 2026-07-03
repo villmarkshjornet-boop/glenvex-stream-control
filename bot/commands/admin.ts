@@ -306,8 +306,10 @@ export const adminCommand = {
           `• TWITCH_CLIENT_SECRET: ${hasTwSec ? '✅' : '❌ mangler'}`,
         ];
         if (hasSbUrl && hasSbKey && hasTwId && hasTwSec && hasWsId) {
-          lines.push(`• Alle env-vars OK — token i DB mangler eller er ugyldig. Gå til Innstillinger → Koble Twitch på nytt.`);
-          lines.push(`  (Sjekk om \`workspaces.twitch_access_token\` er satt for workspace ${process.env.WORKSPACE_ID})`);
+          lines.push(`• Alle env-vars OK — token i DB mangler, utløpt eller mangler scope.`);
+          lines.push(`  → Sjekk Railway-loggene for "[getBroadcasterUserToken]" for nøyaktig årsak.`);
+          lines.push(`  → Gå til Innstillinger → Koble Twitch på nytt om token er utløpt/mangler.`);
+          lines.push(`  (workspace_id="${process.env.WORKSPACE_ID}" — verifiser at dette matcher \`workspaces.id\` i Supabase)`);
         }
         await interaction.editReply({ content: lines.join('\n') });
         return;

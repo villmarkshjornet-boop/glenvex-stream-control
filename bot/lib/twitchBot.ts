@@ -190,12 +190,12 @@ let forrigeFollowerAntall = -1;
 // We read twitch_access_token from Supabase and auto-refresh via twitch_refresh_token on 401.
 let _cachedBroadcasterToken: string | null = null;
 
-export async function getBroadcasterUserToken(): Promise<string | null> {
+export async function getBroadcasterUserToken(workspaceId?: string): Promise<string | null> {
   if (_cachedBroadcasterToken) return _cachedBroadcasterToken;
 
-  const wsId = process.env.WORKSPACE_ID ?? '';
+  const wsId = workspaceId ?? process.env.WORKSPACE_ID ?? '';
   if (!wsId) {
-    console.error('[twitchBot] getBroadcasterUserToken: WORKSPACE_ID env var is not set');
+    console.error('[getBroadcasterUserToken] WORKSPACE_ID env var is not set and no workspaceId argument provided');
     return null;
   }
   const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
@@ -204,11 +204,11 @@ export async function getBroadcasterUserToken(): Promise<string | null> {
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
 
   if (!sbUrl || !sbKey) {
-    console.error('[twitchBot] getBroadcasterUserToken: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing');
+    console.error('[getBroadcasterUserToken] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing');
     return null;
   }
   if (!clientId || !clientSecret) {
-    console.error('[twitchBot] getBroadcasterUserToken: TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET missing');
+    console.error('[getBroadcasterUserToken] TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET missing');
     return null;
   }
 
@@ -216,13 +216,35 @@ export async function getBroadcasterUserToken(): Promise<string | null> {
     const { createClient } = require('@supabase/supabase-js');
     const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
 
-    const { data: ws } = await sb
+    const { data: ws, error: dbError } = await sb
       .from('workspaces')
-      .select('twitch_access_token,twitch_refresh_token')
+      .select('twitch_access_token,twitch_refresh_token,twitch_user_id')
       .eq('id', wsId)
       .single();
 
-    if (!ws?.twitch_access_token) return null;
+    if (dbError || !ws) {
+      console.error(`[getBroadcasterUserToken] DB lookup failed for wsId="${wsId}":`, dbError?.message ?? 'no row returned');
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'TWITCH_AUTH_ERROR',
+        title: `Twitch token: workspace "${wsId}" ikke funnet i DB`,
+        severity: 'error',
+        metadata: { workspaceId: wsId, dbError: dbError?.message ?? 'no row' },
+      });
+      return null;
+    }
+
+    if (!ws.twitch_access_token) {
+      console.error(`[getBroadcasterUserToken] wsId="${wsId}" row found but twitch_access_token is null — user must reconnect Twitch in settings`);
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'TWITCH_AUTH_ERROR',
+        title: `Twitch token: twitch_access_token mangler for workspace "${wsId}" — koble til Twitch på nytt`,
+        severity: 'critical',
+        metadata: { workspaceId: wsId, hasTwitchUserId: !!ws.twitch_user_id },
+      });
+      return null;
+    }
 
     // Validate via /oauth2/validate (lightweight, no quota cost)
     const testRes = await fetch('https://id.twitch.tv/oauth2/validate', {
@@ -231,11 +253,38 @@ export async function getBroadcasterUserToken(): Promise<string | null> {
     }).catch(() => null);
 
     if (testRes?.ok) {
+      // Verify required scope is present
+      const validateData = await testRes.json().catch(() => null) as { scopes?: string[] } | null;
+      const scopes = validateData?.scopes ?? [];
+      if (scopes.length > 0 && !scopes.includes('channel:read:subscriptions')) {
+        console.warn(`[getBroadcasterUserToken] Token valid but missing scope "channel:read:subscriptions". Has: ${scopes.join(', ')}`);
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'TWITCH_AUTH_ERROR',
+          title: 'Twitch token mangler scope channel:read:subscriptions — koble til Twitch på nytt',
+          severity: 'error',
+          metadata: { workspaceId: wsId, scopes },
+        });
+        // Return token anyway — some endpoints don't need this scope
+      }
       _cachedBroadcasterToken = ws.twitch_access_token;
       return _cachedBroadcasterToken;
     }
 
-    if (!ws.twitch_refresh_token) return null;
+    const validateStatus = testRes?.status ?? 'network_error';
+    console.warn(`[getBroadcasterUserToken] Token validation failed (HTTP ${validateStatus}) — attempting refresh`);
+
+    if (!ws.twitch_refresh_token) {
+      console.error(`[getBroadcasterUserToken] Token expired and no refresh_token stored for wsId="${wsId}"`);
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'TWITCH_AUTH_ERROR',
+        title: 'Twitch token utløpt og ingen refresh_token — koble til Twitch på nytt',
+        severity: 'critical',
+        metadata: { workspaceId: wsId, validateStatus },
+      });
+      return null;
+    }
 
     const refreshRes = await fetch('https://id.twitch.tv/oauth2/token', {
       method: 'POST',
@@ -268,14 +317,24 @@ export async function getBroadcasterUserToken(): Promise<string | null> {
       return _cachedBroadcasterToken;
     }
 
+    // Refresh failed — log the specific error from Twitch
+    let refreshErrBody = '';
+    try { refreshErrBody = await refreshRes?.text() ?? ''; } catch {}
+    console.error(`[getBroadcasterUserToken] Token refresh failed HTTP ${refreshRes?.status ?? 'network_error'}: ${refreshErrBody.slice(0, 200)}`);
     logSystemEvent({
       source: 'twitch_bot',
       event_type: 'TWITCH_AUTH_ERROR',
       title: 'Twitch token refresh feilet — koble til Twitch på nytt i innstillinger',
       severity: 'critical',
-      metadata: { workspaceId: wsId, refreshStatus: refreshRes?.status ?? 'network_error' },
+      metadata: {
+        workspaceId: wsId,
+        refreshStatus: refreshRes?.status ?? 'network_error',
+        refreshError: refreshErrBody.slice(0, 200),
+      },
     });
-  } catch {}
+  } catch (err) {
+    console.error('[getBroadcasterUserToken] Unexpected error:', err);
+  }
   return null;
 }
 
