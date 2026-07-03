@@ -17,14 +17,15 @@ export interface Card {
 export type BlackjackOutcome = 'blackjack' | 'win' | 'push' | 'loss';
 
 export interface BlackjackGameState {
-  playerCards:  Card[];
-  dealerCards:  Card[];
-  playerScore:  number;
-  dealerScore:  number;
-  outcome:      BlackjackOutcome | null;
-  canHit:       boolean;
-  coinsDelta:   number;
-  newBalance:   number;
+  playerCards:   Card[];
+  dealerCards:   Card[];
+  playerScore:   number;
+  dealerScore:   number;
+  outcome:       BlackjackOutcome | null;
+  canHit:        boolean;
+  coinsDelta:    number;
+  newBalance:    number;
+  remainingDeck: Card[];
 }
 
 // In-memory cooldown tracker: `${workspaceId}:${discordId}` → last played ms
@@ -217,17 +218,19 @@ export async function playBlackjack(
         playerCards, dealerCards, playerScore, dealerScore,
         outcome: 'blackjack', canHit: false,
         coinsDelta: payout, newBalance: spend.newBalance + bet + payout,
+        remainingDeck: [],
       },
     };
   }
 
-  // Return state for hit/stand interaction
+  // Return state for hit/stand interaction — include remaining deck (cards after initial deal)
   return {
     ok: true,
     state: {
       playerCards, dealerCards, playerScore, dealerScore,
       outcome: null, canHit: playerScore < 21,
       coinsDelta: 0, newBalance: spend.newBalance,
+      remainingDeck: deck.slice(4),
     },
   };
 }
@@ -240,8 +243,9 @@ export async function hitBlackjack(
   dealerCards:   Card[],
   remainingDeck: Card[],
 ): Promise<BlackjackGameState> {
-  const newCard = remainingDeck[0]!;
-  const updated = [...playerCards, newCard];
+  const newCard      = remainingDeck[0]!;
+  const updated      = [...playerCards, newCard];
+  const deckAfterHit = remainingDeck.slice(1);
 
   await logRng(workspaceId, discordId, Math.random(), { newCard }, 'hit');
 
@@ -257,13 +261,16 @@ export async function hitBlackjack(
       .maybeSingle() ?? { data: null };
     return {
       playerCards: updated, dealerCards, playerScore, dealerScore: scoreHand(dealerCards),
-      outcome: 'loss', canHit: false, coinsDelta: -bet, newBalance: (m?.coins_balance as number | null) ?? 0,
+      outcome: 'loss', canHit: false, coinsDelta: -bet,
+      newBalance: (m?.coins_balance as number | null) ?? 0,
+      remainingDeck: deckAfterHit,
     };
   }
 
   return {
     playerCards: updated, dealerCards, playerScore, dealerScore: scoreHand(dealerCards),
     outcome: null, canHit: playerScore < 21, coinsDelta: 0, newBalance: 0,
+    remainingDeck: deckAfterHit,
   };
 }
 
@@ -315,6 +322,8 @@ export async function standBlackjack(
 
   return {
     playerCards, dealerCards: dc, playerScore: pScore, dealerScore: dScore,
-    outcome, canHit: false, coinsDelta, newBalance: (m?.coins_balance as number | null) ?? 0,
+    outcome, canHit: false, coinsDelta,
+    newBalance: (m?.coins_balance as number | null) ?? 0,
+    remainingDeck: [],
   };
 }

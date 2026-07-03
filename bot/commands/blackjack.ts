@@ -69,7 +69,7 @@ export async function execute(interaction: ChatInputCommandInteraction, workspac
     bet,
     playerCards: state.playerCards,
     dealerCards: state.dealerCards,
-    deck:        [],
+    deck:        state.remainingDeck,
   });
 
   // Auto-expire after 5 minutes
@@ -158,6 +158,7 @@ export async function handleBlackjackButton(btn: ButtonInteraction, workspaceId:
   if (isHit) {
     const state = await hitBlackjack(workspaceId, game.discordId, game.bet, game.playerCards, game.dealerCards, game.deck);
     game.playerCards = state.playerCards;
+    game.deck        = state.remainingDeck;
 
     if (state.outcome) {
       activeGames.delete(gameId);
