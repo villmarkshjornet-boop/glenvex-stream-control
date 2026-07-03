@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { GoalBarsPreview, GoalBarSingle, FxStyles, DEFAULT_FX, PRESETS, type OverlayFx } from '@/components/GoalBars';
+import { GoalBarsPreview, FxStyles, DEFAULT_FX, PRESETS, type OverlayFx } from '@/components/GoalBars';
 
 interface Goal {
   type: string;
@@ -12,14 +12,17 @@ interface Goal {
   aktiv: boolean;
   farge: string;
   manuell?: boolean;
+  source?: 'auto' | 'manual';
+  startValue?: number;
+  resetPolicy?: 'never' | 'per_stream' | 'daily' | 'manual';
 }
 
 const FARGER = ['#00ff41', '#9b77cf', '#ff7b47', '#00d4ff', '#ffd700', '#ff4466', '#44ffcc'];
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false },
-  { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false },
-  { type: 'donations',   label: 'Donasjoner',  icon: '♥', mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', manuell: true  },
+  { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false, source: 'auto'   },
+  { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false, source: 'auto'   },
+  { type: 'donations',   label: 'Donasjoner',  icon: '♥', mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', manuell: true,  source: 'manual' },
 ];
 
 /* ─── Segmented bar (settings panel) ─── */
@@ -50,20 +53,36 @@ function SegBar({ pct, farge }: { pct: number; farge: string }) {
 }
 
 /* ─── Goal card ─── */
-function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
+function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub }: {
   goal: Goal; index: number;
   onUpdate: (i: number, u: Partial<Goal>) => void;
   onRemove: (i: number) => void;
+  onIncrement: (i: number, delta: number) => Promise<void>;
   liveF: number | null; liveSub: number | null;
 }) {
+  // Derive effective source (backward-compat with old manuell field)
+  const effectiveSource: 'auto' | 'manual' =
+    goal.source ??
+    (['followers', 'subscribers'].includes(goal.type) ? 'auto' : 'manual');
+
   const gjeldende =
-    goal.type === 'followers'   && liveF   !== null ? liveF   :
-    goal.type === 'subscribers' && liveSub !== null ? liveSub :
+    effectiveSource === 'auto' && goal.type === 'followers'   && liveF   !== null ? liveF   :
+    effectiveSource === 'auto' && goal.type === 'subscribers' && liveSub !== null ? liveSub :
     goal.gjeldende;
 
   const pct   = goal.mal > 0 ? Math.min(100, Math.round((gjeldende / goal.mal) * 100)) : 0;
   const igjen = Math.max(0, goal.mal - gjeldende);
   const isCustom = goal.type.startsWith('custom_');
+
+  const btnStyle = (active: boolean, color: string) => ({
+    padding: '4px 10px', fontSize: '11px', fontFamily: 'monospace' as const,
+    border: `1px solid ${active ? color + '80' : '#1a2f1a'}`,
+    background: active ? color + '12' : 'transparent',
+    color: active ? color : '#3a5a3a',
+    borderRadius: '4px', cursor: 'pointer' as const, fontWeight: 700 as const,
+    textTransform: 'uppercase' as const, letterSpacing: '0.08em',
+    transition: 'all 0.2s',
+  });
 
   return (
     <div style={{
@@ -113,10 +132,59 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
           {goal.aktiv && (
             <>
               <SegBar pct={pct} farge={goal.farge} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0 12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0 10px' }}>
                 <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>{igjen.toLocaleString('no-NO')} igjen</span>
-                <span style={{ fontSize: '11px', color: goal.manuell ? '#4a6a4a' : '#00ff4145', fontFamily: 'monospace' }}>{goal.manuell ? 'Manuell' : '● Live'}</span>
+                <span style={{ fontSize: '11px', color: effectiveSource === 'manual' ? '#4a6a4a' : '#00ff4145', fontFamily: 'monospace' }}>
+                  {effectiveSource === 'manual' ? 'Manuell' : '● Live'}
+                </span>
               </div>
+
+              {/* Source selector */}
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+                <button onClick={() => onUpdate(index, { source: 'auto', manuell: false })} style={btnStyle(effectiveSource === 'auto', goal.farge)}>
+                  ● Auto (Twitch)
+                </button>
+                <button onClick={() => onUpdate(index, { source: 'manual', manuell: true })} style={btnStyle(effectiveSource === 'manual', goal.farge)}>
+                  ✎ Manuell
+                </button>
+              </div>
+
+              {/* Manual increment controls */}
+              {effectiveSource === 'manual' && (
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '10px', alignItems: 'center' }}>
+                  <button
+                    onClick={() => onIncrement(index, -1)}
+                    style={{ ...btnStyle(false, '#ff4466'), padding: '5px 14px', fontSize: '16px' }}
+                  >−</button>
+                  <button
+                    onClick={() => onIncrement(index, 1)}
+                    style={{ ...btnStyle(false, goal.farge), padding: '5px 14px', fontSize: '16px' }}
+                  >+</button>
+                  <button
+                    onClick={() => onIncrement(index, 0)}
+                    title={`Reset til ${goal.startValue ?? 0}`}
+                    style={{ ...btnStyle(false, '#4a6a4a'), padding: '5px 10px', fontSize: '11px', marginLeft: '4px' }}
+                  >↺ Reset</button>
+
+                  {/* resetPolicy inline */}
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+                    {(['never', 'per_stream', 'daily', 'manual'] as const).map(p => {
+                      const labels: Record<string, string> = { never: 'Aldri', per_stream: 'Per stream', daily: 'Daglig', manual: 'Manuelt' };
+                      const active = (goal.resetPolicy ?? 'never') === p;
+                      return (
+                        <button key={p} onClick={() => onUpdate(index, { resetPolicy: p })} style={{
+                          padding: '4px 8px', fontSize: '10px', fontFamily: 'monospace',
+                          border: `1px solid ${active ? goal.farge + '80' : '#1a2f1a'}`,
+                          background: active ? goal.farge + '12' : 'transparent',
+                          color: active ? goal.farge : '#3a5a3a',
+                          borderRadius: '4px', cursor: 'pointer', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '0.06em', transition: 'all 0.2s',
+                        }}>{labels[p]}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Edit fields */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
@@ -139,11 +207,18 @@ function GoalCard({ goal, index, onUpdate, onRemove, liveF, liveSub }: {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
                   <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>
-                    {goal.manuell ? 'Gjeldende' : 'Gjeldende (auto)'}
+                    {effectiveSource === 'manual' ? 'Startverdi (reset til)' : 'Gjeldende (auto)'}
                   </div>
-                  <input type="number" value={gjeldende} disabled={!goal.manuell}
-                    onChange={e => goal.manuell && onUpdate(index, { gjeldende: +e.target.value })}
-                    style={{ width: '100%', background: '#050505', border: `1px solid ${goal.manuell ? goal.farge + '30' : '#141f14'}`, borderRadius: '5px', padding: '5px 9px', fontSize: '13px', color: goal.manuell ? '#c8f5c8' : '#2a3d2a', fontFamily: 'monospace', outline: 'none', cursor: goal.manuell ? 'text' : 'default' }} />
+                  {effectiveSource === 'manual' ? (
+                    <input type="number" value={goal.startValue ?? 0}
+                      onChange={e => onUpdate(index, { startValue: Math.max(0, +e.target.value) })}
+                      style={{ width: '100%', background: '#050505', border: `1px solid ${goal.farge + '30'}`, borderRadius: '5px', padding: '5px 9px', fontSize: '13px', color: '#c8f5c8', fontFamily: 'monospace', outline: 'none' }}
+                      onFocus={e => e.target.style.borderColor = goal.farge + '50'}
+                      onBlur={e => e.target.style.borderColor = goal.farge + '30'} />
+                  ) : (
+                    <input type="number" value={gjeldende} disabled
+                      style={{ width: '100%', background: '#050505', border: '1px solid #141f14', borderRadius: '5px', padding: '5px 9px', fontSize: '13px', color: '#2a3d2a', fontFamily: 'monospace', outline: 'none', cursor: 'default' }} />
+                  )}
                 </div>
                 <div>
                   <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Farge</div>
@@ -210,21 +285,37 @@ export default function ViewerGoalsPage() {
   const [canReadSub, setCanReadSub] = useState<boolean | null>(null);
   const [tokenStatus, setToken]     = useState<'ok' | 'missing' | 'snapshot' | null>(null);
   const [overlayUrl, setOverlayUrl] = useState('');
-  const [workspaceId, setWsId]    = useState('');
-  const [lagret, setLagret]       = useState(false);
-  const [posting, setPosting]     = useState(false);
-  const [postRes, setPostRes]      = useState('');
-  const [fx, setFx]               = useState<OverlayFx>(DEFAULT_FX);
-  const [fxLagret, setFxLagret]   = useState(false);
+  const [workspaceId, setWsId]      = useState('');
+  const [lagret, setLagret]         = useState(false);
+  const [posting, setPosting]       = useState(false);
+  const [postRes, setPostRes]       = useState('');
+  const [fx, setFx]                 = useState<OverlayFx>(DEFAULT_FX);
+  const [fxLagret, setFxLagret]     = useState(false);
   const [kopierteUrls, setKopierteUrls] = useState<Record<string, boolean>>({});
-  const [kopiert, setKopiert]     = useState(false);
-  const [lastRefresh, setLast]    = useState<Date | null>(null);
+  const [lastRefresh, setLast]      = useState<Date | null>(null);
 
   const updateGoal = (i: number, u: Partial<Goal>) =>
     setGoals(prev => prev.map((g, idx) => idx === i ? { ...g, ...u } : g));
 
   const removeGoal = (i: number) =>
     setGoals(prev => prev.filter((_, idx) => idx !== i));
+
+  async function inkrementGoal(index: number, delta: number) {
+    const goal = goals[index];
+    try {
+      const res = await fetch(`/api/goals/${encodeURIComponent(goal.type)}/increment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { gjeldende?: number };
+        if (typeof data.gjeldende === 'number') {
+          updateGoal(index, { gjeldende: data.gjeldende });
+        }
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     fetch('/api/goals/live').then(r => r.json()).then(d => {
@@ -235,7 +326,11 @@ export default function ViewerGoalsPage() {
         setCanReadSub(d.live.canReadSubscribers ?? false);
         if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
       }
-      if (d.goals?.length > 0) setGoals(d.goals);
+      if (d.goals?.length > 0) setGoals(d.goals.map((g: any) => ({
+        ...g,
+        icon: g.icon ?? '◆',
+        farge: g.farge ?? '#00ff41',
+      })));
       if (d.fx) setFx(prev => ({ ...prev, ...d.fx }));
       setLast(new Date());
     }).catch(() => {});
@@ -264,16 +359,24 @@ export default function ViewerGoalsPage() {
   const fullOverlayUrl = workspaceId ? `${overlayUrl}?ws=${encodeURIComponent(workspaceId)}` : overlayUrl;
 
   // Live preview uses goals with current live data merged in
-  const previewGoals = goals.map(g => ({
-    ...g,
-    gjeldende:
-      g.type === 'followers'   && liveF   !== null ? liveF   :
-      g.type === 'subscribers' && liveSub !== null ? liveSub :
-      g.gjeldende,
-  }));
+  const previewGoals = goals.map(g => {
+    const src = g.source ?? (['followers', 'subscribers'].includes(g.type) ? 'auto' : 'manual');
+    return {
+      ...g,
+      gjeldende:
+        src === 'auto' && g.type === 'followers'   && liveF   !== null ? liveF   :
+        src === 'auto' && g.type === 'subscribers' && liveSub !== null ? liveSub :
+        g.gjeldende,
+    };
+  });
 
   async function lagre() {
-    const toSave = goals.map(({ type, label, mal, gjeldende, aktiv, farge }) => ({ type, label, mal, gjeldende, aktiv, farge }));
+    const toSave = goals.map(g => ({
+      type: g.type, label: g.label, icon: g.icon, mal: g.mal,
+      gjeldende: g.gjeldende, aktiv: g.aktiv, farge: g.farge,
+      manuell: g.manuell, source: g.source,
+      startValue: g.startValue, resetPolicy: g.resetPolicy,
+    }));
     await fetch('/api/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toSave) });
     setLagret(true);
     setTimeout(() => setLagret(false), 2000);
@@ -283,7 +386,15 @@ export default function ViewerGoalsPage() {
     setFx(nyFx);
     await fetch('/api/goals', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ _fxOnly: true, fx: nyFx, goals: goals.map(({ type, label, mal, gjeldende, aktiv, farge }) => ({ type, label, mal, gjeldende, aktiv, farge })) }),
+      body: JSON.stringify({
+        _fxOnly: true, fx: nyFx,
+        goals: goals.map(g => ({
+          type: g.type, label: g.label, icon: g.icon, mal: g.mal,
+          gjeldende: g.gjeldende, aktiv: g.aktiv, farge: g.farge,
+          manuell: g.manuell, source: g.source,
+          startValue: g.startValue, resetPolicy: g.resetPolicy,
+        })),
+      }),
     }).catch(() => {});
     setFxLagret(true);
     setTimeout(() => setFxLagret(false), 1800);
@@ -353,13 +464,14 @@ export default function ViewerGoalsPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {goals.map((g, i) => (
           <GoalCard key={g.type + i} goal={g} index={i}
-            onUpdate={updateGoal} onRemove={removeGoal}
+            onUpdate={updateGoal} onRemove={removeGoal} onIncrement={inkrementGoal}
             liveF={liveF} liveSub={liveSub} />
         ))}
 
         <button onClick={() => setGoals(prev => [...prev, {
           type: `custom_${Date.now()}`, label: 'Nytt mål', icon: '◆',
-          mal: 100, gjeldende: 0, aktiv: true, manuell: true,
+          mal: 100, gjeldende: 0, aktiv: true, manuell: true, source: 'manual',
+          startValue: 0, resetPolicy: 'never',
           farge: FARGER[prev.length % FARGER.length],
         }])} style={{
           padding: '11px', background: 'transparent', border: '1px dashed #1a2f1a',
@@ -369,7 +481,7 @@ export default function ViewerGoalsPage() {
         }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = '#00ff4140'; e.currentTarget.style.color = '#00ff41'; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2f1a'; e.currentTarget.style.color = '#3a5a3a'; }}>
-          + Legg til eget mål
+          + Legg til manuelt mål
         </button>
       </div>
 
