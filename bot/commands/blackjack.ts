@@ -8,6 +8,9 @@ import {
   ButtonInteraction,
 } from 'discord.js';
 import { playBlackjack, hitBlackjack, standBlackjack, formatHand, Card } from '../lib/blackjackEngine';
+import { awardCoins, CoinSource } from '../lib/coinService';
+
+const SRC_BJ_TIMEOUT: CoinSource = ('blackjack_timeout' as unknown) as CoinSource;
 
 // In-memory active games: gameId → game state
 const activeGames = new Map<string, {
@@ -72,8 +75,18 @@ export async function execute(interaction: ChatInputCommandInteraction, workspac
     deck:        state.remainingDeck,
   });
 
-  // Auto-expire after 5 minutes
-  setTimeout(() => activeGames.delete(gameId), 300_000);
+  // Auto-expire after 5 minutes — refund bet if game was abandoned
+  setTimeout(() => {
+    const expired = activeGames.get(gameId);
+    if (expired) {
+      activeGames.delete(gameId);
+      awardCoins(expired.discordId, expired.bet, SRC_BJ_TIMEOUT, {
+        workspaceId: expired.workspaceId,
+        reason: 'abandoned_game_refund',
+        bet: expired.bet,
+      }).catch(() => {});
+    }
+  }, 300_000);
 }
 
 function buildGameEmbed(playerCards: Card[], dealerCards: Card[], playerScore: number, bet: number): EmbedBuilder {
@@ -153,24 +166,27 @@ export async function handleBlackjackButton(btn: ButtonInteraction, workspaceId:
     return;
   }
 
+  // Remove from map atomically (before any await) so concurrent double-clicks
+  // hit the "utløpt" guard above rather than processing twice.
+  activeGames.delete(gameId);
+
   await btn.deferUpdate();
 
   if (isHit) {
     const state = await hitBlackjack(workspaceId, game.discordId, game.bet, game.playerCards, game.dealerCards, game.deck);
-    game.playerCards = state.playerCards;
-    game.deck        = state.remainingDeck;
 
     if (state.outcome) {
-      activeGames.delete(gameId);
+      // Bust or 21 — game over, map entry already removed
       const embed = buildResultEmbed(state.playerCards, state.dealerCards, state.playerScore, state.dealerScore, state.outcome, state.coinsDelta, state.newBalance, true);
       await btn.editReply({ embeds: [embed], components: [] });
     } else {
+      // Game continues — re-register with updated state for next action
+      activeGames.set(gameId, { ...game, playerCards: state.playerCards, deck: state.remainingDeck });
       const embed = buildGameEmbed(state.playerCards, state.dealerCards, state.playerScore, game.bet);
       await btn.editReply({ embeds: [embed], components: [buildActionRow(gameId, ownerUserId)] });
     }
   } else {
     const state = await standBlackjack(workspaceId, game.discordId, game.bet, game.playerCards, game.dealerCards, game.deck);
-    activeGames.delete(gameId);
     const embed = buildResultEmbed(state.playerCards, state.dealerCards, state.playerScore, state.dealerScore, state.outcome!, state.coinsDelta, state.newBalance, true);
     await btn.editReply({ embeds: [embed], components: [] });
   }

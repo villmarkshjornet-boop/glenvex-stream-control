@@ -147,11 +147,14 @@ async function renderBrowse(
   userId: string,
   page: number,
 ): Promise<void> {
+  // Defer immediately — image fetch can take up to 6 s, past Discord's 3 s limit
+  await btn.deferUpdate();
+
   const cards = await getMemberCards(workspaceId, userId, 'active');
   const total = cards.length;
 
   if (total === 0) {
-    await btn.update({
+    await btn.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0x9ca3af)
@@ -245,7 +248,7 @@ async function renderBrowse(
       .setStyle(ButtonStyle.Primary),
   );
 
-  await btn.update({ embeds: [embed], files, components: [row] });
+  await btn.editReply({ embeds: [embed], files, components: [row] });
 }
 
 // ── Button handler (exported for use in index.ts) ──────────────────────────────
