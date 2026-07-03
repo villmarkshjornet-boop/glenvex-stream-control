@@ -43,9 +43,8 @@ import { seedDefaultAchievements } from './lib/achievementService';
 import { seedDefaultQuests } from './lib/questService';
 import { WORKSPACE_ID } from './lib/supabase';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
-import { awardCoins, getBalance } from './lib/coinService';
-import { awardSubCard } from './lib/cardCollectionService';
-import { publishCardDrop } from './lib/cardDropPublisher';
+import { awardCoins } from './lib/coinService';
+import { generateSubCard } from './lib/subCardService';
 import { findMemberByTwitchId, storeUnmatchedSub } from './lib/twitchLinkService';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
@@ -1993,26 +1992,13 @@ async function tildelTwitchSubRolle(
   addSub(discordId, twitchUsername, displayName);
   awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
 
-  // Award sub card, then publish card drop event
-  const member = getMember(discordId);
-  awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
-    if (!subCard) return;
-    const coinBal = await getBalance(discordId).catch(() => 0);
-    publishCardDrop({
-      userId:          discordId,
-      discordUsername: displayName,
-      twitchUsername,
-      cardId:          subCard.id,
-      cardType:        'sub',
-      rarity:          subCard.rarity,
-      title:           subCard.title,
-      klass:           subCard.class ?? null,
-      level:           member?.level ?? 1,
-      xp:              member?.xp ?? 0,
-      coinsBalance:    coinBal,
-      cardImageUrl:    subCard.card_image_url ?? null,
-      source:          'sub',
-    }).catch(() => {});
+  // Generer og post SUB-kort (innebygd duplikat-guard)
+  generateSubCard({
+    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+    discordId,
+    twitchUsername,
+    displayName,
+    subTier,
   }).catch(() => {});
 }
 
@@ -2394,72 +2380,26 @@ client.once('clientReady', () => {
 
       // ── Sub card ───────────────────────────────────────────────────────────
       if (isSub) {
-        // Idempotency: check if sub card already exists
-        let existingSubCard = false;
-        if (sb) {
-          const { data: existing } = await sb
-            .from('community_cards')
-            .select('id')
-            .eq('workspace_id', wsId)
-            .eq('user_id', discordId)
-            .eq('card_type', 'sub')
-            .limit(1)
-            .single();
-          existingSubCard = !!existing;
-        }
-
-        if (existingSubCard) {
-          console.log(`[SUB_CARD_ALREADY_EXISTS] discordId=${discordId}`);
-          logSystemEvent({
-            source: 'twitch_link', event_type: 'SUB_CARD_ALREADY_EXISTS',
-            title:  `Sub-kort finnes allerede for ${discordId}`,
-            severity: 'info', metadata: { discordId, twitchUsername, wsId },
-          });
-        } else {
-          const member = getMember(discordId);
-          awardSubCard(discordId, twitchUsername, subTier).then(async subCard => {
-            if (!subCard) {
-              logSystemEvent({
-                source: 'twitch_link', event_type: 'SUB_CARD_AWARD_FAILED',
-                title:  `awardSubCard returnerte null for ${discordId}`,
-                severity: 'error', metadata: { discordId, twitchUsername, wsId },
-              });
-              return;
-            }
-            console.log(`[SUB_CARD_AWARDED] discordId=${discordId} cardId=${subCard.id}`);
-            logSystemEvent({
-              source: 'twitch_link', event_type: 'SUB_CARD_AWARDED',
-              title:  `Sub-kort tildelt ${discordId} — ${subCard.title} (${subCard.rarity})`,
-              severity: 'info', metadata: { discordId, twitchUsername, cardId: subCard.id, rarity: subCard.rarity, wsId },
-            });
-            const coinBal = await getBalance(discordId).catch(() => 0);
-            publishCardDrop({
-              userId:          discordId,
-              discordUsername: member?.displayName ?? twitchUsername,
-              twitchUsername,
-              cardId:          subCard.id,
-              cardType:        'sub',
-              rarity:          subCard.rarity,
-              title:           subCard.title,
-              klass:           subCard.class ?? null,
-              level:           member?.level ?? 1,
-              xp:              member?.xp ?? 0,
-              coinsBalance:    coinBal,
-              cardImageUrl:    subCard.card_image_url ?? null,
-              source:          'sub',
-            }).catch(() => {});
-          }).catch(() => {
-            logSystemEvent({
-              source: 'twitch_link', event_type: 'SUB_CARD_AWARD_FAILED',
-              title:  `awardSubCard kastet feil for ${discordId}`,
-              severity: 'error', metadata: { discordId, twitchUsername, wsId },
-            });
-          });
-        }
+        // generateSubCard inneholder duplikat-guard + posting + logging
+        const discordDisplayName = getMember(discordId)?.displayName ?? twitchUsername;
+        generateSubCard({
+          workspaceId:    wsId,
+          discordId,
+          twitchUsername,
+          displayName:    discordDisplayName,
+          subTier,
+        }).then(result => {
+          if (result.ok) {
+            console.log(`[SUB_CARD_GENERATED] discordId=${discordId} cardId=${result.cardId}`);
+          } else {
+            console.log(`[SUB_CARD_SKIPPED] discordId=${discordId} reason=${result.reason}`);
+          }
+        }).catch(() => {});
       } else {
         console.log(`[SUB_CARD_SKIPPED_NOT_SUB] discordId=${discordId}`);
         logSystemEvent({
-          source: 'twitch_link', event_type: 'SUB_CARD_SKIPPED_NOT_SUB',
+          workspaceId: wsId,
+          source: 'sub_card', event_type: 'SUB_CARD_SKIPPED_NOT_SUB',
           title:  `${twitchUsername} er ikke sub — ingen sub-kort`,
           severity: 'info', metadata: { discordId, twitchUsername, helixUsed, wsId },
         });
