@@ -182,6 +182,25 @@ function DetailSidebar({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [liveCheckResult, setLiveCheckResult] = useState<any>(null);
   const [liveChecking, setLiveChecking] = useState(false);
+
+  interface TwitchTokenCheckResult {
+    ok: boolean;
+    status: 'ok' | 'no_token' | 'expired' | 'reconnect' | 'mismatch';
+    hasAccessToken: boolean;
+    hasRefreshToken: boolean;
+    tokenValid: boolean;
+    storedLogin: string | null;
+    tokenLogin: string | null;
+    loginMismatch: boolean;
+    connectedAt: string | null;
+    expiresInSeconds: number | null;
+    scopes: string[] | null;
+    diagnosis: string;
+    action: string;
+    error?: string;
+  }
+  const [twitchCheckResult, setTwitchCheckResult] = useState<TwitchTokenCheckResult | null>(null);
+  const [twitchChecking, setTwitchChecking] = useState(false);
   const dots = healthDots(ws);
   const live = isLiveNow(ws);
 
@@ -195,6 +214,25 @@ function DetailSidebar({
       setLiveCheckResult({ ok: false, error: err instanceof Error ? err.message : 'Ukjent feil' });
     } finally {
       setLiveChecking(false);
+    }
+  };
+
+  const handleTwitchTokenCheck = async () => {
+    setTwitchChecking(true);
+    setTwitchCheckResult(null);
+    try {
+      const res = await fetch(`/api/admin/workspaces/${ws.id}/twitch-token-check`, { method: 'POST' });
+      setTwitchCheckResult(await res.json());
+    } catch (err: unknown) {
+      setTwitchCheckResult({
+        ok: false, status: 'reconnect', hasAccessToken: false, hasRefreshToken: false,
+        tokenValid: false, storedLogin: null, tokenLogin: null, loginMismatch: false,
+        connectedAt: null, expiresInSeconds: null, scopes: null, action: 'reconnect',
+        diagnosis: err instanceof Error ? err.message : 'Nettverksfeil',
+        error: err instanceof Error ? err.message : 'Nettverksfeil',
+      });
+    } finally {
+      setTwitchChecking(false);
     }
   };
 
@@ -381,8 +419,86 @@ function DetailSidebar({
         <Row label="User ID" value={<span className="font-mono text-[11px]">{ws.twitchUserId ?? '–'}</span>} />
         <Row label="OAuth tilkoblet" value={timeAgo(ws.twitchConnectedAt)} />
         <Row label="Bot siste event" value={timeAgo(ws.twitchBotLastEventAt)} color={ws.integrationStatus.twitch.botWatching ? 'text-g-green' : 'text-g-muted'} />
-        <Row label="OAuth-tokens" value={ws.integrationStatus.twitch.oauthValid ? '✓ Gyldige' : '✗ Mangler'} color={ws.integrationStatus.twitch.oauthValid ? 'text-g-green' : 'text-red-400'} />
+        <Row
+          label="OAuth-tokens"
+          value={ws.integrationStatus.twitch.oauthValid ? '✓ Gyldige' : '✗ Mangler — sjekk nedenfor'}
+          color={ws.integrationStatus.twitch.oauthValid ? 'text-g-green' : 'text-red-400'}
+        />
         <Row label="Status" value={live ? 'LIVE' : 'Offline'} color={live ? 'text-red-400' : 'text-g-muted'} />
+
+        {/* ── Reparer Twitch-kobling ────────────────────────────────────── */}
+        <div className="px-4 py-2">
+          <div className="rounded-lg border border-g-border/60 bg-g-bg/60 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-g-muted uppercase tracking-widest">Reparer Twitch-kobling</p>
+              <button
+                onClick={handleTwitchTokenCheck}
+                disabled={twitchChecking}
+                className="px-2 py-1 text-[11px] border border-g-border rounded text-g-muted hover:text-purple-400 hover:border-purple-400/30 transition-colors disabled:opacity-50"
+              >
+                {twitchChecking ? 'Validerer…' : 'Sjekk token ↻'}
+              </button>
+            </div>
+
+            {!twitchCheckResult && !twitchChecking && (
+              <p className="text-[11px] text-g-muted/60">
+                Klikk for å validere om token finnes i DB og ikke er utløpt via Twitch API.
+              </p>
+            )}
+
+            {twitchCheckResult && (
+              <>
+                {/* Status badges */}
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${twitchCheckResult.hasAccessToken ? 'bg-g-green/10 text-g-green border border-g-green/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    {twitchCheckResult.hasAccessToken ? '✓ Access token' : '✗ Ingen access token'}
+                  </span>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${twitchCheckResult.hasRefreshToken ? 'bg-g-green/10 text-g-green border border-g-green/20' : 'bg-g-muted/10 text-g-muted border border-g-border/50'}`}>
+                    {twitchCheckResult.hasRefreshToken ? '✓ Refresh token' : '✗ Ingen refresh token'}
+                  </span>
+                  {twitchCheckResult.hasAccessToken && (
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${twitchCheckResult.tokenValid ? 'bg-g-green/10 text-g-green border border-g-green/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                      {twitchCheckResult.tokenValid ? `✓ Gyldig (${Math.round((twitchCheckResult.expiresInSeconds ?? 0) / 3600)}t igjen)` : '✗ Utløpt / ugyldig'}
+                    </span>
+                  )}
+                  {twitchCheckResult.loginMismatch && (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded font-bold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                      ⚠ Login-mismatch
+                    </span>
+                  )}
+                </div>
+
+                {/* Diagnosis text */}
+                <p className={`text-[11px] leading-relaxed ${twitchCheckResult.ok ? 'text-g-green' : 'text-red-400/90'}`}>
+                  {twitchCheckResult.diagnosis}
+                </p>
+
+                {/* Login comparison if mismatch */}
+                {twitchCheckResult.loginMismatch && (
+                  <div className="text-[11px] text-g-muted space-y-0.5">
+                    <p>DB: <span className="font-mono text-g-text">@{twitchCheckResult.storedLogin}</span></p>
+                    <p>Token: <span className="font-mono text-yellow-400">@{twitchCheckResult.tokenLogin}</span></p>
+                  </div>
+                )}
+
+                {/* Reconnect button — visible when action needed */}
+                {twitchCheckResult.action !== 'ok' && (
+                  <div className="pt-1">
+                    <a
+                      href={`/api/auth/twitch?returnUrl=${encodeURIComponent('/admin')}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold bg-purple-500/10 border border-purple-500/30 rounded text-purple-300 hover:bg-purple-500/20 transition-colors"
+                    >
+                      Koble til på nytt →
+                    </a>
+                    <p className="text-[11px] text-g-muted/50 mt-1">
+                      Gjelder din egen konto. For andre brukere: be dem gå til /innstillinger og koble til Twitch på nytt.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
         {ws.lastStream && (
           <Row label="Siste stream" value={`${String(ws.lastStream.metadata?.title ?? '').slice(0, 40) || '–'} (${timeAgo(ws.lastStream.created_at)})`} />
         )}
