@@ -45,6 +45,7 @@ export type CoinSource =
   | 'blackjack_push'
   | 'roulette_bet'
   | 'roulette_win'
+  | 'card_sale'
   | 'admin_adjustment';
 
 export interface CoinTransaction {
