@@ -2,10 +2,43 @@
  * getCreatorContext() – én felles inngang til all akkumulert kunnskap.
  * Brukes av: highlightDiscovery, learningLoop, aiProducer, dashboardAssistant
  * Aldri kall memory-tabeller direkte fra agenter – bruk alltid denne.
+ *
+ * Autorativ kilde: ai_agent_memory (ai_producer_knowledge-fallback fjernet).
  */
 
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
+
+// ── Memory-category helpers (mirror of bot/lib/communityBrain.ts) ─────────────
+
+type MemoryCategory =
+  | 'community' | 'interests' | 'stream' | 'creator'
+  | 'discord'   | 'twitch'   | 'economy' | 'partner'
+  | 'humor'     | 'general';
+
+const MEMORY_TYPE_CATEGORY_MAP: Readonly<Record<string, MemoryCategory>> = {
+  viewer: 'community', member: 'community', member_profile: 'community',
+  topic: 'interests', joke: 'interests', community_phrase: 'interests',
+  meme: 'interests', game_pattern: 'interests',
+  stream_pattern: 'stream', content_pattern: 'stream', retention_pattern: 'stream',
+  creator_style: 'creator', creator_preference: 'creator',
+  creator_strength: 'creator', creator_weakness: 'creator',
+  discord_pattern: 'discord', channel_pattern: 'discord',
+  twitch_pattern: 'twitch', raid_pattern: 'twitch', clip_pattern: 'twitch',
+  economy_pattern: 'economy', coin_pattern: 'economy',
+  xp_pattern: 'economy', reward_pattern: 'economy',
+  partner_pattern: 'partner', sponsor_pattern: 'partner',
+};
+
+function categoryFromMemoryType(memoryType: string): MemoryCategory {
+  return MEMORY_TYPE_CATEGORY_MAP[memoryType] ?? 'general';
+}
+
+function decayRateFromFrequency(occurrenceCount: number): number {
+  if (occurrenceCount > 10) return 0.01;
+  if (occurrenceCount > 5)  return 0.02;
+  return 0.05;
+}
 
 export interface MemoryEntry {
   key: string;
@@ -70,7 +103,7 @@ export async function getCreatorContext(options?: {
 
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
-  const [memoryRes, insightsRes, legacyKnowledge, executedTipsRes, streamHistoryRes] = await Promise.all([
+  const [memoryRes, insightsRes, executedTipsRes, streamHistoryRes] = await Promise.all([
     db.from('ai_agent_memory')
       .select('agent_type,memory_type,key,summary,confidence_score,occurrence_count,last_seen_at,metadata')
       .eq('workspace_id', workspaceId)
@@ -82,11 +115,6 @@ export async function getCreatorContext(options?: {
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false })
       .limit(10),
-
-    // Lese fra gamle tabeller som fallback
-    db.from('ai_producer_knowledge')
-      .select('category,content,stream_count')
-      .eq('workspace_id', workspaceId),
 
     // Siste utførte AI-anbefalinger (for effektsporing og kontekst)
     db.from('system_events')
@@ -107,7 +135,6 @@ export async function getCreatorContext(options?: {
 
   const memory: any[] = memoryRes.data ?? [];
   const insights: any[] = insightsRes.data ?? [];
-  const legacy: any[] = legacyKnowledge.data ?? [];
   const executedTips: any[] = executedTipsRes.data ?? [];
   const streamHistory: any[] = streamHistoryRes.data ?? [];
 
@@ -124,17 +151,11 @@ export async function getCreatorContext(options?: {
         metadata: m.metadata,
       }));
 
-  const legacyGet = (cat: string) => legacy.find((e: any) => e.category === cat)?.content ?? '';
-  const legacyStreamCount = legacy.length > 0 ? Math.max(...legacy.map((e: any) => e.stream_count ?? 0)) : 0;
+  const channelProfileMem = memory.find((m: any) => m.memory_type === 'stream_pattern' && m.key === 'channel_profile');
+  const contentStratMem   = memory.find((m: any) => m.memory_type === 'content_pattern' && m.key === 'content_strategy');
+  const communityMem      = memory.find((m: any) => m.memory_type === 'community_pattern' && m.key === 'community_context');
 
-  // Ny memory har prioritet over gammel
-  const channelProfileMem = memory.find(m => m.memory_type === 'stream_pattern' && m.key === 'channel_profile');
-  const contentStratMem = memory.find(m => m.memory_type === 'content_pattern' && m.key === 'content_strategy');
-  const communityMem = memory.find(m => m.memory_type === 'community_pattern' && m.key === 'community_context');
-
-  const streamCount =
-    memory.filter(m => m.memory_type === 'stream_pattern' && m.key !== 'channel_profile').length
-    || legacyStreamCount;
+  const streamCount = memory.filter((m: any) => m.memory_type === 'stream_pattern' && m.key !== 'channel_profile').length;
 
   return {
     workspaceId,
@@ -145,9 +166,9 @@ export async function getCreatorContext(options?: {
     contentPatterns: byType('content_pattern'),
     gamePatterns: byType('game_pattern'),
     streamPatterns: byType('stream_pattern'),
-    channelProfile: channelProfileMem?.summary || legacyGet('channel_profile') || FALLBACK_CONTEXT.channelProfile,
-    contentStrategy: contentStratMem?.summary || legacyGet('content_strategy') || FALLBACK_CONTEXT.contentStrategy,
-    communityContext: communityMem?.summary || legacyGet('community_context') || FALLBACK_CONTEXT.communityContext,
+    channelProfile:   channelProfileMem?.summary || FALLBACK_CONTEXT.channelProfile,
+    contentStrategy:  contentStratMem?.summary   || FALLBACK_CONTEXT.contentStrategy,
+    communityContext: communityMem?.summary       || FALLBACK_CONTEXT.communityContext,
     recentInsights: insights.map((i: any) => ({
       title: i.title,
       summary: i.summary,
@@ -177,46 +198,102 @@ export async function upsertMemory(entry: {
   key: string;
   summary: string;
   confidence_score?: number;
-  metadata?: Record<string, any>;
+  source?: string;
+  category?: MemoryCategory;
+  metadata?: Record<string, unknown>;
 }): Promise<void> {
   const db = getDb();
   if (!db) return;
   const workspaceId = getWorkspaceId();
   const now = new Date().toISOString();
+  const category = entry.category ?? categoryFromMemoryType(entry.memory_type);
 
   try {
-    const { data: existing } = await db
+    const { data: existing, error: selectError } = await db
       .from('ai_agent_memory')
-      .select('id,occurrence_count')
+      .select('id,occurrence_count,strength,locked,metadata,source_count')
       .eq('workspace_id', workspaceId)
-      .eq('agent_type', entry.agent_type)
+      .eq('agent_type',  entry.agent_type)
       .eq('memory_type', entry.memory_type)
-      .eq('key', entry.key)
-      .single();
+      .eq('key',         entry.key)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error('[CreatorContext] memory SELECT feilet:', selectError.message);
+      return;
+    }
 
     if (existing) {
+      const newCount = ((existing.occurrence_count as number | null) ?? 1) + 1;
+      const isLocked = existing.locked === true;
+
+      if (isLocked) {
+        await db.from('ai_agent_memory').update({
+          occurrence_count: newCount,
+          last_seen_at: now,
+          updated_at:   now,
+        }).eq('id', existing.id as string);
+        return;
+      }
+
+      // Merge metadata and track source
+      const existingMeta = (existing.metadata as Record<string, unknown> | null) ?? {};
+      const lastSource   = existingMeta.last_source as string | undefined;
+      const mergedMeta: Record<string, unknown> = { ...existingMeta, ...(entry.metadata ?? {}) };
+
+      let newSourceCount = (existing.source_count as number | null) ?? 1;
+      if (entry.source) {
+        if (lastSource === undefined) {
+          mergedMeta.last_source = entry.source;
+        } else if (entry.source !== lastSource) {
+          newSourceCount += 1;
+          mergedMeta.last_source = entry.source;
+        }
+      }
+
+      const existingStrength = typeof existing.strength === 'number' ? (existing.strength as number) : 1.0;
+      const newStrength  = Math.min(1.0, existingStrength + 0.05);
+      const newDecayRate = decayRateFromFrequency(newCount);
+
       await db.from('ai_agent_memory').update({
-        summary: entry.summary,
+        summary:          entry.summary,
         confidence_score: entry.confidence_score ?? 0.7,
-        occurrence_count: existing.occurrence_count + 1,
-        last_seen_at: now,
-        updated_at: now,
-        ...(entry.metadata ? { metadata: entry.metadata } : {}),
-      }).eq('id', existing.id);
+        occurrence_count: newCount,
+        last_seen_at:     now,
+        updated_at:       now,
+        strength:         newStrength,
+        decay_rate:       newDecayRate,
+        source_count:     newSourceCount,
+        memory_category:  category,
+        metadata:         mergedMeta,
+      }).eq('id', existing.id as string);
+
     } else {
+      const initMeta: Record<string, unknown> = { ...(entry.metadata ?? {}) };
+      if (entry.source) initMeta.last_source = entry.source;
+
       await db.from('ai_agent_memory').insert({
-        workspace_id: workspaceId,
-        agent_type: entry.agent_type,
-        memory_type: entry.memory_type,
-        key: entry.key,
-        summary: entry.summary,
+        workspace_id:     workspaceId,
+        agent_type:       entry.agent_type,
+        memory_type:      entry.memory_type,
+        key:              entry.key,
+        summary:          entry.summary,
         confidence_score: entry.confidence_score ?? 0.5,
         occurrence_count: 1,
-        last_seen_at: now,
-        metadata: entry.metadata ?? {},
+        last_seen_at:     now,
+        updated_at:       now,
+        strength:         1.0,
+        decay_rate:       0.05,
+        source_count:     1,
+        memory_category:  category,
+        metadata:         initMeta,
+        // admin_approved intentionally omitted (stays null for new entries)
       });
     }
-  } catch { /* silent – memory er best-effort */ }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[CreatorContext] upsertMemory exception:', msg.slice(0, 200));
+  }
 }
 
 export async function addInsight(insight: {
