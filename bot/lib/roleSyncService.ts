@@ -112,15 +112,17 @@ export async function syncRankRole(
  * badgeKey must match a key in BadgeRoles (h4ckerman, hero_yesterday, twitch_sub).
  */
 export async function syncBadgeRole(
-  guild:      Guild,
-  member:     GuildMember,
-  badgeKey:   keyof BadgeRoles,
-  badgeRoles: BadgeRoles,
-  grant:      boolean,
+  guild:       Guild,
+  member:      GuildMember,
+  badgeKey:    keyof BadgeRoles,
+  badgeRoles:  BadgeRoles,
+  grant:       boolean,
+  workspaceId: string,
 ): Promise<void> {
   const roleId = badgeRoles[badgeKey];
   if (!roleId) {
     logSystemEvent({
+      workspaceId,
       source:     'role_sync',
       event_type: 'ROLE_MAPPING_MISSING',
       title:      `Badge role not configured: ${badgeKey}`,
@@ -133,6 +135,7 @@ export async function syncBadgeRole(
   const role = guild.roles.cache.get(roleId);
   if (!role) {
     logSystemEvent({
+      workspaceId,
       source:     'role_sync',
       event_type: 'ROLE_MAPPING_MISSING',
       title:      `Badge role ID not found in guild: ${roleId} (${badgeKey})`,
@@ -145,6 +148,7 @@ export async function syncBadgeRole(
   if (grant && !member.roles.cache.has(roleId)) {
     await member.roles.add(role, `Badge sync: ${badgeKey}`).catch((err: Error) => {
       logSystemEvent({
+        workspaceId,
         source:     'role_sync',
         event_type: 'ROLE_SYNC_PERMISSION_DENIED',
         title:      `Could not assign badge role ${badgeKey}: ${err.message.slice(0, 120)}`,
@@ -155,6 +159,7 @@ export async function syncBadgeRole(
   } else if (!grant && member.roles.cache.has(roleId)) {
     await member.roles.remove(role, `Badge revoke: ${badgeKey}`).catch((err: Error) => {
       logSystemEvent({
+        workspaceId,
         source:     'role_sync',
         event_type: 'ROLE_SYNC_PERMISSION_DENIED',
         title:      `Could not remove badge role ${badgeKey}: ${err.message.slice(0, 120)}`,
@@ -177,10 +182,12 @@ export async function syncHeroRole(
   newHeroDiscordId:  string,
   prevHeroDiscordId: string | null,
   heroRoleId:        string,
+  workspaceId:       string,
 ): Promise<void> {
   const role = guild.roles.cache.get(heroRoleId);
   if (!role) {
     logSystemEvent({
+      workspaceId,
       source:     'role_sync',
       event_type: 'ROLE_MAPPING_MISSING',
       title:      `Hero role ID not found in guild: ${heroRoleId}`,
@@ -203,6 +210,7 @@ export async function syncHeroRole(
   if (newMember && !newMember.roles.cache.has(heroRoleId)) {
     await newMember.roles.add(role, 'Hero of Yesterday').catch((err: Error) => {
       logSystemEvent({
+        workspaceId,
         source:     'role_sync',
         event_type: 'ROLE_SYNC_PERMISSION_DENIED',
         title:      `Could not assign hero role: ${err.message.slice(0, 120)}`,
@@ -215,6 +223,8 @@ export async function syncHeroRole(
 
 // ─── Periodic full repair ─────────────────────────────────────────────────────
 
+let repairInProgress = false;
+
 /**
  * Reads all active community members from DB, syncs their rank roles
  * and h4ckerman badge role. Designed to run every 30–60 min.
@@ -226,8 +236,14 @@ export async function repairAllRoles(
   rankRoles:   RankRoles,
   badgeRoles:  BadgeRoles,
 ): Promise<{ repaired: number; errors: number }> {
+  if (repairInProgress) {
+    console.log('[RoleSync] repairAllRoles already in progress — skipping concurrent run');
+    return { repaired: 0, errors: 0 };
+  }
+  repairInProgress = true;
+
   const db = getBotDb();
-  if (!db) return { repaired: 0, errors: 0 };
+  if (!db) { repairInProgress = false; return { repaired: 0, errors: 0 }; }
 
   const { data: members } = await db
     .from('community_members')
@@ -260,7 +276,7 @@ export async function repairAllRoles(
           .eq('badge_key', 'h4ckerman')
           .maybeSingle();
 
-        await syncBadgeRole(guild, guildMember, 'h4ckerman', badgeRoles, !!badge);
+        await syncBadgeRole(guild, guildMember, 'h4ckerman', badgeRoles, !!badge, workspaceId);
       }
 
       repaired++;
@@ -268,6 +284,8 @@ export async function repairAllRoles(
       errors++;
     }
   }
+
+  repairInProgress = false;
 
   logSystemEvent({
     workspaceId,

@@ -346,7 +346,7 @@ async function sjekkOgSendMVP(): Promise<void> {
           .maybeSingle();
         prevHeroId = (prevEvent?.metadata as any)?.userId ?? null;
       }
-      await syncHeroRole(guild, heroId, prevHeroId, settings.badgeRoles.hero_yesterday).catch(() => {});
+      await syncHeroRole(guild, heroId, prevHeroId, settings.badgeRoles.hero_yesterday, WORKSPACE_ID).catch(() => {});
     }
   }
 }

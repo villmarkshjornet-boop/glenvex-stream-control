@@ -82,6 +82,13 @@ export const adminCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
+    // Server-side permission guard — Discord enforces this at the UI level too,
+    // but we double-check so misconfigured server permissions can't bypass it.
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: '❌ Krever tillatelsen **Manage Server**.', ephemeral: true });
+      return;
+    }
+
     const group = interaction.options.getSubcommandGroup(false);
     const sub   = interaction.options.getSubcommand();
 
@@ -155,7 +162,7 @@ export const adminCommand = {
         if (settings) {
           const guildMember = await interaction.guild.members.fetch(target.id).catch(() => null);
           if (guildMember) {
-            await syncBadgeRole(interaction.guild, guildMember, badgeKey as any, settings.badgeRoles, true);
+            await syncBadgeRole(interaction.guild, guildMember, badgeKey as any, settings.badgeRoles, true, WORKSPACE_ID).catch(() => {});
           }
         }
       }
@@ -195,7 +202,7 @@ export const adminCommand = {
         if (settings) {
           const guildMember = await interaction.guild.members.fetch(target.id).catch(() => null);
           if (guildMember) {
-            await syncBadgeRole(interaction.guild, guildMember, badgeKey as any, settings.badgeRoles, false);
+            await syncBadgeRole(interaction.guild, guildMember, badgeKey as any, settings.badgeRoles, false, WORKSPACE_ID).catch(() => {});
           }
         }
       }
