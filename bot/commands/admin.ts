@@ -11,6 +11,9 @@ import { syncBadgeRole, syncRankRole, repairAllRoles } from '../lib/roleSyncServ
 import { getCommunitySettings } from '../lib/botKanalPreferanser';
 import { WORKSPACE_ID, getBotDb } from '../lib/supabase';
 import { generateSubCard } from '../lib/subCardService';
+import { logSystemEvent } from '../lib/systemEvents';
+import { getBroadcasterUserToken } from '../lib/twitchBot';
+import { getBroadcasterId } from '@/lib/twitch';
 
 const BADGE_CHOICES = [
   { name: '⚡ H4ckerman',    value: 'h4ckerman'   },
@@ -85,7 +88,13 @@ export const adminCommand = {
     .addSubcommand(sub =>
       sub
         .setName('backfill-sub-cards')
-        .setDescription('Generer SUB-kort for alle membres med subs > 0 som mangler kort.'),
+        .setDescription('Hent Twitch-sub-liste og synkroniser sub-status + SUB-kort for alle linkede brukere.'),
+    )
+
+    .addSubcommand(sub =>
+      sub
+        .setName('repair-sub-status')
+        .setDescription('Reparer twitch_sub_status for linkede brukere basert på historisk sub-data (uten Twitch API).'),
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -262,7 +271,7 @@ export const adminCommand = {
     // ── backfill-sub-cards ────────────────────────────────────────────────────────
     if (sub === 'backfill-sub-cards') {
       await interaction.deferReply({ ephemeral: true });
-      await interaction.editReply({ content: '⏳ Henter alle membres med subs > 0...' });
+      await interaction.editReply({ content: '⏳ Henter broadcaster-ID og Twitch-abonnenter...' });
 
       const db = getBotDb();
       if (!db) {
@@ -270,11 +279,225 @@ export const adminCommand = {
         return;
       }
 
+      // 1. Hent broadcaster-ID og brukertoken
+      const broadcasterId = await getBroadcasterId();
+      if (!broadcasterId) {
+        await interaction.editReply({ content: '❌ Kunne ikke hente broadcaster-ID. Er TWITCH_USERNAME satt?' });
+        return;
+      }
+
+      const broadcasterToken = await getBroadcasterUserToken();
+      if (!broadcasterToken) {
+        await interaction.editReply({ content: '❌ Ingen broadcaster-token tilgjengelig. Koble til Twitch på nytt i innstillinger.' });
+        return;
+      }
+
+      // 2. Hent alle Twitch-subscribers med paginering
+      const twitchSubs: Array<{ user_id: string; user_login: string; tier: string }> = [];
+      let cursor: string | undefined;
+
+      try {
+        do {
+          const helixUrl = new URL('https://api.twitch.tv/helix/subscriptions');
+          helixUrl.searchParams.set('broadcaster_id', broadcasterId);
+          helixUrl.searchParams.set('first', '100');
+          if (cursor) helixUrl.searchParams.set('after', cursor);
+
+          const res = await fetch(helixUrl.toString(), {
+            headers: {
+              Authorization: `Bearer ${broadcasterToken}`,
+              'Client-Id': process.env.TWITCH_CLIENT_ID ?? '',
+            },
+            signal: AbortSignal.timeout(15_000),
+          });
+
+          if (res.status === 401 || res.status === 403) {
+            await interaction.editReply({
+              content: `❌ Mangler Twitch-scope for subscribers (HTTP ${res.status}). Koble til Twitch på nytt i innstillinger.`,
+            });
+            return;
+          }
+
+          if (!res.ok) {
+            await interaction.editReply({ content: `❌ Twitch API feil: HTTP ${res.status}` });
+            return;
+          }
+
+          const body = await res.json() as {
+            data?: Array<{ user_id: string; user_login: string; tier: string }>;
+            pagination?: { cursor?: string };
+          };
+          twitchSubs.push(...(body.data ?? []));
+          cursor = body.pagination?.cursor;
+        } while (cursor);
+      } catch (fetchErr: any) {
+        await interaction.editReply({ content: `❌ Feil ved Twitch API: ${fetchErr?.message ?? 'ukjent'}` });
+        return;
+      }
+
+      // 3. Hent alle linkede community_members
+      const { data: linkedMembers, error: membersErr } = await db
+        .from('community_members')
+        .select('discord_id, twitch_id, twitch_username, display_name, twitch_sub_status, subs')
+        .eq('workspace_id', WORKSPACE_ID)
+        .eq('twitch_linked', true)
+        .not('twitch_id', 'is', null);
+
+      if (membersErr || !linkedMembers) {
+        await interaction.editReply({
+          content: `❌ Feil ved henting av community_members: ${membersErr?.message ?? 'ukjent'}`,
+        });
+        return;
+      }
+
+      // 4. Bygg sub-maps for rask matching
+      const subTierById    = new Map<string, string>(); // twitch_user_id -> tier
+      const subTierByLogin = new Map<string, string>(); // login.toLowerCase() -> tier
+
+      for (const s of twitchSubs) {
+        subTierById.set(s.user_id, s.tier);
+        subTierByLogin.set(s.user_login.toLowerCase(), s.tier);
+      }
+
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source:     'admin',
+        event_type: 'SUB_CARD_BACKFILL_STARTED',
+        title:      `backfill-sub-cards startet: ${twitchSubs.length} Twitch-subs, ${linkedMembers.length} linkede brukere`,
+        severity:   'info',
+        metadata:   {
+          twitchSubsCount:    twitchSubs.length,
+          linkedMembersCount: linkedMembers.length,
+          initiatedBy:        interaction.user.id,
+        },
+      });
+
+      // 5. Match og oppdater
+      let matched        = 0;
+      let subUpdated     = 0;
+      let cardsGenerated = 0;
+      let skippedAlready = 0;
+      let errors         = 0;
+
+      for (const m of linkedMembers) {
+        const discordId      = m.discord_id      as string;
+        const twitchId       = m.twitch_id       as string;
+        const twitchLogin    = ((m.twitch_username as string | null) ?? '').toLowerCase();
+        const twitchUsername = (m.twitch_username  as string | null) ?? twitchLogin;
+        const displayName    = (m.display_name    as string | null) ?? discordId;
+        const existingSubs   = (m.subs            as number | null) ?? 0;
+
+        const subTier = subTierById.get(twitchId)
+          ?? (twitchLogin ? subTierByLogin.get(twitchLogin) : undefined);
+
+        if (!subTier) continue; // ikke i Twitch-sub-listen
+
+        matched++;
+
+        try {
+          if (!m.twitch_sub_status) {
+            const { error: updErr } = await db.from('community_members').update({
+              twitch_sub_status: true,
+              subs:              Math.max(existingSubs, 1),
+              twitch_sub_tier:   subTier,
+              updated_at:        new Date().toISOString(),
+            })
+            .eq('workspace_id', WORKSPACE_ID)
+            .eq('discord_id', discordId);
+
+            if (updErr) { errors++; continue; }
+            subUpdated++;
+
+            logSystemEvent({
+              workspaceId: WORKSPACE_ID,
+              source:     'admin',
+              event_type: 'COMMUNITY_MEMBER_SUB_STATUS_UPDATED',
+              title:      `twitch_sub_status=true satt for ${displayName} via backfill`,
+              severity:   'info',
+              metadata:   { discordId, twitchId, twitchUsername, subTier },
+            });
+          } else {
+            skippedAlready++;
+          }
+
+          const cardResult = await generateSubCard({
+            workspaceId:    WORKSPACE_ID,
+            discordId,
+            twitchUsername,
+            displayName,
+            subTier,
+          }).catch(() => ({ ok: false, reason: 'db_error' as const }));
+
+          if (cardResult.ok) cardsGenerated++;
+
+        } catch {
+          errors++;
+        }
+      }
+
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source:     'admin',
+        event_type: 'SUB_CARD_BACKFILL_DONE',
+        title:      `backfill-sub-cards fullført: ${matched} matcher, ${subUpdated} oppdatert, ${cardsGenerated} kort`,
+        severity:   'info',
+        metadata:   {
+          twitchSubsTotal: twitchSubs.length,
+          linkedMembers:   linkedMembers.length,
+          matched,
+          subUpdated,
+          cardsGenerated,
+          skippedAlready,
+          errors,
+          initiatedBy: interaction.user.id,
+        },
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x9146ff)
+        .setTitle('💜 SUB-kort Backfill fullført')
+        .addFields(
+          { name: 'Twitch subs hentet',         value: `${twitchSubs.length}`,    inline: true },
+          { name: 'Linkede Discord-kontoer',     value: `${linkedMembers.length}`, inline: true },
+          { name: 'Matcher (linked → sub)',       value: `${matched}`,             inline: true },
+          { name: 'Oppdatert sub-status',        value: `${subUpdated}`,           inline: true },
+          { name: 'Genererte SUB-kort',          value: `${cardsGenerated}`,       inline: true },
+          { name: 'Skipped (allerede sub)',      value: `${skippedAlready}`,       inline: true },
+          ...(errors > 0 ? [{ name: '❌ Feil', value: `${errors}`, inline: true }] : []),
+        )
+        .setFooter({ text: `Utført av ${interaction.user.username}` })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed], content: '' });
+      return;
+    }
+
+    // ── repair-sub-status ─────────────────────────────────────────────────────
+    if (sub === 'repair-sub-status') {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.editReply({ content: '⏳ Henter alle linkede Twitch-brukere...' });
+
+      const db = getBotDb();
+      if (!db) {
+        await interaction.editReply({ content: '❌ DB ikke tilgjengelig.' });
+        return;
+      }
+
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source:     'admin',
+        event_type: 'SUB_CARD_BACKFILL_STARTED',
+        title:      `repair-sub-status startet av ${interaction.user.username}`,
+        severity:   'info',
+        metadata:   { initiatedBy: interaction.user.id },
+      });
+
       const { data: members, error: fetchErr } = await db
         .from('community_members')
-        .select('discord_id, display_name, twitch_username, subs')
+        .select('discord_id, display_name, twitch_id, twitch_username, twitch_sub_status, subs')
         .eq('workspace_id', WORKSPACE_ID)
-        .gt('subs', 0);
+        .eq('twitch_linked', true)
+        .not('twitch_id', 'is', null);
 
       if (fetchErr || !members) {
         await interaction.editReply({
@@ -283,62 +506,85 @@ export const adminCommand = {
         return;
       }
 
-      if (members.length === 0) {
-        await interaction.editReply({ content: 'ℹ️ Ingen membres med subs > 0 funnet.' });
-        return;
-      }
-
-      let generated      = 0;
-      let skippedAlready = 0;
-      let skippedNoLink  = 0;
-      let errors         = 0;
-      const details: string[] = [];
+      const totalLinked    = members.length;
+      let subUpdated       = 0;
+      let cardsGenerated   = 0;
+      let errors           = 0;
 
       for (const m of members) {
-        const discordId      = m.discord_id    as string;
-        const displayName    = (m.display_name  as string | null) ?? discordId;
+        const discordId      = m.discord_id      as string;
+        const displayName    = (m.display_name   as string | null) ?? discordId;
+        const twitchId       = m.twitch_id       as string;
         const twitchUsername = (m.twitch_username as string | null) ?? discordId;
+        const alreadySub     = !!(m.twitch_sub_status as boolean | null);
+        const existingSubs   = (m.subs           as number | null) ?? 0;
 
-        const result = await generateSubCard({
-          workspaceId:    WORKSPACE_ID,
-          discordId,
-          twitchUsername,
-          displayName,
-        }).catch(() => ({ ok: false, reason: 'db_error' as const }));
+        if (alreadySub) continue;
 
-        if (result.ok) {
-          generated++;
-          details.push(`✅ ${displayName} — SUB-kort generert`);
-        } else if (result.reason === 'already_exists') {
-          skippedAlready++;
-          details.push(`☑️ ${displayName} — allerede har sub-kort`);
-        } else if (result.reason === 'no_discord_link') {
-          skippedNoLink++;
-          details.push(`⏭️ ${twitchUsername} — ingen Discord-kobling`);
-        } else {
+        try {
+          const { data: unmatchedSub } = await db
+            .from('community_twitch_unlinked_subs')
+            .select('sub_tier, months')
+            .eq('workspace_id', WORKSPACE_ID)
+            .eq('twitch_user_id', twitchId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const hasStoredSub = !!unmatchedSub || existingSubs > 0;
+          if (!hasStoredSub) continue;
+
+          const { error: updErr } = await db.from('community_members').update({
+            twitch_sub_status: true,
+            subs:              Math.max(existingSubs, 1),
+            updated_at:        new Date().toISOString(),
+          })
+          .eq('workspace_id', WORKSPACE_ID)
+          .eq('discord_id', discordId);
+
+          if (updErr) { errors++; continue; }
+          subUpdated++;
+
+          const cardResult = await generateSubCard({
+            workspaceId:    WORKSPACE_ID,
+            discordId,
+            twitchUsername,
+            displayName,
+            subTier:        (unmatchedSub as any)?.sub_tier ?? '1000',
+          }).catch(() => ({ ok: false, reason: 'db_error' as const }));
+
+          if (cardResult.ok) cardsGenerated++;
+
+        } catch {
           errors++;
-          details.push(`❌ ${displayName} — feil (${result.reason})`);
         }
       }
 
-      const summaryLines = [
-        `✅ Generert: **${generated}**`,
-        `☑️ Hoppet over (allerede har): **${skippedAlready}**`,
-        `⏭️ Hoppet over (ingen Discord): **${skippedNoLink}**`,
-        ...(errors > 0 ? [`❌ Feil: **${errors}**`] : []),
-      ].join('\n');
-
-      const detailText = details.slice(0, 20).join('\n');
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source:     'admin',
+        event_type: 'SUB_CARD_BACKFILL_DONE',
+        title:      `repair-sub-status fullført: ${subUpdated} oppdatert, ${cardsGenerated} kort generert`,
+        severity:   'info',
+        metadata:   {
+          totalLinked,
+          subUpdated,
+          cardsGenerated,
+          errors,
+          initiatedBy: interaction.user.id,
+        },
+      });
 
       const embed = new EmbedBuilder()
         .setColor(0x9146ff)
-        .setTitle('💜 SUB-kort Backfill fullført')
-        .setDescription(
-          summaryLines +
-          (detailText ? `\n\n${detailText}` : '') +
-          (details.length > 20 ? `\n…og ${details.length - 20} til` : ''),
+        .setTitle('💜 repair-sub-status fullført')
+        .addFields(
+          { name: '🔗 Linkede brukere',    value: `${totalLinked}`,    inline: true },
+          { name: '✅ Sub-status reparert', value: `${subUpdated}`,    inline: true },
+          { name: '🃏 Kort generert',       value: `${cardsGenerated}`, inline: true },
+          ...(errors > 0 ? [{ name: '❌ Feil', value: `${errors}`, inline: true }] : []),
         )
-        .setFooter({ text: `Utført av ${interaction.user.username} • ${members.length} membres behandlet` })
+        .setFooter({ text: `Utført av ${interaction.user.username} • ${totalLinked} brukere behandlet` })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [embed], content: '' });

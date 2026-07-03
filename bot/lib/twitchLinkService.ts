@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { logSystemEvent } from './systemEvents';
 
 function getSb() {
   const url = process.env.SUPABASE_URL;
@@ -9,7 +10,11 @@ function getSb() {
   return createClient(url, key, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
+if (!WORKSPACE_ID) {
+  // Fail loudly — denne servicen brukes kun fra bot, og boten krever WORKSPACE_ID
+  throw new Error('[twitchLinkService] WORKSPACE_ID env var is not set');
+}
 const CODE_CHARS   = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusables (0/O, 1/I)
 
 function generateCode(length = 6): string {
@@ -113,7 +118,7 @@ export async function verifyLinkCode(
   const twId = `tw_${twitchUserId}`;
   const { data: twRow } = await sb
     .from('community_members')
-    .select('xp, messages, twitch_xp, messages_twitch, coins_balance, total_coins_earned')
+    .select('xp, messages, twitch_xp, messages_twitch, coins_balance, total_coins_earned, subs')
     .eq('workspace_id', WORKSPACE_ID)
     .eq('discord_id', twId)
     .single();
@@ -143,6 +148,58 @@ export async function verifyLinkCode(
         .eq('discord_id', twId);
     }
   }
+
+  // ── Sub-status: sjekk om Twitch-brukeren hadde ulinket sub-data ─────────────
+  const { data: unmatchedSub } = await sb
+    .from('community_twitch_unlinked_subs')
+    .select('sub_tier, months')
+    .eq('workspace_id', WORKSPACE_ID)
+    .eq('twitch_user_id', twitchUserId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const hasStoredSub = !!unmatchedSub || (twRow?.subs ?? 0) > 0;
+
+  if (hasStoredSub) {
+    await sb.from('community_members').update({
+      twitch_sub_status: true,
+      subs: Math.max((twRow?.subs ?? 0), 1),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('workspace_id', WORKSPACE_ID)
+    .eq('discord_id', data.discord_id);
+
+    logSystemEvent({
+      workspaceId: WORKSPACE_ID,
+      source:     'twitch_link',
+      event_type: 'TWITCH_SUB_MATCHED_TO_DISCORD',
+      title:      `Sub-status satt for ${twitchUsername} → ${data.discord_id} etter linking`,
+      severity:   'info',
+      metadata:   {
+        discordId:        data.discord_id,
+        twitchUserId,
+        twitchUsername,
+        fromUnlinkedSubs: !!unmatchedSub,
+        fromTwRow:        (twRow?.subs ?? 0) > 0,
+        subTier:          (unmatchedSub as any)?.sub_tier ?? null,
+      },
+    });
+  }
+
+  logSystemEvent({
+    workspaceId: WORKSPACE_ID,
+    source:     'twitch_link',
+    event_type: 'TWITCH_DISCORD_LINK_FOUND',
+    title:      `Twitch ${twitchUsername} koblet til Discord ${data.discord_id} — sub: ${hasStoredSub}`,
+    severity:   'info',
+    metadata:   {
+      discordId:    data.discord_id,
+      twitchUserId,
+      twitchUsername,
+      hasStoredSub,
+    },
+  });
 
   return { discordId: data.discord_id, twitchUsername };
 }

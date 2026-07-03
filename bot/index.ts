@@ -1963,12 +1963,14 @@ async function tildelTwitchSubRolle(
   // ── Steg 1: Prøv verifisert lookup via twitch_user_id (primær) ──────────────
   let discordId: string | null = null;
   let displayName = twitchUsername;
+  let verifiedByTwitchId = false;
 
   if (twitchUserId) {
     const linked = await findMemberByTwitchId(twitchUserId);
     if (linked) {
-      discordId   = linked.discordId;
-      displayName = linked.displayName;
+      discordId          = linked.discordId;
+      displayName        = linked.displayName;
+      verifiedByTwitchId = true;
     }
   }
 
@@ -1989,6 +1991,14 @@ async function tildelTwitchSubRolle(
   // ── Steg 3: Ingen match → lagre som unlinked sub ─────────────────────────────
   if (!discordId) {
     storeUnmatchedSub(twitchUsername, twitchUserId, subTier, 'sub').catch(() => {});
+    logSystemEvent({
+      workspaceId: WORKSPACE_ID,
+      source:     'twitch_link',
+      event_type: 'TWITCH_SUB_NOT_LINKED_TO_DISCORD',
+      title:      `Twitch-sub ${twitchUsername} har ingen Discord-kobling — lagret som unlinked`,
+      severity:   'info',
+      metadata:   { twitchUsername, twitchUserId, subTier },
+    });
     return;
   }
 
@@ -2001,9 +2011,32 @@ async function tildelTwitchSubRolle(
   addSub(discordId, twitchUsername, displayName);
   awardCoins(discordId, 50, 'twitch_sub', { twitchUsername, subTier }).catch(() => {});
 
+  // ── Sett twitch_sub_status i DB (kun ved verifisert kobling) ─────────────────
+  if (verifiedByTwitchId) {
+    const db = getBotDb();
+    if (db) {
+      // Fire-and-forget — PromiseLike return value intentionally not awaited
+      void db.from('community_members').update({
+        twitch_sub_status: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('workspace_id', WORKSPACE_ID)
+      .eq('discord_id', discordId);
+
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source:     'twitch_link',
+        event_type: 'COMMUNITY_MEMBER_SUB_STATUS_UPDATED',
+        title:      `twitch_sub_status=true satt for ${displayName} (sub-event)`,
+        severity:   'info',
+        metadata:   { discordId, twitchUsername, twitchUserId, subTier },
+      });
+    }
+  }
+
   // Generer og post SUB-kort (innebygd duplikat-guard)
   generateSubCard({
-    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+    workspaceId: WORKSPACE_ID,
     discordId,
     twitchUsername,
     displayName,
