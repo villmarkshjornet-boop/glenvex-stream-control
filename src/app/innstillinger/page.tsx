@@ -1308,6 +1308,175 @@ function WorkspaceSection() {
   );
 }
 
+// ─── Twitch Integrations Panel ───────────────────────────────────────────────
+
+interface TwitchStatus {
+  connected:       boolean;
+  tokenValid:      boolean;
+  reason?:         string;
+  twitchLogin:     string | null;
+  twitchName:      string | null;
+  twitchUserId:    string | null;
+  connectedAt:     string | null;
+  scopes:          string[];
+  hasRefreshToken: boolean;
+  expiresIn?:      number;
+  liveLogin?:      string;
+}
+
+function TwitchIntegrationsPanel() {
+  const [status,       setStatus]       = useState<TwitchStatus | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [testResult,   setTestResult]   = useState<string | null>(null);
+  const [testLoading,  setTestLoading]  = useState(false);
+
+  async function hentStatus() {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/integrations/twitch');
+      const d: TwitchStatus = await r.json();
+      setStatus(d);
+    } catch { setStatus(null); }
+    setLoading(false);
+  }
+
+  useEffect(() => { hentStatus(); }, []);
+
+  async function disconnect() {
+    if (!confirm('Er du sikker? Dette sletter alle Twitch-tokens og kobler fra kontoen.')) return;
+    setDisconnecting(true);
+    try {
+      const r = await fetch('/api/integrations/twitch', { method: 'DELETE' });
+      if (r.ok) { await hentStatus(); }
+      else { const d = await r.json(); alert(`Feil: ${d.error}`); }
+    } catch { alert('Nettverksfeil. Prøv igjen.'); }
+    setDisconnecting(false);
+  }
+
+  async function testConnection() {
+    setTestLoading(true); setTestResult(null);
+    try {
+      const r = await fetch('/api/integrations/twitch');
+      const d: TwitchStatus = await r.json();
+      if (d.tokenValid && d.liveLogin) {
+        setTestResult(`✅ Token gyldig · Verifisert som: ${d.liveLogin}`);
+      } else if (d.connected === false && d.reason === 'token_expired') {
+        setTestResult('⚠️ Token utløpt — koble til på nytt');
+      } else if (!d.connected) {
+        setTestResult('❌ Ikke koblet til Twitch');
+      } else {
+        setTestResult('⚠️ Ukjent status');
+      }
+    } catch { setTestResult('❌ Klarte ikke nå API'); }
+    setTestLoading(false);
+  }
+
+  const fmtDate = (iso: string | null) => iso
+    ? new Date(iso).toLocaleString('no-NO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—';
+
+  return (
+    <div className="bg-g-card border border-g-border rounded-2xl p-6">
+      <div className="flex items-center justify-between pb-4 mb-5 border-b border-g-border/40">
+        <div>
+          <h2 className="text-sm font-semibold text-g-text">Twitch OAuth-tilkobling</h2>
+          <p className="text-xs text-g-muted mt-0.5">Kontoen som Twitch-integrasjonen er koblet til</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {loading ? (
+            <span className="text-xs text-g-muted">Laster...</span>
+          ) : status?.connected && status.tokenValid ? (
+            <span className="flex items-center gap-1.5 text-xs text-g-green">
+              <span className="w-1.5 h-1.5 rounded-full bg-g-green" /> Tilkoblet
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs text-red-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+              {status?.reason === 'token_expired' ? 'Token utløpt' : 'Ikke koblet til'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-g-muted">Henter status...</p>
+      ) : (
+        <div className="space-y-4">
+          {/* Account info grid */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+            {[
+              { label: 'Login',        value: status?.twitchLogin ?? '—' },
+              { label: 'Display Name', value: status?.twitchName  ?? '—' },
+              { label: 'User ID',      value: status?.twitchUserId ?? '—' },
+              { label: 'Koblet til',   value: fmtDate(status?.connectedAt ?? null) },
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <p className="text-xs text-g-muted">{label}</p>
+                <p className="text-sm font-mono text-g-text mt-0.5">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Scopes */}
+          {(status?.scopes?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs text-g-muted mb-1.5">Tillatelser (scopes)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {status!.scopes.map(s => (
+                  <span key={s} className="px-2 py-0.5 rounded bg-g-bg border border-g-border text-xs font-mono text-g-muted">{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stale name warning */}
+          {status?.twitchLogin && status.liveLogin && status.twitchLogin !== status.liveLogin && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
+              <p className="text-xs text-amber-400">
+                ⚠️ Lagret login (<span className="font-mono">{status.twitchLogin}</span>) stemmer ikke med live-verifisert konto (<span className="font-mono">{status.liveLogin}</span>). Koble til på nytt for å rette opp.
+              </p>
+            </div>
+          )}
+
+          {/* Test result */}
+          {testResult && (
+            <div className="bg-g-bg border border-g-border rounded-lg px-4 py-2.5">
+              <p className="text-sm">{testResult}</p>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2 flex-wrap pt-1">
+            <a
+              href="/api/auth/twitch?returnUrl=/innstillinger"
+              className="px-4 py-2 bg-purple-500/10 border border-purple-500/25 text-purple-400 text-xs font-medium rounded-lg hover:bg-purple-500/20 transition-all"
+            >
+              {status?.connected ? '🔄 Koble til på nytt' : '🟢 Koble til Twitch'}
+            </a>
+            <button
+              onClick={testConnection}
+              disabled={testLoading || !status?.connected}
+              className="px-4 py-2 bg-g-bg border border-g-border text-g-muted text-xs font-medium rounded-lg hover:border-g-green/30 hover:text-g-green transition-all disabled:opacity-40"
+            >
+              {testLoading ? 'Tester...' : '🧪 Test tilkobling'}
+            </button>
+            {status?.connected && (
+              <button
+                onClick={disconnect}
+                disabled={disconnecting}
+                className="px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-all disabled:opacity-40"
+              >
+                {disconnecting ? 'Kobler fra...' : '🔴 Koble fra Twitch'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Twitch Section ───────────────────────────────────────────────────────────
 
 function TwitchSection() {
@@ -1348,6 +1517,7 @@ function TwitchSection() {
         <p className="text-sm text-g-muted mt-1">Broadcaster-token, kanal og Content Factory.</p>
       </div>
 
+      <TwitchIntegrationsPanel />
       <BotWatchingStatus />
       <TwitchBroadcasterPanel />
 
