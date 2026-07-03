@@ -2664,8 +2664,17 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       await handleDuplikatKnapp(interaction).catch(console.error);
       return;
     }
-    if (interaction.customId.startsWith('minekort_vis_aktivt') || interaction.customId.startsWith('minekort_vis_alle')) {
-      await handleMinekortButton(interaction).catch(console.error);
+    if (
+      interaction.customId.startsWith('mekort_') ||
+      interaction.customId.startsWith('card_sell_') ||
+      interaction.customId.startsWith('card_showcase_')
+    ) {
+      await handleMinekortButton(interaction, WORKSPACE_ID).catch(async (err: Error) => {
+        console.error('[Minekort] button error:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ Noe gikk galt. Prøv igjen.', ephemeral: true }).catch(() => {});
+        }
+      });
       return;
     }
     if (interaction.customId.startsWith('trade_accept:') || interaction.customId.startsWith('trade_decline:')) {
