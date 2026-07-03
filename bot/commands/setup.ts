@@ -91,6 +91,10 @@ export const setupCommand = {
     }
 
     // Create roles
+    // NOTE: guild.roles.create() is intentional here — /setup is a one-time
+    // initialisation command (run by admin, not by live event handlers).
+    // After setup, configure the created role IDs in Dashboard → Community → Reward Roles
+    // so roleSyncService.ts can manage them without auto-creation.
     const existingRoles = guild.roles.cache.map(r => r.name.toLowerCase());
     for (const role of ROLES_TO_CREATE) {
       if (existingRoles.includes(role.name.toLowerCase())) {
@@ -98,6 +102,7 @@ export const setupCommand = {
         continue;
       }
       try {
+        console.warn(`[SETUP] Creating role "@${role.name}" via guild.roles.create(). After setup, copy this role's ID to Community settings so roleSyncService manages it.`);
         await guild.roles.create({ name: role.name, color: role.color });
         results.push(`✓ Rolle: @${role.name}`);
       } catch {

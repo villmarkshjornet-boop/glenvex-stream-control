@@ -1,3 +1,28 @@
+/**
+ * roleManager.ts — LEGACY ROLE MANAGEMENT (DEPRECATED)
+ *
+ * Deprecated functions and their replacements:
+ *
+ *   finnEllerOpprettRolle()  →  DEPRECATED — creates Discord roles automatically.
+ *                               Use configured role IDs from Community settings instead.
+ *
+ *   tildeltRolle()           →  DEPRECATED — falls back to auto-create roles by name.
+ *                               Replace with: syncRankRole() from roleSyncService.ts
+ *
+ *   tildeltSpesialRolle()    →  DEPRECATED — auto-creates special roles.
+ *                               Replace with: syncBadgeRole() / syncHeroRole() from roleSyncService.ts
+ *
+ * Migration plan:
+ *   1. Configure Discord role IDs in the Dashboard → Community → Rank/Badge Roles section.
+ *   2. roleSyncService.ts uses only configured IDs — never auto-creates.
+ *   3. DO NOT delete these functions yet — they are still used by /setup (one-time init).
+ *      Once all live flows are verified against roleSyncService, remove in a future PR.
+ *
+ * Functions that remain intentional (NOT deprecated):
+ *   tildeltRolleKonfigurert() — the safe wrapper that uses configured IDs first.
+ *   sjekkRollePermissions()   — utility, no role creation.
+ */
+
 import { Guild, GuildMember } from 'discord.js';
 import { logSystemEvent } from './systemEvents';
 
@@ -16,9 +41,14 @@ export const SPECIAL_ROLLER: Record<string, { navn: string; farge: number }> = {
   vip:              { navn: 'VIP',               farge: 0xffcc00 },
 };
 
+/**
+ * @deprecated Auto-creates Discord roles by name. Use configured role IDs from
+ * Community settings and roleSyncService.ts instead. Only kept for /setup command.
+ */
 async function finnEllerOpprettRolle(guild: Guild, navn: string, farge: number) {
   let rolle = guild.roles.cache.find(r => r.name === navn);
   if (!rolle) {
+    console.warn(`[DEPRECATED] finnEllerOpprettRolle() auto-creating role "${navn}" — use roleSyncService with configured role IDs instead`);
     rolle = await guild.roles.create({
       name: navn,
       color: farge,
@@ -28,7 +58,13 @@ async function finnEllerOpprettRolle(guild: Guild, navn: string, farge: number) 
   return rolle;
 }
 
+/**
+ * @deprecated Auto-creates XP roles by name. Use syncRankRole() from roleSyncService.ts
+ * with configured role IDs instead. Only called as last-resort fallback from tildeltRolleKonfigurert
+ * when rewardRoles is empty — that fallback is now blocked. Kept for reference until migration complete.
+ */
 export async function tildeltRolle(guild: Guild, member: GuildMember, level: number): Promise<string | null> {
+  console.warn(`[DEPRECATED] tildeltRolle() called for ${member.displayName} level ${level} — use roleSyncService instead`);
   const rolleConfig = [...LEVEL_ROLLER].reverse().find(r => level >= r.level);
   if (!rolleConfig) return null;
 
@@ -66,11 +102,17 @@ export async function tildeltRolle(guild: Guild, member: GuildMember, level: num
   }
 }
 
+/**
+ * @deprecated Auto-creates special Discord roles by name. Use syncBadgeRole() from
+ * roleSyncService.ts with configured role IDs instead. Kept for guildMemberAdd
+ * 'new_member' welcome flow until migrated.
+ */
 export async function tildeltSpesialRolle(
   guild: Guild,
   member: GuildMember,
   type: keyof typeof SPECIAL_ROLLER
 ): Promise<string | null> {
+  console.warn(`[DEPRECATED] tildeltSpesialRolle() called for type="${type}" on ${member.displayName} — use roleSyncService instead`);
   const config = SPECIAL_ROLLER[type];
   if (!config) return null;
 
@@ -113,8 +155,24 @@ export async function tildeltRolleKonfigurert(
   rewardRoles: RewardRole[],
 ): Promise<{ rolleNavn: string | null }> {
   if (rewardRoles.length === 0) {
-    const rolleNavn = await tildeltRolle(guild, member, level);
-    return { rolleNavn };
+    // ROLE_AUTO_CREATE_BLOCKED: The old fallback called tildeltRolle() which used
+    // guild.roles.create() to auto-create roles by name. This is incompatible with
+    // roleSyncService which requires configured role IDs. Block the auto-create and
+    // log so the operator knows to configure reward roles in Community settings.
+    logSystemEvent({
+      source:     'role_manager',
+      event_type: 'ROLE_AUTO_CREATE_BLOCKED',
+      title:      `Rolle-tildeling blokkert: rewardRoles er tom for ${member.displayName} (level ${level})`,
+      severity:   'warning',
+      metadata:   {
+        discordId: member.id,
+        username:  member.displayName,
+        level,
+        reason:    'rewardRoles not configured — auto-create disabled',
+        fix:       'Configure reward role IDs in Dashboard → Community → Reward Roles',
+      },
+    });
+    return { rolleNavn: null };
   }
 
   const matching = [...rewardRoles]
