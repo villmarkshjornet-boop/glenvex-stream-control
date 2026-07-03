@@ -1,7 +1,7 @@
 ﻿import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import OpenAI from 'openai';
-import { lagreStreamMemory, oppdaterContentPatterns } from './streamMemory';
+import { oppdaterContentPatterns } from './streamMemory';
 import { oppdaterKnowledge, hentStreamMemory, hentContentPatterns } from './knowledgeBase';
 import { upsertMemory, addInsight } from '@/lib/ai/creatorContext';
 import { logAgentDecision } from '@/lib/ai/eventLogger';
@@ -124,9 +124,6 @@ Returner KUN JSON:
     try { analyse = JSON.parse(rawContent); } catch { /* ignore */ }
 
     const nyStreamCount = tidligereAntall + 1;
-
-    // DEL 4: Legacy table writes disabled — monitoring for 7 days from 2026-06-07
-    // Only ai_agent_* tables are written to now. Remove this comment block after 2026-06-14 if stable.
     const topCategories = Array.from(new Set(highlights.map((h: any) => h.category as string)));
 
     // ── Skriv til Global AI Memory (nye tabeller) ─────────────────────────────
@@ -188,21 +185,6 @@ Returner KUN JSON:
     if (analyse.communitySignaler?.length > 0) {
       for (const signal of (analyse.communitySignaler as string[]).slice(0, 3)) {
         if (signal && signal.length > 3) {
-          // Gammel tabell
-          await db.from('ai_producer_community_memory').upsert(
-            {
-              workspace_id: workspaceId,
-              entry_type: 'community_signal',
-              name: signal.slice(0, 100),
-              description: `Fra stream: ${vod?.title ?? vodId}`,
-              occurrence_count: 1,
-              first_seen_vod_id: vodId,
-              last_seen_vod_id: vodId,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'workspace_id,entry_type,name', ignoreDuplicates: true }
-          );
-          // Ny tabell
           await upsertMemory({
             agent_type: 'content',
             memory_type: 'topic',

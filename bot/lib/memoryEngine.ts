@@ -1,9 +1,10 @@
 // Memory Engine — V3 read/write path for ai_agent_memory
-// Does NOT replace upsertBotMemory (existing modules still use it directly).
-// This is the Creator Brain's API for memory — the same table, a typed interface.
+// upsertMemory is now a thin wrapper around communityBrain::upsertCommunityMemory
+// (the canonical write path). Kept for backward compat with existing callers.
 // V3 Architecture: Section 8 — AI Memory V3
 
 import { getBotDb, WORKSPACE_ID } from './supabase';
+import { upsertCommunityMemory } from './communityBrain';
 
 export interface MemoryRow {
   id: string;
@@ -65,23 +66,25 @@ export async function getMemory(opts: {
   return (data ?? []).map(mapRow);
 }
 
+/**
+ * Thin backward-compat wrapper around upsertCommunityMemory.
+ * Bug fix: previously reset occurrence_count to 1 on every upsert (lost history).
+ * Now delegates to communityBrain which correctly increments on conflict.
+ */
 export async function upsertMemory(opts: UpsertMemoryOpts): Promise<boolean> {
-  const db = getBotDb();
-  if (!db) return false;
   const ws = opts.workspaceId ?? WORKSPACE_ID;
-
-  const { error } = await db.from('ai_agent_memory').upsert({
-    workspace_id: ws,
-    agent_type: opts.agentType,
-    memory_type: opts.memoryType,
-    key: opts.key,
-    summary: opts.summary,
-    confidence_score: opts.confidenceScore ?? 0.5,
-    occurrence_count: 1,
-    last_seen_at: new Date().toISOString(),
-    metadata: opts.metadata ?? {},
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'workspace_id,agent_type,memory_type,key' });
-
-  return !error;
+  try {
+    await upsertCommunityMemory({
+      workspaceId:  ws,
+      agentType:    opts.agentType,
+      memoryType:   opts.memoryType,
+      key:          opts.key,
+      summary:      opts.summary,
+      confidence:   opts.confidenceScore,
+      metadata:     opts.metadata as Record<string, unknown> | undefined,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
