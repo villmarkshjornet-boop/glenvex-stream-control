@@ -137,7 +137,7 @@ const client = new Client({
   ],
 });
 
-const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
+const commands = new Collection<string, { data: any; execute: (interaction: any, workspaceId: string) => Promise<any> }>();
 for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand, blackjack, roulette, achievements, quests, prestige]) {
   commands.set(cmd.data.name, cmd);
 }
@@ -2223,7 +2223,7 @@ client.once('clientReady', () => {
   lasterMedlemmerFraSupabase().catch(() => {});
 
   // ── Community OS: seed default data for new workspaces ───────────────────
-  await Promise.all([
+  Promise.all([
     seedDefaultRanks(WORKSPACE_ID),
     seedSystemBadges(WORKSPACE_ID),
     seedDefaultPerks(WORKSPACE_ID),
@@ -2703,7 +2703,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   if (!command) return;
 
   try {
-    await command.execute(interaction);
+    await command.execute(interaction, WORKSPACE_ID);
     addLog('info', `/${interaction.commandName} brukt av ${interaction.user.tag}`, 'OK');
   } catch (error) {
     console.error(`Feil i /${interaction.commandName}:`, error);

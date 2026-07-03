@@ -38,6 +38,13 @@ export type CoinSource =
   | 'sub_card'
   | 'achievement_card'
   | 'milestone_card'
+  | 'achievement_reward'
+  | 'quest_reward'
+  | 'blackjack_bet'
+  | 'blackjack_win'
+  | 'blackjack_push'
+  | 'roulette_bet'
+  | 'roulette_win'
   | 'admin_adjustment';
 
 export interface CoinTransaction {

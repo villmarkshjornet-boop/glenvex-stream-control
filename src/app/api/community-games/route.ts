@@ -10,9 +10,8 @@ function getDb() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await getAuthenticatedWorkspace(req);
-  if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { workspaceId } = auth;
+  const workspaceId = getAuthenticatedWorkspace(req);
+  if (!workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = getDb();
 
@@ -61,9 +60,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await getAuthenticatedWorkspace(req);
-  if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { workspaceId } = auth;
+  const workspaceId = getAuthenticatedWorkspace(req);
+  if (!workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json() as Record<string, unknown>;
   const db   = getDb();

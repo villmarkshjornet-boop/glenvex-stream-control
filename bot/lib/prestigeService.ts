@@ -73,7 +73,7 @@ export async function performPrestige(
     title:        `${discordId} achieved Prestige ${newPrestige}`,
     severity:     'info',
     metadata:     { discordId, prestigeLevel: newPrestige, levelAtReset: member.level, xpAtReset: member.xp },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   return { ok: true, prestigeLevel: newPrestige };
 }

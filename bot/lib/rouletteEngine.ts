@@ -174,7 +174,7 @@ export async function spinRoulette(
       coins_delta:   coinsDelta,
       rng_log_id:    rngLogId,
       played_at:     new Date().toISOString(),
-    }).catch((e: Error) => console.error('[Roulette] save bet failed:', e.message));
+    }).then(null, (e: Error) => console.error('[Roulette] save bet failed:', e.message));
   }
 
   const { data: m } = await db?.from('community_members')

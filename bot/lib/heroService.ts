@@ -108,7 +108,7 @@ export async function selectDailyHero(workspaceId: string): Promise<HeroResult |
     title:        `Hero of the Day: ${topMember} (score: ${topScore})`,
     severity:     'info',
     metadata:     { discordId: topMember, contributionScore: topScore, heroDate: today },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   return { discordId: topMember, contributionScore: topScore, heroDate: today, alreadyExists: false };
 }

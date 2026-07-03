@@ -88,6 +88,22 @@ UPDATE ai_agent_insights
   SET insight_key = LOWER(REGEXP_REPLACE(title, '[^a-z0-9 ]', '', 'gi'))
   WHERE insight_key IS NULL AND title IS NOT NULL AND title <> '';
 
+-- Deduplicate: keep most recent row per (workspace_id, insight_key), nullify the rest
+-- so the unique index below does not fail on pre-existing duplicate titles.
+WITH ranked AS (
+  SELECT id,
+         ROW_NUMBER() OVER (
+           PARTITION BY workspace_id, insight_key
+           ORDER BY created_at DESC NULLS LAST, id DESC
+         ) AS rn
+  FROM ai_agent_insights
+  WHERE insight_key IS NOT NULL AND insight_key <> ''
+)
+UPDATE ai_agent_insights
+  SET insight_key = NULL
+  FROM ranked
+  WHERE ai_agent_insights.id = ranked.id AND ranked.rn > 1;
+
 -- Partial unique index: dedup by (workspace_id, insight_key)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_agent_insights_key
   ON ai_agent_insights (workspace_id, insight_key)

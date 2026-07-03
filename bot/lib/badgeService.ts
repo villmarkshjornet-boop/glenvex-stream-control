@@ -126,7 +126,7 @@ export async function awardBadge(
       title:        `Admin badge '${badgeKey}' awarded to ${discordId} by ${awardedBy ?? 'system'}`,
       severity:     'info',
       metadata:     { badgeKey, discordId, awardedBy, note },
-    }).catch(() => {});
+    }).then(null, () => {});
   }
 
   return { ok: true, alreadyHas: false };
@@ -160,7 +160,7 @@ export async function revokeBadge(
     title:        `Badge '${badgeKey}' revoked from ${discordId} by ${revokedBy}`,
     severity:     'info',
     metadata:     { badgeKey, discordId, revokedBy },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   return { ok: true };
 }

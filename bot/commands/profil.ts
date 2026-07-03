@@ -80,7 +80,7 @@ export const profilCommand = {
     const [coins, rankData, dbBadges] = await Promise.all([
       getBalance(target.id),
       getRankForLevel(WORKSPACE_ID, member.level).catch(() => null),
-      getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as { name: string; emoji: string }[]),
+      getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as import('../lib/badgeService').MemberBadge[]),
     ]);
 
     // ── XP og level ──────────────────────────────────────────────────────────
@@ -113,15 +113,15 @@ export const profilCommand = {
     const farge      = xpFargeKode(displayXp);
 
     // ── Community OS: rank, prestige, perks ──────────────────────────────────
-    const rankName      = rankData?.name ?? null;
-    const rankIcon      = rankData?.icon ?? null;
-    const prestigeLevel = (member as any).prestige_level ?? 0;
+    const rankName      = rankData?.rankName ?? null;
+    const rankIcon      = rankData?.rankIcon ?? null;
+    const prestigeLevel = (member as { prestige_level?: number }).prestige_level ?? 0;
     const prestigeText  = prestigeLevel > 0 ? formatPrestige(prestigeLevel) : null;
     const rankPerks     = rankName
-      ? await getPerksForRank(WORKSPACE_ID, rankName).catch(() => [] as { description: string }[])
-      : [];
-    const perksText = rankPerks.length > 0
-      ? rankPerks.slice(0, 3).map(p => p.description).join(' · ')
+      ? await getPerksForRank(WORKSPACE_ID, rankName).catch(() => null)
+      : null;
+    const perksText = rankPerks
+      ? `${rankPerks.xpMultiplier}× XP · ${rankPerks.coinsMultiplier}× Coins`
       : null;
 
     // ── Badges ───────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ export const profilCommand = {
 
     // Prefer DB badges (Community OS) if available, fall back to memberTracker
     const alleBadgeEmojis: string[] = dbBadges.length > 0
-      ? dbBadges.slice(-8).map(b => b.emoji)
+      ? dbBadges.slice(-8).map(b => b.badgeIcon)
       : opptjentBadges.slice(-8).map(b => b.emoji);
 
     // Vis emojis for opptjente badges

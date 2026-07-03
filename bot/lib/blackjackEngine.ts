@@ -89,7 +89,7 @@ async function logRng(workspaceId: string, discordId: string, rngValue: number, 
     rng_result:   result,
     context,
     logged_at:    new Date().toISOString(),
-  }).catch((e: Error) => console.error('[Blackjack] rng_log failed:', e.message));
+  }).then(null, (e: Error) => console.error('[Blackjack] rng_log failed:', e.message));
 }
 
 async function saveGame(
@@ -116,7 +116,7 @@ async function saveGame(
     dealer_score: dealerScore,
     coins_delta:  coinsDelta,
     played_at:    new Date().toISOString(),
-  }).catch((e: Error) => console.error('[Blackjack] saveGame failed:', e.message));
+  }).then(null, (e: Error) => console.error('[Blackjack] saveGame failed:', e.message));
 }
 
 export async function getCooldownSeconds(workspaceId: string): Promise<number> {
