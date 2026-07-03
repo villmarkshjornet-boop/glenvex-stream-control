@@ -502,6 +502,51 @@ export async function runLearningEngine(wsId: string = WORKSPACE_ID): Promise<vo
       },
     });
 
+    // ── Decay pass for creator_knowledge (weekly, 5% strength reduction) ─────
+    try {
+      const cutoff6d = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: staleKnowledge } = await db
+        .from('creator_knowledge')
+        .select('id,strength,confidence,evidence_count')
+        .eq('workspace_id', wsId)
+        .eq('locked', false)
+        .or(`last_decayed_at.is.null,last_decayed_at.lt.${cutoff6d}`)
+        .limit(200);
+
+      if (staleKnowledge && staleKnowledge.length > 0) {
+        let decayed = 0;
+        const nowStr = new Date().toISOString();
+        for (const ck of staleKnowledge as { id: unknown; strength: number | null; confidence: number | null; evidence_count: number | null }[]) {
+          const currentStrength   = ck.strength        ?? 1.0;
+          const currentConfidence = ck.confidence      ?? 50;
+          const evidenceCount     = ck.evidence_count  ?? 0;
+
+          const newStrength   = Math.max(0.05, currentStrength * 0.95);
+          const newConfidence = evidenceCount < 3
+            ? Math.max(10, currentConfidence - 1)
+            : currentConfidence;
+
+          await db.from('creator_knowledge').update({
+            strength:        newStrength,
+            confidence:      newConfidence,
+            last_decayed_at: nowStr,
+          }).eq('id', ck.id);
+          decayed++;
+        }
+
+        logSystemEvent({
+          workspaceId: wsId,
+          source: 'learning_engine',
+          event_type: 'KNOWLEDGE_DECAY_COMPLETED',
+          title: `Creator Knowledge decay: ${decayed} oppføringer oppdatert`,
+          severity: 'info',
+          metadata: { decayed, total: staleKnowledge.length },
+        });
+      }
+    } catch {
+      // Decay failure is non-fatal — main learning run already succeeded
+    }
+
   } catch (err: unknown) {
     logSystemEvent({
       workspaceId: wsId,

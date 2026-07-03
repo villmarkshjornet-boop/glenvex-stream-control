@@ -185,6 +185,8 @@ export async function upsertBotMemory(entry: {
   key: string;
   summary: string;
   confidence_score?: number;
+  /** V2: maps to new memory_category column (community/interests/stream/humor etc.) */
+  memory_category?: string;
   metadata?: Record<string, any>;
 }): Promise<void> {
   const sb = getSb();
@@ -201,16 +203,19 @@ export async function upsertBotMemory(entry: {
       .single();
 
     if (existing) {
-      const { error } = await sb.from('ai_agent_memory').update({
+      const updatePayload: Record<string, unknown> = {
         summary: entry.summary,
         confidence_score: entry.confidence_score ?? 0.7,
-        occurrence_count: existing.occurrence_count + 1,
+        occurrence_count: (existing.occurrence_count as number) + 1,
         last_seen_at: now,
         updated_at: now,
-      }).eq('id', existing.id);
+      };
+      if (entry.memory_category !== undefined) updatePayload['memory_category'] = entry.memory_category;
+      if (entry.metadata !== undefined) updatePayload['metadata'] = entry.metadata;
+      const { error } = await sb.from('ai_agent_memory').update(updatePayload).eq('id', existing.id);
       if (error) console.error('[AgentLogger] memory update feilet:', error.message);
     } else {
-      const { error } = await sb.from('ai_agent_memory').insert({
+      const insertPayload: Record<string, unknown> = {
         workspace_id: WORKSPACE_ID,
         agent_type: entry.agent_type,
         memory_type: entry.memory_type,
@@ -220,7 +225,9 @@ export async function upsertBotMemory(entry: {
         occurrence_count: 1,
         last_seen_at: now,
         metadata: entry.metadata ?? {},
-      });
+      };
+      if (entry.memory_category !== undefined) insertPayload['memory_category'] = entry.memory_category;
+      const { error } = await sb.from('ai_agent_memory').insert(insertPayload);
       if (error) console.error('[AgentLogger] memory insert feilet:', error.message);
     }
   } catch (e: any) {
