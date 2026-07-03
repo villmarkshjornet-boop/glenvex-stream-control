@@ -98,10 +98,10 @@ function osloTodayCutoffUTC(): string {
   return new Date(Date.now() - 24 * 3_600_000).toISOString();
 }
 
-export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> {
+export async function velgDagensMVP(communityKanal: TextChannel): Promise<string | null> {
   ensureFreshDay();
 
-  if (dayState.mvpSentToday) return;
+  if (dayState.mvpSentToday) return null;
 
   // DB-backed idempotency — survives bot restarts
   {
@@ -124,7 +124,7 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
             severity: 'info',
             metadata: { date: osloDateISO(), workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
           });
-          return;
+          return null;
         }
       } catch {}
     }
@@ -137,7 +137,7 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
       severity: 'info',
       metadata: { type: 'mvp', minutesSinceLast: minutesSinceLast(), requiredMinutes: 360, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
     });
-    return;
+    return null;
   }
 
   const db = getDb();
@@ -191,7 +191,7 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
       severity: 'info',
       metadata: { workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
     });
-    return;
+    return null;
   }
 
   const allMembers = getAllMembers();
@@ -203,7 +203,7 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
       severity: 'warning',
       metadata: { userId: topUserId, workspaceId: WORKSPACE_ID },
     });
-    return;
+    return null;
   }
 
   const streakLine  = mvp.streakDays >= 2 ? `🔥 **Streak:** ${mvp.streakDays} dager på rad!\n` : '';
@@ -246,6 +246,8 @@ export async function velgDagensMVP(communityKanal: TextChannel): Promise<void> 
     severity: 'info',
     metadata: { userId: mvp.id, username: mvp.displayName, xpToday: topXpToday, level: mvp.level, kanalId: communityKanal.id, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
   });
+
+  return mvp.id;
 }
 
 // ─── C2: Community Hype ───────────────────────────────────────────────────────

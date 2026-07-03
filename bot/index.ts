@@ -30,6 +30,7 @@ import { linktwitchCommand } from './commands/linktwitch';
 import { tradeCommand, handleTradeButton } from './commands/trade';
 import { handlePersonaReroll, handlePersonaShare } from './lib/rerollService';
 import { adminCommand }   from './commands/admin';
+import { syncRankRole, syncBadgeRole, syncHeroRole, repairAllRoles } from './lib/roleSyncService';
 import * as blackjack     from './commands/blackjack';
 import * as roulette      from './commands/roulette';
 import * as achievements  from './commands/achievements';
@@ -321,7 +322,33 @@ async function sjekkOgSendMVP(): Promise<void> {
     });
     return;
   }
-  await velgDagensMVP(kanal).catch(() => {});
+  const heroId = await velgDagensMVP(kanal).catch(() => null);
+
+  // Hero of Yesterday role sync
+  if (heroId && settings?.badgeRoles?.hero_yesterday) {
+    const guild = client.guilds.cache.first();
+    if (guild) {
+      // Find yesterday's hero from system_events
+      const db = getBotDb();
+      let prevHeroId: string | null = null;
+      if (db) {
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const today     = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago (today's cutoff)
+        const { data: prevEvent } = await db
+          .from('system_events')
+          .select('metadata')
+          .eq('workspace_id', WORKSPACE_ID)
+          .eq('event_type', 'COMMUNITY_MVP_SELECTED')
+          .gte('created_at', yesterday)
+          .lt('created_at', today)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        prevHeroId = (prevEvent?.metadata as any)?.userId ?? null;
+      }
+      await syncHeroRole(guild, heroId, prevHeroId, settings.badgeRoles.hero_yesterday).catch(() => {});
+    }
+  }
 }
 
 async function sjekkOgSendHype(): Promise<void> {
@@ -1024,12 +1051,17 @@ async function handleLevelUp(
     await communityKanal.send(`${emoji} **${displayName}** nådde **Level ${newLevel}**${tittel}! PogChamp`).catch(() => {});
   }
 
-  // Tildel rolle
+  // Tildel rolle — legacy rewardRoles (level threshold → role ID)
   if (guild && guildMember) {
     const rewardRoles = settings?.rewardRoles ?? [];
     const { rolleNavn } = await tildeltRolleKonfigurert(guild, guildMember, newLevel, rewardRoles);
     if (rolleNavn && communityKanal) {
       await communityKanal.send(`🏅 **${displayName}** fikk rollen **@${rolleNavn}**! 👑`).catch(() => {});
+    }
+
+    // Sync rank role via Role Sync V1 (rank bands: Noob → Mythic)
+    if (settings?.rankRoles) {
+      await syncRankRole(guild, guildMember, newLevel, WORKSPACE_ID, settings.rankRoles).catch(() => {});
     }
   }
 
@@ -1904,10 +1936,20 @@ async function tildelTwitchSubRolle(
   const guild = client.guilds.cache.first();
   if (!guild) return;
 
-  const ROLLE_NAVN = '⭐ Twitch Sub';
-  let rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN);
+  // Prefer workspace-configured role ID; fall back to auto-creating by name
+  const communitySettings = await getCommunitySettings().catch(() => null);
+  const configuredRoleId  = communitySettings?.badgeRoles?.twitch_sub;
+
+  let rolle = configuredRoleId
+    ? guild.roles.cache.get(configuredRoleId) ?? null
+    : null;
+
   if (!rolle) {
-    rolle = await guild.roles.create({ name: ROLLE_NAVN, color: 0x9146FF, reason: 'Auto-opprettet for Twitch subs' });
+    const ROLLE_NAVN = '⭐ Twitch Sub';
+    rolle = guild.roles.cache.find(r => r.name === ROLLE_NAVN) ?? null;
+    if (!rolle) {
+      rolle = await guild.roles.create({ name: ROLLE_NAVN, color: 0x9146FF, reason: 'Auto-opprettet for Twitch subs' });
+    }
   }
 
   // ── Steg 1: Prøv verifisert lookup via twitch_user_id (primær) ──────────────
@@ -1944,7 +1986,7 @@ async function tildelTwitchSubRolle(
 
   // ── Tildel rolle + rewards ────────────────────────────────────────────────────
   const guildMember = await guild.members.fetch(discordId).catch(() => null);
-  if (guildMember && !guildMember.roles.cache.has(rolle.id)) {
+  if (guildMember && rolle && !guildMember.roles.cache.has(rolle.id)) {
     await guildMember.roles.add(rolle, 'Twitch sub verifisert').catch(() => {});
   }
 
@@ -2509,6 +2551,18 @@ client.once('clientReady', () => {
       console.log(`[SCHEDULER_ERROR] processPendingDMs: ${err?.message}`);
     });
   }, 60_000);
+
+  // ── Role Sync V1 — periodisk reparasjon hvert 45. min ─────────────────────
+  setInterval(async () => {
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+    const settings = await getCommunitySettings().catch(() => null);
+    if (!settings) return;
+    const hasRankRoles  = Object.values(settings.rankRoles  ?? {}).some(Boolean);
+    const hasBadgeRoles = Object.values(settings.badgeRoles ?? {}).some(Boolean);
+    if (!hasRankRoles && !hasBadgeRoles) return; // ingen roller konfigurert — hopp over
+    await repairAllRoles(WORKSPACE_ID, guild, settings.rankRoles, settings.badgeRoles).catch(() => {});
+  }, 45 * 60_000);
 });
 
 // ─── Meldingslytter ───────────────────────────────────────────────────────────

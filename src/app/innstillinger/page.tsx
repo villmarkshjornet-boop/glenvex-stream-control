@@ -1817,14 +1817,174 @@ function SystemSection() {
   );
 }
 
+// ─── Discord Role Sync Section ────────────────────────────────────────────────
+
+const RANK_KEYS  = ['noob','rookie','explorer','survivor','veteran','elite','legend','mythic'] as const;
+const BADGE_KEYS = ['h4ckerman','hero_yesterday','twitch_sub'] as const;
+const RANK_LABELS: Record<string, string> = {
+  noob: '🌱 Noob (1–10)', rookie: '🔰 Rookie (11–20)', explorer: '🧭 Explorer (21–30)',
+  survivor: '⚔️ Survivor (31–40)', veteran: '🛡️ Veteran (41–50)', elite: '💎 Elite (51–60)',
+  legend: '🌟 Legend (61–75)', mythic: '👑 Mythic (76–100)',
+};
+const BADGE_LABELS: Record<string, string> = {
+  h4ckerman: '⚡ H4ckerman', hero_yesterday: '🏆 Hero of Yesterday', twitch_sub: '⭐ Twitch Sub',
+};
+
+function DiscordRoleSyncSection() {
+  const [roles,      setRoles]      = useState<Array<{ id: string; name: string; color: number }>>([]);
+  const [rankRoles,  setRankRoles]  = useState<Record<string, string>>({});
+  const [badgeRoles, setBadgeRoles] = useState<Record<string, string>>({});
+  const [status,     setStatus]     = useState<{ lastSyncAt: string | null; hasPermError: boolean } | null>(null);
+  const [saving,     setSaving]     = useState(false);
+  const [msg,        setMsg]        = useState<string | null>(null);
+  const [loading,    setLoading]    = useState(true);
+
+  useEffect(() => {
+    void Promise.all([
+      fetch('/api/discord/guild-roles').then(r => r.json()).then((d: any) => setRoles(d.roles ?? [])).catch(() => {}),
+      fetch('/api/discord/role-sync').then(r => r.json()).then((d: any) => {
+        setRankRoles(d.rankRoles ?? {});
+        setBadgeRoles(d.badgeRoles ?? {});
+        setStatus({ lastSyncAt: d.lastSyncAt, hasPermError: d.hasPermError });
+      }).catch(() => {}),
+    ]).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    try {
+      const res = await fetch('/api/discord/role-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rankRoles, badgeRoles }),
+      });
+      setMsg(res.ok ? '✅ Lagret' : '❌ Feil ved lagring');
+    } catch {
+      setMsg('❌ Nettverksfeil');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const RoleSelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2 text-sm text-g-text focus:outline-none focus:border-g-green/50"
+    >
+      <option value="">— Ikke satt —</option>
+      {roles.map(r => (
+        <option key={r.id} value={r.id}>{r.name}</option>
+      ))}
+    </select>
+  );
+
+  if (loading) return <div className="text-sm text-g-muted p-4">Laster roller...</div>;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold gradient-text">Discord Rolle Sync</h2>
+        <p className="text-sm text-g-muted mt-1">
+          Velg hvilke Discord-roller som tildeles automatisk basert på rank, badges og Twitch sub.
+          Boten synkroniserer ved level-up, badge-tildeling, hero-valg og hvert 45. minutt.
+        </p>
+      </div>
+
+      {status?.hasPermError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400">
+          ⚠️ Boten har ikke MANAGE_ROLES-tillatelse, eller botens rolle er under rollene den skal tildele.
+          Sjekk Discord Server Settings → Roles og sørg for at boten er øverst.
+        </div>
+      )}
+
+      {roles.length === 0 && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-sm text-yellow-400">
+          ⚠️ Ingen Discord-roller funnet. Sjekk at <code className="font-mono text-xs">DISCORD_GUILD_ID</code> og{' '}
+          <code className="font-mono text-xs">DISCORD_BOT_TOKEN</code> er satt, og at boten er i serveren.
+        </div>
+      )}
+
+      {/* Rank roles */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-4">
+        <h3 className="text-sm font-semibold text-g-text">Rank-roller (én aktiv om gangen)</h3>
+        <p className="text-xs text-g-muted -mt-2">
+          Brukeren fjernes fra alle andre rank-roller og får kun rollen som matcher current rank.
+          Boten fjerner ikke manuelt tildelte Discord-roller utover disse.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {RANK_KEYS.map(key => (
+            <div key={key}>
+              <label className="block text-xs text-g-muted mb-1">{RANK_LABELS[key]}</label>
+              <RoleSelect
+                value={rankRoles[key] ?? ''}
+                onChange={v => setRankRoles(prev => ({ ...prev, [key]: v }))}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Badge roles */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-4">
+        <h3 className="text-sm font-semibold text-g-text">Badge-roller</h3>
+        <p className="text-xs text-g-muted -mt-2">
+          H4ckerman gis kun via <code className="font-mono text-xs">/admin badge give</code>.
+          Hero of Yesterday byttes daglig. Twitch Sub gis automatisk ved ny sub.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {BADGE_KEYS.map(key => (
+            <div key={key}>
+              <label className="block text-xs text-g-muted mb-1">{BADGE_LABELS[key]}</label>
+              <RoleSelect
+                value={badgeRoles[key] ?? ''}
+                onChange={v => setBadgeRoles(prev => ({ ...prev, [key]: v }))}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Save + status */}
+      <div className="flex items-center gap-4">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-4 py-2 bg-g-green text-black text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {saving ? 'Lagrer…' : 'Lagre rolle-mapping'}
+        </button>
+        {msg && <span className="text-sm text-g-muted">{msg}</span>}
+        {status?.lastSyncAt && (
+          <span className="text-xs text-g-muted ml-auto">
+            Sist sync: {new Date(status.lastSyncAt).toLocaleString('no-NO')}
+          </span>
+        )}
+      </div>
+
+      {/* Permission guide */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-5">
+        <h3 className="text-sm font-semibold text-g-text mb-3">Sjekkliste for rolle-sync</h3>
+        <ul className="text-xs text-g-muted space-y-1.5">
+          <li>✓ Boten har <strong>Manage Roles</strong>-tillatelse i serveren</li>
+          <li>✓ Botens rolle er <strong>høyere</strong> enn rollene den skal tildele i Discord → Server Settings → Roles</li>
+          <li>✓ <code className="font-mono">DISCORD_GUILD_ID</code> og <code className="font-mono">DISCORD_BOT_TOKEN</code> er satt på Railway</li>
+          <li>✓ Bruk <code className="font-mono">/admin sync-roles</code> i Discord for manuell full-sync</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Layout ──────────────────────────────────────────────────────────────
 
-type SectionId = 'workspace' | 'twitch' | 'discord' | 'bot-behavior' | 'economy' | 'ai-producer' | 'system';
+type SectionId = 'workspace' | 'twitch' | 'discord' | 'discord-roles' | 'bot-behavior' | 'economy' | 'ai-producer' | 'system';
 
 const SEKSJONER: { id: SectionId; label: string; ikon: string; desc: string }[] = [
   { id: 'workspace',    label: 'Workspace',    ikon: '◈', desc: 'Merkevare og tilkoblinger' },
   { id: 'twitch',       label: 'Twitch',       ikon: '▶', desc: 'Broadcaster token og bot' },
   { id: 'discord',      label: 'Discord',      ikon: '◉', desc: 'Kanaler og meldinger' },
+  { id: 'discord-roles',label: 'Rolle Sync',   ikon: '🏷', desc: 'Discord-roller for rank, badges og Twitch sub' },
   { id: 'bot-behavior', label: 'Bot-atferd',   ikon: '⚙', desc: 'Kontroll og tone' },
   { id: 'economy',      label: 'Økonomi',      ikon: '◎', desc: 'XP, coins og belønninger' },
   { id: 'ai-producer',  label: 'AI Produsent', ikon: '✦', desc: 'AI-atferd og tone' },
@@ -1870,13 +2030,14 @@ export default function InnstillingerSide() {
 
         {/* Content area */}
         <div className="flex-1 min-w-0">
-          {aktivSeksjon === 'workspace'    && <WorkspaceSection />}
-          {aktivSeksjon === 'twitch'       && <TwitchSection />}
-          {aktivSeksjon === 'discord'      && <DiscordSection />}
-          {aktivSeksjon === 'bot-behavior' && <BotBehaviorSection />}
-          {aktivSeksjon === 'economy'      && <EconomySection />}
-          {aktivSeksjon === 'ai-producer'  && <AiProducerSection />}
-          {aktivSeksjon === 'system'       && <SystemSection />}
+          {aktivSeksjon === 'workspace'     && <WorkspaceSection />}
+          {aktivSeksjon === 'twitch'        && <TwitchSection />}
+          {aktivSeksjon === 'discord'       && <DiscordSection />}
+          {aktivSeksjon === 'discord-roles' && <DiscordRoleSyncSection />}
+          {aktivSeksjon === 'bot-behavior'  && <BotBehaviorSection />}
+          {aktivSeksjon === 'economy'       && <EconomySection />}
+          {aktivSeksjon === 'ai-producer'   && <AiProducerSection />}
+          {aktivSeksjon === 'system'        && <SystemSection />}
         </div>
       </div>
     </div>

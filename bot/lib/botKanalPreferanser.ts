@@ -173,6 +173,25 @@ export interface RewardRole {
   roleName: string;
 }
 
+/** Discord role IDs for each rank band. Keys match DEFAULT_RANKS rank names (lowercase). */
+export interface RankRoles {
+  noob?:     string;
+  rookie?:   string;
+  explorer?: string;
+  survivor?: string;
+  veteran?:  string;
+  elite?:    string;
+  legend?:   string;
+  mythic?:   string;
+}
+
+/** Discord role IDs for special non-rank badges. */
+export interface BadgeRoles {
+  h4ckerman?:      string;
+  hero_yesterday?: string;
+  twitch_sub?:     string;
+}
+
 export interface CommunitySettings {
   aktiv: boolean;
   xpAktiv: boolean;
@@ -184,6 +203,8 @@ export interface CommunitySettings {
   rewardRoles: RewardRole[];
   xpCooldownSek: number;
   xpMinMeldingslengde: number;
+  rankRoles: RankRoles;
+  badgeRoles: BadgeRoles;
 }
 
 const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
@@ -197,6 +218,8 @@ const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   rewardRoles: [],
   xpCooldownSek: 60,
   xpMinMeldingslengde: 4,
+  rankRoles: {},
+  badgeRoles: {},
 };
 
 let _communitySettingsCache: CommunitySettings | null = null;
