@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron', '/api/backfill', '/api/admin/run-migration'];
+const PUBLIC_PATHS = [
+  '/login',
+  '/api/auth',
+  '/api/cron',
+  '/api/backfill',
+  '/api/admin/run-migration',
+  '/overlay',        // OBS browser sources — ingen session
+  '/api/goals/live', // read-only public goal data (brukes av overlay)
+];
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 dager
 
 interface StoredSession {
