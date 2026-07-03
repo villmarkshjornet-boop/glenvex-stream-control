@@ -85,6 +85,45 @@ export async function POST(req: NextRequest) {
         title: stream.title,
       });
 
+      // Reset per_stream goals when a new stream starts
+      if (db && stream.id) {
+        try {
+          const { data: wsGoals } = await db
+            .from('workspaces')
+            .select('settings_json')
+            .eq('id', wsId)
+            .single();
+          const currentGoals: any[] = wsGoals?.settings_json?.viewer_goals ?? [];
+          const resetTime = new Date().toISOString();
+          let resetCount = 0;
+
+          const updatedGoals = currentGoals.map((g: any) => {
+            if (g.resetPolicy === 'per_stream' && g.lastResetStreamId !== stream.id) {
+              resetCount++;
+              return {
+                ...g,
+                gjeldende: g.startValue ?? 0,
+                lastResetStreamId: stream.id,
+                lastResetAt: resetTime,
+              };
+            }
+            return g;
+          });
+
+          if (resetCount > 0) {
+            const currentSettings = wsGoals?.settings_json ?? {};
+            await db.from('workspaces').update({
+              settings_json: { ...currentSettings, viewer_goals: updatedGoals },
+              updated_at: new Date().toISOString(),
+            }).eq('id', wsId);
+            await logEvent('scheduler', 'PER_STREAM_GOALS_RESET', `Nullstilte ${resetCount} per_stream-goal(s) ved ny stream`, 'info', {
+              streamId: stream.id,
+              resetCount,
+            });
+          }
+        } catch {}
+      }
+
       if (settings.autoPostLive) {
         const liveKanalId = await getLiveKanalId();
         if (!liveKanalId) {

@@ -31,7 +31,7 @@ export default function GoalsOverlay() {
     ? goals.filter(g => g.type === goalParam)
     : goals;
 
-  if (visGoals.length === 0) return null;
+  if (visGoals.length === 0) return <div style={{ background: 'transparent' }} />;
 
   return (
     <>

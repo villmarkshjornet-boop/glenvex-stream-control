@@ -14,28 +14,40 @@ interface Goal {
   farge?: string;
   icon?: string;
   manuell?: boolean;
+  source?: 'auto' | 'manual';
+  startValue?: number;
+  resetPolicy?: 'never' | 'per_stream' | 'daily' | 'manual';
+  lastResetStreamId?: string | null;
+  lastResetAt?: string | null;
 }
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers',   label: 'Følgere',     mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', icon: '◈', manuell: false },
-  { type: 'subscribers', label: 'Subscribers', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', icon: '★', manuell: false },
-  { type: 'donations',   label: 'Donasjoner',  mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', icon: '♥', manuell: true  },
+  { type: 'followers',   label: 'Følgere',     mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', icon: '◈', manuell: false, source: 'auto'   },
+  { type: 'subscribers', label: 'Subscribers', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', icon: '★', manuell: false, source: 'auto'   },
+  { type: 'donations',   label: 'Donasjoner',  mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', icon: '♥', manuell: true,  source: 'manual' },
 ];
 
 const NORMALIZE_TYPE: Record<string, string> = { viewers: 'donations' };
 
-const GOAL_DEFAULTS: Record<string, { icon: string; manuell: boolean; farge: string }> = {
-  followers:   { icon: '◈', manuell: false, farge: '#00ff41' },
-  subscribers: { icon: '★', manuell: false, farge: '#9b77cf' },
-  donations:   { icon: '♥', manuell: true,  farge: '#ff7b47' },
+const GOAL_DEFAULTS: Record<string, { icon: string; manuell: boolean; source: 'auto' | 'manual'; farge: string }> = {
+  followers:   { icon: '◈', manuell: false, source: 'auto',   farge: '#00ff41' },
+  subscribers: { icon: '★', manuell: false, source: 'auto',   farge: '#9b77cf' },
+  donations:   { icon: '♥', manuell: true,  source: 'manual', farge: '#ff7b47' },
 };
 
 function normalizeSavedGoals(saved: any[]): Goal[] {
   return saved.map(g => {
     const type = NORMALIZE_TYPE[g.type] ?? g.type;
-    const def  = GOAL_DEFAULTS[type] ?? { icon: '◆', manuell: true, farge: '#00ff41' };
-    return { ...def, ...g, type };
+    const def  = GOAL_DEFAULTS[type] ?? { icon: '◆', manuell: true, source: 'manual' as const, farge: '#00ff41' };
+    // Derive source from manuell if not explicitly set (backward-compat)
+    const source: 'auto' | 'manual' = g.source ?? (g.manuell ? 'manual' : def.source);
+    return { ...def, ...g, type, source };
   });
+}
+
+function withCache(res: NextResponse): NextResponse {
+  res.headers.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
+  return res;
 }
 
 async function getFollowers(token: string, broadcasterId: string, clientId: string): Promise<number> {
@@ -84,22 +96,25 @@ export async function GET(req: NextRequest) {
     }
 
     if (!broadcasterId) {
-      return NextResponse.json({
+      return withCache(NextResponse.json({
         connected: false,
         tokenStatus: 'missing' as const,
         live: { followers: 0, subscribers: 0, canReadSubscribers: false, harSubData: false },
-        goals: goals.map(g => ({ ...g, gjeldende: g.type === 'donations' ? g.gjeldende : 0 })),
-      });
+        goals: goals.map(g => ({
+          ...g,
+          gjeldende: (g.source === 'manual' || g.manuell) ? g.gjeldende : 0,
+        })),
+      }));
     }
   }
 
   if (!broadcasterId || !clientId) {
-    return NextResponse.json({
+    return withCache(NextResponse.json({
       connected: false,
       tokenStatus: 'missing' as const,
       live: { followers: 0, subscribers: 0, canReadSubscribers: false, harSubData: false },
       goals,
-    });
+    }));
   }
 
   let userToken = await getValidBroadcasterToken(wsId);
@@ -138,9 +153,11 @@ export async function GET(req: NextRequest) {
     fromSnapshot        ? 'snapshot' :
     followers > 0       ? 'ok'       : 'missing';
 
+  // Only override gjeldende for auto-tracked goals; manual goals keep their stored value
   const oppdatert = goals.map(g => {
-    if (g.type === 'followers')                         return { ...g, gjeldende: followers };
-    if (g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
+    const isAuto = g.source === 'auto' || (g.source === undefined && !g.manuell);
+    if (isAuto && g.type === 'followers')                         return { ...g, gjeldende: followers };
+    if (isAuto && g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
     return g;
   });
 
@@ -151,11 +168,11 @@ export async function GET(req: NextRequest) {
     fx = fxRow?.settings_json?.viewer_goals_fx ?? null;
   }
 
-  return NextResponse.json({
+  return withCache(NextResponse.json({
     connected: true,
     tokenStatus,
     live: { followers, subscribers: subscriberTotal, canReadSubscribers, harSubData: canReadSubscribers, fromSnapshot },
     goals: oppdatert,
     fx,
-  });
+  }));
 }
