@@ -9,7 +9,8 @@ import { XP_PER_LEVEL, levelFromXP } from '@/lib/xp';
 import { awardBadge, revokeBadge } from '../lib/badgeService';
 import { syncBadgeRole, syncRankRole, repairAllRoles } from '../lib/roleSyncService';
 import { getCommunitySettings } from '../lib/botKanalPreferanser';
-import { WORKSPACE_ID } from '../lib/supabase';
+import { WORKSPACE_ID, getBotDb } from '../lib/supabase';
+import { generateSubCard } from '../lib/subCardService';
 
 const BADGE_CHOICES = [
   { name: '⚡ H4ckerman',    value: 'h4ckerman'   },
@@ -79,6 +80,12 @@ export const adminCommand = {
       sub
         .setName('sync-roles')
         .setDescription('Reparer alle Discord-roller basert på rank og badges i DB.'),
+    )
+
+    .addSubcommand(sub =>
+      sub
+        .setName('backfill-sub-cards')
+        .setDescription('Generer SUB-kort for alle membres med subs > 0 som mangler kort.'),
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -246,6 +253,92 @@ export const adminCommand = {
           { name: '❌ Feil',         value: `${errors}`,             inline: true },
         )
         .setFooter({ text: `Utført av ${interaction.user.username}` })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed], content: '' });
+      return;
+    }
+
+    // ── backfill-sub-cards ────────────────────────────────────────────────────────
+    if (sub === 'backfill-sub-cards') {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.editReply({ content: '⏳ Henter alle membres med subs > 0...' });
+
+      const db = getBotDb();
+      if (!db) {
+        await interaction.editReply({ content: '❌ DB ikke tilgjengelig.' });
+        return;
+      }
+
+      const { data: members, error: fetchErr } = await db
+        .from('community_members')
+        .select('discord_id, display_name, twitch_username, subs')
+        .eq('workspace_id', WORKSPACE_ID)
+        .gt('subs', 0);
+
+      if (fetchErr || !members) {
+        await interaction.editReply({
+          content: `❌ Feil ved henting av membres: ${fetchErr?.message ?? 'ukjent'}`,
+        });
+        return;
+      }
+
+      if (members.length === 0) {
+        await interaction.editReply({ content: 'ℹ️ Ingen membres med subs > 0 funnet.' });
+        return;
+      }
+
+      let generated      = 0;
+      let skippedAlready = 0;
+      let skippedNoLink  = 0;
+      let errors         = 0;
+      const details: string[] = [];
+
+      for (const m of members) {
+        const discordId      = m.discord_id    as string;
+        const displayName    = (m.display_name  as string | null) ?? discordId;
+        const twitchUsername = (m.twitch_username as string | null) ?? discordId;
+
+        const result = await generateSubCard({
+          workspaceId:    WORKSPACE_ID,
+          discordId,
+          twitchUsername,
+          displayName,
+        }).catch(() => ({ ok: false, reason: 'db_error' as const }));
+
+        if (result.ok) {
+          generated++;
+          details.push(`✅ ${displayName} — SUB-kort generert`);
+        } else if (result.reason === 'already_exists') {
+          skippedAlready++;
+          details.push(`☑️ ${displayName} — allerede har sub-kort`);
+        } else if (result.reason === 'no_discord_link') {
+          skippedNoLink++;
+          details.push(`⏭️ ${twitchUsername} — ingen Discord-kobling`);
+        } else {
+          errors++;
+          details.push(`❌ ${displayName} — feil (${result.reason})`);
+        }
+      }
+
+      const summaryLines = [
+        `✅ Generert: **${generated}**`,
+        `☑️ Hoppet over (allerede har): **${skippedAlready}**`,
+        `⏭️ Hoppet over (ingen Discord): **${skippedNoLink}**`,
+        ...(errors > 0 ? [`❌ Feil: **${errors}**`] : []),
+      ].join('\n');
+
+      const detailText = details.slice(0, 20).join('\n');
+
+      const embed = new EmbedBuilder()
+        .setColor(0x9146ff)
+        .setTitle('💜 SUB-kort Backfill fullført')
+        .setDescription(
+          summaryLines +
+          (detailText ? `\n\n${detailText}` : '') +
+          (details.length > 20 ? `\n…og ${details.length - 20} til` : ''),
+        )
+        .setFooter({ text: `Utført av ${interaction.user.username} • ${members.length} membres behandlet` })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [embed], content: '' });
