@@ -30,6 +30,17 @@ import { linktwitchCommand } from './commands/linktwitch';
 import { tradeCommand, handleTradeButton } from './commands/trade';
 import { handlePersonaReroll, handlePersonaShare } from './lib/rerollService';
 import { adminCommand }   from './commands/admin';
+import * as blackjack     from './commands/blackjack';
+import * as roulette      from './commands/roulette';
+import * as achievements  from './commands/achievements';
+import * as quests        from './commands/quests';
+import * as prestige      from './commands/prestige';
+import { seedDefaultRanks } from './lib/rankService';
+import { seedSystemBadges } from './lib/badgeService';
+import { seedDefaultPerks } from './lib/perkService';
+import { seedDefaultAchievements } from './lib/achievementService';
+import { seedDefaultQuests } from './lib/questService';
+import { WORKSPACE_ID } from './lib/supabase';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins, getBalance } from './lib/coinService';
 import { awardSubCard } from './lib/cardCollectionService';
@@ -127,7 +138,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, { data: any; execute: (interaction: any) => Promise<any> }>();
-for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand]) {
+for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand, socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand, personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand, blackjack, roulette, achievements, quests, prestige]) {
   commands.set(cmd.data.name, cmd);
 }
 
@@ -2126,6 +2137,7 @@ client.once('clientReady', () => {
         liveCommand, twitchCommand, promoCommand, setupCommand, statusCommand,
         socialsCommand, clipCommand, kanalerCommand, innsendCommand, profilCommand,
         personaCommand, minekortCommand, linktwitchCommand, tradeCommand, adminCommand,
+        blackjack, roulette, achievements, quests, prestige,
       ].map(c => c.data.toJSON());
 
       const clientId = process.env.DISCORD_CLIENT_ID ?? '';
@@ -2209,6 +2221,15 @@ client.once('clientReady', () => {
     }
   }, 15_000);
   lasterMedlemmerFraSupabase().catch(() => {});
+
+  // ── Community OS: seed default data for new workspaces ───────────────────
+  await Promise.all([
+    seedDefaultRanks(WORKSPACE_ID),
+    seedSystemBadges(WORKSPACE_ID),
+    seedDefaultPerks(WORKSPACE_ID),
+    seedDefaultAchievements(WORKSPACE_ID),
+    seedDefaultQuests(WORKSPACE_ID),
+  ]).catch((e: Error) => console.error('[Boot] Seed failed:', e.message));
 
   // VOD startup recovery: if CONTENT_FACTORY_ENABLED and stream is offline at startup,
   // call detect-latest after 16 min to process any VOD missed due to bot restart.
@@ -2621,6 +2642,16 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction: Interaction) => {
   if (interaction.isButton()) {
+    if (interaction.customId.startsWith('bj_hit_') || interaction.customId.startsWith('bj_stand_')) {
+      const { handleBlackjackButton } = await import('./commands/blackjack');
+      await handleBlackjackButton(interaction, WORKSPACE_ID).catch(async (err: Error) => {
+        console.error('[Blackjack] button error:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ Feil i blackjack-håndtering.', ephemeral: true }).catch(() => {});
+        }
+      });
+      return;
+    }
     if (interaction.customId.startsWith('slett_kanal_')) {
       await handleSlettKanalKnapp(interaction).catch(console.error);
       return;

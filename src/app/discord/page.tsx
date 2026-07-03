@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { GuildInfo, Settings } from '@/types';
 import { PageHeader } from '@/components/ui';
 
@@ -130,6 +130,23 @@ export default function DiscordPage() {
       setMeldingResult({ ok: false, msg: (e as Error).message });
     }
     setSendingMelding(false);
+  }
+
+  const [flags, setFlags] = React.useState<Record<string, unknown> | null>(null);
+  const [savingFlags, setSavingFlags] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch('/api/community-games')
+      .then(r => r.json())
+      .then((d: { featureFlags: Record<string, unknown> | null }) => setFlags(d.featureFlags))
+      .catch(() => {});
+  }, []);
+
+  async function saveFlags() {
+    if (!flags) return;
+    setSavingFlags(true);
+    await fetch('/api/community-games', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flags) });
+    setSavingFlags(false);
   }
 
   const kategorier = channels.filter(c => c.type === 4);
@@ -410,12 +427,65 @@ export default function DiscordPage() {
       <div className="bg-g-card border border-g-border rounded-2xl p-6">
         <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Slash Kommandoer</p>
         <div className="grid grid-cols-2 gap-2">
-          {['/live', '/twitch', '/promo', '/setup', '/status', '/socials', '/clip', '/kanaler'].map(cmd => (
+          {['/live', '/twitch', '/promo', '/setup', '/status', '/socials', '/clip', '/kanaler', '/blackjack', '/roulette', '/achievements', '/quests', '/prestige'].map(cmd => (
             <div key={cmd} className="flex items-center gap-2 py-1.5 px-3 bg-g-bg border border-g-border rounded-lg">
               <span className="text-g-green text-sm font-mono font-bold">{cmd}</span>
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Community OS */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-4">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Community OS</p>
+        <p className="text-xs text-g-muted">Ranks, badges, perks, prestige, daily hero, achievements, quests og casino-spill. Styres via Discord-kommandoer og API.</p>
+        <div className="grid grid-cols-2 gap-2">
+          {['Ranks & Prestige', 'Badges', 'Daily Hero', 'Achievements', 'Quests', 'Blackjack', 'Roulette', 'Perks'].map(sys => (
+            <div key={sys} className="py-1.5 px-3 bg-g-bg border border-g-border rounded-lg">
+              <span className="text-xs text-g-text">◆ {sys}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Community OS — Feature Flags */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">Community OS — Feature Flags</p>
+          <button
+            onClick={saveFlags}
+            disabled={savingFlags || !flags}
+            className="px-4 py-2 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:shadow-green-sm transition-all duration-200 disabled:opacity-50"
+          >
+            {savingFlags ? 'Lagrer...' : '◆ Lagre'}
+          </button>
+        </div>
+        {flags ? (
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              ['ranks_enabled',        'Ranks'],
+              ['badges_enabled',       'Badges'],
+              ['hero_enabled',         'Daily Hero'],
+              ['prestige_enabled',     'Prestige'],
+              ['achievements_enabled', 'Achievements'],
+              ['quests_enabled',       'Quests'],
+              ['blackjack_enabled',    'Blackjack'],
+              ['roulette_enabled',     'Roulette'],
+            ] as [string, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-center justify-between py-2 px-3 bg-g-bg border border-g-border rounded-lg cursor-pointer">
+                <span className="text-xs text-g-text">{label}</span>
+                <input
+                  type="checkbox"
+                  checked={!!flags[key]}
+                  onChange={e => setFlags(prev => prev ? { ...prev, [key]: e.target.checked } : prev)}
+                  className="accent-green-400"
+                />
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-g-muted">Laster feature flags...</p>
+        )}
       </div>
     </div>
   );

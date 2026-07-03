@@ -8,6 +8,10 @@ import { getMember, getAllMembers, upsertMember, ALLE_BADGES, nesteBadge } from 
 import { XP_PER_LEVEL, levelFromXP, xpIntoCurrentLevel, levelProgress } from '@/lib/xp';
 import { getBalance } from '../lib/coinService';
 import { logSystemEvent } from '../lib/systemEvents';
+import { WORKSPACE_ID } from '../lib/supabase';
+import { getRankForLevel, formatPrestige } from '../lib/rankService';
+import { getMemberBadges } from '../lib/badgeService';
+import { getPerksForRank } from '../lib/perkService';
 
 function progressBar(pct: number, len = 14): string {
   const filled = Math.max(0, Math.round((pct / 100) * len));
@@ -72,8 +76,12 @@ export const profilCommand = {
       member = upsertMember(target.id, target.username, dn);
     }
 
-    // Coins — hent parallelt (uavhengig av XP)
-    const coins = await getBalance(target.id);
+    // Coins + Community OS data — hent parallelt
+    const [coins, rankData, dbBadges] = await Promise.all([
+      getBalance(target.id),
+      getRankForLevel(WORKSPACE_ID, member.level).catch(() => null),
+      getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as { name: string; emoji: string }[]),
+    ]);
 
     // ── XP og level ──────────────────────────────────────────────────────────
     // If raw xp is suspiciously large, fall back to discordXp (Discord-specific column)
@@ -104,13 +112,30 @@ export const profilCommand = {
     const rangTittel = xpRangTittel(displayXp);
     const farge      = xpFargeKode(displayXp);
 
+    // ── Community OS: rank, prestige, perks ──────────────────────────────────
+    const rankName      = rankData?.name ?? null;
+    const rankIcon      = rankData?.icon ?? null;
+    const prestigeLevel = (member as any).prestige_level ?? 0;
+    const prestigeText  = prestigeLevel > 0 ? formatPrestige(prestigeLevel) : null;
+    const rankPerks     = rankName
+      ? await getPerksForRank(WORKSPACE_ID, rankName).catch(() => [] as { description: string }[])
+      : [];
+    const perksText = rankPerks.length > 0
+      ? rankPerks.slice(0, 3).map(p => p.description).join(' · ')
+      : null;
+
     // ── Badges ───────────────────────────────────────────────────────────────
     const opptjentBadges = ALLE_BADGES.filter(b => member!.badges.includes(b.navn));
     const nesteMål       = nesteBadge(member);
 
+    // Prefer DB badges (Community OS) if available, fall back to memberTracker
+    const alleBadgeEmojis: string[] = dbBadges.length > 0
+      ? dbBadges.slice(-8).map(b => b.emoji)
+      : opptjentBadges.slice(-8).map(b => b.emoji);
+
     // Vis emojis for opptjente badges
-    const badgeRad = opptjentBadges.length > 0
-      ? opptjentBadges.slice(-8).map(b => b.emoji).join(' ')
+    const badgeRad = alleBadgeEmojis.length > 0
+      ? alleBadgeEmojis.join(' ')
       : '—';
 
     // ── Streak-tekst ─────────────────────────────────────────────────────────
@@ -138,10 +163,18 @@ export const profilCommand = {
       ? `${nesteMål.badge.emoji} **${nesteMål.badge.navn}** — ${nesteMål.mangler}\n${progressBar(nesteMål.pct)} ${Math.round(nesteMål.pct)}%\n*${nesteMål.badge.beskrivelse}*`
       : '✅ Alle badges opptjent!';
 
+    // ── Community OS: sub and hero display ───────────────────────────────────
+    const twitchSubMonths = (member as any).twitch_sub_months as number | undefined ?? 0;
+    const heroCount       = (member as any).hero_count as number | undefined ?? 0;
+
     // ── Embed ─────────────────────────────────────────────────────────────────
+    const displayTitle = prestigeText
+      ? `${rangTittel}  ·  ${member.displayName} ${prestigeText}`
+      : `${rangTittel}  ·  ${member.displayName}`;
+
     const embed = new EmbedBuilder()
       .setColor(farge)
-      .setTitle(`${rangTittel}  ·  ${member.displayName}`)
+      .setTitle(displayTitle)
       .setDescription(
         `**Level ${level}** · Rank **#${rank}** av ${total}${total > 1 ? ` · Topp **${100 - rankPct}%**` : ''}\n` +
         `\`${progressBar(levelPct)}\` ${xpInLevel}/${xpForNext} XP til neste level`
@@ -164,7 +197,7 @@ export const profilCommand = {
         },
         {
           name: '🏅 Badges',
-          value: `${badgeRad}\n${opptjentBadges.length}/${ALLE_BADGES.length} opptjent`,
+          value: `${badgeRad}\n${dbBadges.length > 0 ? dbBadges.length : opptjentBadges.length}/${ALLE_BADGES.length} opptjent`,
           inline: true,
         },
         {
@@ -177,6 +210,21 @@ export const profilCommand = {
           value: nesteBadgeTekst,
           inline: false,
         },
+        ...(rankName ? [{
+          name: '🏆 Rank',
+          value: `${rankIcon ?? ''} ${rankName}${perksText ? `\n${perksText}` : ''}`.trim(),
+          inline: true,
+        }] : []),
+        ...(twitchSubMonths > 0 ? [{
+          name: '💜 Twitch Sub',
+          value: `×${twitchSubMonths} måneder`,
+          inline: true,
+        }] : []),
+        ...(heroCount > 0 ? [{
+          name: '🦸 Hero',
+          value: `×${heroCount} ganger`,
+          inline: true,
+        }] : []),
       )
       .setFooter({
         text: `Sist aktiv: ${tidSiden(member.lastSeen)}  ·  Medlem siden: ${new Date(member.joinedAt).toLocaleDateString('no-NO')}`,
