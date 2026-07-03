@@ -380,6 +380,22 @@ export default function ContentFactoryAdminPage() {
     });
   }
 
+  async function slettAlleFeilede() {
+    if (feilede.length === 0) return;
+    setConfirmState({
+      title: `Slett feilede jobber (${feilede.length})`,
+      message: `Er du sikker? Dette vil permanent slette ${feilede.length} feilede jobb${feilede.length === 1 ? '' : 'er'} og all tilhørende data. Kan ikke angres.`,
+      danger: true,
+      confirmLabel: `Slett ${feilede.length} feilede permanent`,
+      onConfirm: async () => {
+        const res = await fetch('/api/content-factory/jobs', { method: 'DELETE' }).catch(() => null);
+        if (res?.ok) {
+          await hentVods();
+        }
+      },
+    });
+  }
+
   // ─── States ────────────────────────────────────────────────────────────────
   if (aktivert === false) {
     return (
@@ -629,9 +645,17 @@ export default function ContentFactoryAdminPage() {
       {/* ─── Feilede ──────────────────────────────────────────────────────────── */}
       {feilede.length > 0 && (
         <div>
-          <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">
-            Feilede <span className="text-red-400 ml-1">({feilede.length})</span>
-          </p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold tracking-widest uppercase text-g-muted">
+              Feilede <span className="text-red-400 ml-1">({feilede.length})</span>
+            </p>
+            <button
+              onClick={slettAlleFeilede}
+              className="text-[11px] text-red-400/70 hover:text-red-400 transition-colors px-2.5 py-1 border border-red-500/20 hover:border-red-500/40 rounded-lg flex items-center gap-1.5"
+            >
+              🗑 Slett feilede ({feilede.length})
+            </button>
+          </div>
           <div className="space-y-2">
             {feilede.map(v => (
               <div key={v.id} className="bg-g-card border border-red-500/20 rounded-2xl p-4">
