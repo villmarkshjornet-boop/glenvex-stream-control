@@ -6,6 +6,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  AttachmentBuilder,
 } from 'discord.js';
 import {
   getMemberCards,
@@ -166,6 +167,8 @@ async function renderBrowse(
   const card = cards[clampedPage];
   if (!card) return;
 
+  console.log(`[MINEKORT] index=${clampedPage} cardId=${card.id} rarity=${card.rarity} imageUrl=${card.cardImageUrl ?? 'NULL'}`);
+
   const price = getSellPrice(card.rarity);
   const statusLabel = card.status === 'sold'
     ? 'Solgt'
@@ -191,8 +194,26 @@ async function renderBrowse(
     )
     .setFooter({ text: `Kort ${clampedPage + 1} av ${total} · ${card.rarity}` });
 
+  // Fetch image as attachment with a unique filename per card so Discord never
+  // serves a cached version from a previous card on the same message.
+  const files: AttachmentBuilder[] = [];
   if (card.cardImageUrl) {
-    embed.setImage(card.cardImageUrl);
+    try {
+      const res  = await fetch(card.cardImageUrl, { signal: AbortSignal.timeout(6000) });
+      if (res.ok) {
+        const buf        = Buffer.from(await res.arrayBuffer());
+        const filename   = `card-${card.id}.png`;
+        const attachment = new AttachmentBuilder(buf, { name: filename });
+        files.push(attachment);
+        embed.setImage(`attachment://${filename}`);
+      } else {
+        console.log(`[MINEKORT] CARD_IMAGE_MISSING cardId=${card.id} status=${res.status}`);
+      }
+    } catch (err: unknown) {
+      console.log(`[MINEKORT] CARD_IMAGE_MISSING cardId=${card.id} err=${(err as Error).message}`);
+    }
+  } else {
+    console.log(`[MINEKORT] CARD_IMAGE_MISSING cardId=${card.id} reason=no_url`);
   }
 
   const isSold = card.status === 'sold';
@@ -224,7 +245,7 @@ async function renderBrowse(
       .setStyle(ButtonStyle.Primary),
   );
 
-  await btn.update({ embeds: [embed], components: [row] });
+  await btn.update({ embeds: [embed], files, components: [row] });
 }
 
 // ── Button handler (exported for use in index.ts) ──────────────────────────────

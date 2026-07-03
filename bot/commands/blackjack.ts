@@ -9,7 +9,7 @@ import {
 } from 'discord.js';
 import { playBlackjack, hitBlackjack, standBlackjack, formatHand, Card } from '../lib/blackjackEngine';
 
-// In-memory active games: messageId → game state
+// In-memory active games: gameId → game state
 const activeGames = new Map<string, {
   workspaceId: string;
   discordId:   string;
@@ -18,6 +18,10 @@ const activeGames = new Map<string, {
   dealerCards: Card[];
   deck:        Card[];
 }>();
+
+function generateGameId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
 
 export const data = new SlashCommandBuilder()
   .setName('blackjack')
@@ -54,21 +58,22 @@ export async function execute(interaction: ChatInputCommandInteraction, workspac
   }
 
   // Game in progress
-  const embed = buildGameEmbed(state.playerCards, state.dealerCards, state.playerScore, bet);
-  const row   = buildActionRow(interaction.id);
-  const msg   = await interaction.editReply({ embeds: [embed], components: [row] });
+  const gameId = generateGameId();
+  const embed  = buildGameEmbed(state.playerCards, state.dealerCards, state.playerScore, bet);
+  const row    = buildActionRow(gameId, discordId);
+  await interaction.editReply({ embeds: [embed], components: [row] });
 
-  activeGames.set(msg.id, {
+  activeGames.set(gameId, {
     workspaceId,
     discordId,
     bet,
     playerCards: state.playerCards,
     dealerCards: state.dealerCards,
-    deck:        [], // Deck state managed in memory via shuffle in engine; pass remaining cards
+    deck:        [],
   });
 
   // Auto-expire after 5 minutes
-  setTimeout(() => activeGames.delete(msg.id), 300_000);
+  setTimeout(() => activeGames.delete(gameId), 300_000);
 }
 
 function buildGameEmbed(playerCards: Card[], dealerCards: Card[], playerScore: number, bet: number): EmbedBuilder {
@@ -108,46 +113,63 @@ function buildResultEmbed(
     );
 }
 
-function buildActionRow(interactionId: string): ActionRowBuilder<ButtonBuilder> {
+// custom_id format: bj_hit_{gameId}_{ownerUserId}  /  bj_stand_{gameId}_{ownerUserId}
+// Ownership is encoded in the button so the handler never needs a message-ID lookup.
+function buildActionRow(gameId: string, ownerUserId: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`bj_hit_${interactionId}`).setLabel('Hit 🃏').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`bj_stand_${interactionId}`).setLabel('Stand ✋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`bj_hit_${gameId}_${ownerUserId}`).setLabel('Hit 🃏').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`bj_stand_${gameId}_${ownerUserId}`).setLabel('Stand ✋').setStyle(ButtonStyle.Secondary),
   );
 }
 
 export async function handleBlackjackButton(btn: ButtonInteraction, workspaceId: string): Promise<void> {
-  const msgId = btn.message.id;
-  const game  = activeGames.get(msgId);
+  // custom_id: bj_hit_{gameId}_{ownerUserId}  or  bj_stand_{gameId}_{ownerUserId}
+  const isHit     = btn.customId.startsWith('bj_hit_');
+  const withoutPrefix = btn.customId.replace(/^bj_(hit|stand)_/, '');
+  // ownerUserId is the last segment; gameId is everything before the final underscore
+  const lastUnderscore = withoutPrefix.lastIndexOf('_');
+  const gameId      = withoutPrefix.slice(0, lastUnderscore);
+  const ownerUserId = withoutPrefix.slice(lastUnderscore + 1);
+
+  const allowed = btn.user.id === ownerUserId;
+  const action  = isHit ? 'hit' : 'stand';
+  console.log(`[BLACKJACK] buttonUserId=${btn.user.id} ownerUserId=${ownerUserId} gameId=${gameId} action=${action} allowed=${allowed}`);
+
+  if (!allowed) {
+    await btn.reply({ content: '❌ Dette er ikke ditt spill.', ephemeral: true });
+    return;
+  }
+
+  const game = activeGames.get(gameId);
 
   if (!game) {
     await btn.reply({ content: '❌ Dette spillet er utløpt. Start et nytt med `/blackjack`.', ephemeral: true });
     return;
   }
 
+  // Sanity: double-check against stored discordId
   if (game.discordId !== btn.user.id) {
-    await btn.reply({ content: '❌ Dette er ikke ditt spill.', ephemeral: true });
+    await btn.reply({ content: '❌ Feil spill-ID. Start et nytt med `/blackjack`.', ephemeral: true });
     return;
   }
 
   await btn.deferUpdate();
-
-  const isHit = btn.customId.startsWith('bj_hit_');
 
   if (isHit) {
     const state = await hitBlackjack(workspaceId, game.discordId, game.bet, game.playerCards, game.dealerCards, game.deck);
     game.playerCards = state.playerCards;
 
     if (state.outcome) {
-      activeGames.delete(msgId);
+      activeGames.delete(gameId);
       const embed = buildResultEmbed(state.playerCards, state.dealerCards, state.playerScore, state.dealerScore, state.outcome, state.coinsDelta, state.newBalance, true);
       await btn.editReply({ embeds: [embed], components: [] });
     } else {
       const embed = buildGameEmbed(state.playerCards, state.dealerCards, state.playerScore, game.bet);
-      await btn.editReply({ embeds: [embed], components: [buildActionRow(btn.message.id)] });
+      await btn.editReply({ embeds: [embed], components: [buildActionRow(gameId, ownerUserId)] });
     }
   } else {
     const state = await standBlackjack(workspaceId, game.discordId, game.bet, game.playerCards, game.dealerCards, game.deck);
-    activeGames.delete(msgId);
+    activeGames.delete(gameId);
     const embed = buildResultEmbed(state.playerCards, state.dealerCards, state.playerScore, state.dealerScore, state.outcome!, state.coinsDelta, state.newBalance, true);
     await btn.editReply({ embeds: [embed], components: [] });
   }
