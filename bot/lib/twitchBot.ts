@@ -193,13 +193,24 @@ let _cachedBroadcasterToken: string | null = null;
 export async function getBroadcasterUserToken(): Promise<string | null> {
   if (_cachedBroadcasterToken) return _cachedBroadcasterToken;
 
-  const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+  const wsId = process.env.WORKSPACE_ID ?? '';
+  if (!wsId) {
+    console.error('[twitchBot] getBroadcasterUserToken: WORKSPACE_ID env var is not set');
+    return null;
+  }
   const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
   const clientId     = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
 
-  if (!sbUrl || !sbKey || !clientId || !clientSecret) return null;
+  if (!sbUrl || !sbKey) {
+    console.error('[twitchBot] getBroadcasterUserToken: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing');
+    return null;
+  }
+  if (!clientId || !clientSecret) {
+    console.error('[twitchBot] getBroadcasterUserToken: TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET missing');
+    return null;
+  }
 
   try {
     const { createClient } = require('@supabase/supabase-js');

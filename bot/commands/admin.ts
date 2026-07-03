@@ -282,13 +282,34 @@ export const adminCommand = {
       // 1. Hent broadcaster-ID og brukertoken
       const broadcasterId = await getBroadcasterId();
       if (!broadcasterId) {
-        await interaction.editReply({ content: '❌ Kunne ikke hente broadcaster-ID. Er TWITCH_USERNAME satt?' });
+        const hint = process.env.TWITCH_USERNAME
+          ? `Sjekket TWITCH_USERNAME="${process.env.TWITCH_USERNAME}" — Twitch API returnerte ingen bruker-ID.`
+          : 'TWITCH_USERNAME env var er ikke satt.';
+        await interaction.editReply({ content: `❌ Kunne ikke hente broadcaster-ID. ${hint}` });
         return;
       }
 
       const broadcasterToken = await getBroadcasterUserToken();
       if (!broadcasterToken) {
-        await interaction.editReply({ content: '❌ Ingen broadcaster-token tilgjengelig. Koble til Twitch på nytt i innstillinger.' });
+        // Build a diagnostic message so the user knows exactly what to fix
+        const hasSbUrl  = !!(process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL);
+        const hasSbKey  = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const hasTwId   = !!process.env.TWITCH_CLIENT_ID;
+        const hasTwSec  = !!process.env.TWITCH_CLIENT_SECRET;
+        const hasWsId   = !!process.env.WORKSPACE_ID;
+        const lines = [
+          `❌ Broadcaster-token ikke tilgjengelig. Diagnostikk:`,
+          `• WORKSPACE_ID: ${hasWsId ? '✅' : '❌ mangler'}`,
+          `• SUPABASE_URL: ${hasSbUrl ? '✅' : '❌ mangler'}`,
+          `• SUPABASE_SERVICE_ROLE_KEY: ${hasSbKey ? '✅' : '❌ mangler'}`,
+          `• TWITCH_CLIENT_ID: ${hasTwId ? '✅' : '❌ mangler'}`,
+          `• TWITCH_CLIENT_SECRET: ${hasTwSec ? '✅' : '❌ mangler'}`,
+        ];
+        if (hasSbUrl && hasSbKey && hasTwId && hasTwSec && hasWsId) {
+          lines.push(`• Alle env-vars OK — token i DB mangler eller er ugyldig. Gå til Innstillinger → Koble Twitch på nytt.`);
+          lines.push(`  (Sjekk om \`workspaces.twitch_access_token\` er satt for workspace ${process.env.WORKSPACE_ID})`);
+        }
+        await interaction.editReply({ content: lines.join('\n') });
         return;
       }
 
@@ -507,6 +528,12 @@ export const adminCommand = {
       }
 
       const totalLinked    = members.length;
+      let hasTwitchId      = 0;
+      let hasTwitchLogin   = 0;
+      let alreadySubCount  = 0;
+      let hasUnlinkedSub   = 0;
+      let hasSubsField     = 0;
+      let noHistoricalSub  = 0;
       let subUpdated       = 0;
       let cardsGenerated   = 0;
       let errors           = 0;
@@ -514,25 +541,32 @@ export const adminCommand = {
       for (const m of members) {
         const discordId      = m.discord_id      as string;
         const displayName    = (m.display_name   as string | null) ?? discordId;
-        const twitchId       = m.twitch_id       as string;
-        const twitchUsername = (m.twitch_username as string | null) ?? discordId;
+        const twitchId       = (m.twitch_id      as string | null) ?? '';
+        const twitchUsername = (m.twitch_username as string | null) ?? '';
         const alreadySub     = !!(m.twitch_sub_status as boolean | null);
         const existingSubs   = (m.subs           as number | null) ?? 0;
 
-        if (alreadySub) continue;
+        if (twitchId)       hasTwitchId++;
+        if (twitchUsername) hasTwitchLogin++;
+        if (alreadySub) { alreadySubCount++; continue; }
 
         try {
-          const { data: unmatchedSub } = await db
-            .from('community_twitch_unlinked_subs')
-            .select('sub_tier, months')
-            .eq('workspace_id', WORKSPACE_ID)
-            .eq('twitch_user_id', twitchId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const { data: unmatchedSub } = twitchId
+            ? await db
+                .from('community_twitch_unlinked_subs')
+                .select('sub_tier, months')
+                .eq('workspace_id', WORKSPACE_ID)
+                .eq('twitch_user_id', twitchId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+            : { data: null };
+
+          if (unmatchedSub) hasUnlinkedSub++;
+          if (existingSubs > 0) hasSubsField++;
 
           const hasStoredSub = !!unmatchedSub || existingSubs > 0;
-          if (!hasStoredSub) continue;
+          if (!hasStoredSub) { noHistoricalSub++; continue; }
 
           const { error: updErr } = await db.from('community_members').update({
             twitch_sub_status: true,
@@ -548,7 +582,7 @@ export const adminCommand = {
           const cardResult = await generateSubCard({
             workspaceId:    WORKSPACE_ID,
             discordId,
-            twitchUsername,
+            twitchUsername: twitchUsername || discordId,
             displayName,
             subTier:        (unmatchedSub as any)?.sub_tier ?? '1000',
           }).catch(() => ({ ok: false, reason: 'db_error' as const }));
@@ -568,6 +602,12 @@ export const adminCommand = {
         severity:   'info',
         metadata:   {
           totalLinked,
+          hasTwitchId,
+          hasTwitchLogin,
+          alreadySubCount,
+          hasUnlinkedSub,
+          hasSubsField,
+          noHistoricalSub,
           subUpdated,
           cardsGenerated,
           errors,
@@ -579,9 +619,15 @@ export const adminCommand = {
         .setColor(0x9146ff)
         .setTitle('💜 repair-sub-status fullført')
         .addFields(
-          { name: '🔗 Linkede brukere',    value: `${totalLinked}`,    inline: true },
-          { name: '✅ Sub-status reparert', value: `${subUpdated}`,    inline: true },
-          { name: '🃏 Kort generert',       value: `${cardsGenerated}`, inline: true },
+          { name: '🔗 Linkede brukere',          value: `${totalLinked}`,       inline: true },
+          { name: '🆔 Har twitch_user_id',        value: `${hasTwitchId}`,       inline: true },
+          { name: '👤 Har twitch_login',           value: `${hasTwitchLogin}`,    inline: true },
+          { name: '✅ Allerede subscriber',        value: `${alreadySubCount}`,   inline: true },
+          { name: '📋 Unlinked sub i DB',          value: `${hasUnlinkedSub}`,    inline: true },
+          { name: '📊 subs > 0 i community_members', value: `${hasSubsField}`,   inline: true },
+          { name: '⏭ Ingen historisk sub (skip)', value: `${noHistoricalSub}`,   inline: true },
+          { name: '🔧 Sub-status reparert',        value: `${subUpdated}`,        inline: true },
+          { name: '🃏 Kort generert',              value: `${cardsGenerated}`,    inline: true },
           ...(errors > 0 ? [{ name: '❌ Feil', value: `${errors}`, inline: true }] : []),
         )
         .setFooter({ text: `Utført av ${interaction.user.username} • ${totalLinked} brukere behandlet` })
