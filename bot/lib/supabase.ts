@@ -13,7 +13,9 @@ export function getBotDb(): SupabaseClient | null {
   return _client;
 }
 
-export const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+// NOTE: Empty string is intentional — bot/index.ts exits at startup if WORKSPACE_ID is unset.
+// This avoids TypeScript errors throughout the codebase while still failing fast at boot.
+export const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 export async function dbUpsert(table: string, row: Record<string, any>, onConflict: string): Promise<boolean> {
   const db = getBotDb();

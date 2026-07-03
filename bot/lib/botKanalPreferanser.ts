@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+// NOTE: Empty string is intentional — bot/index.ts exits at startup if WORKSPACE_ID is unset.
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const CACHE_TTL = 5 * 60_000; // 5 minutes
 
 let _cache: Record<string, string> | null = null;

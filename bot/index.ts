@@ -127,6 +127,15 @@ if (!token) {
   process.exit(1);
 }
 
+// ─── WORKSPACE_ID guard — must be set before any DB operation ────────────────
+// Without this, every Supabase query silently uses the wrong (empty) workspace_id,
+// corrupting data across all tables. Fail immediately so the error is unmissable.
+if (!process.env.WORKSPACE_ID) {
+  console.error('[FATAL] WORKSPACE_ID env var is not set. Bot cannot start safely.');
+  console.error('[FATAL] Set WORKSPACE_ID in Railway Variables (or .env) to your Supabase workspace UUID.');
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
