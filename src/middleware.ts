@@ -83,48 +83,49 @@ function decodeJwtClaims(accessToken: string): UserClaims | null {
 }
 
 // ─── Verify JWT cryptographically via Supabase ───────────────────────────────
-// PARTIAL FIX: Cryptographic signature verification layer on top of the existing
-// base64-decode. Calls Supabase's /auth/v1/user endpoint which validates the JWT
-// signature server-side, preventing workspace_id forgery via payload tampering.
-// Full fix: replace parseCookieSession + decodeJwtClaims with @supabase/ssr SSR
-// session management (requires migrating cookie storage format).
+// Calls Supabase's /auth/v1/user endpoint which validates the JWT signature
+// server-side, preventing workspace_id forgery via payload tampering.
 //
 // Returns:
-//   { id, email, workspace_id, alpha_enabled } — token is valid; use these values
-//   'invalid'  — Supabase rejected the token (bad signature / forged payload)
-//   null       — verification call failed (network error / env missing) — caller falls back
+//   { id, email, workspace_id, alpha_enabled } — token is valid
+//   'invalid'  — Supabase explicitly rejected the token (bad sig / revoked)
+//   null       — verification unavailable (network down, env missing, timeout)
+//
+// IMPORTANT: callers must treat null as a security-critical failure for private
+// routes — do NOT fall back to base64-decoded claims on private paths.
 async function verifyJwtWithSupabase(
   accessToken: string,
 ): Promise<{ id: string; email: string; workspace_id: string; alpha_enabled?: boolean } | 'invalid' | null> {
-  const url    = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const url     = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null; // env missing — graceful skip
+  if (!url || !anonKey) return null;
 
-  try {
-    // createServerClient produces a SupabaseClient backed by @supabase/auth-js.
-    // Passing an empty cookie store is fine here because we supply the JWT explicitly
-    // to getUser(jwt) — the cookie store is only used for cookie-based session refresh.
-    const supabase = createServerClient(url, anonKey, {
-      cookies: { getAll: () => [], setAll: () => {} },
-    });
-    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
-    if (error) {
-      const status = (error as { status?: number }).status ?? 0;
-      // 401/403 means Supabase rejected the token (invalid signature or revoked)
-      if (status === 401 || status === 403) return 'invalid';
-      // Other status codes (500, network issues) — treat as transient
+  // Race against a 5 s hard deadline so a slow Supabase never hangs the edge fn
+  const timeoutSignal = new Promise<null>(resolve => setTimeout(() => resolve(null), 5000));
+  const verifyCall = (async () => {
+    try {
+      const supabase = createServerClient(url, anonKey, {
+        cookies: { getAll: () => [], setAll: () => {} },
+      });
+      const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+      if (error) {
+        const status = (error as { status?: number }).status ?? 0;
+        if (status === 401 || status === 403) return 'invalid' as const;
+        return null; // 5xx / network — treat as unavailable
+      }
+      if (!user) return 'invalid' as const;
+      return {
+        id:            user.id,
+        email:         user.email ?? '',
+        workspace_id:  user.user_metadata?.workspace_id ?? '',
+        alpha_enabled: user.user_metadata?.alpha_enabled as boolean | undefined,
+      };
+    } catch {
       return null;
     }
-    if (!user) return 'invalid';
-    return {
-      id:            user.id,
-      email:         user.email ?? '',
-      workspace_id:  user.user_metadata?.workspace_id ?? '',
-      alpha_enabled: user.user_metadata?.alpha_enabled,
-    };
-  } catch {
-    return null; // network / timeout — caller uses decoded claims
-  }
+  })();
+
+  return Promise.race([verifyCall, timeoutSignal]);
 }
 
 // ─── Refresh access token via Supabase REST ───────────────────────────────────
@@ -267,15 +268,20 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // ─── Cryptographic JWT verification ───────────────────────────────────────
-  // Only verify tokens that were NOT just refreshed: refreshed tokens are
-  // server-issued by Supabase and can't be tampered. For pre-existing tokens
-  // (the common hot-path), we verify the signature to prevent workspace_id forgery.
+  // ─── Cryptographic JWT verification ─────────────────────────────────────────
+  // Skip for freshly-refreshed tokens: those are server-issued and can't be
+  // tampered. For all other tokens (common hot-path) verify the signature so
+  // workspace_id cannot be forged by editing the JWT payload.
+  //
+  // Public/cron/backfill paths are already returned above — every request that
+  // reaches this point is a private route.  We NEVER fall back to base64-decoded
+  // claims if Supabase is unreachable: an unavailable auth service is still a
+  // security boundary, not a reason to degrade silently.
   if (!refreshedSession) {
     const verifyResult = await verifyJwtWithSupabase(session.access_token);
+
     if (verifyResult === 'invalid') {
-      // Supabase explicitly rejected the token — forged or revoked
-      console.warn('[SECURITY] JWT signature verification failed — rejecting request');
+      console.warn(`[SECURITY] JWT rejected by Supabase (invalid sig / revoked) — blocking ${pathname}`);
       if (isApiRoute) {
         return NextResponse.json({ error: 'Invalid token', code: 'INVALID_TOKEN' }, { status: 401 });
       }
@@ -283,16 +289,28 @@ export async function middleware(request: NextRequest) {
       loginUrl.pathname = '/login';
       return NextResponse.redirect(loginUrl);
     }
-    if (verifyResult !== null) {
-      // Use cryptographically-verified identity data instead of base64-decoded values
-      claims.id            = verifyResult.id;
-      claims.email         = verifyResult.email;
-      claims.workspace_id  = verifyResult.workspace_id;
-      claims.alpha_enabled = verifyResult.alpha_enabled;
-    } else {
-      // Network failure / env missing — log and continue with decoded claims (degraded)
-      console.warn('[SECURITY] JWT verification call failed — using decoded claims (partial protection)');
+
+    if (verifyResult === null) {
+      // Supabase unreachable / timed out — fail closed.
+      // Trusting base64-decoded claims would let an attacker forge workspace_id
+      // whenever the auth service is slow or down.
+      console.warn(`[SECURITY] JWT crypto verification unavailable (Supabase unreachable or timeout) — blocking private route: ${pathname}`);
+      if (isApiRoute) {
+        return NextResponse.json(
+          { error: 'Authentication service unavailable', code: 'AUTH_UNAVAILABLE' },
+          { status: 401 },
+        );
+      }
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      return NextResponse.redirect(loginUrl);
     }
+
+    // verifyResult is the cryptographically-verified identity — overwrite decoded values
+    claims.id            = verifyResult.id;
+    claims.email         = verifyResult.email;
+    claims.workspace_id  = verifyResult.workspace_id;
+    claims.alpha_enabled = verifyResult.alpha_enabled;
   }
 
   const requestHeaders = new Headers(request.headers);
