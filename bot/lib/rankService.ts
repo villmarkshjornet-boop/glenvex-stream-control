@@ -105,3 +105,18 @@ export function formatPrestige(prestigeLevel: number): string {
   const numeral = numerals[Math.min(prestigeLevel - 1, numerals.length - 1)];
   return `${stars}${numeral}`;
 }
+
+/** Icon for a given prestige level. */
+export function prestigeIcon(level: number): string {
+  if (level >= 10) return '🌠';
+  if (level >= 5)  return '💫';
+  if (level >= 3)  return '🌟';
+  if (level >= 1)  return '⭐';
+  return '';
+}
+
+/** Full display string with icon (e.g. "⭐ ⭐I"). */
+export function prestigeDisplay(level: number): string {
+  if (level <= 0) return '';
+  return `${prestigeIcon(level)} ${formatPrestige(level)}`;
+}
