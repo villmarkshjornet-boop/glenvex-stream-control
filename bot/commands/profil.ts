@@ -4,14 +4,15 @@ import {
   EmbedBuilder,
   Colors,
 } from 'discord.js';
-import { getMember, getAllMembers, upsertMember, ALLE_BADGES, nesteBadge } from '../lib/memberTracker';
+import { getMember, getAllMembers, upsertMember } from '../lib/memberTracker';
 import { XP_PER_LEVEL, levelFromXP, xpIntoCurrentLevel, levelProgress } from '@/lib/xp';
 import { getBalance } from '../lib/coinService';
 import { logSystemEvent } from '../lib/systemEvents';
-import { WORKSPACE_ID } from '../lib/supabase';
-import { getRankForLevel, formatPrestige } from '../lib/rankService';
-import { getMemberBadges } from '../lib/badgeService';
-import { getPerksForRank } from '../lib/perkService';
+import { WORKSPACE_ID, getBotDb } from '../lib/supabase';
+import { getRankForLevel, prestigeDisplay } from '../lib/rankService';
+import { getMemberBadges, MemberBadge } from '../lib/badgeService';
+import { getAchievementCounts } from '../lib/achievementService';
+import { getShowcaseCard } from '../lib/cardService';
 
 function progressBar(pct: number, len = 14): string {
   const filled = Math.max(0, Math.round((pct / 100) * len));
@@ -29,35 +30,36 @@ function tidSiden(iso: string): string {
   return `${d}d siden`;
 }
 
-function rankOf(userId: string): { rank: number; total: number; pct: number } {
-  const all   = getAllMembers().filter(m => m.xp > 0).sort((a, b) => b.xp - a.xp);
-  const idx   = all.findIndex(m => m.id === userId);
-  const total = all.length;
-  if (idx === -1) return { rank: total + 1, total, pct: 0 };
-  return { rank: idx + 1, total, pct: total > 1 ? Math.round(((total - idx - 1) / (total - 1)) * 100) : 100 };
+function leaderboardPos(userId: string): { rank: number; total: number } {
+  const all = getAllMembers().filter(m => m.xp > 0).sort((a, b) => b.xp - a.xp);
+  const idx  = all.findIndex(m => m.id === userId);
+  return { rank: idx === -1 ? all.length + 1 : idx + 1, total: all.length };
 }
 
-function xpFargeKode(xp: number): number {
-  if (xp >= 25000) return 0xffd700; // champion — gull
-  if (xp >= 10000) return 0xe8d44d; // legend
-  if (xp >=  5000) return 0x00e676; // elite — grønn
-  if (xp >=  1000) return 0x42a5f5; // veteran — blå
-  return 0x4444cc;                   // ny spiller
+function reputationTitle(communityScore: number): string {
+  if (communityScore >= 1000) return '🌟 Legend';
+  if (communityScore >= 300)  return '🏛 Community Pillar';
+  if (communityScore >= 100)  return '🤝 Trusted';
+  if (communityScore >= 10)   return '😊 Friendly';
+  return '🆕 Newcomer';
 }
 
-function xpRangTittel(xp: number): string {
-  if (xp >= 25000) return '👑 Champion';
-  if (xp >= 10000) return '🥇 Legend';
-  if (xp >=  5000) return '🥈 Elite';
-  if (xp >=  1000) return '🥉 Veteran';
-  if (xp >=    50) return '🌱 Member';
-  return '🆕 Ny';
+function parseColor(hex: string | null | undefined): number {
+  if (!hex) return 0x5865F2;
+  return parseInt(hex.replace('#', ''), 16) || 0x5865F2;
+}
+
+function rarityEmoji(rarity: string): string {
+  const map: Record<string, string> = {
+    Mythic: '🔴', Legendary: '⚜️', Epic: '💜', Rare: '💙', Uncommon: '💚', Common: '⬜',
+  };
+  return map[rarity] ?? '⬜';
 }
 
 export const profilCommand = {
   data: new SlashCommandBuilder()
     .setName('profil')
-    .setDescription('Vis XP, level, badges og statistikk.')
+    .setDescription('Se community-identiteten din — rank, badges, achievements og mer.')
     .addUserOption(opt =>
       opt.setName('bruker')
         .setDescription('Hvem vil du se profilen til? (tomt = deg selv)')
@@ -67,180 +69,151 @@ export const profilCommand = {
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply({ ephemeral: false });
     try {
-    const target  = interaction.options.getUser('bruker') ?? interaction.user;
-    let member    = getMember(target.id);
+      const target = interaction.options.getUser('bruker') ?? interaction.user;
+      let member   = getMember(target.id);
 
-    // Opprett stub om personen ikke finnes ennå
-    if (!member) {
-      const dn = (target as any).displayName ?? target.username;
-      member = upsertMember(target.id, target.username, dn);
-    }
+      if (!member) {
+        const dn = (target as any).displayName ?? target.username;
+        member = upsertMember(target.id, target.username, dn);
+      }
 
-    // Coins + Community OS data — hent parallelt
-    const [coins, rankData, dbBadges] = await Promise.all([
-      getBalance(target.id),
-      getRankForLevel(WORKSPACE_ID, member.level).catch(() => null),
-      getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as import('../lib/badgeService').MemberBadge[]),
-    ]);
+      // ── XP sanitization (rawXp vs discordXp mismatch guard) ─────────────────
+      const rawXp      = member.xp;
+      const discordXp  = member.discordXp;
+      const suspicious = rawXp > 100_000;
+      const displayXp  = (suspicious && discordXp < rawXp) ? discordXp : rawXp;
 
-    // ── XP og level ──────────────────────────────────────────────────────────
-    // If raw xp is suspiciously large, fall back to discordXp (Discord-specific column)
-    const rawXp       = member.xp;
-    const discordXp   = member.discordXp;
-    const suspicious  = rawXp > 100_000;
-    const displayXp   = (suspicious && discordXp < rawXp) ? discordXp : rawXp;
+      console.log(`[profil] PROFILE_XP_DEBUG userId=${target.id} rawXp=${rawXp} discordXp=${discordXp} displayXp=${displayXp} dbLevel=${member.level} computedLevel=${levelFromXP(displayXp)}`);
+      if (suspicious) {
+        logSystemEvent({
+          source:     'bot_command',
+          event_type: 'PROFILE_XP_SUSPICIOUS',
+          title:      `Mistenkelig høy XP for ${target.username}: rawXp=${rawXp} discordXp=${discordXp}`,
+          severity:   'warning',
+          metadata:   { discordId: target.id, rawXp, discordXp, displayXp, dbLevel: member.level },
+        });
+      }
 
-    const level     = levelFromXP(displayXp);
-    const xpInLevel = xpIntoCurrentLevel(displayXp);
-    const xpForNext = XP_PER_LEVEL;
-    const levelPct  = levelProgress(displayXp);
+      const level     = levelFromXP(displayXp);
+      const xpInLevel = xpIntoCurrentLevel(displayXp);
+      const levelPct  = levelProgress(displayXp);
 
-    // PROFILE_XP_DEBUG — logg alltid, kritisk for feilsøking
-    console.log(`[profil] PROFILE_XP_DEBUG userId=${target.id} rawXp=${rawXp} discordXp=${discordXp} displayXp=${displayXp} dbLevel=${member.level} computedLevel=${level} coins=${coins}`);
-    if (suspicious) {
-      logSystemEvent({
-        source:     'bot_command',
-        event_type: 'PROFILE_XP_SUSPICIOUS',
-        title:      `Mistenkelig høy XP for ${target.username}: rawXp=${rawXp} discordXp=${discordXp} displayXp=${displayXp}`,
-        severity:   'warning',
-        metadata:   { discordId: target.id, rawXp, discordXp, displayXp, dbLevel: member.level, computedLevel: level, coins },
-      });
-    }
+      // ── Workspace brand name ─────────────────────────────────────────────────
+      const db = getBotDb();
+      const workspaceNamePromise: Promise<string | null> = db
+        ? Promise.resolve(
+            db.from('workspaces').select('brand_name').eq('id', WORKSPACE_ID).maybeSingle()
+          ).then(r => (r.data?.brand_name as string | null) ?? null, () => null)
+        : Promise.resolve(null);
 
-    // ── Rang ─────────────────────────────────────────────────────────────────
-    const { rank, total, pct: rankPct } = rankOf(member.id);
-    const rangTittel = xpRangTittel(displayXp);
-    const farge      = xpFargeKode(displayXp);
+      // ── Parallel data fetch ──────────────────────────────────────────────────
+      const [coins, rankData, dbBadges, achCounts, showcaseCard, workspaceName] = await Promise.all([
+        getBalance(target.id),
+        getRankForLevel(WORKSPACE_ID, member.level).catch(() => null),
+        getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as MemberBadge[]),
+        getAchievementCounts(WORKSPACE_ID, target.id).catch(() => ({ unlocked: 0, total: 0 })),
+        getShowcaseCard(WORKSPACE_ID, target.id).catch(() => null),
+        workspaceNamePromise,
+      ]);
 
-    // ── Community OS: rank, prestige, perks ──────────────────────────────────
-    const rankName      = rankData?.rankName ?? null;
-    const rankIcon      = rankData?.rankIcon ?? null;
-    const prestigeLevel = (member as { prestige_level?: number }).prestige_level ?? 0;
-    const prestigeText  = prestigeLevel > 0 ? formatPrestige(prestigeLevel) : null;
-    const rankPerks     = rankName
-      ? await getPerksForRank(WORKSPACE_ID, rankName).catch(() => null)
-      : null;
-    const perksText = rankPerks
-      ? `${rankPerks.xpMultiplier}× XP · ${rankPerks.coinsMultiplier}× Coins`
-      : null;
+      // ── Derived values ───────────────────────────────────────────────────────
+      const rankName        = rankData?.rankName ?? 'Ukjent';
+      const rankIcon        = rankData?.rankIcon ?? '❓';
+      const prestigeLevel   = (member as any).prestige_level as number | undefined ?? 0;
+      const communityScore  = member.communityScore ?? 0;
+      const twitchSubMonths = (member as any).twitch_sub_months as number | undefined ?? 0;
+      const heroCount       = (member as any).hero_count as number | undefined ?? 0;
+      const { rank, total } = leaderboardPos(member.id);
 
-    // ── Badges ───────────────────────────────────────────────────────────────
-    const opptjentBadges = ALLE_BADGES.filter(b => member!.badges.includes(b.navn));
-    const nesteMål       = nesteBadge(member);
+      const streakTekst = member.streakDays >= 30 ? `${member.streakDays} dager ⚡`
+        : member.streakDays >= 7  ? `${member.streakDays} dager 🔥`
+        : member.streakDays >= 2  ? `${member.streakDays} dager`
+        : member.streakDays === 1 ? '1 dag — start!'
+        : '—';
 
-    // Prefer DB badges (Community OS) if available, fall back to memberTracker
-    const alleBadgeEmojis: string[] = dbBadges.length > 0
-      ? dbBadges.slice(-8).map(b => b.badgeIcon)
-      : opptjentBadges.slice(-8).map(b => b.emoji);
+      // ── Description: identity signals ────────────────────────────────────────
+      // Prestige (if earned), then badges (max 6), then hero count
+      const descLines: string[] = [];
 
-    // Vis emojis for opptjente badges
-    const badgeRad = alleBadgeEmojis.length > 0
-      ? alleBadgeEmojis.join(' ')
-      : '—';
+      if (prestigeLevel > 0) {
+        descLines.push(prestigeDisplay(prestigeLevel));
+        descLines.push('');
+      }
 
-    // ── Streak-tekst ─────────────────────────────────────────────────────────
-    const streakTekst = member.streakDays >= 30 ? `⚡ ${member.streakDays} dager — USTOPPELIG`
-      : member.streakDays >= 7  ? `🔥 ${member.streakDays} dager — på rekke!`
-      : member.streakDays >= 2  ? `🔥 ${member.streakDays} dager`
-      : member.streakDays === 1 ? '🌱 Startet i dag'
-      : '—';
+      if (twitchSubMonths > 0) {
+        descLines.push(`💜 Subscriber${twitchSubMonths >= 3 ? ` ×${twitchSubMonths}` : ''}`);
+      }
+      for (const b of dbBadges.slice(0, 6)) {
+        descLines.push(`${b.badgeIcon} ${b.badgeName}`);
+      }
+      if (heroCount > 0) {
+        descLines.push(`🏆 Hero${heroCount > 1 ? ` ×${heroCount}` : ''}`);
+      }
 
-    // ── XP-bidrag-tekst ──────────────────────────────────────────────────────
-    const xpFordeling = [
-      member.messages      > 0 ? `💬 ${member.messages} meldinger (+${member.messages * 5} XP)` : '',
-      member.voiceMinutes  > 0 ? `🎙️ ${member.voiceMinutes} min voice (+${member.voiceMinutes} XP)` : '',
-      member.streamsAttended>0 ? `📺 ${member.streamsAttended} streams (+${member.streamsAttended * 50} XP)` : '',
-      member.subs          > 0 ? `💜 ${member.subs} sub (+${member.subs * 200} XP)` : '',
-      member.giftSubs      > 0 ? `🎁 ${member.giftSubs} gifted (+${member.giftSubs * 100} XP)` : '',
-      member.raids         > 0 ? `🚀 ${member.raids} raid (+${member.raids * 500} XP)` : '',
-      member.reactions     > 0 ? `⚡ ${member.reactions} reaksjoner (+${member.reactions * 2} XP)` : '',
-    ].filter(Boolean).slice(0, 4).join('\n') || '— Ingen aktivitet registrert ennå';
+      if (descLines.filter(l => l !== '').length === 0) {
+        descLines.push('*Ingen badges ennå — vær aktiv og tjen dem!*');
+      }
 
-    const coinsTekst = `${coins.toLocaleString('no-NO')} coins`;
+      // ── Build embed ──────────────────────────────────────────────────────────
+      const embed = new EmbedBuilder()
+        .setColor(parseColor(rankData?.color))
+        .setTitle(`${rankIcon} ${rankName.toUpperCase()}`)
+        .setDescription(descLines.join('\n'))
+        .setThumbnail(target.displayAvatarURL())
+        .addFields(
+          {
+            name:   '🪙 Coins',
+            value:  coins.toLocaleString('no-NO'),
+            inline: true,
+          },
+          {
+            name:   '🔥 Streak',
+            value:  streakTekst,
+            inline: true,
+          },
+          {
+            name:   '📊 Level',
+            value:  `Level ${level}\n\`${progressBar(levelPct)}\` ${xpInLevel.toLocaleString('no-NO')}/${XP_PER_LEVEL.toLocaleString('no-NO')} XP`,
+            inline: true,
+          },
+          {
+            name:   '🏅 Omdømme',
+            value:  reputationTitle(communityScore),
+            inline: true,
+          },
+          {
+            name:   '🏆 Prestasjoner',
+            value:  achCounts.total > 0
+              ? `${achCounts.unlocked} / ${achCounts.total}`
+              : `${achCounts.unlocked} opptjent`,
+            inline: true,
+          },
+          {
+            name:   '📈 Leaderboard',
+            value:  total > 0 ? `#${rank} av ${total}` : '—',
+            inline: true,
+          },
+          ...(showcaseCard ? [{
+            name:   '✨ Showcase Card',
+            value:  `${rarityEmoji(showcaseCard.rarity)} **${showcaseCard.rarity.toUpperCase()}** — ${showcaseCard.title}`,
+            inline: false,
+          }] : []),
+        )
+        .setFooter({
+          text: `Sist aktiv: ${tidSiden(member.lastSeen)}  ·  Medlem siden: ${new Date(member.joinedAt).toLocaleDateString('no-NO')}`,
+        })
+        .setTimestamp();
 
-    // ── Neste badge-fremgang ──────────────────────────────────────────────────
-    const nesteBadgeTekst = nesteMål
-      ? `${nesteMål.badge.emoji} **${nesteMål.badge.navn}** — ${nesteMål.mangler}\n${progressBar(nesteMål.pct)} ${Math.round(nesteMål.pct)}%\n*${nesteMål.badge.beskrivelse}*`
-      : '✅ Alle badges opptjent!';
+      if (workspaceName) {
+        embed.setAuthor({ name: workspaceName });
+      }
 
-    // ── Community OS: sub and hero display ───────────────────────────────────
-    const twitchSubMonths = (member as any).twitch_sub_months as number | undefined ?? 0;
-    const heroCount       = (member as any).hero_count as number | undefined ?? 0;
+      if (showcaseCard?.cardImageUrl) {
+        embed.setImage(showcaseCard.cardImageUrl);
+      }
 
-    // ── Embed ─────────────────────────────────────────────────────────────────
-    const displayTitle = prestigeText
-      ? `${rangTittel}  ·  ${member.displayName} ${prestigeText}`
-      : `${rangTittel}  ·  ${member.displayName}`;
+      return interaction.editReply({ embeds: [embed] });
 
-    const embed = new EmbedBuilder()
-      .setColor(farge)
-      .setTitle(displayTitle)
-      .setDescription(
-        `**Level ${level}** · Rank **#${rank}** av ${total}${total > 1 ? ` · Topp **${100 - rankPct}%**` : ''}\n` +
-        `\`${progressBar(levelPct)}\` ${xpInLevel}/${xpForNext} XP til neste level`
-      )
-      .addFields(
-        {
-          name: '📊 Total XP',
-          value: `**${displayXp.toLocaleString('no-NO')} XP**\n${xpForNext - xpInLevel} XP til Level ${level + 1}`,
-          inline: true,
-        },
-        {
-          name: '🪙 Coins',
-          value: coinsTekst,
-          inline: true,
-        },
-        {
-          name: '🔥 Streak',
-          value: streakTekst,
-          inline: true,
-        },
-        {
-          name: '🏅 Badges',
-          value: `${badgeRad}\n${dbBadges.length > 0 ? dbBadges.length : opptjentBadges.length}/${ALLE_BADGES.length} opptjent`,
-          inline: true,
-        },
-        {
-          name: '📈 XP-kilde',
-          value: xpFordeling,
-          inline: false,
-        },
-        {
-          name: '🎯 Neste badge',
-          value: nesteBadgeTekst,
-          inline: false,
-        },
-        ...(rankName ? [{
-          name: '🏆 Rank',
-          value: `${rankIcon ?? ''} ${rankName}${perksText ? `\n${perksText}` : ''}`.trim(),
-          inline: true,
-        }] : []),
-        ...(twitchSubMonths > 0 ? [{
-          name: '💜 Twitch Sub',
-          value: `×${twitchSubMonths} måneder`,
-          inline: true,
-        }] : []),
-        ...(heroCount > 0 ? [{
-          name: '🦸 Hero',
-          value: `×${heroCount} ganger`,
-          inline: true,
-        }] : []),
-      )
-      .setFooter({
-        text: `Sist aktiv: ${tidSiden(member.lastSeen)}  ·  Medlem siden: ${new Date(member.joinedAt).toLocaleDateString('no-NO')}`,
-      })
-      .setTimestamp();
-
-    // Vis alle badge-navn hvis brukeren ser sin egen profil
-    if (target.id === interaction.user.id && opptjentBadges.length > 0) {
-      embed.addFields({
-        name: `🏆 Alle dine badges (${opptjentBadges.length})`,
-        value: opptjentBadges.map(b => `${b.emoji} ${b.navn}`).join(' · ') || '—',
-        inline: false,
-      });
-    }
-
-    return interaction.editReply({ embeds: [embed] });
     } catch (err: any) {
       const msg = err?.message ?? 'Ukjent feil';
       console.error(`[profil] PROFILE_COMMAND_FAILED userId=${interaction.user.id}: ${msg}`);

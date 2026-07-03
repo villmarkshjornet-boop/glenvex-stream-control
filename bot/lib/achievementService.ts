@@ -233,6 +233,20 @@ export async function getMemberAchievements(
   });
 }
 
+/** Returns unlocked + total achievement counts for a member. */
+export async function getAchievementCounts(
+  workspaceId: string,
+  discordId:   string,
+): Promise<{ unlocked: number; total: number }> {
+  const db = getBotDb();
+  if (!db) return { unlocked: 0, total: 0 };
+  const [{ count: total }, { count: unlocked }] = await Promise.all([
+    db.from('community_achievements')        .select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
+    db.from('community_member_achievements') .select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('discord_id', discordId),
+  ]);
+  return { unlocked: unlocked ?? 0, total: total ?? 0 };
+}
+
 /** Mark all unnotified achievements as notified for a member. */
 export async function markAchievementsNotified(workspaceId: string, discordId: string): Promise<void> {
   const db = getBotDb();
