@@ -30,17 +30,19 @@ function tidSiden(iso: string): string {
   return `${d}d siden`;
 }
 
-function leaderboardPos(userId: string): { rank: number; total: number } {
+function leaderboardPos(userId: string): { rank: number; total: number } | null {
   const all = getAllMembers().filter(m => m.xp > 0).sort((a, b) => b.xp - a.xp);
   const idx  = all.findIndex(m => m.id === userId);
-  return { rank: idx === -1 ? all.length + 1 : idx + 1, total: all.length };
+  if (idx === -1) return null; // user has no XP yet — don't show a misleading rank
+  return { rank: idx + 1, total: all.length };
 }
 
+// communityScore is capped at 100 in memberTracker.computeScores()
 function reputationTitle(communityScore: number): string {
-  if (communityScore >= 1000) return '🌟 Legend';
-  if (communityScore >= 300)  return '🏛 Community Pillar';
-  if (communityScore >= 100)  return '🤝 Trusted';
-  if (communityScore >= 10)   return '😊 Friendly';
+  if (communityScore >= 90) return '🌟 Legend';
+  if (communityScore >= 60) return '🏛 Community Pillar';
+  if (communityScore >= 30) return '🤝 Trusted';
+  if (communityScore >= 10) return '😊 Friendly';
   return '🆕 Newcomer';
 }
 
@@ -73,7 +75,7 @@ export const profilCommand = {
       let member   = getMember(target.id);
 
       if (!member) {
-        const dn = (target as any).displayName ?? target.username;
+        const dn = (target as any).globalName ?? target.username;
         member = upsertMember(target.id, target.username, dn);
       }
 
@@ -98,7 +100,7 @@ export const profilCommand = {
       const xpInLevel = xpIntoCurrentLevel(displayXp);
       const levelPct  = levelProgress(displayXp);
 
-      // ── Workspace brand name ─────────────────────────────────────────────────
+      // ── Workspace + community_members DB queries ─────────────────────────────
       const db = getBotDb();
       const workspaceNamePromise: Promise<string | null> = db
         ? Promise.resolve(
@@ -106,24 +108,36 @@ export const profilCommand = {
           ).then(r => (r.data?.brand_name as string | null) ?? null, () => null)
         : Promise.resolve(null);
 
+      interface CommunityRow { prestige_level?: number; twitch_sub_months?: number; hero_count?: number }
+      const communityRowPromise: Promise<CommunityRow | null> = db
+        ? Promise.resolve(
+            db.from('community_members')
+              .select('prestige_level,twitch_sub_months,hero_count')
+              .eq('workspace_id', WORKSPACE_ID)
+              .eq('discord_id', target.id)
+              .maybeSingle()
+          ).then(r => (r.data as CommunityRow | null) ?? null, () => null)
+        : Promise.resolve(null);
+
       // ── Parallel data fetch ──────────────────────────────────────────────────
-      const [coins, rankData, dbBadges, achCounts, showcaseCard, workspaceName] = await Promise.all([
+      const [coins, rankData, dbBadges, achCounts, showcaseCard, workspaceName, communityRow] = await Promise.all([
         getBalance(target.id),
         getRankForLevel(WORKSPACE_ID, member.level).catch(() => null),
         getMemberBadges(WORKSPACE_ID, target.id).catch(() => [] as MemberBadge[]),
         getAchievementCounts(WORKSPACE_ID, target.id).catch(() => ({ unlocked: 0, total: 0 })),
         getShowcaseCard(WORKSPACE_ID, target.id).catch(() => null),
         workspaceNamePromise,
+        communityRowPromise,
       ]);
 
       // ── Derived values ───────────────────────────────────────────────────────
       const rankName        = rankData?.rankName ?? 'Ukjent';
       const rankIcon        = rankData?.rankIcon ?? '❓';
-      const prestigeLevel   = (member as any).prestige_level as number | undefined ?? 0;
-      const communityScore  = member.communityScore ?? 0;
-      const twitchSubMonths = (member as any).twitch_sub_months as number | undefined ?? 0;
-      const heroCount       = (member as any).hero_count as number | undefined ?? 0;
-      const { rank, total } = leaderboardPos(member.id);
+      const prestigeLevel   = communityRow?.prestige_level   ?? 0;
+      const twitchSubMonths = communityRow?.twitch_sub_months ?? 0;
+      const heroCount       = communityRow?.hero_count        ?? 0;
+      const communityScore  = member.communityScore;
+      const lbPos           = leaderboardPos(member.id);
 
       const streakTekst = member.streakDays >= 30 ? `${member.streakDays} dager ⚡`
         : member.streakDays >= 7  ? `${member.streakDays} dager 🔥`
@@ -190,12 +204,12 @@ export const profilCommand = {
           },
           {
             name:   '📈 Leaderboard',
-            value:  total > 0 ? `#${rank} av ${total}` : '—',
+            value:  lbPos ? `#${lbPos.rank} av ${lbPos.total}` : '—',
             inline: true,
           },
           ...(showcaseCard ? [{
             name:   '✨ Showcase Card',
-            value:  `${rarityEmoji(showcaseCard.rarity)} **${showcaseCard.rarity.toUpperCase()}** — ${showcaseCard.title}`,
+            value:  `${rarityEmoji(showcaseCard.rarity)} **${showcaseCard.rarity.toUpperCase()}** — ${showcaseCard.title.slice(0, 950)}`,
             inline: false,
           }] : []),
         )
