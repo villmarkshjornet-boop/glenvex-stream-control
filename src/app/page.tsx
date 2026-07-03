@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [loadingSlow, setLoadingSlow] = useState(true);
   const [sistOppdatert, setSistOppdatert] = useState<string | null>(null);
   const [visDebug, setVisDebug]       = useState(false);
+  const [visAvansert, setVisAvansert] = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
 
   const handleApiResponse = useCallback((res: Response) => {
@@ -102,28 +103,34 @@ export default function Dashboard() {
         <LiveCommandCenter live={live} slow={slow} />
       ) : (
 
-        /* ── OFFLINE MODE: new story-driven layout ─────────────────────────── */
+        /* ── OFFLINE MODE: streamer-first layout ──────────────────────────── */
         <>
-          {/* HERO: Dominant last-stream status */}
+          {/* 1. HERO: Dominant last-stream status */}
           <Hero heroStream={live?.heroStream} loading={loadingLive} />
 
-          {/* ACTION CENTER: Only shown when there are items */}
+          {/* 2. ACTION CENTER: Only shown when there are items */}
           {(live?.actionCenter?.length ?? 0) > 0 && (
             <ActionCenter items={live?.actionCenter} loading={loadingLive} />
           )}
 
-          {/* TWO-COL: Next stream brief + Recent streams */}
+          {/* 3. WHAT TO DO NOW: primary next-action recommendation */}
+          <WhatToDoNow slow={slow} live={live} />
+
+          {/* 4. TWO-COL: Next stream brief (left) + Community snapshot (right) */}
           <div className="grid grid-cols-2 gap-6">
             <NextStreamBrief />
-            <RecentStreams streams={live?.recentStreams} loading={loadingLive} />
+            <CommunitySnapshot />
           </div>
 
-          {/* STREAM COMPLETION: only when relevant */}
+          {/* 5. STREAM COMPLETION: only when relevant */}
           {live?.heroStream && (
             <StreamCompletionCard heroStream={live.heroStream} loading={loadingLive} />
           )}
 
-          {/* AI INSIGHTS */}
+          {/* 6. RECENT STREAMS */}
+          <RecentStreams streams={live?.recentStreams} loading={loadingLive} />
+
+          {/* 7. AI INSIGHTS */}
           <AiInsightFeed
             innsikter={live?.nyesteInnsikter ?? []}
             lærdom={live?.lærdom}
@@ -131,54 +138,62 @@ export default function Dashboard() {
             heroIntegrity={live?.heroStream?.dataIntegrity}
           />
 
-          {/* THREE-COL HEALTH ROW */}
-          <div className="grid grid-cols-3 gap-4">
-            <SystemHealth
-              live={live}
-              loading={loadingLive}
-              onResetSyklus={async () => {
-                await fetch('/api/stream-syklus/reset', { method: 'POST' });
-                hentLive();
-              }}
-            />
-            <AiStatusRow coverage={live?.coverage} loading={loadingLive} />
-            <StorageHealthCard />
-          </div>
-
-          {/* SECONDARY: Partner + Learning */}
-          <div className="grid grid-cols-2 gap-4">
-            <PartnerEngineStatus />
-            <CreatorBrainLearning />
-          </div>
-
-          {/* WHAT TO DO NOW */}
-          <WhatToDoNow slow={slow} live={live} />
-
-          {/* COMMUNITY SNAPSHOT */}
-          <CommunitySnapshot />
-
-          {/* DEBUG PANEL */}
-          {live?.debug && (
-            <div className="border border-g-border/30 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setVisDebug(v => !v)}
-                className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left"
-              >
-                <span className="text-[11px] text-g-muted/60 uppercase tracking-widest font-bold">Debug</span>
-                <span className="text-[11px] text-g-muted/40">{visDebug ? '▲ Skjul' : '▼ Vis'}</span>
-              </button>
-              {visDebug && (
-                <div className="px-4 py-3 bg-g-bg/20 grid grid-cols-2 gap-x-6 gap-y-1">
-                  {Object.entries(live.debug).map(([k, v]) => (
-                    <div key={k} className="flex items-baseline gap-2">
-                      <span className="text-[11px] text-g-muted/50 font-mono w-32 flex-shrink-0">{k}</span>
-                      <span className="text-[11px] text-g-text font-mono truncate">{String(v ?? '—')}</span>
-                    </div>
-                  ))}
+          {/* 8. COLLAPSIBLE: Avansert / Admin — hidden by default */}
+          <div className="border border-g-border/30 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setVisAvansert(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left"
+            >
+              <span className="text-[11px] text-g-muted/60 uppercase tracking-widest font-bold">Avansert / Admin diagnostikk</span>
+              <span className="text-[11px] text-g-muted/40">{visAvansert ? '▲ Skjul' : '▼ Vis'}</span>
+            </button>
+            {visAvansert && (
+              <div className="px-4 py-4 bg-g-bg/20 space-y-4">
+                {/* THREE-COL HEALTH ROW */}
+                <div className="grid grid-cols-3 gap-4">
+                  <SystemHealth
+                    live={live}
+                    loading={loadingLive}
+                    onResetSyklus={async () => {
+                      await fetch('/api/stream-syklus/reset', { method: 'POST' });
+                      hentLive();
+                    }}
+                  />
+                  <AiStatusRow coverage={live?.coverage} loading={loadingLive} />
+                  <StorageHealthCard />
                 </div>
-              )}
-            </div>
-          )}
+
+                {/* TWO-COL: Partner + Learning */}
+                <div className="grid grid-cols-2 gap-4">
+                  <PartnerEngineStatus />
+                  <CreatorBrainLearning />
+                </div>
+
+                {/* DEBUG PANEL */}
+                {live?.debug && (
+                  <div className="border border-g-border/30 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setVisDebug(v => !v)}
+                      className="w-full flex items-center justify-between px-4 py-2 bg-g-bg/40 hover:bg-g-bg/70 transition-all text-left"
+                    >
+                      <span className="text-[11px] text-g-muted/60 uppercase tracking-widest font-bold">Debug</span>
+                      <span className="text-[11px] text-g-muted/40">{visDebug ? '▲ Skjul' : '▼ Vis'}</span>
+                    </button>
+                    {visDebug && (
+                      <div className="px-4 py-3 bg-g-bg/20 grid grid-cols-2 gap-x-6 gap-y-1">
+                        {Object.entries(live.debug).map(([k, v]) => (
+                          <div key={k} className="flex items-baseline gap-2">
+                            <span className="text-[11px] text-g-muted/50 font-mono w-32 flex-shrink-0">{k}</span>
+                            <span className="text-[11px] text-g-text font-mono truncate">{String(v ?? '—')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       )}
 
