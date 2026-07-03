@@ -193,6 +193,7 @@ export async function upsertBotMemory(entry: {
   key: string;
   summary: string;
   confidence_score?: number;
+  memory_category?: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
   await upsertCommunityMemory({
@@ -202,6 +203,7 @@ export async function upsertBotMemory(entry: {
     key:         entry.key,
     summary:     entry.summary,
     confidence:  entry.confidence_score,
+    category:    entry.memory_category as import('./communityBrain').MemoryCategory | undefined,
     metadata:    entry.metadata,
   });
 }
