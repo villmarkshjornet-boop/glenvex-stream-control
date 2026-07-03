@@ -28,6 +28,7 @@ import { personaCommand } from './commands/persona';
 import { minekortCommand, handleMinekortButton } from './commands/minekort';
 import { linktwitchCommand } from './commands/linktwitch';
 import { tradeCommand, handleTradeButton } from './commands/trade';
+import { handlePersonaReroll, handlePersonaShare } from './lib/rerollService';
 import { adminCommand }   from './commands/admin';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins, getBalance } from './lib/coinService';
@@ -2638,6 +2639,28 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
     if (interaction.customId.startsWith('trade_accept:') || interaction.customId.startsWith('trade_decline:')) {
       await handleTradeButton(interaction).catch(console.error);
+      return;
+    }
+    if (interaction.customId.startsWith('persona_reroll_')) {
+      await handlePersonaReroll(interaction).catch(async (err) => {
+        console.error('[REROLL] unhandled exception:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ En uventet feil oppstod. Prøv igjen.', ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.followUp({ content: '❌ En uventet feil oppstod. Prøv igjen.', ephemeral: true }).catch(() => {});
+        }
+      });
+      return;
+    }
+    if (interaction.customId.startsWith('persona_share_')) {
+      await handlePersonaShare(interaction).catch(async (err) => {
+        console.error('[PERSONA_SHARE] unhandled exception:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ Klarte ikke å dele kortet. Prøv igjen.', ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.followUp({ content: '❌ Klarte ikke å dele kortet. Prøv igjen.', ephemeral: true }).catch(() => {});
+        }
+      });
       return;
     }
     return;

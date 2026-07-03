@@ -61,8 +61,9 @@ export default function Topbar() {
     router.refresh();
   }
 
-  // Display: Twitch display name > brand name > email prefix > fallback
-  const displayName = ws?.twitchDisplayName ?? ws?.brandName ?? email.split('@')[0] ?? '–';
+  // Display: brand name > Twitch display name > email prefix > fallback
+  // Brand name is the primary identity; Twitch display name is secondary context
+  const displayName = ws?.brandName ?? ws?.twitchDisplayName ?? email.split('@')[0] ?? '–';
   const initial     = displayName.slice(0, 1).toUpperCase() || '?';
   const profileImg  = ws?.twitchProfileImage ?? null;
 

@@ -1597,6 +1597,7 @@ function SystemSection() {
             <h2 className="text-sm font-semibold text-g-text pb-4 mb-4 border-b border-g-border/40">Systemsider</h2>
             <div className="space-y-0.5">
               {[
+                { label: 'Identity Diagnostics', href: '/identity-repair',            desc: 'Fiks feil workspace i JWT — topbar viser feil navn?' },
                 { label: 'Logging',            href: '/logs',                     desc: 'Alle bot-logger og feilmeldinger' },
                 { label: 'Systemhelse (full)', href: '/system-health',            desc: 'Detaljert helsesjekk' },
                 { label: 'QA-oversikt',        href: '/content-factory-admin/qa', desc: 'Content factory kvalitetskontroll' },

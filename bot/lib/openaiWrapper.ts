@@ -61,7 +61,7 @@ export async function callChatCompletion(
   context: { source: string; workspaceId?: string },
 ): Promise<OpenAI.Chat.ChatCompletion | null> {
   try {
-    const res = await openaiClient.chat.completions.create(params);
+    const res = await openaiClient.chat.completions.create(params, { signal: AbortSignal.timeout(30_000) });
 
     // Log usage when available
     const usage = res.usage;
@@ -104,7 +104,7 @@ export async function callImageGeneration(
   context: { source: string; workspaceId?: string },
 ): Promise<OpenAI.Images.ImagesResponse | null> {
   try {
-    const res = await openaiClient.images.generate(params);
+    const res = await openaiClient.images.generate(params, { signal: AbortSignal.timeout(90_000) });
     return res;
   } catch (err: any) {
     const { eventType, severity, label, status } = categorizeError(err);
