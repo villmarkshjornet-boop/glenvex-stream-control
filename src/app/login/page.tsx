@@ -28,32 +28,6 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    // Step 1: ping to verify the API is reachable at all
-    try {
-      const ping = await fetch('/api/auth/ping');
-      if (!ping.ok) {
-        setError(`Login API nås men returnerer feil (ping HTTP ${ping.status}). Sjekk Vercel logs.`);
-        setLoading(false);
-        return;
-      }
-      const pingData = await ping.json().catch(() => null);
-      if (!pingData?.ok) {
-        setError(`Ping returnerte uventet svar: ${JSON.stringify(pingData)}`);
-        setLoading(false);
-        return;
-      }
-      if (!pingData.env?.supabaseUrl || !pingData.env?.supabaseAnonKey) {
-        setError(`Supabase env mangler i Vercel: supabaseUrl=${pingData.env?.supabaseUrl} anonKey=${pingData.env?.supabaseAnonKey}`);
-        setLoading(false);
-        return;
-      }
-    } catch (pingErr: any) {
-      setError(`Login API unreachable (ping feilet): ${pingErr.message}`);
-      setLoading(false);
-      return;
-    }
-
-    // Step 2: actual login
     let res: Response | undefined;
     try {
       res = await fetch('/api/auth/login', {
@@ -66,7 +40,7 @@ export default function LoginPage() {
         }),
       });
     } catch (networkErr: any) {
-      setError(`/api/auth/login unreachable (fetch failed): ${networkErr.message}`);
+      setError(`Kan ikke nå innloggings-API: ${networkErr.message}`);
       setLoading(false);
       return;
     }
@@ -75,7 +49,7 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? `Serverfeil (HTTP ${res.status})`);
+        setError(data.error ?? `Innlogging feilet (HTTP ${res.status})`);
         return;
       }
 
@@ -87,7 +61,7 @@ export default function LoginPage() {
         window.location.href = data.workspaceId ? '/' : '/onboarding';
       }
     } catch (err: any) {
-      setError(`Ugyldig svar fra /api/auth/login (HTTP ${res.status}): ${err.message}`);
+      setError(`Uventet svar fra server (HTTP ${res.status})`);
     } finally {
       setLoading(false);
     }
