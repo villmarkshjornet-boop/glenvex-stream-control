@@ -1,38 +1,38 @@
 /**
  * Next.js Edge Middleware — authentication + workspace routing.
  *
- * Session validation: @supabase/ssr createServerClient with request cookies.
- * getUser() calls Supabase /auth/v1/user, handles token refresh automatically,
- * and writes refreshed cookies back via setAll. No manual JWT parsing needed.
+ * Session validation: @supabase/ssr createServerClient reads plain-JSON cookies
+ * (format: JSON.stringify(session), NOT encodeURIComponent(...)).
+ * /api/auth/login and /api/auth/callback must write cookies in this format.
  */
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-// Paths that bypass auth entirely — matched with startsWith
 const PUBLIC_PATHS = [
   '/login',
   '/register',
-  '/api/auth',        // /api/auth/callback, /api/auth/twitch/*, login, logout
+  '/api/auth',           // /api/auth/callback, /api/auth/login, /api/auth/twitch/*, etc.
   '/api/cron',
   '/api/backfill',
   '/api/admin/run-migration',
-  '/overlay',         // OBS Browser Source — no session
-  '/api/goals/live',  // public read-only goal data used by overlay
+  '/overlay',            // OBS Browser Source — no session required
+  '/api/goals/live',     // public read-only goal data for overlay
+  '/api/debug/session',  // diagnostic endpoint — public so it works when not logged in
 ];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // ── Static assets ────────────────────────────────────────────────────────────
+  // ── Static assets ─────────────────────────────────────────────────────────────
   if (pathname.startsWith('/_next') || pathname.startsWith('/favicon')) {
     return NextResponse.next({ request });
   }
 
-  // ── Public paths ─────────────────────────────────────────────────────────────
+  // ── Public paths ──────────────────────────────────────────────────────────────
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
-    // Handle Supabase OAuth code exchange routed through /login
+    // Handle Supabase OAuth code exchange landing on /login (fallback from magic links)
     if (pathname === '/login') {
       const code = request.nextUrl.searchParams.get('code');
       if (code) {
@@ -46,13 +46,13 @@ export async function middleware(request: NextRequest) {
     return res;
   }
 
-  // ── Private path: validate session via Supabase SSR ──────────────────────────
+  // ── Private path: validate session via Supabase SSR ───────────────────────────
   const sbUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const sbAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const isApiRoute = pathname.startsWith('/api/');
 
   if (!sbUrl || !sbAnonKey) {
-    console.error('[SECURITY] middleware: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY missing');
+    console.error('[MW] CRITICAL: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY missing in middleware');
     if (isApiRoute) {
       return NextResponse.json({ error: 'Server configuration error', code: 'CONFIG_ERROR' }, { status: 500 });
     }
@@ -62,21 +62,21 @@ export async function middleware(request: NextRequest) {
     });
   }
 
+  // Log cookie names for debugging — never log values
+  const cookieNames = request.cookies.getAll().map(c => c.name);
+  const hasSbCookie = cookieNames.some(n => n.startsWith('sb-') && n.includes('-auth-token'));
+  console.log(`[MW] ${pathname} | cookies=[${cookieNames.join(',')}] | hasSbCookie=${hasSbCookie}`);
+
   // Supabase SSR canonical pattern:
-  // supabaseResponse is a mutable variable so setAll can replace it on token refresh.
-  // IMPORTANT: return supabaseResponse (or finalResponse with its cookies copied)
-  // so the refreshed cookies are written to the browser.
+  // supabaseResponse is mutable — setAll replaces it on token refresh so refreshed
+  // cookies are included in whichever response we return.
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(sbUrl, sbAnonKey, {
     cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
+      getAll() { return request.cookies.getAll(); },
       setAll(cookiesToSet) {
-        // Write to request (so subsequent reads in this middleware see new cookies)
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        // Replace supabaseResponse so the refreshed cookies are sent to browser
         supabaseResponse = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) =>
           supabaseResponse.cookies.set(name, value, options),
@@ -86,13 +86,17 @@ export async function middleware(request: NextRequest) {
   });
 
   // getUser() validates the session server-side and refreshes expired tokens.
-  // Do NOT use getSession() here — it doesn't revalidate on the server.
-  const { data: { user } } = await supabase.auth.getUser();
+  // Do NOT use getSession() — it trusts client-supplied tokens without revalidation.
+  const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
-  console.log(`[SECURITY-DEBUG] ${pathname} | public=false | hasUser=${!!user}`);
+  if (getUserError) {
+    console.warn(`[MW] ${pathname} | getUser error: ${getUserError.message}`);
+  }
+
+  console.log(`[MW] ${pathname} | hasUser=${!!user} | userId=${user?.id ?? 'none'}`);
 
   if (!user) {
-    console.log(`[SECURITY-DEBUG] ${pathname} | action=block | reason=no_valid_session`);
+    console.log(`[MW] ${pathname} | BLOCK → /login | hasSbCookie=${hasSbCookie}`);
     if (isApiRoute) {
       return NextResponse.json({ error: 'Unauthorized', code: 'NO_SESSION' }, { status: 401 });
     }
@@ -101,10 +105,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── Workspace & alpha gate ────────────────────────────────────────────────────
-  const workspaceId  = (user.user_metadata?.workspace_id  as string | undefined) ?? '';
-  const userId       = user.id;
-  const userEmail    = user.email ?? '';
+  // ── Workspace lookup ──────────────────────────────────────────────────────────
+  let workspaceId  = (user.user_metadata?.workspace_id as string | undefined) ?? '';
+  const userId     = user.id;
+  const userEmail  = user.email ?? '';
   const alphaEnabled = user.user_metadata?.alpha_enabled as boolean | undefined;
 
   const isOnboardingPath = pathname.startsWith('/onboarding')
@@ -113,15 +117,39 @@ export async function middleware(request: NextRequest) {
   const isWaitingPath = pathname.startsWith('/waiting');
   const isAdminPath   = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
 
+  // If workspace_id not in JWT claims, check DB before redirecting to onboarding.
+  // This handles older users or sessions issued before workspace_id was added to metadata.
   if (!workspaceId && !isOnboardingPath) {
-    console.log(`[SECURITY-DEBUG] ${pathname} | action=redirect_onboarding | reason=no_workspace_id`);
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    if (sbUrl && serviceKey) {
+      try {
+        const wsRes = await fetch(
+          `${sbUrl}/rest/v1/workspaces?owner_user_id=eq.${encodeURIComponent(userId)}&select=id&limit=1`,
+          {
+            headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+            signal: AbortSignal.timeout(2000),
+          },
+        );
+        if (wsRes.ok) {
+          const rows = await wsRes.json() as { id: string }[];
+          workspaceId = rows?.[0]?.id ?? '';
+          if (workspaceId) {
+            console.log(`[MW] ${pathname} | workspace_id "${workspaceId}" found in DB (not in JWT) — user should re-login to refresh token`);
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (!workspaceId && !isOnboardingPath) {
+    console.log(`[MW] ${pathname} | REDIRECT /onboarding | reason=no_workspace_id | userId=${userId}`);
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
     return NextResponse.redirect(url);
   }
 
-  // Alpha gate: alpha_enabled === false → waiting list.
-  // undefined/true means allowed (preserves access for older users without the flag).
+  // Alpha gate: alpha_enabled === false → waiting list
+  // undefined/true → allowed (backwards compat for users without the flag)
   if (workspaceId && alphaEnabled === false && !isWaitingPath && !isOnboardingPath && !isAdminPath) {
     let dbAlphaEnabled = false;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -147,10 +175,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // ── Build final response ──────────────────────────────────────────────────────
-  // We need custom headers on the REQUEST side so route handlers can read them.
-  // @supabase/ssr's supabaseResponse uses the base request; we rebuild with our
-  // custom headers, then copy any refreshed cookies that setAll wrote.
+  // ── Build final response ───────────────────────────────────────────────────────
+  // Custom headers are set on the REQUEST side so route handlers can read them.
+  // Build new headers, then copy refreshed cookies from supabaseResponse.
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', pathname);
   requestHeaders.set('x-workspace-id', workspaceId);
@@ -159,12 +186,11 @@ export async function middleware(request: NextRequest) {
 
   const finalResponse = NextResponse.next({ request: { headers: requestHeaders } });
 
-  // Copy refreshed session cookies from supabaseResponse (set by setAll on token refresh)
+  // Forward any refreshed session cookies Supabase SSR wrote via setAll
   supabaseResponse.cookies.getAll().forEach(cookie => {
     finalResponse.cookies.set(cookie.name, cookie.value);
   });
 
-  // Response headers (for tracing / client-readable context)
   finalResponse.headers.set('x-workspace-id', workspaceId);
   finalResponse.headers.set('x-user-id', userId);
   finalResponse.headers.set('x-pathname', pathname);
