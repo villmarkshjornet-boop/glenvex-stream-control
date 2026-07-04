@@ -28,8 +28,9 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    let res: Response | undefined;
     try {
-      const res = await fetch('/api/auth/login', {
+      res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -38,11 +39,20 @@ export default function LoginPage() {
           mode: useMagic ? 'magic' : mode,
         }),
       });
+    } catch (networkErr: any) {
+      // fetch() itself threw — server closed the connection without any HTTP response.
+      // This usually means the route handler crashed before returning headers.
+      setError(`Kan ikke nå innloggings-API (HTTP ${networkErr.message}). Prøv å laste siden på nytt.`);
+      setLoading(false);
+      return;
+    }
 
+    try {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error ?? 'Noe gikk galt');
+        setError(data.error ?? `Serverfeil (HTTP ${res.status})`);
+        return;
       }
 
       if (data.magic) {
@@ -53,7 +63,7 @@ export default function LoginPage() {
         window.location.href = data.workspaceId ? '/' : '/onboarding';
       }
     } catch (err: any) {
-      setError(err.message ?? 'Noe gikk galt');
+      setError(`Ugyldig svar fra server (HTTP ${res.status}): ${err.message}`);
     } finally {
       setLoading(false);
     }
