@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { encodeState } from '@/lib/oauthState';
 import { createClient } from '@supabase/supabase-js';
+import { getIdentityFromRequestCookies } from '@/lib/supabaseSessionCookie';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +16,11 @@ const BOT_PERMISSIONS = '19456';
 
 export async function GET(req: NextRequest) {
   const h = headers();
-  const userId              = h.get('x-user-id');
-  const metadataWorkspaceId = h.get('x-workspace-id'); // JWT user_metadata.workspace_id
+  // /api/auth is PUBLIC — middleware does not inject x-user-id or x-workspace-id.
+  // Fall back to cookie parsing (handles both base64url and legacy formats).
+  const cookie = getIdentityFromRequestCookies(req.cookies);
+  const userId              = h.get('x-user-id')      ?? cookie.userId;
+  const metadataWorkspaceId = h.get('x-workspace-id') ?? cookie.workspaceId; // JWT user_metadata.workspace_id
 
   const clientId    = process.env.DISCORD_CLIENT_ID;
   const stateSecret = process.env.OAUTH_STATE_SECRET;

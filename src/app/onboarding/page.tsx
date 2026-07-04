@@ -102,6 +102,7 @@ const OAUTH_ERRORS: Record<string, { heading: string; detail: string }> = {
   discord_token_failed:     { heading: 'Klarte ikke koble til Discord', detail: 'Discord returnerte ingen tilgangsnøkkel. Prøv å invitere boten på nytt.' },
   discord_db_failed:        { heading: 'Lagringsfeil (Discord)', detail: 'Boten ble lagt til, men vi klarte ikke lagre det. Prøv igjen.' },
   server_config:            { heading: 'Konfigurasjonsfeil på server', detail: 'Noe er galt i GLENVEX-oppsettet. Kontakt support.' },
+  workspace_ikke_funnet:    { heading: 'Workspace ikke funnet', detail: 'Din workspace ble ikke funnet. Logg ut, logg inn igjen, og fullfør steg 1 (opprett workspace) før du kobler til Twitch eller Discord.' },
 };
 
 function OnboardingInner() {

@@ -30,8 +30,11 @@ export function getWorkspaceId(): string {
   } catch {
     // headers() throws outside of request context (e.g. bot/Railway)
   }
-  // Fallback: env var (used by Railway bot and local dev)
-  return process.env.WORKSPACE_ID ?? 'glenvex-default';
+  // Fallback: env var (Railway bot / local dev only).
+  // Web-app routes always have x-workspace-id from middleware — if we reach here
+  // in a web context, return '' so callers can detect the missing workspace and
+  // return a proper error instead of writing data to a non-existent workspace.
+  return process.env.WORKSPACE_ID ?? '';
 }
 
 export async function getOrCreateWorkspace(): Promise<Workspace> {

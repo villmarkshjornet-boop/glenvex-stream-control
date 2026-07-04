@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers, cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import { getDb } from '@/lib/db';
+import { getIdentityFromCookieStore } from '@/lib/supabaseSessionCookie';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,36 +12,7 @@ function slugify(s: string) {
 
 function parseSessionUserId(): string | null {
   const cookieStore = cookies();
-  const all = cookieStore.getAll();
-  let tokenValue = '';
-
-  const single = all.find(c => /^sb-.+-auth-token$/.test(c.name));
-  if (single?.value) tokenValue = single.value;
-
-  if (!tokenValue) {
-    const chunk0 = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
-    if (chunk0) {
-      const base = chunk0.name.replace('.0', '');
-      const chunks: string[] = [];
-      for (let i = 0; i < 10; i++) {
-        const v = cookieStore.get(`${base}.${i}`)?.value;
-        if (!v) break;
-        chunks.push(v);
-      }
-      tokenValue = chunks.join('');
-    }
-  }
-
-  if (!tokenValue) return null;
-  try {
-    const session = JSON.parse(decodeURIComponent(tokenValue));
-    const b64 = session.access_token?.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
-    if (!b64) return null;
-    const payload = JSON.parse(Buffer.from(b64, 'base64').toString());
-    return payload.sub ?? null;
-  } catch {
-    return null;
-  }
+  return getIdentityFromCookieStore(cookieStore).userId;
 }
 
 export async function POST(req: NextRequest) {

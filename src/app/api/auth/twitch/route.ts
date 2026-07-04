@@ -3,59 +3,21 @@ import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { encodeState } from '@/lib/oauthState';
 import { createClient } from '@supabase/supabase-js';
+import { getIdentityFromRequestCookies } from '@/lib/supabaseSessionCookie';
 
 export const dynamic = 'force-dynamic';
 
 // Required env vars: TWITCH_CLIENT_ID, OAUTH_STATE_SECRET, GLENVEX_OAUTH_BASE
 // Register ONE redirect URI in Twitch dev console: {GLENVEX_OAUTH_BASE}/api/auth/twitch/callback
-
-// This route is under /api/auth which is a PUBLIC path — middleware does NOT inject
-// x-workspace-id or x-user-id headers here. We must parse the auth cookie directly.
-function getIdentityFromCookie(req: NextRequest): { userId: string | null; workspaceId: string | null } {
-  const all = req.cookies.getAll();
-  let tokenValue = '';
-
-  const authCookie = all.find(c => /^sb-.+-auth-token$/.test(c.name));
-  if (authCookie) {
-    tokenValue = authCookie.value;
-  } else {
-    const chunkCookie = all.find(c => /^sb-.+-auth-token\.0$/.test(c.name));
-    if (chunkCookie) {
-      const base = chunkCookie.name.replace('.0', '');
-      const chunks: string[] = [];
-      for (let i = 0; i < 10; i++) {
-        const chunk = req.cookies.get(`${base}.${i}`)?.value;
-        if (!chunk) break;
-        chunks.push(chunk);
-      }
-      tokenValue = chunks.join('');
-    }
-  }
-
-  if (!tokenValue) return { userId: null, workspaceId: null };
-
-  try {
-    const session = JSON.parse(decodeURIComponent(tokenValue)) as { access_token?: string };
-    if (!session.access_token) return { userId: null, workspaceId: null };
-    const b64     = session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8')) as {
-      sub?: string;
-      user_metadata?: { workspace_id?: string };
-    };
-    return {
-      userId:      payload.sub ?? null,
-      workspaceId: payload.user_metadata?.workspace_id ?? null,
-    };
-  } catch {
-    return { userId: null, workspaceId: null };
-  }
-}
+// This route is under /api/auth (PUBLIC path) — middleware does NOT inject x-workspace-id
+// or x-user-id. We parse the session cookie directly via getIdentityFromRequestCookies,
+// which handles both the new base64url format and the legacy URL-encoded JSON format.
 
 export async function GET(req: NextRequest) {
   const h = headers();
   // Middleware injects these only for non-public paths.
   // Fall back to cookie parsing since /api/auth is PUBLIC.
-  const cookie = getIdentityFromCookie(req);
+  const cookie = getIdentityFromRequestCookies(req.cookies);
   const userId              = h.get('x-user-id')      ?? cookie.userId;
   const metadataWorkspaceId = h.get('x-workspace-id') ?? cookie.workspaceId; // JWT user_metadata.workspace_id
 
