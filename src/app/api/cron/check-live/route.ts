@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStreamInfo } from '@/lib/twitch';
 import { postLiveEmbed } from '@/lib/discord';
-import { getSettings, saveSettings } from '@/lib/settings';
+import { getSettings } from '@/lib/settings';
 import { addLog } from '@/lib/logger';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
@@ -63,13 +63,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'skipped', reason: 'twitch_not_connected' });
     }
 
+    // lastNotifiedStreamId MUST come from DB — the filesystem is ephemeral on Vercel.
+    // getSettings() / saveSettings() use data/settings.json which resets each invocation.
+    let lastNotifiedStreamId: string | null = null;
+    if (db) {
+      const { data: wsSnap } = await db
+        .from('workspaces')
+        .select('settings_json')
+        .eq('id', wsId)
+        .single();
+      lastNotifiedStreamId = (wsSnap?.settings_json as any)?.lastNotifiedStreamId ?? null;
+    }
+
+    // File-based settings are still used for autoPostLive (default: true).
+    // lastNotifiedStreamId is intentionally NOT read from here — see DB read above.
     const settings = getSettings();
     const stream   = await getStreamInfo(twitchLogin);
 
     addLog('info', `System sjekk fullført – ${stream.isLive ? 'LIVE' : 'Offline'}`, 'OK');
 
     if (stream.isLive) {
-      if (stream.id && stream.id === settings.lastNotifiedStreamId) {
+      if (stream.id && stream.id === lastNotifiedStreamId) {
         await logEvent('scheduler', 'LIVE_ALREADY_NOTIFIED', `Stream allerede varslet: ${stream.id}`, 'info', {
           streamId: stream.id,
           game: stream.game,
@@ -144,11 +158,24 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (stream.id) saveSettings({ lastNotifiedStreamId: stream.id });
+      // Persist lastNotifiedStreamId to DB — filesystem is ephemeral on Vercel.
+      if (stream.id && db) {
+        try {
+          const { data: current } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+          const merged = { ...(current?.settings_json as object ?? {}), lastNotifiedStreamId: stream.id };
+          await db.from('workspaces').update({ settings_json: merged, updated_at: new Date().toISOString() }).eq('id', wsId);
+        } catch {}
+      }
       return NextResponse.json({ status: 'notified', stream });
     } else {
-      if (settings.lastNotifiedStreamId) {
-        saveSettings({ lastNotifiedStreamId: null });
+      if (lastNotifiedStreamId) {
+        if (db) {
+          try {
+            const { data: current } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
+            const merged = { ...(current?.settings_json as object ?? {}), lastNotifiedStreamId: null };
+            await db.from('workspaces').update({ settings_json: merged, updated_at: new Date().toISOString() }).eq('id', wsId);
+          } catch {}
+        }
         addLog('info', 'Stream er offline – varslings-ID nullstilt', 'OK');
         await logEvent('scheduler', 'STREAM_OFFLINE_DETECTED', 'Stream er offline', 'info');
       }

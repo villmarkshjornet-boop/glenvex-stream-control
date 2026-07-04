@@ -17,9 +17,11 @@ export async function GET(req: NextRequest) {
   const h = headers();
   // Middleware injects these only for non-public paths.
   // Fall back to cookie parsing since /api/auth is PUBLIC.
+  // Middleware now injects x-user-id and x-workspace-id for this authenticated route.
+  // Cookie parsing is kept as fallback (empty string from middleware falls through || ).
   const cookie = getIdentityFromRequestCookies(req.cookies);
-  const userId              = h.get('x-user-id')      ?? cookie.userId;
-  const metadataWorkspaceId = h.get('x-workspace-id') ?? cookie.workspaceId; // JWT user_metadata.workspace_id
+  const userId              = h.get('x-user-id')      || cookie.userId;
+  const metadataWorkspaceId = h.get('x-workspace-id') || cookie.workspaceId;
 
   const clientId    = process.env.TWITCH_CLIENT_ID;
   const stateSecret = process.env.OAUTH_STATE_SECRET;

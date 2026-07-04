@@ -16,11 +16,11 @@ const BOT_PERMISSIONS = '19456';
 
 export async function GET(req: NextRequest) {
   const h = headers();
-  // /api/auth is PUBLIC — middleware does not inject x-user-id or x-workspace-id.
-  // Fall back to cookie parsing (handles both base64url and legacy formats).
+  // Middleware now injects x-user-id and x-workspace-id for this authenticated route.
+  // Cookie parsing is kept as fallback (empty string from middleware falls through || ).
   const cookie = getIdentityFromRequestCookies(req.cookies);
-  const userId              = h.get('x-user-id')      ?? cookie.userId;
-  const metadataWorkspaceId = h.get('x-workspace-id') ?? cookie.workspaceId; // JWT user_metadata.workspace_id
+  const userId              = h.get('x-user-id')      || cookie.userId;
+  const metadataWorkspaceId = h.get('x-workspace-id') || cookie.workspaceId;
 
   const clientId    = process.env.DISCORD_CLIENT_ID;
   const stateSecret = process.env.OAUTH_STATE_SECRET;

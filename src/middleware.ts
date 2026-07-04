@@ -1,9 +1,11 @@
 /**
  * Next.js Edge Middleware — authentication + workspace routing.
  *
- * Session validation: @supabase/ssr createServerClient reads plain-JSON cookies
- * (format: JSON.stringify(session), NOT encodeURIComponent(...)).
- * /api/auth/login and /api/auth/callback must write cookies in this format.
+ * PUBLIC_PATHS must be specific — do NOT use blanket '/api/auth'.
+ * The OAuth START routes (/api/auth/twitch, /api/auth/discord-bot) need
+ * authentication so middleware can resolve workspace_id via DB fallback and
+ * inject x-workspace-id into the request headers.
+ * Only the callback routes (code-exchange) are truly public.
  */
 
 import { NextResponse } from 'next/server';
@@ -13,13 +15,26 @@ import { createServerClient } from '@supabase/ssr';
 const PUBLIC_PATHS = [
   '/login',
   '/register',
-  '/api/auth',           // /api/auth/callback, /api/auth/login, /api/auth/twitch/*, etc.
+  '/api/auth/login',               // login endpoint — no session yet
+  '/api/auth/callback',            // Supabase OAuth code exchange
+  '/api/auth/logout',              // clear cookies (safe without workspace)
+  '/api/auth/twitch/callback',     // Twitch OAuth callback — has HMAC-signed state
+  '/api/auth/discord-bot/callback',// Discord OAuth callback — has HMAC-signed state
+  '/api/auth/debug',               // diagnostic
+  '/api/auth/fix-workspace',       // self-service workspace repair (has own auth)
   '/api/cron',
   '/api/backfill',
   '/api/admin/run-migration',
   '/overlay',            // OBS Browser Source — no session required
   '/api/goals/live',     // public read-only goal data for overlay
   '/api/debug/session',  // diagnostic endpoint — public so it works when not logged in
+];
+
+// OAuth start routes: authenticated (not public) but must NOT redirect to /onboarding
+// if workspace is missing — the route itself handles workspace_ikke_funnet.
+const OAUTH_START_PATHS = [
+  '/api/auth/twitch',
+  '/api/auth/discord-bot',
 ];
 
 export async function middleware(request: NextRequest) {
@@ -112,13 +127,15 @@ export async function middleware(request: NextRequest) {
   const alphaEnabled = user.user_metadata?.alpha_enabled as boolean | undefined;
 
   const isOnboardingPath = pathname.startsWith('/onboarding')
-    || pathname.startsWith('/api/onboarding')
-    || pathname.startsWith('/api/auth');
+    || pathname.startsWith('/api/onboarding');
   const isWaitingPath = pathname.startsWith('/waiting');
   const isAdminPath   = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+  // OAuth start routes need authentication but must NOT redirect to /onboarding
+  // if workspace is missing — the route itself redirects with a specific error.
+  const isOAuthStartPath = OAUTH_START_PATHS.some(p => pathname === p);
 
   // If workspace_id not in JWT claims, check DB before redirecting to onboarding.
-  // This handles older users or sessions issued before workspace_id was added to metadata.
+  // Runs for regular paths AND oauth start paths (they need workspace_id too).
   if (!workspaceId && !isOnboardingPath) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
     if (sbUrl && serviceKey) {
@@ -141,7 +158,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (!workspaceId && !isOnboardingPath) {
+  // OAuth start routes handle missing workspace themselves (workspace_ikke_funnet redirect).
+  // All other non-onboarding paths get redirected to onboarding if workspace is missing.
+  if (!workspaceId && !isOnboardingPath && !isOAuthStartPath) {
     console.log(`[MW] ${pathname} | REDIRECT /onboarding | reason=no_workspace_id | userId=${userId}`);
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
