@@ -307,9 +307,12 @@ export const adminCommand = {
         ];
         if (hasSbUrl && hasSbKey && hasTwId && hasTwSec && hasWsId) {
           lines.push(`• Alle env-vars OK — token i DB mangler, utløpt eller mangler scope.`);
-          lines.push(`  → Sjekk Railway-loggene for "[getBroadcasterUserToken]" for nøyaktig årsak.`);
-          lines.push(`  → Gå til Innstillinger → Koble Twitch på nytt om token er utløpt/mangler.`);
-          lines.push(`  (workspace_id="${process.env.WORKSPACE_ID}" — verifiser at dette matcher \`workspaces.id\` i Supabase)`);
+          lines.push(`  → Se Railway-logg for "[getBroadcasterUserToken]" — nøyaktig årsak er logget der.`);
+          lines.push(`  → Hvis "ikke funnet i DB": WORKSPACE_ID="${process.env.WORKSPACE_ID}" matcher ikke workspaces.id.`);
+          lines.push(`    Gå til Supabase → SQL: SELECT id, twitch_channel_name FROM workspaces;`);
+          lines.push(`    Sett WORKSPACE_ID i Railway til faktisk id-verdi.`);
+          lines.push(`  → Hvis "twitch_access_token mangler": Gå til Innstillinger → Koble Twitch på nytt.`);
+          lines.push(`  → Hvis "mangler scope": Koble til Twitch på nytt — be om channel:read:subscriptions.`);
         }
         await interaction.editReply({ content: lines.join('\n') });
         return;

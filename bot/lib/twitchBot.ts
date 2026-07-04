@@ -216,18 +216,43 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
     const { createClient } = require('@supabase/supabase-js');
     const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
 
-    const { data: ws, error: dbError } = await sb
+    // Primary lookup: workspaces.id (TEXT PK — must match exactly)
+    let { data: ws, error: dbError } = await sb
       .from('workspaces')
-      .select('twitch_access_token,twitch_refresh_token,twitch_user_id')
+      .select('id,twitch_access_token,twitch_refresh_token,twitch_user_id,twitch_channel_name,streamer_name')
       .eq('id', wsId)
       .single();
 
+    // Fallback: WORKSPACE_ID may be a slug/name rather than the actual PK value.
+    // Try twitch_channel_name and streamer_name before giving up.
+    if ((dbError || !ws) && wsId) {
+      const { data: wsAlt } = await sb
+        .from('workspaces')
+        .select('id,twitch_access_token,twitch_refresh_token,twitch_user_id,twitch_channel_name,streamer_name')
+        .or(`twitch_channel_name.eq.${wsId},streamer_name.eq.${wsId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (wsAlt) {
+        console.warn(`[getBroadcasterUserToken] wsId="${wsId}" ikke funnet som PK — fallback til rad med id="${wsAlt.id}" (twitch_channel_name="${wsAlt.twitch_channel_name}"). Oppdater WORKSPACE_ID i Railway til "${wsAlt.id}".`);
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'TWITCH_AUTH_ERROR',
+          title: `WORKSPACE_ID="${wsId}" matcher ikke workspaces.id — fallback brukt (faktisk id="${wsAlt.id}"). Oppdater Railway.`,
+          severity: 'warning',
+          metadata: { providedWsId: wsId, actualId: wsAlt.id, twitchChannelName: wsAlt.twitch_channel_name },
+        });
+        ws = wsAlt;
+        dbError = null;
+      }
+    }
+
     if (dbError || !ws) {
-      console.error(`[getBroadcasterUserToken] DB lookup failed for wsId="${wsId}":`, dbError?.message ?? 'no row returned');
+      console.error(`[getBroadcasterUserToken] DB lookup feilet for wsId="${wsId}":`, dbError?.message ?? 'no row returned');
       logSystemEvent({
         source: 'twitch_bot',
         event_type: 'TWITCH_AUTH_ERROR',
-        title: `Twitch token: workspace "${wsId}" ikke funnet i DB`,
+        title: `Twitch token: workspace "${wsId}" ikke funnet i DB (hverken som id, twitch_channel_name eller streamer_name)`,
         severity: 'error',
         metadata: { workspaceId: wsId, dbError: dbError?.message ?? 'no row' },
       });
@@ -528,6 +553,14 @@ export function startTwitchBot() {
     channels: [KANAL],
   });
 
+  // tmi.js requires password in format "oauth:TOKEN". Warn early if missing prefix.
+  const oauthHasPrefix = oauth.startsWith('oauth:');
+  if (!oauthHasPrefix) {
+    console.warn(`[twitchBot] TWITCH_BOT_OAUTH mangler "oauth:"-prefix — autentisering vil sannsynligvis feile. Forventet format: "oauth:TOKEN"`);
+  }
+
+  console.log(`[twitchBot] Kobler til #${KANAL} som bot="${botNavn}" | oauth-prefix=${oauthHasPrefix}`);
+
   client.connect().then(() => {
     console.log(`  ✓ Twitch chat-bot koblet til #${KANAL}`);
     logSystemEvent({
@@ -650,13 +683,46 @@ export function startTwitchBot() {
       }
     }, 18 * 60_000);
   }).catch((err: Error) => {
-    console.error('  ✗ Twitch chat feil:', err.message);
+    const raw = err.message ?? '';
+    console.error(`  ✗ Twitch chat feil (kanal=#${KANAL} bot=${botNavn}): ${raw}`);
+
+    // Categorize the failure so admin can act on it without reading raw TMI errors
+    let reason: string;
+    let fix: string;
+    if (/login authentication failed|improperly formatted auth|invalid oauth/i.test(raw)) {
+      reason = 'TWITCH_BOT_OAUTH er ugyldig eller utløpt';
+      fix = 'Generer et nytt OAuth-token på https://twitchapps.com/tmi/ og oppdater TWITCH_BOT_OAUTH i Railway';
+    } else if (!oauthHasPrefix) {
+      reason = 'TWITCH_BOT_OAUTH mangler "oauth:"-prefix';
+      fix = 'Sett TWITCH_BOT_OAUTH til "oauth:TOKEN" (ikke bare TOKEN)';
+    } else if (/no response from twitch|etimedout|econnrefused|enotfound/i.test(raw)) {
+      reason = 'Nettverksfeil — ingen respons fra Twitch TMI';
+      fix = 'Sjekk nettverkstilgang fra Railway til irc.chat.twitch.tv:443';
+    } else if (/error joining|bad_authentication/i.test(raw)) {
+      reason = `Feil ved join av #${KANAL} — kanal finnes ikke eller token mangler chat-scope`;
+      fix = 'Verifiser at TWITCH_USERNAME er korrekt Twitch-login og at tokenet har chat:read + chat:edit scope';
+    } else if (/wrong username/i.test(raw)) {
+      reason = `TWITCH_BOT_USERNAME="${botNavn}" matcher ikke tokenet`;
+      fix = 'Sett TWITCH_BOT_USERNAME til brukernavn for kontoen tokenet tilhører';
+    } else {
+      reason = raw.slice(0, 150) || 'ukjent feil';
+      fix = 'Se Railway-logg for full stacktrace';
+    }
+
     logSystemEvent({
       source: 'twitch_bot',
       event_type: 'TWITCH_CHAT_JOIN_FAILED',
-      title: `Twitch chat-bot kunne ikke koble til #${KANAL}`,
+      title: `Twitch chat-bot feilet: ${reason}`,
       severity: 'error',
-      metadata: { channel: KANAL, error: err.message?.slice(0, 200) },
+      metadata: {
+        channel: KANAL,
+        botUsername: botNavn,
+        oauthPresent: !!oauth,
+        oauthHasPrefix,
+        reason,
+        fix,
+        rawError: raw.slice(0, 300),
+      },
     });
   });
 
