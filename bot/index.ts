@@ -16,7 +16,7 @@ import { addLog } from '@/lib/logger';
 import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@/lib/twitch';
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
-import { generateChatReply, getProaktivMelding, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
+import { generateChatReply, getProaktivMelding, getProaktivMeldingAsync, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
 import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
@@ -154,6 +154,7 @@ for (const cmd of [liveCommand, twitchCommand, promoCommand, setupCommand, statu
 const postedeClips = new Set<string>();
 let sisteStatsukeNr = -1;
 let sisteRyddUke = -1;
+let _lastOfflineProcessed: string | null = null; // stream ID — guards offline block from re-firing on cache expiry
 
 // Kanaler som aldri skal slettes automatisk
 const BESKYTTEDE_KANALER = [
@@ -415,7 +416,7 @@ async function getSettingsFresh() {
   try {
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const wid = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const wid = process.env.WORKSPACE_ID ?? '';
     if (sbUrl && sbKey) {
       const res = await fetch(`${sbUrl}/rest/v1/workspaces?id=eq.${encodeURIComponent(wid)}&select=settings_json`, {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
@@ -483,7 +484,7 @@ async function checkLive() {
 
       console.log(
         `[DISCORD ANNOUNCEMENT DEBUG]` +
-        `\n  workspace=${process.env.WORKSPACE_ID ?? 'glenvex-default'}` +
+        `\n  workspace=${process.env.WORKSPACE_ID ?? ''}` +
         `\n  dbChannel=${dbLiveKanalId || '(ikke satt i Supabase)'}` +
         `\n  envChannel=${envLiveKanalId || '(ikke satt i env/fil)'}` +
         `\n  actualChannel=${effectiveLiveKanalId || '(INGEN — varslet vil feile)'}` +
@@ -513,7 +514,7 @@ async function checkLive() {
           metadata: {
             reason: 'missing_channel_preference',
             streamId: stream.id,
-            workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+            workspaceId: process.env.WORKSPACE_ID ?? '',
             fix: 'Gå til Dashboard → Settings → Discord → Velg live-kanal',
           },
         });
@@ -536,7 +537,7 @@ async function checkLive() {
           title: `Discord live-varsel postet: ${stream.title?.slice(0, 60) ?? ''}`,
           severity: 'info',
           metadata: {
-            workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+            workspaceId: process.env.WORKSPACE_ID ?? '',
             guildId,
             channelId: effectiveLiveKanalId,
             channelName,
@@ -561,6 +562,15 @@ async function checkLive() {
       }
 
       saveSettings({ lastNotifiedStreamId: stream.id });
+      // Also persist to DB so bot picks it up correctly after a Railway container restart
+      const _botDb = getBotDb();
+      const _botWsId = process.env.WORKSPACE_ID ?? '';
+      if (_botDb && _botWsId && stream.id) {
+        _botDb.from('workspaces').select('settings_json').eq('id', _botWsId).single().then(({ data: _ws }) => {
+          const _merged = { ...(_ws?.settings_json as object ?? {}), lastNotifiedStreamId: stream.id };
+          _botDb.from('workspaces').update({ settings_json: _merged, updated_at: new Date().toISOString() }).eq('id', _botWsId).then(() => {}, () => {});
+        }).catch(() => {});
+      }
       addLog(liveEmbedOk ? 'success' : 'warning', `Auto live-varsel ${liveEmbedOk ? 'postet' : 'feilet'}: ${stream.title}`, liveEmbedOk ? 'OK' : 'WARN');
       startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
 
@@ -589,7 +599,7 @@ async function checkLive() {
       // Phase 2: double-write to Creator State (existing streamHistory unchanged)
       onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
       // Phase Live Agent V2 + Poll Manager: start continuous AI producer loop
-      const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+      const wsId = process.env.WORKSPACE_ID ?? '';
       const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
       startLiveAgent(stream.id, twitchLogin, wsId);
       startPollManagerForStream(stream.id, wsId, Date.now());
@@ -601,7 +611,7 @@ async function checkLive() {
         // Phase 2: restore Creator State on bot restart during live stream
         onStreamLive({ streamId: stream.id, title: stream.title ?? '', game: stream.game ?? '', viewerCount: stream.viewerCount, startedAt: stream.startedAt ?? new Date().toISOString() });
         // Phase Live Agent V2 + Poll Manager: resume on bot restart during active stream
-        const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+        const wsId = process.env.WORKSPACE_ID ?? '';
         const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
         startLiveAgent(stream.id, twitchLogin, wsId);
         startPollManagerForStream(stream.id, wsId, new Date(stream.startedAt ?? Date.now()).getTime());
@@ -609,31 +619,44 @@ async function checkLive() {
       updateSession(stream.viewerCount ?? 0);
       onViewerUpdate(stream.viewerCount ?? 0);
     } else if (!stream.isLive && settings.lastNotifiedStreamId) {
-      saveSettings({ lastNotifiedStreamId: null });
-      await endSession(0);
-      onStreamOffline();
-      stopLiveAgent();
-      stopPollManager();
-      logBotEvent('stream_offline', {});
-      logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
-      logSystemEvent({
-        source: 'twitch_bot',
-        event_type: 'STREAM_OFFLINE_DETECTED',
-        title: 'Stream gikk offline – VOD-watcher starter om 15 min',
-        severity: 'info',
-        metadata: { resetSyklusOm: '2t' },
-      });
-      logSystemEvent({
-        source: 'twitch_bot',
-        event_type: 'POST_STREAM_STARTED',
-        title: 'Post-stream fase startet – VOD-prosessering og opprydding',
-        severity: 'info',
-        metadata: { streamId: settings.lastNotifiedStreamId ?? null },
-      });
-      // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
-      setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
-      // Phase 18: run Learning Engine 5 min after stream ends so all data is written
-      setTimeout(() => runLearningEngine().catch(() => {}), 5 * 60 * 1000);
+      // Guard: skip if we already processed this offline event (prevents re-firing when settings cache expires)
+      if (_lastOfflineProcessed !== settings.lastNotifiedStreamId) {
+        _lastOfflineProcessed = settings.lastNotifiedStreamId;
+        saveSettings({ lastNotifiedStreamId: null });
+        // Clear lastNotifiedStreamId in Supabase so it doesn't re-trigger on next cache expiry
+        const _offlineDb = getBotDb();
+        const _offlineWsId = process.env.WORKSPACE_ID ?? '';
+        if (_offlineDb && _offlineWsId) {
+          _offlineDb.from('workspaces').select('settings_json').eq('id', _offlineWsId).single().then(({ data: _ws }) => {
+            const _merged = { ...(_ws?.settings_json as object ?? {}), lastNotifiedStreamId: null };
+            _offlineDb.from('workspaces').update({ settings_json: _merged, updated_at: new Date().toISOString() }).eq('id', _offlineWsId).then(() => {}, () => {});
+          }).catch(() => {});
+        }
+        await endSession(0);
+        onStreamOffline();
+        stopLiveAgent();
+        stopPollManager();
+        logBotEvent('stream_offline', {});
+        logBotAgentEvent({ source: 'twitch', event_type: 'stream_offline', importance_score: 80 });
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'STREAM_OFFLINE_DETECTED',
+          title: 'Stream gikk offline – VOD-watcher starter om 15 min',
+          severity: 'info',
+          metadata: { resetSyklusOm: '2t' },
+        });
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'POST_STREAM_STARTED',
+          title: 'Post-stream fase startet – VOD-prosessering og opprydding',
+          severity: 'info',
+          metadata: { streamId: _lastOfflineProcessed ?? null },
+        });
+        // Reset syklus 2 timer etter stream slutt (gir tid til VOD-prosessering å fullføres)
+        setTimeout(() => resetStreamSyklus().catch(() => {}), 2 * 60 * 60 * 1000);
+        // Phase 18: run Learning Engine 5 min after stream ends so all data is written
+        setTimeout(() => runLearningEngine().catch(() => {}), 5 * 60 * 1000);
+      }
     }
   } catch (error) {
     const msg = (error as Error).message ?? '';
@@ -1193,7 +1216,7 @@ async function sjekkGoals() {
 
     const db = getBotDb();
     if (db) {
-      const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+      const wsId = process.env.WORKSPACE_ID ?? '';
       const { data } = await db
         .from('workspaces')
         .select('settings_json')
@@ -1357,7 +1380,7 @@ async function sendPartnerPromoMelding(kanal: TextChannel): Promise<void> {
     content: typeof tekst === 'string' ? tekst : JSON.stringify(tekst).slice(0, 500),
     channel: 'discord_channel',
     category: 'partner_promo',
-    workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+    workspaceId: process.env.WORKSPACE_ID ?? '',
     metadata: { partner: partner.navn, channelId: kanal.id },
   });
   if (!compliance.allowed) {
@@ -1454,7 +1477,7 @@ async function sendProaktivMelding() {
   if (!aktiv || pauseDiscord || pauseProaktiv) {
     const årsak = !aktiv ? 'BOT_DEAKTIVERT' : pauseDiscord ? 'DISCORD_PAUSE' : 'PROAKTIV_PAUSE';
     logSystemEvent({
-      workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+      workspaceId: process.env.WORKSPACE_ID ?? '',
       source: 'discord_bot',
       event_type: 'PARTNER_PROMOTION_SKIPPED',
       title: `Proaktiv runde hoppet over: ${årsak}`,
@@ -1480,7 +1503,7 @@ async function sendProaktivMelding() {
         // Phase 4+6: real-time state from Creator State (avgViewers30d cached at stream start)
         const _brainStream = getBrainState().stream;
         const decision = await decidePromotion({
-          workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+          workspaceId: process.env.WORKSPACE_ID ?? '',
           game: _brainStream.game ?? '',
           viewerCount: _brainStream.viewerCount ?? 0,
           historicalAvgViewers: _brainStream.avgViewers30d ?? 0,
@@ -1525,7 +1548,7 @@ async function sendProaktivMelding() {
       // Community-melding → chat
       const chatKanal = await finnChatKanal();
       if (!chatKanal) return;
-      const melding = getProaktivMelding();
+      const melding = await getProaktivMeldingAsync(process.env.WORKSPACE_ID ?? '');
       await discordSend(chatKanal, melding, { trigger: 'proaktiv_community' });
       addToMemory({ type: 'proaktiv', innhold: melding });
     }
@@ -2064,7 +2087,7 @@ async function sikkerAdminTilGkarlsen(): Promise<void> {
 // Prøver å finne det faktiske workspace-IDen fra Supabase slik at Railway-loggen
 // viser nøyaktig hva man må sette som WORKSPACE_ID i Railway env vars.
 async function logWorkspaceIdDiagnose(): Promise<void> {
-  const currentId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+  const currentId = process.env.WORKSPACE_ID ?? '';
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const twitchUser = process.env.TWITCH_USERNAME ?? '';
@@ -2124,7 +2147,9 @@ async function logWorkspaceIdDiagnose(): Promise<void> {
 // ─── Heartbeats — skrives hvert 5. min for at System Coverage viser riktig status ──
 function writeHeartbeats(): void {
   const uptime = Math.round(process.uptime());
+  const workspaceId = process.env.WORKSPACE_ID ?? '';
   logSystemEvent({
+    workspaceId,
     source: 'twitch_bot',
     event_type: 'HEARTBEAT',
     title: 'Twitch Bot aktiv',
@@ -2132,6 +2157,7 @@ function writeHeartbeats(): void {
     metadata: { uptime, pid: process.pid },
   });
   logSystemEvent({
+    workspaceId,
     source: 'discord_bot',
     event_type: 'HEARTBEAT',
     title: 'Discord Bot aktiv',
@@ -2139,6 +2165,7 @@ function writeHeartbeats(): void {
     metadata: { guilds: client.guilds.cache.size, uptime, pid: process.pid },
   });
   logSystemEvent({
+    workspaceId,
     source: 'learning_aggregator',
     event_type: 'HEARTBEAT',
     title: 'Learning Aggregator aktiv',
@@ -2146,6 +2173,7 @@ function writeHeartbeats(): void {
     metadata: { uptime, pid: process.pid },
   });
   logSystemEvent({
+    workspaceId,
     source: 'scheduler',
     event_type: 'HEARTBEAT',
     title: 'Scheduler aktiv',
@@ -2153,6 +2181,7 @@ function writeHeartbeats(): void {
     metadata: { uptime, pid: process.pid },
   });
   logSystemEvent({
+    workspaceId,
     source: 'content_factory',
     event_type: 'HEARTBEAT',
     title: 'Content Factory aktiv',
@@ -2160,6 +2189,7 @@ function writeHeartbeats(): void {
     metadata: { uptime, pid: process.pid },
   });
   logSystemEvent({
+    workspaceId,
     source: 'recovery_engine',
     event_type: 'HEARTBEAT',
     title: 'Recovery Engine aktiv',
@@ -2169,7 +2199,7 @@ function writeHeartbeats(): void {
 }
 
 client.once('clientReady', () => {
-  startTwitchBot();
+  startTwitchBot().catch(console.error);
   registerTwitchChat(sendTwitchChatMessage); // wire dashboard /twitch-chat → bot chat
   startClipWorker().catch(console.error);
   startDataApi(Number(process.env.PORT) || 4242);
@@ -2339,7 +2369,7 @@ client.once('clientReady', () => {
 
   setOnSubCallback(tildelTwitchSubRolle);
   setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername) => {
-    const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const wsId = process.env.WORKSPACE_ID ?? '';
     console.log(`[LINKTWITCH_VERIFY_STARTED] discordId=${discordId} twitchUserId=${twitchUserId} twitchUsername=${twitchUsername}`);
     try {
       const guild = client.guilds.cache.first();

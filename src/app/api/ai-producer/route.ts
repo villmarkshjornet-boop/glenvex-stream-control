@@ -6,8 +6,6 @@ import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 import { logSystemEvent } from '@/lib/systemEvents';
 import { getCreatorContext, buildContextPrompt } from '@/lib/ai/creatorContext';
-import { logAgentDecision } from '@/lib/ai/eventLogger';
-
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
@@ -154,6 +152,33 @@ export async function GET() {
 
     const kanalKunnskap = buildContextPrompt(ctx);
 
+    // Read recent decision feedback to improve future recommendations
+    let decisionFeedback = '';
+    if (db) {
+      try {
+        const { data: recentDecisions } = await db
+          .from('ai_agent_decisions')
+          .select('decision_summary,outcome')
+          .eq('workspace_id', getWorkspaceId())
+          .eq('agent_type', 'ai_producer')
+          .in('outcome', ['completed', 'ignored', 'not_relevant'])
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (recentDecisions && recentDecisions.length > 0) {
+          const completed  = recentDecisions.filter((d: any) => d.outcome === 'completed').map((d: any) => `✓ ${d.decision_summary}`).join('\n');
+          const ignored    = recentDecisions.filter((d: any) => d.outcome === 'ignored').map((d: any) => `✗ ${d.decision_summary}`).join('\n');
+          const noRelevant = recentDecisions.filter((d: any) => d.outcome === 'not_relevant').map((d: any) => `⊘ ${d.decision_summary}`).join('\n');
+
+          decisionFeedback = [
+            completed   ? `FUNGERTE (gjennomfør lignende):\n${completed}`  : '',
+            ignored     ? `BLE IGNORERT:\n${ignored}`                       : '',
+            noRelevant  ? `IKKE RELEVANT:\n${noRelevant}`                   : '',
+          ].filter(Boolean).join('\n\n');
+        }
+      } catch {}
+    }
+
     if (apiKey) {
       const openai = new OpenAI({ apiKey });
       const res = await openai.chat.completions.create({
@@ -162,7 +187,7 @@ export async function GET() {
           role: 'system',
           content: `Du er AI-produsent for ${brandName}, en norsk Twitch-streamer. Du kjenner kanalen godt og hjelper med å maksimere vekst og engasjement under stream.
 Kanalens tone: energisk, litt edgy norsk gaming-humor, autentisk, ikke overdrevent corporat.${twitchUrl ? `\nTwitch-kanal: ${twitchUrl} — inkluder alltid denne lenken som CTA i sosiale medier-tekster.` : ''}
-Du skal ALLTID generere faktisk klar-til-bruk innhold for hvert tiltak som involverer en tekst/post – ikke bare si "post noe", men LAG selve teksten.`,
+Du skal ALLTID generere faktisk klar-til-bruk innhold for hvert tiltak som involverer en tekst/post – ikke bare si "post noe", men LAG selve teksten.${decisionFeedback ? `\n\nHISTORISK FEEDBACK PÅ TIDLIGERE ANBEFALINGER:\n${decisionFeedback}\n\nBruk denne historikken til å unngå irrelevante anbefalinger og gjøre lignende av det som fungerte.` : ''}`,
         }, {
           role: 'user',
           content: `Analyser nåværende stream og gi handlingsrettede forslag med ferdig innhold.
@@ -238,29 +263,38 @@ Gi 3-5 tiltak. Alltid generer faktisk innhold for tiltak som krever en tekst. Ti
       (Math.min(activeMembers, 20) / 20) * 40
     ));
 
-    await Promise.all([
-      logSystemEvent({
-        source: 'ai_producer',
-        event_type: 'AI_PRODUCER_ANALYSIS_COMPLETE',
-        title: `AI Producer analyserte stream: ${stream.game ?? 'Ukjent spill'}`,
-        severity: 'info',
-        metadata: {
-          stream: stream.game,
-          viewers: viewerCount,
-          tiltakGenerert: tiltak.length,
-          harHistorikk: streamHistorikk.length > 0,
-          engagementScore,
-          harKanalKunnskap: ctx.streamCount > 0,
-        },
-      }),
-      logAgentDecision({
-        agent_type: 'ai_producer',
-        decision_type: 'stream_analysis',
-        input_context: { game: stream.game, viewers: viewerCount, historyCount: streamHistorikk.length, streamCount: ctx.streamCount },
-        decision_summary: `Analyserte ${stream.game ?? 'stream'} med ${viewerCount} seere. Genererte ${tiltak.length} tiltak. Kanalminne: ${ctx.streamCount} streams.`,
-        outcome: tiltak.length > 0 ? 'tips_generated' : 'no_tips',
-      }),
-    ]).catch(() => {});
+    await logSystemEvent({
+      source: 'ai_producer',
+      event_type: 'AI_PRODUCER_ANALYSIS_COMPLETE',
+      title: `AI Producer analyserte stream: ${stream.game ?? 'Ukjent spill'}`,
+      severity: 'info',
+      metadata: {
+        stream: stream.game,
+        viewers: viewerCount,
+        tiltakGenerert: tiltak.length,
+        harHistorikk: streamHistorikk.length > 0,
+        engagementScore,
+        harKanalKunnskap: ctx.streamCount > 0,
+      },
+    }).catch(() => {});
+
+    // Log each tiltak as a separate trackable decision for individual feedback
+    if (db && tiltak.length > 0) {
+      const ws = getWorkspaceId();
+      for (let i = 0; i < (tiltak as any[]).length; i++) {
+        const t = (tiltak as any[])[i];
+        try {
+          await db.from('ai_agent_decisions').insert({
+            workspace_id:     ws,
+            agent_type:       'ai_producer',
+            decision_type:    'recommendation',
+            decision_summary: ((t.tekst ?? `Tiltak ${i + 1}`) as string).slice(0, 200),
+            input_context:    { game: stream.game, viewerCount: stream.viewerCount ?? 0, type: t.type, prioritet: t.prioritet },
+            outcome:          'pending',
+          });
+        } catch {}
+      }
+    }
 
     return NextResponse.json({
       isLive: true,

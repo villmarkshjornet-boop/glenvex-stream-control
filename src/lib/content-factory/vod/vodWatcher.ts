@@ -25,7 +25,7 @@ async function getTwitchToken(): Promise<string | null> {
   } catch { return null; }
 }
 
-async function hentSisteVod(token: string): Promise<{ id: string; title: string; category: string; duration: number; url: string } | null> {
+async function hentSisteVod(token: string, minDurationSek = 5 * 60): Promise<{ id: string; title: string; category: string; duration: number; url: string; stream_id?: string; created_at?: string } | null> {
   const username = process.env.TWITCH_USERNAME;
   if (!username) return null;
 
@@ -38,19 +38,32 @@ async function hentSisteVod(token: string): Promise<{ id: string; title: string;
     const userId = userData.data?.[0]?.id;
     if (!userId) return null;
 
-    // Hent siste arkiverte stream
-    const vodRes = await fetch(`${TWITCH_API}/videos?user_id=${userId}&type=archive&first=1`, {
+    // Hent siste 3 arkiverte streams (fallback-kandidater hvis nyeste ikke er klar ennå)
+    const vodRes = await fetch(`${TWITCH_API}/videos?user_id=${userId}&type=archive&first=3`, {
       headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, Authorization: `Bearer ${token}` },
     });
     const vodData = await vodRes.json() as any;
-    const vod = vodData.data?.[0];
-    if (!vod) return null;
+    const vods: any[] = vodData.data ?? [];
+    if (vods.length === 0) return null;
 
-    let durationSek = 0;
-    const m = (vod.duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
-    if (m) durationSek = (parseInt(m[1]??'0')*3600)+(parseInt(m[2]??'0')*60)+parseInt(m[3]??'0');
+    const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
 
-    return { id: vod.id, title: vod.title, category: vod.game_name ?? 'Ukjent', duration: durationSek, url: vod.url };
+    for (const vod of vods) {
+      let durationSek = 0;
+      const m = (vod.duration ?? '').match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+      if (m) durationSek = (parseInt(m[1]??'0')*3600)+(parseInt(m[2]??'0')*60)+parseInt(m[3]??'0');
+
+      // Filtrer: for kort (sannsynligvis ikke den riktige streamen)
+      if (durationSek < minDurationSek) continue;
+
+      // Filtrer: eldre enn 24 timer (forrige stream, ikke den som nettopp endte)
+      const vodCreatedAt = vod.created_at ? new Date(vod.created_at).getTime() : 0;
+      if (vodCreatedAt > 0 && vodCreatedAt < cutoff24h) continue;
+
+      return { id: vod.id, title: vod.title, category: vod.game_name ?? 'Ukjent', duration: durationSek, url: vod.url, stream_id: vod.stream_id, created_at: vod.created_at };
+    }
+
+    return null;
   } catch { return null; }
 }
 
@@ -80,6 +93,36 @@ export async function sjekkForNyVod(
     console.log('[VODWatcher] Stream gikk offline – venter 15 min');
   }
   forrigeStream = erLive;
+
+  // Fallback: boten restartet mens streamen var offline — sjekk system_events for å gjenopprette tilstand
+  if (!erLive && !offlineSiden) {
+    try {
+      const db = getDb();
+      const ws = getWorkspaceId();
+      if (db && ws) {
+        const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+        const { data } = await db
+          .from('system_events')
+          .select('created_at')
+          .eq('workspace_id', ws)
+          .eq('event_type', 'STREAM_OFFLINE_DETECTED')
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data?.created_at) {
+          const offlineAt = new Date(data.created_at);
+          const minutesSince = (Date.now() - offlineAt.getTime()) / 60_000;
+          if (minutesSince >= 15) {
+            // Boten restartet og 15 min har allerede gått — start VOD-søk umiddelbart
+            console.log(`[VODWatcher] Gjenopprettet offline-tilstand fra system_events (${Math.round(minutesSince)} min siden)`);
+            offlineSiden = offlineAt;
+            forrigeStream = false;
+          }
+        }
+      }
+    } catch {}
+  }
 
   if (erLive || !offlineSiden) {
     return { funnet: false, melding: erLive ? 'Stream er live' : 'Ingen stream registrert' };
@@ -112,7 +155,7 @@ export async function sjekkForNyVod(
   }
 
   console.log(`[VODWatcher] Ny VOD funnet: "${vod.title}" (${vod.id}) – starter pipeline`);
-  logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_AUTO_QUEUE_STARTED', title: `VOD satt i kø: "${vod.title}"`, severity: 'info', metadata: { vodId: vod.id, title: vod.title, category: vod.category, duration: vod.duration } }).catch(() => {});
+  logSystemEvent({ source: 'vod_watcher', event_type: 'VOD_AUTO_QUEUE_STARTED', title: `VOD satt i kø: "${vod.title}"`, severity: 'info', metadata: { vodId: vod.id, title: vod.title, category: vod.category, duration: vod.duration, stream_id: vod.stream_id } }).catch(() => {});
   offlineSiden = null; // Reset så vi ikke starter flere ganger
 
   // Start pipeline asynkront

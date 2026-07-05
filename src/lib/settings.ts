@@ -8,13 +8,13 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const DEFAULT_SETTINGS: Settings = {
   discordLiveChannelId: process.env.DISCORD_LIVE_CHANNEL_ID || '',
   discordLiveRoleId: process.env.DISCORD_LIVE_ROLE_ID || '',
-  twitchUsername: process.env.TWITCH_USERNAME || 'glenvex',
-  twitchUrl: process.env.TWITCH_URL || 'https://twitch.tv/glenvex',
+  twitchUsername: process.env.TWITCH_USERNAME || '',
+  twitchUrl: process.env.TWITCH_URL || '',
   autoPostLive: true,
   autoPostPromo: false,
   pingRole: true,
   socials: {
-    twitch: process.env.TWITCH_URL || 'https://twitch.tv/glenvex',
+    twitch: process.env.TWITCH_URL || '',
   },
   lastNotifiedStreamId: null,
 };

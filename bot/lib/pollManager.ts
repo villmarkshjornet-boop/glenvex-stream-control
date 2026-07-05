@@ -61,6 +61,7 @@ interface PollContext {
   usedQuestions:    string[];   // recently asked question texts — cross-session dedup
   chatActivity:     'dead' | 'low' | 'medium' | 'high';
   streamDurationMin: number;
+  topicScores:      Map<string, { engagementScore: number; negativeCount: number; lastAskedAt: string | null; askedCount: number }>;
 }
 
 export interface PollManagerConfig {
@@ -87,6 +88,7 @@ export class PollManager {
   private lastPollAt       = 0;
   private lastPollType: PollType | null = null;
   private pollTypeIndex    = 0;
+  private _pendingDecisionReason: { reason: string; signals: Record<string, unknown>; exploration: boolean } | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: PollManagerConfig) {
@@ -305,6 +307,23 @@ export class PollManager {
       usedQuestions = (recentQs ?? []).map((p: any) => p.question as string).filter(Boolean);
     }
 
+    // Load topic engagement scores for choosePollType scoring
+    let topicScores: Map<string, { engagementScore: number; negativeCount: number; lastAskedAt: string | null; askedCount: number }> = new Map();
+    if (db) {
+      const { data: scores } = await db
+        .from('poll_topic_scores')
+        .select('topic_key,engagement_score,negative_count,last_asked_at,asked_count')
+        .eq('workspace_id', ws);
+      for (const s of (scores ?? [])) {
+        topicScores.set(s.topic_key, {
+          engagementScore: s.engagement_score ?? 0.5,
+          negativeCount:   s.negative_count   ?? 0,
+          lastAskedAt:     s.last_asked_at    ?? null,
+          askedCount:      s.asked_count      ?? 0,
+        });
+      }
+    }
+
     const chatActivity: PollContext['chatActivity'] =
       msgsPerMin === 0 ? 'dead' :
       msgsPerMin < 3   ? 'low' :
@@ -319,40 +338,110 @@ export class PollManager {
       usedQuestions,
       chatActivity,
       streamDurationMin: Math.round(streamAgeMs / 60_000),
+      topicScores,
     };
   }
 
   // ─── Poll type selector ──────────────────────────────────────────────────────
 
   private choosePollType(ctx: PollContext, chatDead: boolean): PollType | null {
-    // Try to go through the rotation, skip types we can't build well
-    for (let attempts = 0; attempts < POLL_TYPE_ROTATION.length; attempts++) {
-      const type = POLL_TYPE_ROTATION[this.pollTypeIndex % POLL_TYPE_ROTATION.length];
-      this.pollTypeIndex++;
+    const now = Date.now();
 
-      // Don't repeat last type in this session
-      if (type === this.lastPollType) continue;
+    // Score each poll type
+    const scored: Array<{ type: PollType; score: number; reason: string; blocked: boolean }> = POLL_TYPE_ROTATION.map(type => {
+      // ── Hard blockers ──
+      if (type === this.lastPollType) return { type, score: -1, reason: 'Same as last poll this session', blocked: true };
+      if (type === 'GAME_PREFERENCE' && ctx.recentGames.length < 2) return { type, score: -1, reason: 'Not enough recent games', blocked: true };
+      if (type === 'PARTNER_FIT' && ctx.activePartners.length < 2) return { type, score: -1, reason: 'Not enough active partners', blocked: true };
+      if (chatDead && type === 'DISCORD_GROWTH') return { type, score: -1, reason: 'Chat dead, skip DISCORD_GROWTH', blocked: true };
 
-      // GAME_PREFERENCE requires at least 3 recent games
-      if (type === 'GAME_PREFERENCE' && ctx.recentGames.length < 2) continue;
-
-      // PARTNER_FIT requires active partners
-      if (type === 'PARTNER_FIT' && ctx.activePartners.length < 2) continue;
-
-      // If chat is dead, skip DISCORD_GROWTH (useless) unless it's a wake-chat attempt
-      if (chatDead && type === 'DISCORD_GROWTH') continue;
-
-      // Cross-session dedup: skip if the same question was asked in the last 48h
+      // 48h exact-match dedup
       const preview = this.buildPoll(type, ctx);
-      if (preview && ctx.usedQuestions.includes(preview.question)) continue;
+      if (preview && ctx.usedQuestions.includes(preview.question)) {
+        return { type, score: -1, reason: 'Question used in last 48h', blocked: true };
+      }
 
-      return type;
+      // ── Scoring ──
+      let score = 0.5; // base
+      let reason = 'baseline';
+
+      const topicData = ctx.topicScores.get(type);
+
+      // Historical engagement boost/penalty from poll_topic_scores
+      if (topicData) {
+        const daysSinceAsked = topicData.lastAskedAt
+          ? (now - new Date(topicData.lastAskedAt).getTime()) / (24 * 3600_000)
+          : 99;
+
+        // Engagement score boost (0 to +0.3)
+        score += (topicData.engagementScore - 0.5) * 0.6;
+
+        // Negative signal penalty
+        const negRate = topicData.askedCount > 0 ? topicData.negativeCount / topicData.askedCount : 0;
+        if (negRate > 0.5) score -= 0.2; // more than half attempts had low engagement
+
+        // Recency penalty — asked within 7 days but more than 48h (not hard blocked)
+        if (daysSinceAsked < 7) score -= 0.15 * (1 - daysSinceAsked / 7);
+
+        reason = `eng=${topicData.engagementScore.toFixed(2)},neg=${topicData.negativeCount},daysSince=${daysSinceAsked.toFixed(1)}`;
+      }
+
+      // ai_agent_memory boost: if memory hints mention games and type is GAME_PREFERENCE
+      if (type === 'GAME_PREFERENCE' && ctx.aiMemoryHints.some(h => h.startsWith('[game]') || h.startsWith('[stream_pattern]'))) {
+        score += 0.18;
+        reason += ',memBoost=game';
+      }
+
+      // STREAM_DIRECTION bonus when chat is active (good for live engagement)
+      if (type === 'STREAM_DIRECTION' && (ctx.chatActivity === 'high' || ctx.chatActivity === 'medium')) {
+        score += 0.1;
+      }
+
+      // CONTENT_TYPE bonus when audience_preference memory exists
+      if (type === 'CONTENT_TYPE' && ctx.aiMemoryHints.some(h => h.startsWith('[audience_preference]'))) {
+        score += 0.12;
+        reason += ',memBoost=audience';
+      }
+
+      return { type, score: Math.max(0, Math.min(1, score)), reason, blocked: false };
+    });
+
+    const eligible = scored.filter(s => !s.blocked);
+    if (eligible.length === 0) {
+      // All blocked — fall back to STREAM_DIRECTION
+      this.logSkip('Alle poll-typer blokkert — faller tilbake til STREAM_DIRECTION', { usedCount: ctx.usedQuestions.length });
+      return 'STREAM_DIRECTION';
     }
 
-    // All types were blocked by dedup — fall back to STREAM_DIRECTION (most generic)
-    // Prevents the poll engine from going completely silent after many recent polls.
-    this.logSkip('Alle poll-typer nylig brukt — faller tilbake til STREAM_DIRECTION', { usedCount: ctx.usedQuestions.length });
-    return 'STREAM_DIRECTION';
+    // Explore/exploit: 20% chance to pick non-top type for variety
+    const explore = Math.random() < 0.2;
+    let chosen: typeof eligible[0];
+
+    if (explore && eligible.length > 1) {
+      // Pick a random type that wasn't the best scorer (for variety)
+      const sorted = [...eligible].sort((a, b) => b.score - a.score);
+      const nonTop = sorted.slice(1); // exclude best
+      chosen = nonTop[Math.floor(Math.random() * nonTop.length)];
+      chosen = { ...chosen, reason: chosen.reason + ',explore=true' };
+    } else {
+      // Exploit: pick highest scoring
+      chosen = eligible.reduce((best, s) => s.score > best.score ? s : best);
+    }
+
+    // Store decision reason for this poll (used in createPollRecord)
+    this._pendingDecisionReason = {
+      reason: `Valgte ${chosen.type} (score=${chosen.score.toFixed(2)}): ${chosen.reason}`,
+      signals: {
+        recentGame: ctx.recentGames[0] ?? null,
+        memoryHints: ctx.aiMemoryHints.slice(0, 3),
+        engagementScore: ctx.topicScores.get(chosen.type)?.engagementScore ?? null,
+        exploration: explore,
+        allScores: Object.fromEntries(eligible.map(s => [s.type, s.score.toFixed(2)])),
+      },
+      exploration: explore,
+    };
+
+    return chosen.type;
   }
 
   // ─── Poll builder per type ──────────────────────────────────────────────────
@@ -600,20 +689,24 @@ export class PollManager {
 
     try {
       const { data, error } = await db.from('poll_events').insert({
-        workspace_id: this.cfg.workspaceId,
-        stream_id:    this.cfg.streamId,
-        poll_type:    opts.pollType,
-        platform:     'both',
-        question:     opts.question,
-        options:      opts.options.map(o => ({ label: o.label, twitchVotes: 0, discordVotes: 0 })),
-        reason:       opts.reason,
-        context:      { recentGames: opts.ctx.recentGames, chatActivity: opts.ctx.chatActivity, streamDurationMin: opts.ctx.streamDurationMin },
-        status:       'active',
+        workspace_id:    this.cfg.workspaceId,
+        stream_id:       this.cfg.streamId,
+        poll_type:       opts.pollType,
+        platform:        'both',
+        question:        opts.question,
+        options:         opts.options.map(o => ({ label: o.label, twitchVotes: 0, discordVotes: 0 })),
+        reason:          opts.reason,
+        context:         { recentGames: opts.ctx.recentGames, chatActivity: opts.ctx.chatActivity, streamDurationMin: opts.ctx.streamDurationMin },
+        status:          'active',
+        decision_reason: this._pendingDecisionReason ?? null,
       }).select('id').single();
 
       if (error) throw error;
-      return data?.id ?? null;
+      const pollId = data?.id ?? null;
+      this._pendingDecisionReason = null;
+      return pollId;
     } catch (err: any) {
+      this._pendingDecisionReason = null;
       console.error('[PollManager] createPollRecord feilet:', err?.message);
       return null;
     }
@@ -704,6 +797,39 @@ export class PollManager {
         },
         updated_at: now,
       }, { onConflict: 'workspace_id,key' });
+    } catch {}
+
+    // Update poll_topic_scores for learning-based type selection
+    try {
+      const engScore = opts.totalVotes > 0 ? Math.min(1.0, opts.totalVotes / 20) : 0;
+      const negSignal = opts.totalVotes < 3;
+
+      const { data: existing } = await db
+        .from('poll_topic_scores')
+        .select('asked_count,total_votes,negative_count')
+        .eq('workspace_id', ws)
+        .eq('topic_key', opts.pollType)
+        .maybeSingle();
+
+      const prevAsked = existing?.asked_count ?? 0;
+      const prevTotal = existing?.total_votes ?? 0;
+      const prevNeg   = existing?.negative_count ?? 0;
+      const newAsked  = prevAsked + 1;
+      const newTotal  = prevTotal + opts.totalVotes;
+
+      await db.from('poll_topic_scores').upsert({
+        workspace_id:     ws,
+        topic_key:        opts.pollType,
+        poll_type:        opts.pollType,
+        asked_count:      newAsked,
+        total_votes:      newTotal,
+        avg_votes:        Math.round(newTotal / newAsked),
+        engagement_score: engScore,
+        negative_count:   prevNeg + (negSignal ? 1 : 0),
+        last_winner:      opts.winner?.label ?? null,
+        last_asked_at:    now,
+        updated_at:       now,
+      }, { onConflict: 'workspace_id,topic_key' });
     } catch {}
   }
 

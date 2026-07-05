@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Eye, Users, MessageSquare, Clock, AlertTriangle, ArrowRight, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { tidSiden } from './helpers';
-import type { HeroStream } from './types';
+import type { HeroStream, LiveData } from './types';
 import { useI18n } from '@/contexts/I18nContext';
 
 const GRADE_STYLE: Record<HeroStream['grade'], { text: string; ring: string; glow: string }> = {
@@ -22,7 +22,11 @@ function formatDuration(min: number, locale: string): string {
     : h > 0 ? `${h}t ${m}m` : `${m}m`;
 }
 
-export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | undefined; loading: boolean }) {
+export function Hero({ heroStream, loading, lastVodSync }: {
+  heroStream: HeroStream | null | undefined;
+  loading: boolean;
+  lastVodSync?: LiveData['lastVodSync'];
+}) {
   const { t, locale } = useI18n();
 
   if (loading) {
@@ -75,6 +79,8 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
 
   const grade = GRADE_STYLE[heroStream.grade];
   const isEstimate = !heroStream.checklist.streamHistory;
+  const isStaleData = !!heroStream.endedAt &&
+    (Date.now() - new Date(heroStream.endedAt).getTime()) > 48 * 3600_000;
 
   return (
     <div className="glass-card rounded-2xl p-6 shadow-green-sm">
@@ -94,6 +100,30 @@ export function Hero({ heroStream, loading }: { heroStream: HeroStream | null | 
             {isEstimate && (
               <p className="flex items-center gap-1.5 text-xs text-yellow-400 mt-1.5">
                 <AlertTriangle size={12} /> {heroStream.historyMissingReason ?? t('hero.estimate')}
+              </p>
+            )}
+            {heroStream.source === 'vod_recovery' && !isEstimate && (
+              <span className="inline-block text-[10px] text-g-muted/50 mt-1">
+                ↻ Hentet fra VOD
+              </span>
+            )}
+            {isStaleData && (
+              <p className="text-[10px] text-g-muted/50 mt-1 flex items-center gap-1.5">
+                <AlertTriangle size={10} className="text-g-muted/40" />
+                Data kan være utdatert ·{' '}
+                <Link href="/content-factory-admin" className="underline underline-offset-2 hover:text-g-muted transition-colors">
+                  Sync
+                </Link>
+              </p>
+            )}
+            {lastVodSync && (
+              <p className="text-[10px] text-g-muted/40 mt-1">
+                {lastVodSync.checkedAt
+                  ? `Siste VOD-sync: ${tidSiden(lastVodSync.checkedAt)}`
+                  : 'VOD-sync: aldri sjekket i dag'}
+                {lastVodSync.vodFound && lastVodSync.lastVodTitle && (
+                  <span className="ml-1 text-g-green/60">· {lastVodSync.lastVodTitle.slice(0, 40)}</span>
+                )}
               </p>
             )}
           </div>

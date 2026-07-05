@@ -21,10 +21,11 @@ import type { Client } from 'discord.js';
 import { WorkspaceRuntime, type WorkspaceConfig } from './workspaceRuntime';
 import { logSystemEvent } from './systemEvents';
 
-const LIVE_CHECK_INTERVAL_MS = 2 * 60 * 1000;   // Live-sjekk hvert 2. min
-const SYNC_INTERVAL_MS       = 3 * 60 * 1000;   // Sync nye workspaces hvert 3. min
-const STAGGER_MS             = 8_000;            // 8s mellom hvert workspace (rate limit buffer)
-const DEFAULT_WS             = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const LIVE_CHECK_INTERVAL_MS  = 2 * 60 * 1000;   // Live-sjekk hvert 2. min
+const SYNC_INTERVAL_MS        = 3 * 60 * 1000;   // Sync nye workspaces hvert 3. min
+const FAST_PICKUP_INTERVAL_MS = 30_000;           // Fast-pickup sjekk hvert 30. sek
+const STAGGER_MS              = 8_000;            // 8s mellom hvert workspace (rate limit buffer)
+const DEFAULT_WS              = process.env.WORKSPACE_ID ?? '';
 
 const runtimes = new Map<string, WorkspaceRuntime>();
 
@@ -179,6 +180,61 @@ async function runStaggeredLiveChecks(discordClient: Client): Promise<void> {
   }
 }
 
+// ── Fast pickup: plukk opp nyaktiverte workspaces uten å vente på 3-min sync ──
+
+async function checkForNewlyActivatedWorkspaces(discordClient: Client): Promise<void> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+
+  try {
+    const cutoff10m = new Date(Date.now() - 10 * 60_000).toISOString();
+
+    const qs = new URLSearchParams({
+      select:     'workspace_id',
+      event_type: 'eq.WORKSPACE_ONBOARDING_READY',
+      created_at: `gte.${cutoff10m}`,
+    });
+
+    const res = await fetch(`${url}/rest/v1/system_events?${qs}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      console.error(`[WorkspaceManager] fast-pickup Supabase ${res.status}`);
+      return;
+    }
+
+    const rows = await res.json() as { workspace_id: string }[];
+    if (!rows.length) return;
+
+    // Deduplicer — ett workspace kan ha flere events i vinduet
+    const candidateIds = [...new Set(rows.map(r => r.workspace_id))];
+    const newIds = candidateIds.filter(id => id && id !== DEFAULT_WS && !runtimes.has(id));
+
+    if (newIds.length === 0) return;
+
+    console.log(`[WorkspaceManager] Fast-pickup: ${newIds.length} nytt workspace(r) oppdaget — kjører sync`);
+
+    await syncWorkspaces(discordClient);
+
+    for (const wsId of newIds) {
+      logSystemEvent({
+        workspaceId: wsId,
+        source: 'workspace_manager',
+        event_type: 'WORKSPACE_FAST_PICKUP',
+        title: `Fast-pickup: workspace ${wsId} plukket opp via WORKSPACE_ONBOARDING_READY`,
+        severity: 'info',
+        metadata: { workspaceId: wsId, timestamp: new Date().toISOString() },
+      });
+    }
+  } catch (err: any) {
+    // Aldri krasj WorkspaceManager på grunn av fast-pickup
+    console.error('[WorkspaceManager] fast-pickup feil:', err.message?.slice(0, 120));
+  }
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 export function startWorkspaceManager(discordClient: Client): void {
@@ -220,6 +276,10 @@ export function startWorkspaceManager(discordClient: Client): void {
 
     // Periodisk sync — oppdager nye alpha-testere uten restart
     setInterval(() => syncWorkspaces(discordClient).catch(() => {}), SYNC_INTERVAL_MS);
+
+    // Fast-pickup — sjekker hvert 30. sekund for nyaktiverte workspaces
+    // (WORKSPACE_ONBOARDING_READY-event) for å unngå opptil 3 minutters ventetid
+    setInterval(() => checkForNewlyActivatedWorkspaces(discordClient).catch(() => {}), FAST_PICKUP_INTERVAL_MS);
 
   }, 20_000);
 }

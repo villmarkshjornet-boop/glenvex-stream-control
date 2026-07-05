@@ -44,6 +44,7 @@ export async function POST() {
   const { error } = await db.from('workspaces').update({
     onboarding_completed_at: now,
     onboarding_step: 5,
+    alpha_enabled: true,   // WorkspaceManager requires this to pick up the workspace
     updated_at: now,
   }).eq('id', workspaceId);
 
@@ -56,6 +57,18 @@ export async function POST() {
     title: `Onboarding fullført for workspace ${workspaceId}`,
     severity: 'info',
     metadata: { workspaceId, completedAt: now, twitchLogin: ws?.twitch_login, discordGuildId: ws?.discord_guild_id, liveChannelId },
+  }); } catch {}
+
+  // Fast-notify: skriv WORKSPACE_ONBOARDING_READY med severity 'critical' så
+  // WorkspaceManager sin 30-sekunders poll kan plukke opp workspace'et umiddelbart
+  // istedenfor å vente på den ordinære 3-minutters sync-syklusen.
+  try { await db.from('system_events').insert({
+    workspace_id: workspaceId,
+    source: 'onboarding',
+    event_type: 'WORKSPACE_ONBOARDING_READY',
+    title: `Workspace ${workspaceId} klar for bot-oppstart (fast-pickup)`,
+    severity: 'critical',
+    metadata: { alpha_enabled: true, source: 'onboarding_activate', completedAt: now },
   }); } catch {}
 
   return NextResponse.json({ ok: true });

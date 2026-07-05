@@ -115,6 +115,20 @@ export async function GET(req: NextRequest) {
 
   if (!db) return NextResponse.redirect(`${fallbackUrl}?error=db_unavailable`);
 
+  // Verify workspace exists before updating — Supabase .update().eq() returns error:null even on 0-row matches
+  const { data: wsCheck } = await db.from('workspaces').select('id').eq('id', wsId).single();
+  if (!wsCheck) {
+    void db.from('system_events').insert({
+      workspace_id: wsId,
+      source:       'onboarding',
+      event_type:   'OAUTH_DISCORD_WORKSPACE_MISMATCH',
+      title:        `Discord OAuth: workspace ikke funnet (wsId=${wsId})`,
+      severity:     'warning',
+      metadata:     { wsId, provider: 'discord', reason: 'workspace_not_found' },
+    });
+    return NextResponse.redirect(`${fallbackUrl}?step=1&error=workspace_ikke_funnet`);
+  }
+
   const { error: dbErr } = await db.from('workspaces').update({
     discord_guild_id:     resolvedGuildId,
     discord_guild_name:   resolvedGuildName,

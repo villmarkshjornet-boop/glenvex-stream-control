@@ -87,7 +87,7 @@ async function helixGet(clientId: string, url: string, isRetry = false): Promise
     // Log to system_events as critical — this surfaces in dashboard system health
     const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-    const ws    = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const ws    = process.env.WORKSPACE_ID ?? '';
     if (sbUrl && sbKey) {
       fetch(`${sbUrl}/rest/v1/system_events`, {
         method: 'POST',

@@ -344,6 +344,64 @@ Returner KUN gyldig JSON:
       }
     }
 
+    // ── Write Stream Coach learning to ai_agent_memory ──────────────────────
+    if (db && analyse && knownStreamId) {
+      const learningPoints: Array<{ key: string; summary: string; type: string; positive: boolean }> = [];
+
+      if (Array.isArray(analyse.fungerteBra) && analyse.fungerteBra.length > 0) {
+        learningPoints.push({
+          key:      `coach_positive_${knownStreamId}`,
+          summary:  (analyse.fungerteBra as string[]).join(' | ').slice(0, 200),
+          type:     'stream_positive',
+          positive: true,
+        });
+      }
+      if (Array.isArray(analyse.fungerteIkke) && analyse.fungerteIkke.length > 0) {
+        learningPoints.push({
+          key:      `coach_negative_${knownStreamId}`,
+          summary:  (analyse.fungerteIkke as string[]).join(' | ').slice(0, 200),
+          type:     'stream_negative',
+          positive: false,
+        });
+      }
+      if (typeof analyse.toppInsikt === 'string' && analyse.toppInsikt.length > 0) {
+        learningPoints.push({
+          key:      `coach_insight_${knownStreamId}`,
+          summary:  analyse.toppInsikt.slice(0, 200),
+          type:     'stream_insight',
+          positive: true,
+        });
+      }
+
+      for (const lp of learningPoints) {
+        try {
+          await db.from('ai_agent_memory').upsert({
+            workspace_id:     workspaceId,
+            agent_type:       'stream_coach',
+            memory_type:      lp.type,
+            key:              lp.key,
+            summary:          lp.summary,
+            confidence_score: 0.7,
+            metadata:         { streamId: knownStreamId, positive: lp.positive, source: 'stream_coach' },
+            updated_at:       new Date().toISOString(),
+          }, { onConflict: 'workspace_id,agent_type,memory_type,key' });
+        } catch {}
+      }
+
+      if (learningPoints.length > 0) {
+        try {
+          await db.from('system_events').insert({
+            workspace_id: workspaceId,
+            source:       'stream_coach',
+            event_type:   'STREAM_COACH_LEARNING_SAVED',
+            title:        `Stream Coach lagret ${learningPoints.length} læringspunkter fra stream`,
+            severity:     'info',
+            metadata:     { streamId: knownStreamId, learningPoints: learningPoints.map(l => l.key) },
+          });
+        } catch {}
+      }
+    }
+
     // ── Diagnostics: log when audience data is missing ───────────────────────
     if (!audienceData) {
       void db?.from('system_events').insert({

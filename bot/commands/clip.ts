@@ -6,7 +6,7 @@ export const clipCommand = {
     .setDescription('Forklarer hvordan du kan lage clips fra streamen.'),
 
   async execute(interaction: ChatInputCommandInteraction) {
-    const twitchUrl = process.env.TWITCH_URL || 'https://twitch.tv/glenvex';
+    const twitchUrl = process.env.TWITCH_URL || '';
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff41)

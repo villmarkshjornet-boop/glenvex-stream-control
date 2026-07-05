@@ -80,7 +80,7 @@ async function getWorkspaceData(workspaceId: string): Promise<WorkspaceData | nu
 
 // ─── Live status check ────────────────────────────────────────────────────────
 
-async function isTwitchLive(workspaceId: string): Promise<boolean> {
+export async function isTwitchLive(workspaceId: string): Promise<boolean> {
   try {
     const db = getBotDb();
     if (!db) return true; // fail-open: if DB is down, assume live to not block

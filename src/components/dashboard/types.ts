@@ -87,6 +87,7 @@ export interface HeroStream {
   ok: boolean;
   failureReasons: string[];
   historyMissingReason: string | null;
+  source?: 'stream_history' | 'vod_recovery' | 'event_fallback';
   dataIntegrity: {
     status: 'full' | 'partial' | 'broken';
     botStatus: 'ok' | 'crashed' | 'offline' | 'auth_failed' | 'unknown' | 'manual_repair';
@@ -157,6 +158,11 @@ export interface LiveData {
   pollManager?: PollManagerData | null;
   twitchAuthStatus?: 'ok' | 'token_fetch_failed' | 'auth_failed' | 'unknown';
   recentStreams?: RecentStream[];
+  lastVodSync?: {
+    checkedAt: string | null;
+    vodFound: boolean | null;
+    lastVodTitle: string | null;
+  };
   debug?: Record<string, any>;
   ts: string;
 }

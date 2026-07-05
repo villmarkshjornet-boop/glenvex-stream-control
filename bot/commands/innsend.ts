@@ -14,7 +14,7 @@ export const innsendCommand = {
     const beskrivelse = interaction.options.getString('beskrivelse') ?? 'Ingen beskrivelse';
     const brukernavn = interaction.user.username;
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://glenvex-stream-control.vercel.app';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
 
     try {
       await fetch(`${appUrl}/api/clips-queue`, {

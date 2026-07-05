@@ -31,6 +31,9 @@ export async function GET() {
           followerGain: s.followers_gained ?? 0,
           subsGained: s.subs_gained ?? 0,
           raidsDuring: s.raids_during ?? 0,
+          source: s.source ?? null,
+          vodId: s.vod_id ?? null,
+          vodUrl: s.vod_url ?? null,
         }));
         return NextResponse.json(history);
       }

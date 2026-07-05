@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 import { sendTwitchChatMessage } from './twitchBot';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const DISCORD_API  = 'https://discord.com/api/v10';
 
 // ── Supabase ──────────────────────────────────────────────────────────────────

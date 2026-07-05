@@ -13,9 +13,9 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { getRandomActivePartner, getFeaturedPartner, PartnerInfo, trackPartnerExposure } from './partnerHelper';
 import { logDecision, recordOutcome } from './decisionEngine';
-import { getPartnerKnowledgeBoost } from './learningEngine';
+import { getPartnerKnowledgeBoost, getTimingKnowledgeBoost, getPreferredPlatform } from './learningEngine';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 const MIN_CONFIDENCE = 0.35; // minimum score to fire a promo
 const MAX_POSTS_PER_STREAM_DEFAULT = 3;
 const COOLDOWN_MINUTES_DEFAULT = 45;
@@ -79,6 +79,7 @@ export interface PromotionContext {
   postsThisStream: number;
   settings: PartnerBotSettings;
   recentRaidAt?: number | null;      // epoch ms of last raid; null/undefined = no raid
+  minutesIntoStream?: number | null; // how many minutes since stream started (for timing intelligence)
 }
 
 export type PromotionReasonCode =
@@ -116,6 +117,8 @@ export interface PromotionDecision {
     audienceMatch: number;
     timingScore: number;
     cooldownPenalty: number;
+    knowledgeBoost?: number;
+    timingBoost?: number;
   } | null;
 }
 
@@ -448,6 +451,15 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     best.score = Math.max(0, Math.min(1, best.score + knowledgeBoost));
   }
 
+  // Timing intelligence: adjust score based on where we are in the stream
+  // (uses stream_behaviour creator_knowledge — max ±0.08)
+  const timingBoost = ctx.minutesIntoStream != null
+    ? await getTimingKnowledgeBoost(workspaceId, ctx.minutesIntoStream).catch(() => 0)
+    : 0;
+  if (timingBoost !== 0) {
+    best.score = Math.max(0, Math.min(1, best.score + timingBoost));
+  }
+
   if (best.score < MIN_CONFIDENCE) {
     await logEvent(workspaceId, 'PARTNER_PROMOTION_SKIPPED', `Partner promo skippet: lav score (${best.score.toFixed(2)})`, {
       reasonCode: 'LOW_SCORE', partnerId: best.partner.id, partnerName: best.partner.navn, score: best.score, triggerType,
@@ -455,10 +467,17 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     return skip(`Score for lav (${best.score.toFixed(2)} < ${MIN_CONFIDENCE})`, 'LOW_SCORE');
   }
 
-  // Determine channel
-  const channel: 'twitch' | 'discord' | 'both' =
-    settings.allowBothChannels && settings.twitchEnabled && settings.discordEnabled ? 'both' :
-    settings.twitchEnabled ? 'twitch' : 'discord';
+  // Determine channel — use platform_preference knowledge if both are enabled and allowBothChannels=false
+  let channel: 'twitch' | 'discord' | 'both';
+  if (settings.allowBothChannels && settings.twitchEnabled && settings.discordEnabled) {
+    channel = 'both';
+  } else if (settings.twitchEnabled && settings.discordEnabled) {
+    // Both enabled but not simultaneous — pick the historically preferred platform
+    const preferredPlatform = await getPreferredPlatform(workspaceId).catch(() => null);
+    channel = (preferredPlatform === 'discord') ? 'discord' : 'twitch';
+  } else {
+    channel = settings.twitchEnabled ? 'twitch' : 'discord';
+  }
 
   // Generate messages
   const [msgTwitch, msgDiscord] = await Promise.all([
@@ -483,6 +502,7 @@ export async function decidePromotion(ctx: PromotionContext): Promise<PromotionD
     timingScore:    triggerType === 'viewer_peak' ? 0.9 : triggerType === 'chat_silence' ? 0.7 : triggerType === 'context_match' ? 0.8 : 0.5,
     cooldownPenalty: best.cooldownPenalty,
     knowledgeBoost,
+    timingBoost,
   };
 
   // requireApproval: store proposal, do not send yet
@@ -616,7 +636,7 @@ export async function dispatchApprovedProposals(opts: {
 }): Promise<void> {
   const sb = getSb();
   if (!sb) return;
-  const wsId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+  const wsId = process.env.WORKSPACE_ID ?? '';
 
   const { data: proposals } = await sb
     .from('partner_proposals')

@@ -6,7 +6,7 @@ import { getStreamplan } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 import { getCommunitySettings } from './botKanalPreferanser';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const GUILD_ID     = process.env.DISCORD_GUILD_ID ?? '';
 const BOT_BRAND    = process.env.BRAND_NAME ?? process.env.TWITCH_USERNAME ?? 'streameren';
 
@@ -388,6 +388,34 @@ export async function sendCommunityHype(communityKanal: TextChannel): Promise<vo
   });
 }
 
+// ─── Community mood helper ────────────────────────────────────────────────────
+
+async function getCommunityMood(
+  communityKanal: TextChannel,
+  isLive: boolean = false,
+): Promise<'quiet' | 'normal' | 'active' | 'hyped'> {
+  try {
+    const msgs = await communityKanal.messages.fetch({ limit: 25 });
+    const cutoff = Date.now() - 30 * 60_000; // last 30 min
+    const recentHuman = [...msgs.values()].filter(
+      m => !m.author.bot && m.createdTimestamp > cutoff
+    );
+    const msgCount = recentHuman.length;
+    const reactionCount = recentHuman.reduce(
+      (s, m) => s + m.reactions.cache.reduce((r, rx) => r + (rx.count ?? 0), 0),
+      0,
+    );
+    const activityScore = msgCount + reactionCount * 0.5 + (isLive ? 10 : 0);
+
+    if (activityScore >= 20) return 'hyped';
+    if (activityScore >= 10) return 'active';
+    if (activityScore >= 3)  return 'normal';
+    return 'quiet';
+  } catch {
+    return 'normal';
+  }
+}
+
 // ─── C3: Idle Detection + Poll + @everyone ───────────────────────────────────
 
 export async function sjekkIdleOgPrompt(
@@ -448,8 +476,8 @@ export async function sjekkIdleOgPrompt(
     metadata: { minutesSinceLastMessage: Math.round(minutesSinceHuman), threshold: idleThresholdMinutes, kanalId: communityKanal.id, workspaceId: WORKSPACE_ID },
   });
 
-  const sent = await genererOgSendIdlePoll(communityKanal, Math.round(minutesSinceHuman));
-  if (!sent) return;
+  const result = await genererOgSendIdlePoll(communityKanal, Math.round(minutesSinceHuman));
+  if (!result.sent) return;
 
   dayState.promptCount++;
   dayState.lastPostAt = Date.now();
@@ -458,7 +486,7 @@ export async function sjekkIdleOgPrompt(
     source: 'community_manager', event_type: 'COMMUNITY_ACTIVITY_PROMPT_SENT',
     title: 'Idle-poll sendt til community-kanal med @everyone',
     severity: 'info',
-    metadata: { promptCount: dayState.promptCount, minutesIdle: Math.round(minutesSinceHuman), kanalId: communityKanal.id, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
+    metadata: { promptCount: dayState.promptCount, minutesIdle: Math.round(minutesSinceHuman), topicKey: result.topicKey, kanalId: communityKanal.id, workspaceId: WORKSPACE_ID, guildId: GUILD_ID },
   });
 }
 
@@ -467,12 +495,35 @@ export async function sjekkIdleOgPrompt(
 async function genererOgSendIdlePoll(
   communityKanal: TextChannel,
   idleMinutes: number,
-): Promise<boolean> {
+): Promise<{ sent: boolean; topicKey: string }> {
   const plan         = await getStreamplan().catch(() => [] as Awaited<ReturnType<typeof getStreamplan>>);
   const activeGames  = [...new Set(plan.filter(e => e.aktiv).map(e => e.spill).filter(Boolean))].slice(0, 3);
   const sisteSpill   = activeGames[0] || 'stream';
   const aiMemory     = await hentAiMemory();
   const apiKey       = process.env.OPENAI_API_KEY;
+
+  // Community mood — influences poll tone
+  const mood = await getCommunityMood(communityKanal);
+
+  // Cross-session dedup: get topics used in last 7 days from system_events
+  let recentTopics: string[] = [];
+  const db = getDb();
+  if (db) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const { data: recentEvents } = await db
+        .from('system_events')
+        .select('metadata')
+        .eq('workspace_id', WORKSPACE_ID)
+        .eq('event_type', 'COMMUNITY_ACTIVITY_PROMPT_SENT')
+        .gte('created_at', sevenDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(14);
+      recentTopics = (recentEvents ?? [])
+        .map((e: any) => e.metadata?.topicKey as string | undefined)
+        .filter((t): t is string => !!t);
+    } catch {}
+  }
 
   // Fetch recent Discord conversation to create context-aware polls
   let recentChatContext = '';
@@ -508,10 +559,14 @@ async function genererOgSendIdlePoll(
             (recentChatContext
               ? `Hva som NYLIG ble diskutert i Discord (bruk dette til å lage en relevant poll!):\n${recentChatContext}\n\n`
               : '') +
+            `Community mood: ${mood}. ${mood === 'quiet' ? 'Lag en lav-terskel poll som er lett å svare på.' : mood === 'hyped' ? 'Lag en energisk, engasjerende poll!' : 'Lag en engasjerende poll.'}\n` +
             `Lag en ENGASJERENDE Discord-poll (norsk) basert på hva som ble diskutert.\n` +
             `Hvis folk snakket om et spill eller et tema — lag poll om DET, ikke noe generisk.\n` +
-            `Stil: energisk, direkte, gaming-fokusert.\n\n` +
-            `Svar med JSON: { "question": "spørsmål maks 80 tegn med emoji", "options": ["svar1","svar2","svar3","svar4"] }\n` +
+            `Stil: energisk, direkte, gaming-fokusert.\n` +
+            (recentTopics.length > 0
+              ? `\nUNNGÅ å lage poll om disse temaene (brukt nylig): ${recentTopics.slice(0, 5).join(', ')}\n`
+              : '') +
+            `\nSvar med JSON: { "question": "spørsmål maks 80 tegn med emoji", "options": ["svar1","svar2","svar3","svar4"] }\n` +
             `Maks 4 alternativer, hvert maks 40 tegn. Bruk gjerne emojier i alternativene.`,
         }],
         max_tokens: 200,
@@ -548,6 +603,11 @@ async function genererOgSendIdlePoll(
     poll = FALLBACK_POLLS[Math.floor(Math.random() * FALLBACK_POLLS.length)];
   }
 
+  // Extract a topic key from the poll question for dedup tracking
+  const topicKey = poll.question
+    ? poll.question.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3)[0] ?? 'ukjent'
+    : 'ukjent';
+
   const description = poll.options
     .map((o, i) => `${DISCORD_REACTIONS[i]} ${o}`)
     .join('\n');
@@ -571,9 +631,9 @@ async function genererOgSendIdlePoll(
       await new Promise(r => setTimeout(r, 300));
     }
 
-    return true;
+    return { sent: true, topicKey };
   } catch {
-    return false;
+    return { sent: false, topicKey };
   }
 }
 

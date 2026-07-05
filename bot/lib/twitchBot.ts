@@ -16,7 +16,8 @@ import { getSubsKanalId, getClipsKanalId as getBotClipsKanalId, getChatKanalId a
 import { addTwitchMessageXP } from './memberTracker';
 import { verifyLinkCode } from './twitchLinkService';
 import { checkCompliance } from './complianceEngine';
-import { canPostToTwitch } from './postingGate';
+import { canPostToTwitch, isTwitchLive } from './postingGate';
+import { getBotDb } from './supabase';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const KANAL      = process.env.TWITCH_USERNAME?.toLowerCase() || 'streameren';
@@ -53,7 +54,7 @@ export function setOnLinkVerifiedCallback(cb: LinkVerifiedCb): void {
 
 // Henter Discord URL fra Supabase hver gang så det alltid er oppdatert
 async function getDiscordMeldinger(): Promise<string[]> {
-  const url = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'https://discord.gg/glenvex';
+  const url = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || '';
   return [
     `Bli med i ${BOT_BRAND} sitt Discord! Snakk med community, se klipp og få live-varsling: ${url} GlitchCat`,
     `Har du ikke jotnet Discord ennå? Kom innom: ${url} PogChamp`,
@@ -64,7 +65,7 @@ async function getDiscordMeldinger(): Promise<string[]> {
 }
 
 async function getSystemPrompt(): Promise<string> {
-  const discordUrl = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || 'discord.gg/glenvex';
+  const discordUrl = await getDiscordInviteUrl().catch(() => '') || process.env.DISCORD_INVITE_URL || '';
   return `Du er community-boten for ${BOT_BRAND} i Twitch-chat.
 Regler:
 - VELDIG korte svar – maks 1 setning, helst under 10 ord
@@ -189,9 +190,13 @@ let forrigeFollowerAntall = -1;
 // /helix/channels/followers requires a broadcaster user token (not app token) since Aug 2023.
 // We read twitch_access_token from Supabase and auto-refresh via twitch_refresh_token on 401.
 let _cachedBroadcasterToken: string | null = null;
+let _cachedBroadcasterTokenAt: number | null = null;
 
 export async function getBroadcasterUserToken(workspaceId?: string): Promise<string | null> {
-  if (_cachedBroadcasterToken) return _cachedBroadcasterToken;
+  const TOKEN_TTL_MS = 3.5 * 60 * 60 * 1000; // 3.5 hours — Twitch tokens expire ~4h
+  if (_cachedBroadcasterToken && _cachedBroadcasterTokenAt && (Date.now() - _cachedBroadcasterTokenAt) < TOKEN_TTL_MS) {
+    return _cachedBroadcasterToken;
+  }
 
   const wsId = workspaceId ?? process.env.WORKSPACE_ID ?? '';
   if (!wsId) {
@@ -293,6 +298,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
         // Return token anyway — some endpoints don't need this scope
       }
       _cachedBroadcasterToken = ws.twitch_access_token;
+      _cachedBroadcasterTokenAt = Date.now();
       return _cachedBroadcasterToken;
     }
 
@@ -332,6 +338,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
       }).eq('id', wsId);
 
       _cachedBroadcasterToken = tokens.access_token;
+      _cachedBroadcasterTokenAt = Date.now();
       logSystemEvent({
         source: 'twitch_bot',
         event_type: 'TWITCH_TOKEN_REFRESHED',
@@ -384,7 +391,7 @@ async function sjekkNyeFollowers() {
 
     if (!res?.ok) {
       // Invalidate cached token so next call re-fetches
-      if (res?.status === 401) _cachedBroadcasterToken = null;
+      if (res?.status === 401) { _cachedBroadcasterToken = null; _cachedBroadcasterTokenAt = null; }
       if (res) {
         logApiError({
           service: 'Twitch',
@@ -436,7 +443,7 @@ async function sjekkNyeFollowers() {
       .filter(Boolean);
 
     // Velkomst i Twitch chat
-    const erLive = (await getSettings()).lastNotifiedStreamId != null;
+    const erLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
     if (erLive && client) {
       const navnListe = nyeNavn.length > 0 ? nyeNavn : Array(Math.min(antallNye, 3)).fill(null).map(() => null as null);
       for (const navn of navnListe) {
@@ -479,8 +486,8 @@ async function sjekkNyeFollowers() {
 
 async function sendTwitchPartnerPromo(): Promise<void> {
   if (!client) return;
-  const settings = getSettings();
-  if (!settings.lastNotifiedStreamId) return; // bare når live
+  const isLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
+  if (!isLive) return; // bare når live
   if (await getPausePartnerPromo().catch(() => false)) return;
 
   const partner = await getRandomActivePartner(process.env.WORKSPACE_ID);
@@ -531,24 +538,50 @@ async function sendTwitchPartnerPromo(): Promise<void> {
   }).catch(() => {});
 }
 
-export function startTwitchBot() {
-  const oauth = process.env.TWITCH_BOT_OAUTH;
+export async function startTwitchBot() {
+  let oauth: string | undefined = process.env.TWITCH_BOT_OAUTH;
   const botNavn = process.env.TWITCH_BOT_USERNAME || KANAL;
 
   if (!oauth) {
-    console.log('  ⚠ TWITCH_BOT_OAUTH mangler – Twitch chat-bot ikke startet');
+    // Fallback: try broadcaster token stored in DB (requires chat:read + chat:edit scopes)
+    const wsId = process.env.WORKSPACE_ID ?? '';
+    const db   = getBotDb();
+    if (db && wsId) {
+      const { data } = await db
+        .from('workspaces')
+        .select('twitch_access_token')
+        .eq('id', wsId)
+        .single()
+        .catch(() => ({ data: null }));
+      if (data?.twitch_access_token) {
+        oauth = `oauth:${data.twitch_access_token}`;
+        console.log('  ℹ TWITCH_BOT_OAUTH ikke satt — bruker broadcaster token fra DB som fallback');
+        logSystemEvent({
+          source: 'twitch_bot',
+          event_type: 'TWITCH_BOT_USING_BROADCASTER_TOKEN',
+          title: 'Twitch chat: bruker broadcaster token fra DB (TWITCH_BOT_OAUTH ikke satt)',
+          severity: 'info',
+          metadata: { channel: KANAL, wsId },
+        });
+      }
+    }
+  }
+
+  if (!oauth) {
+    console.log('  ⚠ TWITCH_BOT_OAUTH mangler og ingen broadcaster token — Twitch chat-bot ikke startet');
     logSystemEvent({
       source: 'twitch_bot',
       event_type: 'TWITCH_BOT_MISSING_OAUTH',
-      title: 'Twitch chat-bot ikke startet — TWITCH_BOT_OAUTH mangler i Railway',
+      title: 'Twitch chat-bot ikke startet — TWITCH_BOT_OAUTH mangler og ingen broadcaster token i DB',
       severity: 'error',
-      metadata: { channel: KANAL, fix: 'Legg til TWITCH_BOT_OAUTH i Railway Variables' },
+      metadata: { channel: KANAL, fix: 'Koble til Twitch på nytt med chat-scopes i Innstillinger, eller sett TWITCH_BOT_OAUTH i Railway' },
     });
     return;
   }
 
   client = new tmi.Client({
     options: { debug: false },
+    connection: { reconnect: true, secure: true },
     identity: { username: botNavn, password: oauth },
     channels: [KANAL],
   });
@@ -590,8 +623,8 @@ export function startTwitchBot() {
         const settings = await loadPartnerBotSettings().catch(() => null);
         if (!settings?.enabled || !settings.twitchEnabled) return;
 
-        const streamSettings = getSettings();
-        if (!streamSettings.lastNotifiedStreamId) return; // bare når live
+        const streamIsLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
+        if (!streamIsLive) return; // bare når live
         if (await getPausePartnerPromo().catch(() => false)) return;
 
         const minutesSinceLastPromo = (Date.now() - _sistePartnerPromo) / 60_000;
@@ -653,8 +686,8 @@ export function startTwitchBot() {
     const LURKER_COOLDOWN_MS = 22 * 60_000;
 
     setInterval(async () => {
-      const streamSettings = getSettings();
-      if (!streamSettings.lastNotifiedStreamId) return;
+      const lurkerStreamLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
+      if (!lurkerStreamLive) return;
       if (Date.now() - _sisteLurkerPing < LURKER_COOLDOWN_MS) return;
 
       const viewerCount = getBrainState().stream.viewerCount ?? 0;
@@ -987,7 +1020,7 @@ export function startTwitchBot() {
     if (spørOmDiscord) {
       cooldowns.set(brukernavn, Date.now());
       const discordUrlChat = await getDiscordInviteUrl();
-      await chatSend(channel, `@${tags.username} Discord er her: ${discordUrlChat || 'discord.gg/glenvex'} PogChamp`, { trigger: 'discord_mention', username: tags.username });
+      await chatSend(channel, `@${tags.username} Discord er her: ${discordUrlChat || process.env.DISCORD_INVITE_URL || ''} PogChamp`, { trigger: 'discord_mention', username: tags.username });
       return;
     }
 

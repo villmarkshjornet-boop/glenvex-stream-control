@@ -6,7 +6,7 @@ export const twitchCommand = {
     .setDescription('Sender Twitch-linken til streameren.'),
 
   async execute(interaction: ChatInputCommandInteraction) {
-    const url = process.env.TWITCH_URL || 'https://twitch.tv/glenvex';
+    const url = process.env.TWITCH_URL || '';
 
     const embed = new EmbedBuilder()
       .setColor(0x9146ff)

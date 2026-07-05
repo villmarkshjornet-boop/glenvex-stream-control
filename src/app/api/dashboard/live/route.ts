@@ -222,10 +222,12 @@ export async function GET() {
       .gte('created_at', cutoff1h),
 
     // Siste 6 avsluttede streams (kilde for Hero + "Siste streams")
+    // Bruker started_at (alltid non-null) i stedet for ended_at (NULL for pågående streams = sortert først i PostgreSQL)
     db.from('stream_history')
       .select('stream_id,title,game,started_at,ended_at,duration_minutes,peak_viewers,avg_viewers,chat_messages,followers_gained,subs_gained,raids_during')
       .eq('workspace_id', ws)
-      .order('ended_at', { ascending: false })
+      .gte('started_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order('started_at', { ascending: false })
       .limit(6),
 
     // Partnere – for "Fremhev partner"-handling i Action Center
@@ -574,6 +576,7 @@ export async function GET() {
       ok: failureReasons.length === 0,
       failureReasons,
       historyMissingReason: heroFallbackUsed ? historyMissingReason : null,
+      source: heroFallbackUsed ? 'vod_recovery' : 'stream_history',
       dataIntegrity: {
         status: integrityStatus,
         botStatus,
@@ -1017,6 +1020,15 @@ export async function GET() {
     return { key: cs.key, label: cs.label, lastSeen, status, count24h: events.length, passive: cs.passive, errors24h };
   });
 
+  // ── Siste VOD-sync (fra subsystemEvents siste 24t) ───────────────────────
+  const lastVodLookup = subsystemEvents.find((e: any) => e.event_type === 'VOD_LOOKUP_STARTED') ?? null;
+  const lastVodQueued = subsystemEvents.find((e: any) => e.event_type === 'VOD_AUTO_QUEUE_STARTED') ?? null;
+  const lastVodSync = {
+    checkedAt: lastVodLookup?.created_at ?? null,
+    vodFound: lastVodLookup ? !!lastVodQueued : null,
+    lastVodTitle: (lastVodQueued?.metadata as any)?.title ?? null,
+  };
+
   // ── Aktivitetsfeed uten heartbeat-spam ─────────────────────────────────────
   const visibleSystemEvents = systemEvents.filter((e: any) => !/HEARTBEAT/i.test(e.event_type));
 
@@ -1082,6 +1094,7 @@ export async function GET() {
       totalPollsThisStream: pollEventsAll.length,
     },
     recentStreams,
+    lastVodSync,
     debug,
     ts: new Date().toISOString(),
   });

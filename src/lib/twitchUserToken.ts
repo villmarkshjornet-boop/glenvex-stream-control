@@ -11,7 +11,8 @@ import { getDb } from '@/lib/db';
 export async function getValidBroadcasterToken(workspaceId: string): Promise<string | null> {
   const clientId     = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+  // clientId/clientSecret are only needed for token refresh — not for validation.
+  // Do NOT return null here if they are missing; we can still validate and return a stored token.
 
   // ── 1. Try TWITCH_USER_OAUTH env var (set in Railway) ─────────────────
   const envToken = (process.env.TWITCH_USER_OAUTH ?? '').replace(/^oauth:/, '').trim();
@@ -42,7 +43,7 @@ export async function getValidBroadcasterToken(workspaceId: string): Promise<str
 
   if (testRes?.ok) return ws.twitch_access_token;
 
-  if (!ws.twitch_refresh_token) return null;
+  if (!clientId || !clientSecret || !ws.twitch_refresh_token) return null;
 
   const refreshRes = await fetch('https://id.twitch.tv/oauth2/token', {
     method: 'POST',

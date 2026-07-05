@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 
 function getDb() {
   const url = process.env.SUPABASE_URL;

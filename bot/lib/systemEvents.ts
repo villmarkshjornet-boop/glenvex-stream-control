@@ -12,7 +12,7 @@ export interface SystemEvent {
   metadata?: Record<string, any>;
 }
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 let _queue: SystemEvent[] = [];
 let _flushing = false;

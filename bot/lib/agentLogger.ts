@@ -13,7 +13,7 @@
 
 import { upsertCommunityMemory } from './communityBrain';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 
 function getSb() {
   const url = process.env.SUPABASE_URL;

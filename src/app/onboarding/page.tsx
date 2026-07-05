@@ -208,19 +208,19 @@ function OnboardingInner() {
   }
 
   const CHANNEL_TYPES = [
-    { felt: 'live',            label: 'Live-varsling',   desc: 'Boten poster her når stream starter' },
-    { felt: 'chat',            label: 'Chat / Generell', desc: 'Promos og generelle meldinger' },
-    { felt: 'clips',           label: 'Klipp',           desc: 'Ferdige klipp' },
-    { felt: 'subs',            label: 'Subs & Gifts',    desc: 'Sub-anerkjennelser' },
-    { felt: 'errors',          label: 'Feil & Varsler',  desc: 'Tekniske feil fra boten' },
+    { felt: 'live',            label: 'Kanalvarsler',    desc: 'Boten kunngjør her at du er live' },
+    { felt: 'chat',            label: 'Community',       desc: 'Polls, XP-meldinger, rangering og AI-aktiviteter' },
+    { felt: 'clips',           label: 'Clips',           desc: 'Automatisk deling av nye Twitch-clips' },
+    { felt: 'subs',            label: 'Subs & Gifts',    desc: 'Sub-anerkjennelser og gavemeldinger' },
+    { felt: 'errors',          label: 'Feil',            desc: 'Systemvarsler (kun for deg)' },
   ];
 
   const stepMeta: Record<number, { title: string; description: string }> = {
-    1: { title: 'Velkommen til Glenvex', description: 'Sett opp ditt creator workspace.' },
-    2: { title: 'Koble til Twitch', description: 'Autoriser Glenvex til å lese din Twitch-kanal.' },
-    3: { title: 'Koble til Discord', description: 'Legg til Glenvex-boten på Discord-serveren din.' },
-    4: { title: 'Velg kanaler', description: 'Hvilke Discord-kanaler skal boten bruke?' },
-    5: { title: 'Aktiver Glenvex', description: 'Se over og send inn forespørselen.' },
+    1: { title: 'Sett opp workspacet ditt', description: 'Et workspace er din personlige Creator OS-instans. Alt du setter opp lagres her — AI-en din, community-data, stream-historikk og partnere.' },
+    2: { title: 'Koble til Twitch', description: 'Creator OS henter live-status, chat, followers og clips direkte fra Twitch. Dette gjør det mulig for AI Producer, Stream Coach og Community Manager å jobbe i sanntid under stream.' },
+    3: { title: 'Legg til Discord-boten', description: 'Discord er hjertet i communityet ditt. Creator OS-boten gir XP, levels, roller, velkomsthilsener, polls og AI Community Manager til serveren din.' },
+    4: { title: 'Velg kanaler', description: 'Fortell boten hvilke Discord-kanaler den skal bruke til hva. Du kan endre dette senere.' },
+    5: { title: 'Alt er klart — aktiver Creator OS', description: 'Her er en oversikt over hva som skjer når du aktiverer.' },
   };
 
   return (
@@ -278,7 +278,7 @@ function OnboardingInner() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium tracking-wide text-g-muted block">
-                  Workspace ID
+                  Workspace-ID (URL-slug)
                 </label>
                 <input
                   type="text"
@@ -287,7 +287,7 @@ function OnboardingInner() {
                   placeholder="nordicgamer"
                   className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2.5 text-sm text-g-text placeholder:text-g-muted/40 focus:outline-none focus:border-g-green/40 focus:ring-1 focus:ring-g-green/20 transition-all duration-200 font-mono"
                 />
-                <p className="text-xs text-g-muted/70">Kun små bokstaver og bindestrek. Kan ikke endres etter opprettelse.</p>
+                <p className="text-xs text-g-muted/70">URL-en til workspacet ditt. Brukes internt av alle systemene. Kan ikke endres etter opprettelse.</p>
               </div>
               <button
                 onClick={saveWorkspace}
@@ -433,10 +433,24 @@ function OnboardingInner() {
                 ))}
               </div>
 
-              <div className="bg-g-bg/50 border border-g-border/30 rounded-lg p-4">
-                <p className="text-xs text-g-muted leading-relaxed">
-                  Etter aktivering går du til ventelisten. En administrator vil godkjenne deg som alpha-tester og åpne tilgangen.
-                </p>
+              <div className="bg-g-bg/50 border border-g-border/30 rounded-lg p-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-widest text-g-muted">Hva skjer når du aktiverer</p>
+                {[
+                  'Workspace aktiveres',
+                  'Railway-boten oppdager workspacet ditt (innen 3 minutter)',
+                  'Discord-boten aktiveres på serveren din',
+                  'Twitch-chatten kobles til',
+                  'AI-en begynner å lære communityet ditt',
+                  'Creator Brain starter',
+                  'Community Manager aktiveres',
+                  'Poll Manager aktiveres',
+                  'XP og levels aktiveres',
+                ].map(t => (
+                  <div key={t} className="flex items-start gap-2">
+                    <span className="text-g-green/60 text-[11px] mt-0.5">✓</span>
+                    <p className="text-[11px] text-g-muted">{t}</p>
+                  </div>
+                ))}
               </div>
 
               <button
@@ -444,7 +458,7 @@ function OnboardingInner() {
                 disabled={loading}
                 className="w-full px-5 py-2.5 bg-g-green/10 border border-g-green/25 text-g-green text-sm font-medium rounded-lg hover:bg-g-green/20 hover:border-g-green/40 hover:shadow-green-sm transition-all duration-200 disabled:opacity-40"
               >
-                {loading ? 'Aktiverer...' : '→ Send inn og vent på godkjenning'}
+                {loading ? 'Aktiverer...' : 'Aktiver Creator OS →'}
               </button>
             </div>
           )}

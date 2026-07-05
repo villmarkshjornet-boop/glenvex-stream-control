@@ -17,7 +17,7 @@ import {
 import { logSystemEvent } from '../lib/systemEvents';
 
 const DISCORD_API  = 'https://discord.com/api/v10';
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 function botToken() { return process.env.DISCORD_TOKEN ?? process.env.DISCORD_BOT_TOKEN ?? ''; }
 

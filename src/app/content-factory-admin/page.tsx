@@ -204,6 +204,10 @@ export default function ContentFactoryAdminPage() {
   const [sisteVods, setSisteVods] = useState<{ id: string; title: string; duration: string; published_at: string; url: string }[]>([]);
   const [manualPhase2Id, setManualPhase2Id] = useState('');
 
+  // Sync siste VOD state
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const hentVods = useCallback(async () => {
     const res = await fetch('/api/content-factory').catch(() => null);
     if (!res) return;
@@ -396,6 +400,30 @@ export default function ContentFactoryAdminPage() {
     });
   }
 
+  async function syncSisteVod() {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/content-factory/sync-latest-vod', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncResult({ type: 'error', message: d.error ?? `HTTP ${res.status}` });
+      } else if (!d.vodFound) {
+        setSyncResult({ type: 'success', message: 'Ingen ny VOD funnet de siste 48 timene' });
+      } else if (d.streamHistoryCreated) {
+        setSyncResult({ type: 'success', message: `✓ VOD funnet og stream-historikk opprettet: ${d.title}` });
+      } else if (d.alreadyInDb) {
+        setSyncResult({ type: 'success', message: `✓ VOD er allerede i systemet: ${d.title}` });
+      } else {
+        setSyncResult({ type: 'success', message: d.title ?? 'Ferdig' });
+      }
+    } catch {
+      setSyncResult({ type: 'error', message: 'Nettverksfeil' });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // ─── States ────────────────────────────────────────────────────────────────
   if (aktivert === false) {
     return (
@@ -422,7 +450,30 @@ export default function ContentFactoryAdminPage() {
     <div className="space-y-6">
       <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />
 
-      <PageHeader title="Content Factory" subtitle="VOD-pipeline — transkribering, highlights og klipp" />
+      <div className="flex items-center justify-between">
+        <PageHeader title="Content Factory" subtitle="VOD-pipeline — transkribering, highlights og klipp" />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={syncSisteVod}
+            disabled={syncing}
+            className="px-3 py-2 border border-g-border text-g-muted text-[11px] font-bold rounded-lg hover:text-g-green hover:border-g-green/30 transition-all disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {syncing ? (
+              <>
+                <span className="w-3 h-3 border border-g-muted/30 border-t-g-muted rounded-full animate-spin" />
+                Sjekker Twitch...
+              </>
+            ) : (
+              '↻ Sync siste VOD'
+            )}
+          </button>
+          {syncResult && (
+            <span className={`text-[11px] max-w-xs truncate ${syncResult.type === 'error' ? 'text-red-400' : 'text-g-muted'}`}>
+              {syncResult.message}
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* ─── KPI-rad ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-4">

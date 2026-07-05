@@ -253,3 +253,94 @@ const PROAKTIVE_MELDINGER = [
 export function getProaktivMelding(): string {
   return PROAKTIVE_MELDINGER[Math.floor(Math.random() * PROAKTIVE_MELDINGER.length)];
 }
+
+// Cache to prevent spam — one generation per 8 hours
+let _proaktivCache: { message: string; generatedAt: number } | null = null;
+const PROAKTIV_CACHE_MS = 8 * 60 * 60_000;
+
+export async function getProaktivMeldingAsync(workspaceId: string): Promise<string> {
+  // Return cached version if fresh
+  if (_proaktivCache && Date.now() - _proaktivCache.generatedAt < PROAKTIV_CACHE_MS) {
+    return _proaktivCache.message;
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  const sbUrl  = process.env.SUPABASE_URL;
+  const sbKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!apiKey || !sbUrl || !sbKey) {
+    return getProaktivMelding(); // fallback
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createClient } = require('@supabase/supabase-js');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ws = require('ws');
+    const db = createClient(sbUrl, sbKey, { realtime: { transport: ws }, auth: { persistSession: false, autoRefreshToken: false } });
+
+    // Get top ai_agent_memory entries
+    const { data: memory } = await db
+      .from('ai_agent_memory')
+      .select('memory_type,summary,content,occurrence_count')
+      .eq('workspace_id', workspaceId)
+      .order('occurrence_count', { ascending: false })
+      .limit(6);
+
+    const memContext = (memory ?? [])
+      .map((m: any) => `[${m.memory_type}] ${String(m.summary ?? m.content ?? '').slice(0, 100)}`)
+      .join('\n') || '(ingen data ennå)';
+
+    // Get recent proactive messages to avoid repeating same theme
+    const { data: recentDecisions } = await db
+      .from('system_events')
+      .select('metadata')
+      .eq('workspace_id', workspaceId)
+      .eq('event_type', 'PROACTIVE_MESSAGE_DECISION')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    const recentThemes = (recentDecisions ?? [])
+      .map((d: any) => d.metadata?.theme as string | undefined)
+      .filter(Boolean)
+      .join(', ');
+
+    const openai = new OpenAI({ apiKey });
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'system',
+        content: `Du er community-boten for ${BOT_BRAND}. Du sender proaktive meldinger til Discord-community.\n\nPersonlighet: Norsk, rå og direkte. Gaming-kompis, ikke robot. Mørk humor ok.\n\nKrav:\n- Maks 1-2 setninger\n- Ingen overskrifter, ingen lister\n- Ikke repeter temaer: ${recentThemes || 'ingen'}\n- Bruk community-kunnskap fra AI-minne\n- Kan nevne ${TWITCH_LINK} naturlig, men ikke alltid`,
+      }, {
+        role: 'user',
+        content: `AI-minne om communityet:\n${memContext}\n\nLag én kort, engasjerende proaktiv melding til Discord. Svar KUN med meldingen, ingen forklaring.`,
+      }],
+      max_tokens: 120,
+      temperature: 0.85,
+    });
+
+    const message = res.choices[0]?.message?.content?.trim() ?? '';
+    if (!message || message.length < 10) throw new Error('Tom GPT-respons');
+
+    // Cache the result
+    _proaktivCache = { message, generatedAt: Date.now() };
+
+    // Log the decision
+    const theme = message.toLowerCase().split(/\s+/).filter(w => w.length > 4)[0] ?? 'ukjent';
+    try {
+      await db.from('system_events').insert({
+        workspace_id: workspaceId,
+        source:       'ai_personality',
+        event_type:   'PROACTIVE_MESSAGE_DECISION',
+        title:        `Proaktiv melding generert: "${message.slice(0, 60)}"`,
+        severity:     'info',
+        metadata:     { message, theme, memoryUsed: memory?.length ?? 0, confidence: 0.8, source: 'gpt' },
+      });
+    } catch {}
+
+    return message;
+  } catch {
+    // Fallback to static messages on any error
+    return getProaktivMelding();
+  }
+}

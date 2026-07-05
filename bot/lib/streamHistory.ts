@@ -5,7 +5,7 @@ import { startAudienceTracking, recordViewerCount, stopAudienceTracking } from '
 import { logSystemEvent } from './systemEvents';
 
 const FILE = path.join(process.cwd(), 'data', 'stream-history.json');
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;

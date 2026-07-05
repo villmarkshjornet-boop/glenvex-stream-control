@@ -17,6 +17,8 @@ import { NextStreamBrief } from '@/components/dashboard/NextStreamBrief';
 import { StorageHealthCard } from '@/components/dashboard/StorageHealthCard';
 import { WhatToDoNow } from '@/components/dashboard/WhatToDoNow';
 import { CommunitySnapshot } from '@/components/dashboard/CommunitySnapshot';
+import { CreatorOSStatus } from '@/components/dashboard/CreatorOSStatus';
+import { CreatorOSHealthCheck } from '@/components/dashboard/CreatorOSHealthCheck';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -106,7 +108,7 @@ export default function Dashboard() {
         /* ── OFFLINE MODE: streamer-first layout ──────────────────────────── */
         <>
           {/* 1. HERO: Dominant last-stream status */}
-          <Hero heroStream={live?.heroStream} loading={loadingLive} />
+          <Hero heroStream={live?.heroStream} loading={loadingLive} lastVodSync={live?.lastVodSync} />
 
           {/* 2. ACTION CENTER: Only shown when there are items */}
           {(live?.actionCenter?.length ?? 0) > 0 && (
@@ -168,6 +170,12 @@ export default function Dashboard() {
                   <PartnerEngineStatus />
                   <CreatorBrainLearning />
                 </div>
+
+                {/* CREATOR OS STATUS: live ops metrics */}
+                <CreatorOSStatus />
+
+                {/* CREATOR OS HEALTH CHECK: per-system diagnostics */}
+                <CreatorOSHealthCheck />
 
                 {/* DEBUG PANEL */}
                 {live?.debug && (

@@ -70,7 +70,8 @@ const GAME_HASHTAG_MAP: [string, string[]][] = [
   ['helldivers',         ['#Helldivers2']],
 ];
 
-const BASE_HASHTAGS = ['#NorskGaming', '#Twitch', '#StreamNO'];
+// Norwegian gaming community hashtags — consistently active on X
+const BASE_HASHTAGS = ['#NorskGaming', '#Twitch', '#TwitchNO'];
 
 function getHashtags(game: string): string[] {
   const g = game.toLowerCase();
@@ -79,8 +80,18 @@ function getHashtags(game: string): string[] {
       return [...tags, ...BASE_HASHTAGS].slice(0, 5);
     }
   }
-  const fallback = '#' + game.replace(/[^a-zA-ZæøåÆØÅ0-9]/g, '').slice(0, 20);
-  return [fallback.length > 1 ? fallback : '#Gaming', ...BASE_HASHTAGS].slice(0, 4);
+  const slug = game.replace(/[^a-zA-ZæøåÆØÅ0-9]/g, '').slice(0, 20);
+  const fallback = slug.length > 1 ? `#${slug}` : '#Gaming';
+  return [fallback, '#StreamNO', ...BASE_HASHTAGS].slice(0, 4);
+}
+
+// Ensure hashtags end up IN the text — safety net if AI forgets
+function ensureHashtagsInText(text: string, hashtags: string[]): string {
+  if (!hashtags.length) return text;
+  const hasAny = hashtags.some(h => text.includes(h));
+  if (hasAny) return text;
+  // Append missing hashtags on a new line
+  return `${text.trimEnd()}\n${hashtags.join(' ')}`;
 }
 
 // ── Learning context from past X posts ────────────────────────────────────────
@@ -171,11 +182,12 @@ export async function POST(req: NextRequest) {
   const cachedVariants = Object.values(byLabel);
 
   if (cachedVariants.length >= 2) {
+    const cachedHashtags = getHashtags(game);
     const variants: XPostVariant[] = cachedVariants.map((r: any) => ({
       id:                 r.id,
       label:              r.variant_label,
-      text:               r.post_text,
-      hashtags:           r.hashtags ?? [],
+      text:               ensureHashtagsInText(r.post_text ?? '', r.hashtags?.length ? r.hashtags : cachedHashtags),
+      hashtags:           r.hashtags?.length ? r.hashtags : cachedHashtags,
       hookScore:          r.hook_score ?? 50,
       urgencyScore:       r.urgency_score ?? 50,
       relevanceScore:     r.relevance_score ?? 50,
@@ -207,10 +219,12 @@ REGLER:
 1. Første linje = kroken. Aldri start med "Jeg er live" eller "Streamer nå".
 2. Gi én konkret grunn til å klikke NÅ (drama, spenning, fellesskap, spørsmål).
 3. Twitch-lenken alltid på slutten.
-4. 2-4 hashtags som flyter naturlig inn i teksten eller på slutten.
+4. ALLTID inkluder 3–5 hashtags direkte i "text"-feltet — de MÅ stå i selve post-teksten (ikke bare i "hashtags"-arrayen). Bruk de foreslåtte hashtagsene. Hashtags på slutten av posten er standard, men kan flytes inn i teksten om det sitter naturlig.
 5. Norsk tone — men spill-spesifikke ord kan være engelske.
-6. Maks 280 tegn per post.
+6. Maks 280 tegn per post (inkludert hashtags).
 7. Lær av hva som har fungert tidligere — se LÆRDOMSDATABASEN.
+
+KRITISK: "text"-feltet MÅ inneholde hashtagsene. En post uten # teller ikke.
 
 SVAR KUN med valid JSON.`;
 
@@ -277,10 +291,13 @@ Format:
     // Store each variant in DB
     const stored: XPostVariant[] = [];
     for (const v of variants) {
+      // Safety net: ensure hashtags appear in the text even if AI forgot to include them
+      const textWithHashtags = ensureHashtagsInText(v.text ?? '', v.hashtags ?? hashtags);
+
       const { data: row } = await db.from('x_post_memory').insert({
         workspace_id:         ws,
         game:                 game || null,
-        post_text:            v.text,
+        post_text:            textWithHashtags,
         hashtags:             v.hashtags ?? [],
         variant_label:        v.label,
         hook_score:           v.hookScore,
@@ -298,8 +315,8 @@ Format:
       stored.push({
         id:                 row?.id ?? crypto.randomUUID(),
         label:              v.label as XPostVariant['label'],
-        text:               v.text,
-        hashtags:           v.hashtags ?? [],
+        text:               textWithHashtags,
+        hashtags:           v.hashtags ?? hashtags,
         hookScore:          v.hookScore,
         urgencyScore:       v.urgencyScore,
         relevanceScore:     v.relevanceScore,

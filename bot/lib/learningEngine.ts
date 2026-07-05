@@ -395,6 +395,66 @@ export async function getPartnerKnowledgeBoost(wsId: string, partnerName: string
   }
 }
 
+// ── Public: timing knowledge boost from stream_behaviour ─────────────────────
+// Returns ±0.08 based on historical approval rate for this window in the stream.
+
+export async function getTimingKnowledgeBoost(wsId: string, minutesIntoStream: number): Promise<number> {
+  const db = getBotDb();
+  if (!db) return 0;
+  const windowKey =
+    minutesIntoStream < 15  ? '0-15'  :
+    minutesIntoStream < 30  ? '15-30' :
+    minutesIntoStream < 45  ? '30-45' :
+    minutesIntoStream < 60  ? '45-60' : '60+';
+  try {
+    const { data } = await db
+      .from('creator_knowledge')
+      .select('confidence, evidence_summary')
+      .eq('workspace_id', wsId)
+      .eq('knowledge_type', 'stream_behaviour')
+      .eq('key', `timing_window:${windowKey}`)
+      .maybeSingle();
+    if (!data || data.confidence < 40) return 0;
+    const approvalRate = (data.evidence_summary as any)?.approvalRate as number | undefined;
+    if (approvalRate == null) return 0;
+    const confidenceScale = Math.min(1, data.confidence / 80);
+    const raw = ((approvalRate - 50) / 50) * 0.08 * confidenceScale;
+    return Math.max(-0.08, Math.min(0.08, raw));
+  } catch {
+    return 0;
+  }
+}
+
+// ── Public: preferred platform from platform_preference knowledge ─────────────
+// Returns 'twitch' or 'discord' based on which has higher send rate, or null if unknown.
+
+export async function getPreferredPlatform(wsId: string): Promise<'twitch' | 'discord' | null> {
+  const db = getBotDb();
+  if (!db) return null;
+  try {
+    const { data } = await db
+      .from('creator_knowledge')
+      .select('key, evidence_summary, confidence')
+      .eq('workspace_id', wsId)
+      .eq('knowledge_type', 'platform_preference')
+      .in('key', ['platform:twitch', 'platform:discord'])
+      .gte('confidence', 30);
+    if (!data || data.length === 0) return null;
+    const byPlatform: Record<string, number> = {};
+    for (const row of data) {
+      const platform = (row.key as string).replace('platform:', '');
+      const pct = (row.evidence_summary as any)?.percentage as number | undefined;
+      if (pct != null) byPlatform[platform] = pct;
+    }
+    const twitch  = byPlatform['twitch']  ?? 0;
+    const discord = byPlatform['discord'] ?? 0;
+    if (twitch === 0 && discord === 0) return null;
+    return discord > twitch ? 'discord' : 'twitch';
+  } catch {
+    return null;
+  }
+}
+
 // ── Public: run full learning pass ───────────────────────────────────────────
 
 export async function runLearningEngine(wsId: string = WORKSPACE_ID): Promise<void> {

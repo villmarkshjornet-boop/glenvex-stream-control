@@ -4,8 +4,6 @@ import { getWorkspaceId } from '@/lib/workspace';
 import type { ContentVod, VodStatus } from '../types';
 import { logPipeline } from '../jobs/pipelineLogger';
 
-const WORKSPACE_ID = getWorkspaceId();
-
 async function getTwitchToken(): Promise<string | null> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
@@ -107,7 +105,7 @@ export async function opprettVod(streamId: string): Promise<ContentVod | null> {
   const metadata = await hentVodMetadata(streamId);
 
   const { data, error } = await db.from('content_vods').insert({
-    workspace_id: WORKSPACE_ID,
+    workspace_id: getWorkspaceId(),
     stream_id: streamId,
     twitch_vod_id: metadata?.twitchVodId,
     title: metadata?.title ?? 'Ukjent stream',
@@ -146,7 +144,7 @@ export async function hentAlleVods(): Promise<ContentVod[]> {
   const db = getDb();
   if (!db) return [];
   const { data } = await db.from('content_vods').select('*')
-    .eq('workspace_id', WORKSPACE_ID)
+    .eq('workspace_id', getWorkspaceId())
     .order('created_at', { ascending: false });
   return (data ?? []).map(mapVod);
 }
