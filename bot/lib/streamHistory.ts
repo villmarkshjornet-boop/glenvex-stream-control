@@ -48,6 +48,31 @@ function save(data: StreamSession[]) {
 let activeSession: Partial<StreamSession> | null = null;
 let chatMessageCount = 0;
 let sessionFollowerGain = 0;
+let _liveFlushInterval: ReturnType<typeof setInterval> | null = null;
+
+const LIVE_FLUSH_INTERVAL_MS = 10 * 60 * 1000; // flush partial stats every 10 min
+
+function _flushLiveStats() {
+  if (!activeSession?.id || !WORKSPACE_ID) return;
+  const sb = getSupabase();
+  if (!sb) return;
+  const started = new Date(activeSession.startedAt ?? Date.now()).getTime();
+  sb.from('stream_history').upsert({
+    workspace_id:     WORKSPACE_ID,
+    stream_id:        activeSession.id,
+    title:            activeSession.title ?? '',
+    game:             activeSession.game ?? '',
+    started_at:       activeSession.startedAt ?? new Date().toISOString(),
+    ended_at:         null,
+    peak_viewers:     activeSession.peakViewers ?? 0,
+    avg_viewers:      activeSession.avgViewers ?? 0,
+    duration_minutes: Math.round((Date.now() - started) / 60_000),
+    chat_messages:    chatMessageCount,
+    followers_gained: sessionFollowerGain,
+    raids_during:     activeSession.raidsDuring ?? 0,
+    subs_gained:      activeSession.subsGained ?? 0,
+  }, { onConflict: 'stream_id' }).then(() => {}, () => {});
+}
 
 export function startSession(stream: { id: string; title: string; game: string; startedAt: string; viewerCount?: number }) {
   activeSession = {
@@ -66,6 +91,51 @@ export function startSession(stream: { id: string; title: string; game: string; 
   chatMessageCount = 0;
   sessionFollowerGain = 0;
   startAudienceTracking(stream.id, stream.game, stream.title);
+
+  if (_liveFlushInterval) clearInterval(_liveFlushInterval);
+  _liveFlushInterval = setInterval(_flushLiveStats, LIVE_FLUSH_INTERVAL_MS);
+
+  // Skriv foreløpig rad til Supabase ved stream-START.
+  // Hvis boten krasjer før endSession() kalles finnes det likevel en rad i DB.
+  // endSession() upsert-er på stream_id og overskriver med fullstendige stats.
+  if (!WORKSPACE_ID) return;
+  const sb = getSupabase();
+  if (!sb) return;
+  sb.from('stream_history').upsert({
+    workspace_id:     WORKSPACE_ID,
+    stream_id:        stream.id,
+    title:            stream.title,
+    game:             stream.game,
+    started_at:       stream.startedAt,
+    ended_at:         null,
+    peak_viewers:     stream.viewerCount ?? 0,
+    avg_viewers:      stream.viewerCount ?? 0,
+    duration_minutes: 0,
+    chat_messages:    0,
+    followers_gained: 0,
+    raids_during:     0,
+    subs_gained:      0,
+  }, { onConflict: 'stream_id' }).then(({ error }) => {
+    if (error) {
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'STREAM_HISTORY_START_FAILED',
+        title: `stream_history start-rad feilet: ${error.message?.slice(0, 100)}`,
+        severity: 'warning',
+        metadata: { streamId: stream.id, workspaceId: WORKSPACE_ID, error: error.message },
+      });
+    } else {
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'STREAM_HISTORY_STARTED',
+        title: `stream_history start-rad skrevet: ${stream.title || stream.id}`,
+        severity: 'info',
+        metadata: { streamId: stream.id, workspaceId: WORKSPACE_ID },
+      });
+    }
+  }, () => {});
 }
 
 export function updateSession(viewerCount: number) {
@@ -84,6 +154,7 @@ export function incrementFollowerGain(n: number) {
 }
 
 export async function endSession(followerGainOverride = 0) {
+  if (_liveFlushInterval) { clearInterval(_liveFlushInterval); _liveFlushInterval = null; }
   if (!activeSession?.id || !activeSession.startedAt) return;
   const started = new Date(activeSession.startedAt).getTime();
   const duration = Math.round((Date.now() - started) / 60_000);
@@ -141,19 +212,19 @@ export async function endSession(followerGainOverride = 0) {
 
   try {
     const { error } = await sb.from('stream_history').upsert({
-      workspace_id: WORKSPACE_ID,
-      stream_id: session.id,
-      title: session.title,
-      game: session.game,
-      started_at: session.startedAt,
-      ended_at: session.endedAt,
-      peak_viewers: session.peakViewers,
-      avg_viewers: session.avgViewers,
+      workspace_id:     WORKSPACE_ID,
+      stream_id:        session.id,
+      title:            session.title,
+      game:             session.game,
+      started_at:       session.startedAt,
+      ended_at:         session.endedAt,
+      peak_viewers:     session.peakViewers,
+      avg_viewers:      session.avgViewers,
       duration_minutes: session.durationMinutes,
       followers_gained: session.followerGain,
-      chat_messages: session.chatMessages,
-      raids_during: session.raidsDuring,
-      subs_gained: session.subsGained,
+      chat_messages:    session.chatMessages,
+      raids_during:     session.raidsDuring,
+      subs_gained:      session.subsGained,
     }, { onConflict: 'stream_id' });
 
     if (error) {

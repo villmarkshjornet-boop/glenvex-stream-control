@@ -569,7 +569,7 @@ async function checkLive() {
         _botDb.from('workspaces').select('settings_json').eq('id', _botWsId).single().then(({ data: _ws }) => {
           const _merged = { ...(_ws?.settings_json as object ?? {}), lastNotifiedStreamId: stream.id };
           _botDb.from('workspaces').update({ settings_json: _merged, updated_at: new Date().toISOString() }).eq('id', _botWsId).then(() => {}, () => {});
-        }).catch(() => {});
+        }, () => {});
       }
       addLog(liveEmbedOk ? 'success' : 'warning', `Auto live-varsel ${liveEmbedOk ? 'postet' : 'feilet'}: ${stream.title}`, liveEmbedOk ? 'OK' : 'WARN');
       startSession({ id: stream.id, title: stream.title ?? '', game: stream.game ?? '', startedAt: stream.startedAt ?? new Date().toISOString(), viewerCount: stream.viewerCount });
@@ -630,7 +630,7 @@ async function checkLive() {
           _offlineDb.from('workspaces').select('settings_json').eq('id', _offlineWsId).single().then(({ data: _ws }) => {
             const _merged = { ...(_ws?.settings_json as object ?? {}), lastNotifiedStreamId: null };
             _offlineDb.from('workspaces').update({ settings_json: _merged, updated_at: new Date().toISOString() }).eq('id', _offlineWsId).then(() => {}, () => {});
-          }).catch(() => {});
+          }, () => {});
         }
         await endSession(0);
         onStreamOffline();

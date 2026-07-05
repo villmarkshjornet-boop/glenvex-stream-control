@@ -552,7 +552,7 @@ export async function startTwitchBot() {
         .select('twitch_access_token')
         .eq('id', wsId)
         .single()
-        .catch(() => ({ data: null }));
+        .then((r) => r, () => ({ data: null }));
       if (data?.twitch_access_token) {
         oauth = `oauth:${data.twitch_access_token}`;
         console.log('  ℹ TWITCH_BOT_OAUTH ikke satt — bruker broadcaster token fra DB som fallback');
