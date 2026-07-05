@@ -50,16 +50,16 @@ function withCache(res: NextResponse): NextResponse {
   return res;
 }
 
-async function getFollowers(token: string, broadcasterId: string, clientId: string): Promise<number> {
+async function getFollowers(token: string, broadcasterId: string, clientId: string): Promise<{ total: number; apiOk: boolean }> {
   try {
     const res = await fetch(
       `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`,
       { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
     );
-    if (!res.ok) return 0;
+    if (!res.ok) return { total: 0, apiOk: false };
     const data = await res.json() as any;
-    return data.total ?? 0;
-  } catch { return 0; }
+    return { total: data.total ?? 0, apiOk: true };
+  } catch { return { total: 0, apiOk: false }; }
 }
 
 async function getSubscribers(token: string, broadcasterId: string, clientId: string): Promise<{ total: number; canRead: boolean }> {
@@ -127,19 +127,21 @@ export async function GET(req: NextRequest) {
   let subscriberTotal    = 0;
   let canReadSubscribers = false;
   let fromSnapshot       = false;
+  let followersApiOk     = false;
 
   if (userToken) {
     const [f, s] = await Promise.all([
       getFollowers(userToken, broadcasterId, clientId),
       getSubscribers(userToken, broadcasterId, clientId),
     ]);
-    followers          = f;
+    followers          = f.total;
+    followersApiOk     = f.apiOk;
     subscriberTotal    = s.total;
     canReadSubscribers = s.canRead;
   }
 
-  // Snapshot fallback if live followers unavailable
-  if (followers === 0 && db) {
+  // Snapshot fallback if followers API failed or returned 0
+  if (!followersApiOk && db) {
     const { data: ws } = await db.from('workspaces').select('settings_json').eq('id', wsId).single();
     const snapshots: { ts: string; total: number }[] = ws?.settings_json?.follower_snapshots ?? [];
     if (snapshots.length > 0) {
@@ -148,10 +150,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Token status: 'missing' = no token at all, 'snapshot' = token OK but using cached data,
+  // 'ok' = token valid and live data fetched. Never return 'missing' just because followers=0.
   const tokenStatus =
-    !userToken          ? 'missing'  :
-    fromSnapshot        ? 'snapshot' :
-    followers > 0       ? 'ok'       : 'missing';
+    !userToken    ? 'missing'  :
+    fromSnapshot  ? 'snapshot' : 'ok';
 
   // Only override gjeldende for auto-tracked goals; manual goals keep their stored value
   const oppdatert = goals.map(g => {
