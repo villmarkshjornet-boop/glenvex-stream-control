@@ -317,44 +317,54 @@ export default function ViewerGoalsPage() {
     } catch {}
   }
 
+  function applyGoalsResponse(d: any) {
+    setToken(d.tokenStatus ?? null);
+    if (d.live) {
+      if (typeof d.live.followers === 'number') setLiveF(d.live.followers);
+      setCanReadSub(d.live.canReadSubscribers ?? false);
+      if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
+    }
+    if (d.goals?.length > 0) setGoals(d.goals.map((g: any) => ({
+      ...g,
+      icon: g.icon ?? '◆',
+      farge: g.farge ?? '#00ff41',
+    })));
+    if (d.fx) setFx(prev => ({ ...prev, ...d.fx }));
+    setLast(new Date());
+  }
+
   useEffect(() => {
-    fetch('/api/goals/live').then(r => r.json()).then(d => {
-      setToken(d.tokenStatus ?? null);
-
-      if (d.live) {
-        if (typeof d.live.followers === 'number' && d.live.followers > 0) setLiveF(d.live.followers);
-        setCanReadSub(d.live.canReadSubscribers ?? false);
-        if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
-      }
-      if (d.goals?.length > 0) setGoals(d.goals.map((g: any) => ({
-        ...g,
-        icon: g.icon ?? '◆',
-        farge: g.farge ?? '#00ff41',
-      })));
-      if (d.fx) setFx(prev => ({ ...prev, ...d.fx }));
-      setLast(new Date());
-    }).catch(() => {});
-
-    // Get workspace ID for overlay URL
-    fetch('/api/me/workspace').then(r => r.json()).then(d => {
-      if (d.id) setWsId(d.id);
-    }).catch(() => {});
-
     if (typeof window !== 'undefined') setOverlayUrl(window.location.origin + '/overlay/goals');
+
+    // Fetch workspace ID first — /api/goals/live is PUBLIC (overlay access), so middleware
+    // never injects x-workspace-id. Must pass ?ws= param explicitly.
+    fetch('/api/me/workspace')
+      .then(r => r.json())
+      .then((d: { id?: string }) => {
+        const ws = d.id ?? '';
+        if (ws) setWsId(ws);
+        return fetch(`/api/goals/live${ws ? `?ws=${encodeURIComponent(ws)}` : ''}`);
+      })
+      .then(r => r.json())
+      .then(applyGoalsResponse)
+      .catch(() => {});
   }, []);
 
-  // Re-poll every 30s
+  // Re-poll every 30s — workspaceId must be known first
   useEffect(() => {
+    if (!workspaceId) return;
     const id = setInterval(() => {
-      fetch('/api/goals/live').then(r => r.json()).then(d => {
+      fetch(`/api/goals/live?ws=${encodeURIComponent(workspaceId)}`).then(r => r.json()).then(d => {
         setToken(d.tokenStatus ?? null);
-        if (d.live?.followers > 0) setLiveF(d.live.followers);
-        if (d.live?.canReadSubscribers) setLiveSub(d.live.subscribers);
+        if (d.live) {
+          if (typeof d.live.followers === 'number') setLiveF(d.live.followers);
+          if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
+        }
         setLast(new Date());
       }).catch(() => {});
     }, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [workspaceId]);
 
   const fullOverlayUrl = workspaceId ? `${overlayUrl}?ws=${encodeURIComponent(workspaceId)}` : overlayUrl;
 
