@@ -182,7 +182,7 @@ export async function POST() {
     workspace_id: ws,
     stream_id: streamId,
     title,
-    game: latestVod.game_name ?? 'Ukjent',
+    game: 'Ukjent',
     started_at: startedAt,
     ended_at: endedAt,
     duration_minutes: Math.round(durationSek / 60),
