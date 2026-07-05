@@ -70,7 +70,7 @@ export async function verifyLinkCode(
   twitchUserId: string,
   twitchUsername: string,
   code: string,
-): Promise<{ discordId: string; twitchUsername: string } | null> {
+): Promise<{ discordId: string; twitchUsername: string; hasStoredSub: boolean } | null> {
   const sb = getSb();
   if (!sb) return null;
 
@@ -201,7 +201,7 @@ export async function verifyLinkCode(
     },
   });
 
-  return { discordId: data.discord_id, twitchUsername };
+  return { discordId: data.discord_id, twitchUsername, hasStoredSub };
 }
 
 // ─── Store unmatched sub (Twitch sub with no Discord link) ────────────────────

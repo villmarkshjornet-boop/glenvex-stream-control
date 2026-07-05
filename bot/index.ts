@@ -44,7 +44,7 @@ import { seedDefaultQuests } from './lib/questService';
 import { WORKSPACE_ID } from './lib/supabase';
 import { addMessageXP, upsertMember, setLastWelcomed, getMember, getAllMembers, lasterMedlemmerFraSupabase, addReaction, addVoiceMinutes, addStreamAttendance, addSub } from './lib/memberTracker';
 import { awardCoins } from './lib/coinService';
-import { generateSubCard } from './lib/subCardService';
+import { generateSubCard, backfillSubCards } from './lib/subCardService';
 import { findMemberByTwitchId, storeUnmatchedSub } from './lib/twitchLinkService';
 import { logBotEvent, updateStreamSyklus, resetStreamSyklus, getStreamSyklus, getStreamplan, updateStreamEntryStatus, StreamEntry } from './lib/botEvents';
 import { startSession, endSession, updateSession, incrementChatMessages, incrementFollowerGain, addRaidToSession, addSubToSession, getActiveSession } from './lib/streamHistory';
@@ -2368,7 +2368,7 @@ client.once('clientReady', () => {
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
 
   setOnSubCallback(tildelTwitchSubRolle);
-  setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername) => {
+  setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername, hasStoredSub) => {
     const wsId = process.env.WORKSPACE_ID ?? '';
     console.log(`[LINKTWITCH_VERIFY_STARTED] discordId=${discordId} twitchUserId=${twitchUserId} twitchUsername=${twitchUsername}`);
     try {
@@ -2427,19 +2427,25 @@ client.once('clientReady', () => {
         console.log(`[SUB_CHECK_HELIX_ERROR] ${helixErr?.message}`);
       }
 
-      // Fallback to DB if Helix was unavailable
-      if (!helixUsed && sb) {
-        const { data: cm } = await sb
-          .from('community_members')
-          .select('twitch_sub_status,twitch_sub_tier,subs')
-          .eq('workspace_id', wsId)
-          .eq('discord_id', discordId)
-          .single();
-        isSub   = !!(cm?.twitch_sub_status || (cm?.subs ?? 0) > 0);
-        subTier = cm?.twitch_sub_tier ?? '1000';
+      // Fallback to DB if Helix was unavailable.
+      // Also accept hasStoredSub from verifyLinkCode — it means the user had an unlinked
+      // sub record or a tw_-row with subs > 0 from before linking.
+      if (!helixUsed) {
+        if (hasStoredSub) {
+          isSub = true; // verifyLinkCode already confirmed this via DB
+        } else if (sb) {
+          const { data: cm } = await sb
+            .from('community_members')
+            .select('twitch_sub_status,twitch_sub_tier,subs')
+            .eq('workspace_id', wsId)
+            .eq('discord_id', discordId)
+            .single();
+          isSub   = !!(cm?.twitch_sub_status || (cm?.subs ?? 0) > 0);
+          subTier = cm?.twitch_sub_tier ?? '1000';
+        }
       }
 
-      console.log(`[SUB_CHECK_RESULT] isSub=${isSub} subTier=${subTier} helixUsed=${helixUsed}`);
+      console.log(`[SUB_CHECK_RESULT] isSub=${isSub} subTier=${subTier} helixUsed=${helixUsed} hasStoredSub=${hasStoredSub}`);
 
       // ── Role assignment ────────────────────────────────────────────────────
       const guildMember = await guild.members.fetch(discordId).catch(() => null);
@@ -2515,6 +2521,26 @@ client.once('clientReady', () => {
     }
   });
   sikkerAdminTilGkarlsen().catch(() => {});
+
+  // Retroaktiv sub-kort-scan: 3 min etter oppstart.
+  // Sjekker alle nåværende Twitch-subs mot Helix og genererer manglende sub-kort
+  // for Discord-brukere som allerede har koblet Twitch-kontoen.
+  setTimeout(async () => {
+    try {
+      const token = await getBroadcasterUserToken();
+      if (!token) {
+        logSystemEvent({ workspaceId: WORKSPACE_ID, source: 'sub_card', event_type: 'SUB_CARD_BACKFILL_ERROR',
+          title: 'Backfill hoppet over: ingen broadcaster-token tilgjengelig', severity: 'warning', metadata: {} });
+        return;
+      }
+      const { checked, generated } = await backfillSubCards(WORKSPACE_ID, token);
+      if (generated > 0 || checked > 0) {
+        addLog('success', `Sub-kort backfill: ${generated} nye kort generert (${checked} subs sjekket)`, 'OK');
+      }
+    } catch (e: any) {
+      console.error('[SUB_BACKFILL] Feil ved startup backfill:', e?.message);
+    }
+  }, 3 * 60_000);
 
   const statusKanal = STATUS_KANAL_ID ? client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined : undefined;
   if (statusKanal) {

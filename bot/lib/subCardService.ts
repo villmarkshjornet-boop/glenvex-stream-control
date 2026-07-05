@@ -16,6 +16,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
 
+import { getBroadcasterId } from '@/lib/twitch';
+
 const SUB_COLOR   = 0x9146ff; // Twitch purple
 const DISCORD_API = 'https://discord.com/api/v10';
 
@@ -48,6 +50,88 @@ async function loadCardDropChannelId(workspaceId: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+// ── Backfill ──────────────────────────────────────────────────────────────────
+
+/**
+ * Scannes alle nåværende Twitch-subs mot broadcaster_id og genererer manglende
+ * sub-kort for Discord-brukere som allerede har koblet Twitch-kontoen.
+ * Kalles ved bot-oppstart og kan kalles manuelt via admin-kommando.
+ */
+export async function backfillSubCards(
+  workspaceId: string,
+  broadcasterToken: string,
+): Promise<{ checked: number; generated: number; skipped: number }> {
+  const sb = getSb();
+  if (!sb || !broadcasterToken) return { checked: 0, generated: 0, skipped: 0 };
+
+  const clientId = process.env.TWITCH_CLIENT_ID ?? '';
+  const broadcasterId = await getBroadcasterId().catch(() => null);
+  if (!broadcasterId) return { checked: 0, generated: 0, skipped: 0 };
+
+  // Hent alle nåværende subs fra Twitch (maks 100 — nok for kanaler under 100 subs)
+  let twitchSubs: { user_id: string; user_login: string; user_name: string; tier: string }[] = [];
+  try {
+    const res = await fetch(
+      `https://api.twitch.tv/helix/subscriptions?broadcaster_id=${broadcasterId}&first=100`,
+      { headers: { Authorization: `Bearer ${broadcasterToken}`, 'Client-Id': clientId }, signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) {
+      logSystemEvent({ workspaceId, source: 'sub_card', event_type: 'SUB_CARD_BACKFILL_ERROR',
+        title: `Backfill: Twitch /subscriptions feilet HTTP ${res.status}`, severity: 'warning', metadata: { workspaceId } });
+      return { checked: 0, generated: 0, skipped: 0 };
+    }
+    const body = await res.json() as { data?: typeof twitchSubs };
+    // Filter out the broadcaster's own subscription entry
+    twitchSubs = (body.data ?? []).filter(s => s.user_id !== broadcasterId);
+  } catch (e: any) {
+    logSystemEvent({ workspaceId, source: 'sub_card', event_type: 'SUB_CARD_BACKFILL_ERROR',
+      title: `Backfill: Twitch API kastet feil: ${e?.message}`, severity: 'warning', metadata: { workspaceId } });
+    return { checked: 0, generated: 0, skipped: 0 };
+  }
+
+  let generated = 0;
+  let skipped   = 0;
+
+  for (const sub of twitchSubs) {
+    // Find the linked Discord member for this Twitch user
+    const { data: member } = await sb
+      .from('community_members')
+      .select('discord_id, display_name, twitch_username')
+      .eq('workspace_id', workspaceId)
+      .eq('twitch_id', sub.user_id)
+      .neq('member_type', 'merged')
+      .limit(1)
+      .maybeSingle();
+
+    if (!member || member.discord_id.startsWith('tw_')) {
+      skipped++;
+      continue; // Twitch-only member, not linked to Discord
+    }
+
+    const result = await generateSubCard({
+      workspaceId,
+      discordId:      member.discord_id,
+      twitchUsername: sub.user_login,
+      displayName:    member.display_name ?? sub.user_name,
+      subTier:        sub.tier,
+    });
+
+    if (result.ok) generated++;
+    else skipped++;
+  }
+
+  logSystemEvent({
+    workspaceId,
+    source:     'sub_card',
+    event_type: 'SUB_CARD_BACKFILL_COMPLETE',
+    title:      `Sub-kort backfill ferdig: ${generated} generert, ${skipped} hoppet over av ${twitchSubs.length} subs`,
+    severity:   'info',
+    metadata:   { workspaceId, total: twitchSubs.length, generated, skipped },
+  });
+
+  return { checked: twitchSubs.length, generated, skipped };
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

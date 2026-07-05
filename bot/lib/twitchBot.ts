@@ -46,7 +46,8 @@ export function setOnSubCallback(cb: OnSubCb): void {
 }
 
 // Callback som index.ts setter for å behandle verifiserte Discord ↔ Twitch-koblinger
-type LinkVerifiedCb = (discordId: string, twitchUserId: string, twitchUsername: string) => void;
+// hasStoredSub: true hvis verifyLinkCode fant en lagret sub (unlinked_subs eller tw_-rad)
+type LinkVerifiedCb = (discordId: string, twitchUserId: string, twitchUsername: string, hasStoredSub: boolean) => void;
 let _onLinkVerifiedCallback: LinkVerifiedCb | null = null;
 export function setOnLinkVerifiedCallback(cb: LinkVerifiedCb): void {
   _onLinkVerifiedCallback = cb;
@@ -967,7 +968,7 @@ export async function startTwitchBot() {
                 { trigger: 'verify_success', twitchUsername: tags.username },
               ).catch(() => {});
               // Notify Discord via callback if registered
-              _onLinkVerifiedCallback?.(result.discordId, twitchUserId, tags.username ?? brukernavn);
+              _onLinkVerifiedCallback?.(result.discordId, twitchUserId, tags.username ?? brukernavn, result.hasStoredSub ?? false);
             } else {
               client?.say(channel,
                 `/w ${tags.username} Ugyldig eller utløpt kode. Bruk /linktwitch i Discord for ny kode.`,
