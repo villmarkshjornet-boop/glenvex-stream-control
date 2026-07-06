@@ -644,14 +644,15 @@ export default function ViewerGoalsPage() {
             Individuelle browser sources — én bar per kilde
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {previewGoals.filter(g => g.aktiv && g.mal > 0).map(g => {
+            {previewGoals.filter(g => g.mal > 0).map(g => {
               const url = `${fullOverlayUrl}&goal=${encodeURIComponent(g.type)}`;
               return (
-                <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.farge ?? '#00ff41'}` }}>
+                <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.aktiv ? (g.farge ?? '#00ff41') : '#2a3a2a'}`, opacity: g.aktiv ? 1 : 0.6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', color: g.farge ?? '#00ff41' }}>{g.icon ?? '◆'}</span>
-                      <span style={{ fontSize: '11px', color: '#c8f5c8', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
+                      <span style={{ fontSize: '11px', color: g.aktiv ? (g.farge ?? '#00ff41') : '#3a5a3a' }}>{g.icon ?? '◆'}</span>
+                      <span style={{ fontSize: '11px', color: g.aktiv ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
+                      {!g.aktiv && <span style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', border: '1px solid #2a3a2a', borderRadius: '3px', padding: '1px 4px' }}>DEAKTIVERT</span>}
                     </div>
                     <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>380×80px</span>
                   </div>
@@ -659,8 +660,8 @@ export default function ViewerGoalsPage() {
                 </div>
               );
             })}
-            {previewGoals.filter(g => g.aktiv && g.mal > 0).length === 0 && (
-              <p style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>Ingen aktive mål ennå</p>
+            {previewGoals.filter(g => g.mal > 0).length === 0 && (
+              <p style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>Ingen mål konfigurert ennå</p>
             )}
           </div>
         </div>

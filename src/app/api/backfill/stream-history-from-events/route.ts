@@ -71,7 +71,9 @@ async function loadGroups(db: NonNullable<ReturnType<typeof getDb>>, workspaceId
 }
 
 function buildRow(streamId: string, group: RawEvent[], startedMeta: any, stoppedMeta: any, workspaceId: string) {
-  const sessionComplete = group.find(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
+  // Bruk SISTE AUDIENCE_SESSION_COMPLETE (heartbeat-writes er preliminary, stream-end-write er final).
+  // [...group].reverse() er trygt siden vi ikke muterer originalen.
+  const sessionComplete = [...group].reverse().find(e => e.event_type === 'AUDIENCE_SESSION_COMPLETE');
   const retention = group.find(e => e.event_type === 'RETENTION_CURVE');
   const offline = group.find(e => e.event_type === 'stream_offline');
 

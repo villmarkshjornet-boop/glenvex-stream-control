@@ -7,7 +7,8 @@ import { logAgentDecision } from '@/lib/ai/eventLogger';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 
-export const dynamic = 'force-dynamic';
+export const dynamic    = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function GET() {
   const wsId = getWorkspaceId();
@@ -211,6 +212,7 @@ ${targets.map(t => `- ${t.username}: ${t.viewers} seere, ${t.game}, språk: ${t.
       targets: targets.slice(0, 5),
       currentGame: stream.game,
       currentViewers: stream.viewerCount,
+      isLive: stream.viewerCount != null,
       gameId,
     });
   } catch (err) {

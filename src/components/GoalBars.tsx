@@ -208,19 +208,30 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
   return (
     <div style={{
       position: 'relative',
-      background: 'rgba(6,10,6,0.86)',
-      backdropFilter: 'blur(10px)',
+      background: 'rgba(4,7,4,0.72)',
+      backdropFilter: 'blur(16px)',
       borderRadius: '5px',
       borderLeft: `3px solid ${farge}`,
       padding: compact ? '7px 10px' : '9px 12px',
-      boxShadow: `0 2px 14px rgba(0,0,0,0.6), inset 0 0 24px rgba(0,0,0,0.3), ${pulseOn ? glowPulse : glowBase}`,
+      boxShadow: `0 2px 18px rgba(0,0,0,0.55), inset 0 0 32px rgba(0,0,0,0.25), ${pulseOn ? glowPulse : glowBase}`,
       opacity: visible ? 1 : 0,
       transform: visible ? 'translateX(0)' : 'translateX(-18px)',
       transition: `opacity 0.45s ease ${slideDelay}ms, transform 0.45s ease ${slideDelay}ms, box-shadow 1.2s ease`,
       overflow: 'hidden',
     }}>
       {/* Background gradient shimmer */}
-      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(110deg, ${farge}04 0%, transparent 50%)`, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(110deg, ${farge}06 0%, transparent 45%)`, pointerEvents: 'none' }} />
+
+      {/* Top-edge gleam sweep (runs when glow is on) */}
+      {fx.glow && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
+          background: `linear-gradient(90deg, transparent 0%, ${farge}80 40%, ${farge} 50%, ${farge}80 60%, transparent 100%)`,
+          animation: 'gleamSweep 6s ease-in-out infinite',
+          opacity: 0.7,
+          pointerEvents: 'none',
+        }} />
+      )}
 
       {/* Milestone burst */}
       {fx.milestone && <MilestoneBurst farge={farge} show={celebrating} />}
@@ -289,6 +300,12 @@ export function FxStyles() {
         15%  { opacity: 1; }
         85%  { opacity: 1; }
         to   { left: 110%; opacity: 0; }
+      }
+      @keyframes gleamSweep {
+        0%   { transform: translateX(-120%); opacity: 0; }
+        10%  { opacity: 1; }
+        90%  { opacity: 1; }
+        100% { transform: translateX(220%); opacity: 0; }
       }
       @keyframes burst0 {
         0%   { transform: rotate(0deg) translateY(0) scale(1); opacity: 1; }

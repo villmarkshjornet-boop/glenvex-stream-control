@@ -202,7 +202,7 @@ export async function GET(req: NextRequest) {
           .lte('created_at', streamWindowEnd)
           .limit(500);
 
-        const rawFollowCount = (followEvents ?? []).reduce(
+        let rawFollowCount = (followEvents ?? []).reduce(
           (sum: number, e: any) => sum + ((e.metadata?.antallNye as number) ?? 1), 0
         );
 
@@ -221,14 +221,79 @@ export async function GET(req: NextRequest) {
           });
           metrics.followersGained = { value: rawFollowCount, source: 'system_events', confidence: 'medium' };
         }
+
+        // Fallback #2: follower-snapshot-delta for stream-vinduet (trenger ikke chat-bot)
+        if (rawFollowCount === 0) {
+          const { data: wsSnap } = await db.from('workspaces').select('settings_json').eq('id', workspaceId).single();
+          const snaps: Array<{ ts: string; total: number }> = wsSnap?.settings_json?.follower_snapshots ?? [];
+
+          if (snaps.length >= 2) {
+            const streamStartMs  = new Date(selectedStream.started_at).getTime();
+            const streamEndMs    = new Date(streamWindowEnd).getTime();
+            // Closest snapshot at or just before stream start (±10 min tolerance)
+            const beforeSnap = [...snaps].reverse().find(s => new Date(s.ts).getTime() <= streamStartMs + 10 * 60_000);
+            // First snapshot at or after stream end
+            const afterSnap  = snaps.find(s => new Date(s.ts).getTime() >= streamEndMs - 10 * 60_000);
+
+            if (beforeSnap && afterSnap && afterSnap.ts !== beforeSnap.ts) {
+              const snapDelta = Math.max(0, afterSnap.total - beforeSnap.total);
+              if (snapDelta > 0) {
+                void db.from('system_events').insert({
+                  workspace_id: workspaceId, source: 'stream_coach',
+                  event_type: 'STREAM_COACH_METRIC_MISMATCH',
+                  title: `Stream Coach: estimerte ${snapDelta} nye følgere fra follower-snapshot-delta (chat-bot var ikke aktiv)`,
+                  severity: 'info',
+                  metadata: {
+                    workspaceId, streamId: knownStreamId, metric: 'followersGained',
+                    displayedValue: 0, rawEventCount: snapDelta,
+                    sourceUsed: 'follower_snapshots',
+                    beforeSnap: beforeSnap.ts, beforeTotal: beforeSnap.total,
+                    afterSnap: afterSnap.ts,  afterTotal: afterSnap.total,
+                    streamWindowStart: selectedStream.started_at, streamWindowEnd,
+                  },
+                });
+                metrics.followersGained = { value: snapDelta, source: 'follower_snapshots', confidence: 'medium' };
+              }
+            }
+          }
+        }
+      }
+
+      // ── Subs: sjekk TWITCH_SUB_RECEIVED i system_events (skrevet av chat-boten) ─────────
+      if (metrics.subsGained.value === 0 && selectedStream.started_at) {
+        const subWindowEnd = selectedStream.ended_at
+          ? new Date(new Date(selectedStream.ended_at).getTime() + 60 * 60_000).toISOString()
+          : new Date(new Date(selectedStream.started_at).getTime() + 12 * 3600_000).toISOString();
+
+        const { data: subEvents } = await db
+          .from('system_events')
+          .select('metadata, created_at')
+          .eq('workspace_id', workspaceId)
+          .in('event_type', ['TWITCH_SUB_RECEIVED', 'TWITCH_GIFT_SUB_RECEIVED'])
+          .gte('created_at', selectedStream.started_at)
+          .lte('created_at', subWindowEnd)
+          .limit(200);
+
+        const subCount = (subEvents ?? []).reduce(
+          (sum: number, e: any) => sum + ((e.metadata?.antall as number) ?? 1), 0
+        );
+
+        if (subCount > 0) {
+          metrics.subsGained = { value: subCount, source: 'system_events', confidence: 'medium' };
+        }
       }
 
       // ── Oppdater selectedStream med berikede verdier (påvirker både KPI-display og AI-tekst) ─
-      if (metrics.chatMessages.source !== 'stream_history' || metrics.followersGained.source !== 'stream_history') {
+      if (
+        metrics.chatMessages.source !== 'stream_history' ||
+        metrics.followersGained.source !== 'stream_history' ||
+        metrics.subsGained.source !== 'stream_history'
+      ) {
         selectedStream = {
           ...selectedStream,
-          chat_messages: metrics.chatMessages.value,
+          chat_messages:    metrics.chatMessages.value,
           followers_gained: metrics.followersGained.value,
+          subs_gained:      metrics.subsGained.value,
         };
       }
     }

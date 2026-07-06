@@ -28,7 +28,7 @@ export default function RaidManagerPage() {
     try {
       const d = await fetch('/api/raid-targets').then(r => r.json());
       setTargets(d.targets ?? []);
-      setIsLive(d.currentGame != null);
+      setIsLive(d.isLive ?? d.currentGame != null);
       setGame(d.currentGame ?? '');
       setLastUpdated(new Date());
     } catch {}

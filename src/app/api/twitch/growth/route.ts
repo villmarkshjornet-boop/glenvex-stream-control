@@ -101,6 +101,10 @@ export async function GET() {
   const gainDag = dagSnapshot ? total - dagSnapshot.total : null;
   const gainUke = ukeSnapshot ? total - ukeSnapshot.total : null;
 
+  // Brutto nye følgere (fra Twitch-listen, uavhengig av unfollows)
+  const grossDag = recentFollowers.filter(f => new Date(f.followed_at).getTime() > dag1Siden).length;
+  const grossUke = recentFollowers.filter(f => new Date(f.followed_at).getTime() > uke1Siden).length;
+
   // Bygg chartdata: antall snapshots de siste 7 dagene (1 per time)
   const chartData = snapshots
     .filter(s => new Date(s.ts).getTime() >= uke1Siden)
@@ -110,6 +114,8 @@ export async function GET() {
     total,
     gainDag,
     gainUke,
+    grossDag,
+    grossUke,
     recentFollowers,
     chartData,
     harBrukertToken: true,

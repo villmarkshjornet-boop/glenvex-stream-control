@@ -539,8 +539,10 @@ async function sendTwitchPartnerPromo(): Promise<void> {
   }).catch(() => {});
 }
 
-export async function startTwitchBot() {
-  let oauth: string | undefined = process.env.TWITCH_BOT_OAUTH;
+let _chatRetryCount = 0;
+
+export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: boolean } = {}) {
+  let oauth: string | undefined = skipEnvOauth ? undefined : process.env.TWITCH_BOT_OAUTH;
   const botNavn = process.env.TWITCH_BOT_USERNAME || KANAL;
 
   if (!oauth) {
@@ -596,6 +598,7 @@ export async function startTwitchBot() {
   console.log(`[twitchBot] Kobler til #${KANAL} som bot="${botNavn}" | oauth-prefix=${oauthHasPrefix}`);
 
   client.connect().then(() => {
+    _chatRetryCount = 0; // reset retry-teller ved vellykket tilkobling
     console.log(`  ✓ Twitch chat-bot koblet til #${KANAL}`);
     logSystemEvent({
       source: 'twitch_bot',
@@ -758,6 +761,28 @@ export async function startTwitchBot() {
         rawError: raw.slice(0, 300),
       },
     });
+
+    // Auth-feil: prøv på nytt med fersk broadcaster-token fra DB (maks 3 forsøk)
+    // Nettverksfeil er allerede dekket av TMI sin innebygde reconnect: true
+    const isAuthError = /login authentication failed|improperly formatted auth|invalid oauth|bad_authentication/i.test(raw);
+    if (isAuthError && _chatRetryCount < 3) {
+      _chatRetryCount++;
+      const RETRY_DELAYS = [5, 15, 30];
+      const delayMin = RETRY_DELAYS[_chatRetryCount - 1];
+      logSystemEvent({
+        source: 'twitch_bot',
+        event_type: 'TWITCH_CHAT_RETRY_SCHEDULED',
+        title: `Chat retry ${_chatRetryCount}/3 planlagt om ${delayMin} min — henter fersk token fra DB`,
+        severity: 'warning',
+        metadata: { retryCount: _chatRetryCount, delayMin, channel: KANAL,
+          hint: 'Koble til Twitch på nytt i Innstillinger for å friske opp tokenet mens retrien venter' },
+      });
+      setTimeout(() => {
+        startTwitchBot({ skipEnvOauth: true }).catch((e: any) =>
+          console.error('[twitchBot] Chat retry kastet feil:', e?.message)
+        );
+      }, delayMin * 60_000);
+    }
   });
 
   // ─── RAID ──────────────────────────────────────────────────────────────────

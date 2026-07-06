@@ -158,6 +158,50 @@ async function writeHeartbeatAndFlush(): Promise<void> {
 
   // Full snapshot to ai_agent_events (for Stream Coach + restart recovery)
   await writeSnapshotDirect(streamId, sessions);
+
+  // Preliminary AUDIENCE_SESSION_COMPLETE — oppdateres ved hvert heartbeat.
+  // Formål: hvis boten krasjer mellom heartbeats finnes det alltid en event
+  // Stream Coach kan lese. Den endelige (is_preliminary: false) skrives i stopAudienceTracking().
+  await writePreliminaryComplete(streamId, sessions);
+}
+
+async function writePreliminaryComplete(streamId: string, sessions: ViewerSession[]): Promise<void> {
+  const sbUrl = process.env.SUPABASE_URL;
+  const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!sbUrl || !sbKey) return;
+
+  const active = sessions.filter(s => s.messagesSent > 0);
+  await fetch(`${sbUrl}/rest/v1/ai_agent_events`, {
+    method: 'POST',
+    headers: {
+      apikey: sbKey,
+      Authorization: `Bearer ${sbKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({
+      workspace_id:    currentWorkspaceId,
+      source:          'twitch',
+      event_type:      'AUDIENCE_SESSION_COMPLETE',
+      importance_score: 70,
+      metadata: {
+        stream_id:         streamId,
+        viewers:           sessions,
+        total:             sessions.length,
+        new_viewers:       0,
+        returning_viewers: 0,
+        subscribers:       sessions.filter(s => s.subscriber).length,
+        moderators:        sessions.filter(s => s.moderator).length,
+        vips:              sessions.filter(s => s.vip).length,
+        active_chatters:   active.length,
+        top_chatters:      [...active].sort((a, b) => b.messagesSent - a.messagesSent).slice(0, 10)
+          .map(v => ({ username: v.username, messages: v.messagesSent })),
+        retention_snapshots: retentionSnapshots,
+        is_preliminary:    true,
+      },
+    }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => {});
 }
 
 async function writeSnapshotDirect(streamId: string, sessions: ViewerSession[]): Promise<void> {
@@ -291,28 +335,28 @@ export async function stopAudienceTracking(): Promise<void> {
     }));
 
     // Final AUDIENCE_SESSION_COMPLETE (Stream Coach reads this)
-    if (enriched.length > 0) {
-      logBotAgentEvent({
-        source: 'twitch',
-        event_type: 'AUDIENCE_SESSION_COMPLETE',
-        importance_score: 90,
-        metadata: {
-          stream_id: streamId,
-          viewers: enriched,
-          total: enriched.length,
-          new_viewers: enriched.filter(v => !(v as any).returningViewer).length,
-          returning_viewers: enriched.filter(v => (v as any).returningViewer).length,
-          subscribers: enriched.filter(v => v.subscriber).length,
-          moderators: enriched.filter(v => v.moderator).length,
-          vips: enriched.filter(v => v.vip).length,
-          active_chatters: enriched.filter(v => v.messagesSent > 0).length,
-          top_chatters: [...enriched]
-            .sort((a, b) => b.messagesSent - a.messagesSent)
-            .slice(0, 10)
-            .map(v => ({ username: v.username, messages: v.messagesSent })),
-        },
-      });
-    }
+    // Always written — even with 0 viewers, so dashboard never shows "not found"
+    logBotAgentEvent({
+      source: 'twitch',
+      event_type: 'AUDIENCE_SESSION_COMPLETE',
+      importance_score: 90,
+      metadata: {
+        stream_id: streamId,
+        viewers: enriched,
+        total: enriched.length,
+        new_viewers: enriched.filter(v => !(v as any).returningViewer).length,
+        returning_viewers: enriched.filter(v => (v as any).returningViewer).length,
+        subscribers: enriched.filter(v => v.subscriber).length,
+        moderators: enriched.filter(v => v.moderator).length,
+        vips: enriched.filter(v => v.vip).length,
+        active_chatters: enriched.filter(v => v.messagesSent > 0).length,
+        top_chatters: [...enriched]
+          .sort((a, b) => b.messagesSent - a.messagesSent)
+          .slice(0, 10)
+          .map(v => ({ username: v.username, messages: v.messagesSent })),
+        is_preliminary: false,
+      },
+    });
 
     // Final retention curve (Stream Coach reads this)
     if (retentionCopy.length > 0) {

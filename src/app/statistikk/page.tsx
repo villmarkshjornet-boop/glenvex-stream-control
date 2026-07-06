@@ -12,19 +12,26 @@ interface GrowthData {
   total: number;
   gainDag: number | null;
   gainUke: number | null;
+  grossDag: number;
+  grossUke: number;
   recentFollowers: RecentFollower[];
   chartData: ChartPoint[];
   harBrukertToken: boolean;
 }
 
-function GainBadge({ value, label }: { value: number | null; label: string }) {
-  if (value === null) return null;
-  const pos = value >= 0;
+function GainBadge({ net, gross, label }: { net: number | null; gross: number; label: string }) {
+  if (net === null) return null;
+  const pos = net >= 0;
+  // When gross > net, there were unfollows — show "X nye • netto +N"
+  const showGross = gross > 0 && gross !== net;
   return (
-    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${
+    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${
       pos ? 'border-g-green/30 text-g-green bg-g-green/5' : 'border-red-500/30 text-red-400 bg-red-500/5'
     }`}>
-      {pos ? '↑' : '↓'} {pos ? '+' : ''}{value} {label}
+      {showGross
+        ? <><span className="opacity-70">{gross} nye</span><span className="opacity-40 mx-0.5">·</span><span>{pos ? '+' : ''}{net} netto</span><span className="ml-0.5 opacity-60">{label}</span></>
+        : <><span>{pos ? '↑ +' : '↓ '}{net}</span><span className="ml-0.5 opacity-60">{label}</span></>
+      }
     </div>
   );
 }
@@ -141,8 +148,8 @@ export default function StatistikkPage() {
                 {growth?.total.toLocaleString('no-NO') ?? '–'}
               </p>
               <div className="flex gap-2 mt-2 flex-wrap">
-                <GainBadge value={growth?.gainDag ?? null} label="24t" />
-                <GainBadge value={growth?.gainUke ?? null} label="7d" />
+                <GainBadge net={growth?.gainDag ?? null} gross={growth?.grossDag ?? 0} label="24t" />
+                <GainBadge net={growth?.gainUke ?? null} gross={growth?.grossUke ?? 0} label="7d" />
               </div>
             </>
           )}

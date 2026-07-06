@@ -49,6 +49,7 @@ let activeSession: Partial<StreamSession> | null = null;
 let chatMessageCount = 0;
 let sessionFollowerGain = 0;
 let _liveFlushInterval: ReturnType<typeof setInterval> | null = null;
+let _startFollowerCount: number | null = null; // followertall ved stream-start, for delta-beregning
 
 const LIVE_FLUSH_INTERVAL_MS = 10 * 60 * 1000; // flush partial stats every 10 min
 
@@ -90,7 +91,18 @@ export function startSession(stream: { id: string; title: string; game: string; 
   };
   chatMessageCount = 0;
   sessionFollowerGain = 0;
+  _startFollowerCount = null;
   startAudienceTracking(stream.id, stream.game, stream.title);
+
+  // Les siste follower-snapshot for å ha baseline til delta-beregning ved stream-slutt
+  const _sb = getSupabase();
+  if (_sb && WORKSPACE_ID) {
+    _sb.from('workspaces').select('settings_json').eq('id', WORKSPACE_ID).single()
+      .then(({ data }) => {
+        const snaps: Array<{ ts: string; total: number }> = data?.settings_json?.follower_snapshots ?? [];
+        if (snaps.length > 0) _startFollowerCount = snaps[snaps.length - 1].total;
+      }, () => {});
+  }
 
   if (_liveFlushInterval) clearInterval(_liveFlushInterval);
   _liveFlushInterval = setInterval(_flushLiveStats, LIVE_FLUSH_INTERVAL_MS);
@@ -153,14 +165,55 @@ export function incrementFollowerGain(n: number) {
   if (activeSession) sessionFollowerGain += n;
 }
 
+async function fetchCurrentFollowerCount(): Promise<number | null> {
+  const sb   = getSupabase();
+  const wsId = WORKSPACE_ID;
+  const cid  = process.env.TWITCH_CLIENT_ID;
+  if (!sb || !wsId || !cid) return null;
+  try {
+    const { data: ws } = await sb
+      .from('workspaces')
+      .select('twitch_access_token,twitch_user_id')
+      .eq('id', wsId)
+      .single();
+    const token = ws?.twitch_access_token;
+    const bid   = ws?.twitch_user_id;
+    if (!token || !bid) return null;
+    const res = await fetch(
+      `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${bid}`,
+      { headers: { 'Client-ID': cid, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    const body = await res.json() as any;
+    return body.total ?? null;
+  } catch { return null; }
+}
+
 export async function endSession(followerGainOverride = 0) {
   if (_liveFlushInterval) { clearInterval(_liveFlushInterval); _liveFlushInterval = null; }
   if (!activeSession?.id || !activeSession.startedAt) return;
   const started = new Date(activeSession.startedAt).getTime();
   const duration = Math.round((Date.now() - started) / 60_000);
 
-  // Bruk eksplisitt override hvis kaller sender ikke-null verdi, ellers den akkumulerte tellingen.
-  const followerGain = followerGainOverride > 0 ? followerGainOverride : sessionFollowerGain;
+  // Prioritet for follower-gain:
+  // 1. Eksplisitt override fra kaller
+  // 2. Akkumulert teller fra sjekkNyeFollowers() (krever chat-tilkobling)
+  // 3. Delta mellom Twitch API nå og snapshot ved stream-start
+  let followerGain = followerGainOverride > 0 ? followerGainOverride : sessionFollowerGain;
+  if (followerGain === 0) {
+    const currentCount = await fetchCurrentFollowerCount();
+    if (currentCount !== null && _startFollowerCount !== null && currentCount > _startFollowerCount) {
+      followerGain = currentCount - _startFollowerCount;
+      logSystemEvent({
+        workspaceId: WORKSPACE_ID,
+        source: 'twitch_bot',
+        event_type: 'STREAM_HISTORY_FOLLOWERS_FROM_API',
+        title: `Followers gained beregnet fra Twitch API-delta: +${followerGain} (${_startFollowerCount} → ${currentCount})`,
+        severity: 'info',
+        metadata: { streamId: activeSession.id, startCount: _startFollowerCount, endCount: currentCount, delta: followerGain },
+      });
+    }
+  }
 
   const session: StreamSession = {
     id: activeSession.id,
