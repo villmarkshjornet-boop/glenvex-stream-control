@@ -508,7 +508,7 @@ export async function GET() {
                 : botCrashSignal    ? 'bot_crashed — boten krasjet og audience tracking ble aldri avsluttet'
                 : hasAudienceFailed ? 'audience_tracking_failed — se system_events'
                 : !botWasLive       ? 'bot_offline — ingen LIVE_DETECTED eller LIVE_AGENT_STARTED i stream-vinduet'
-                                    : 'ukjent — ingen AUDIENCE_SESSION_COMPLETE funnet for denne stream_id',
+                                    : botWasLive ? 'bot avsluttet ikke session normalt — AUDIENCE_SESSION_COMPLETE ble ikke skrevet' : 'bot ikke detektert i stream-vinduet',
         lastSeen: lastAudienceEvent?.created_at ?? null,
       });
     }
@@ -544,7 +544,13 @@ export async function GET() {
 
     const failureReasons: string[] = [];
     if (heroFallbackUsed) failureReasons.push(historyMissingReason ?? 'Stream History-rad mangler – viser estimat fra ai_agent_events');
-    if (!hasAudienceData) failureReasons.push(`Audience-data mangler — ${botStatus === 'crashed' ? 'bot krasjet' : botStatus === 'offline' ? 'bot var offline' : botStatus === 'auth_failed' ? 'Twitch API 401' : 'ukjent årsak'}`);
+    if (!hasAudienceData) failureReasons.push(`Audience-data mangler — ${
+      botStatus === 'crashed'     ? 'bot krasjet under streamen' :
+      botStatus === 'offline'     ? 'bot var ikke tilkoblet til chat' :
+      botStatus === 'auth_failed' ? 'Twitch API 401' :
+      botWasLive                  ? 'bot avsluttet ikke session normalt' :
+                                    'bot ikke detektert i stream-vinduet'
+    }`);
     if (!hasRetentionCurve) failureReasons.push('Retention-kurve mangler — audience-tracking ble ikke avsluttet normalt');
     if (!hasStreamCoach && !coachFailed) failureReasons.push('Stream Coach-rapport ikke generert ennå');
     if (coachFailed) failureReasons.push('Stream Coach feilet');
@@ -770,13 +776,17 @@ export async function GET() {
   const notRecentlyPromoted = activePartners.filter(p =>
     !p.sistePromotert || (Date.now() - new Date(p.sistePromotert).getTime()) > PARTNER_STALENESS_MS
   );
-  const stalestPartner = notRecentlyPromoted.length > 0
-    ? [...notRecentlyPromoted].sort((a, b) => {
-        const aT = a.sistePromotert ? new Date(a.sistePromotert).getTime() : 0;
-        const bT = b.sistePromotert ? new Date(b.sistePromotert).getTime() : 0;
-        return aT - bT;
-      })[0]
-    : null;
+  // Featured partner (featured=true or prioritet>=100) always wins if they're due
+  const featuredDue = notRecentlyPromoted.find(p => p.featured || p.prioritet >= 100);
+  const stalestPartner = featuredDue
+    ? featuredDue
+    : notRecentlyPromoted.length > 0
+      ? [...notRecentlyPromoted].sort((a, b) => {
+          const aT = a.sistePromotert ? new Date(a.sistePromotert).getTime() : 0;
+          const bT = b.sistePromotert ? new Date(b.sistePromotert).getTime() : 0;
+          return aT - bT;
+        })[0]
+      : null;
 
   const actionCenter: { type: string; priority: 'error' | 'warning' | 'action'; title: string; detail?: string; href: string; createdAt: string }[] = [];
 

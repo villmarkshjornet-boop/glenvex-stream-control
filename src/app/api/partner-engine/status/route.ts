@@ -40,7 +40,7 @@ export async function GET() {
       .limit(1),
 
     db.from('partners')
-      .select('navn, siste_promotert, eksponering')
+      .select('navn, siste_promotert, eksponering, featured, prioritet')
       .eq('workspace_id', wsId)
       .eq('aktiv', true)
       .order('eksponering', { ascending: false })
@@ -67,8 +67,9 @@ export async function GET() {
   const s = sendt.data?.[0] ?? null;
   const partnerData = (partners.data ?? []);
 
-  // Finn partner som har ventet lengst uten promo (X-forslag-kandidat)
-  const eldstPartner = [...partnerData]
+  // Featured partner (featured=true or prioritet>=100) takes priority as the suggestion
+  const featuredPartner = partnerData.find(p => p.featured || (p.prioritet ?? 0) >= 100) ?? null;
+  const eldstPartner = featuredPartner ?? [...partnerData]
     .sort((a, b) => {
       if (!a.siste_promotert) return -1;
       if (!b.siste_promotert) return 1;

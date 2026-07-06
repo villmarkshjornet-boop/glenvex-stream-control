@@ -171,12 +171,12 @@ export async function GET(req: NextRequest) {
     !userToken    ? 'missing'  :
     fromSnapshot  ? 'snapshot' : 'ok';
 
-  // Only override gjeldende for auto-tracked goals; manual goals keep their stored value
+  // followers/subscribers/viewers: always override with live API data when available.
+  // The manuell/source flag only restricts manual types like donations.
   const oppdatert = goals.map(g => {
-    const isAuto = g.source === 'auto' || (g.source === undefined && !g.manuell);
-    if (isAuto && g.type === 'followers')                         return { ...g, gjeldende: followers };
-    if (isAuto && g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
-    if (isAuto && g.type === 'viewers')                           return { ...g, gjeldende: liveViewers };
+    if (g.type === 'followers')                         return { ...g, gjeldende: followers };
+    if (g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
+    if (g.type === 'viewers')                           return { ...g, gjeldende: liveViewers };
     return g;
   });
 

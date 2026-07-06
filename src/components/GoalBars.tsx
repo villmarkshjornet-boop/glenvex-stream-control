@@ -225,7 +225,7 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
     ? `perspective(600px) rotateX(3deg) rotateY(-1deg)`
     : undefined;
 
-  return (
+  const barEl = (
     <div style={{
       position: 'relative',
       background: bg,
@@ -241,7 +241,6 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
         depth3dTransform,
       ].filter(Boolean).join(' ') || undefined,
       transition: `opacity 0.45s ease ${slideDelay}ms, transform 0.45s ease ${slideDelay}ms, box-shadow 1.2s ease`,
-      animation: fx.float ? 'floatY 4s ease-in-out infinite' : undefined,
       overflow: 'hidden',
       transformOrigin: 'center top',
     }}>
@@ -298,6 +297,12 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
       <SegBar pct={pct} farge={farge} fx={fx} segs={compact ? 12 : 16} height={compact ? 7 : 9} />
     </div>
   );
+
+  // Float animation on a wrapper so it doesn't conflict with the inner transform transition
+  if (fx.float) {
+    return <div style={{ animation: 'floatY 4s ease-in-out infinite' }}>{barEl}</div>;
+  }
+  return barEl;
 }
 
 // ─── Combined preview (multiple goals) ───────────────────────────────────────

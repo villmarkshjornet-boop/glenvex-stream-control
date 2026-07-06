@@ -70,7 +70,7 @@ export default function GoalsOverlay() {
     <>
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: transparent !important; }
+        html, body { background: transparent !important; overflow: hidden; }
       `}</style>
       <FxStyles />
       <div style={{
