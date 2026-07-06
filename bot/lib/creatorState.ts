@@ -12,6 +12,7 @@ export interface CachedPartner {
   fallbackUrl: string | null;
   rabattkode: string | null;
   prioritet: number;
+  featured: boolean;
 }
 
 export type StreamPhase = 'STARTUP' | 'EARLY_GROWTH' | 'PRIME_TIME' | 'WRAP_UP' | 'ENDING' | null;

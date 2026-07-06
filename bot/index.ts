@@ -70,7 +70,7 @@ import { onStreamLive, onStreamOffline, onViewerUpdate, onContentPipelineUpdate 
 import { startLiveAgent, stopLiveAgent } from './lib/liveAgent';
 import { startPollManager, stopPollManager } from './lib/pollManager';
 import { getBotDb } from './lib/supabase';
-import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt } from './lib/communityManager';
+import { velgDagensMVP, sendCommunityHype, sjekkIdleOgPrompt, promoterPartnerIDiscord } from './lib/communityManager';
 import { checkCompliance } from './lib/complianceEngine';
 import { startAllSchedulers } from './core/scheduler';
 import { processPendingDMs } from './lib/dmProcessor';
@@ -1537,8 +1537,8 @@ async function sendProaktivMelding() {
         }
       }
 
-      // Fallback: bruk eksisterende sendPartnerPromoMelding hvis engine er deaktivert
-      await sendPartnerPromoMelding(partnerKanal);
+      // Fallback: community manager med featured-prioritet + poll ved usikkerhet
+      await promoterPartnerIDiscord(partnerKanal, process.env.WORKSPACE_ID);
     } else if (runde === 1) {
       // Stream-info → chat (greit som det er)
       const chatKanal = await finnChatKanal();

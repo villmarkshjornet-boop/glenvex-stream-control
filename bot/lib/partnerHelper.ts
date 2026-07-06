@@ -56,12 +56,17 @@ function mapCached(raw: CachedPartner): PartnerInfo | null {
   };
 }
 
+// A partner is "featured" if featured=true OR prioritet>=100 (legacy threshold)
+function isFeatured(p: CachedPartner): boolean {
+  return p.featured || p.prioritet >= 100;
+}
+
 // Phase 7+8: reads from Creator State (populated at startup + stream start by Creator Brain).
 // Returns null if partner cache is empty (bot just started, cache not yet ready).
 // workspaceId defaults to bot-level env var — explicit param required for multi-workspace.
 export async function getFeaturedPartner(workspaceId?: string): Promise<PartnerInfo | null> {
   const partners = getCreatorState(workspaceId ?? WORKSPACE_ID).partners.activePartners;
-  const raw = partners.find(p => p.prioritet >= 100) ?? null;
+  const raw = partners.find(isFeatured) ?? null;
   return raw ? mapCached(raw) : null;
 }
 
@@ -70,8 +75,8 @@ export async function getRandomActivePartner(workspaceId?: string): Promise<Part
   const partners = getCreatorState(workspaceId ?? WORKSPACE_ID).partners.activePartners;
   if (partners.length === 0) return null;
 
-  // Featured partner (prioritet >= 100) gets 90% of all promo slots
-  const featured = partners.find(p => p.prioritet >= 100) ?? null;
+  // Featured partner gets 90% of all promo slots
+  const featured = partners.find(isFeatured) ?? null;
   let raw: CachedPartner;
   if (featured && Math.random() < 0.90) {
     raw = featured;

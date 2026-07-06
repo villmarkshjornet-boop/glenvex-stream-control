@@ -5,6 +5,8 @@ import { getAllMembers } from './memberTracker';
 import { getStreamplan } from './botEvents';
 import { logSystemEvent } from './systemEvents';
 import { getCommunitySettings } from './botKanalPreferanser';
+import { getCreatorState, type CachedPartner } from './creatorState';
+import { trackPartnerExposure } from './partnerHelper';
 
 const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const GUILD_ID     = process.env.DISCORD_GUILD_ID ?? '';
@@ -635,6 +637,179 @@ async function genererOgSendIdlePoll(
   } catch {
     return { sent: false, topicKey };
   }
+}
+
+// ─── C4: Partner promotion med featured-prioritet og poll ved usikkerhet ──────
+
+const PARTNER_PROMO_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 timer mellom Discord-promoer
+
+function isFeaturedPartner(p: CachedPartner): boolean {
+  return p.featured || p.prioritet >= 100;
+}
+
+/**
+ * Velger og sender partnerpost i Discord med full observability.
+ * Prioritet: featured → direkte post. Ingen featured + 2+ partnere → poll.
+ * Logger COMMUNITY_BOT_DECISION, PARTNER_PROMO_SELECTED/SKIPPED/POLL_SUGGESTED,
+ * og COMMUNITY_SETTINGS_APPLIED for full sporbarhet.
+ */
+export async function promoterPartnerIDiscord(
+  kanal: TextChannel,
+  wsId: string = WORKSPACE_ID,
+): Promise<{ sent: boolean; action: 'promoted' | 'poll' | 'skipped'; partnerName: string | null }> {
+  ensureFreshDay();
+
+  // ── 1. Les og logg community-innstillinger ──
+  const settings = await getCommunitySettings().catch(() => null);
+  logSystemEvent({
+    source: 'community_manager', event_type: 'COMMUNITY_SETTINGS_APPLIED',
+    title: 'Innstillinger lest for partner-beslutning',
+    severity: 'info',
+    metadata: {
+      aktiv:              settings?.aktiv              ?? null,
+      communityHypeAktiv: settings?.communityHypeAktiv ?? null,
+      maxBotPostsPerDay:  settings?.maxBotPostsPerDay  ?? null,
+      workspaceId: wsId,
+    },
+  });
+
+  // ── 2. Cooldown-sjekk ──
+  const msSinceLast = Date.now() - dayState.lastPostAt;
+  if (dayState.lastPostAt > 0 && msSinceLast < PARTNER_PROMO_COOLDOWN_MS) {
+    const minLeft = Math.round((PARTNER_PROMO_COOLDOWN_MS - msSinceLast) / 60_000);
+    logSystemEvent({
+      source: 'community_manager', event_type: 'PARTNER_PROMO_SKIPPED',
+      title: `Partnerpost hoppet over — cooldown (${minLeft} min igjen)`,
+      severity: 'info', metadata: { reason: 'COOLDOWN', minLeft, workspaceId: wsId },
+    });
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_BOT_DECISION',
+      title: 'Beslutning: SKIP — cooldown aktiv',
+      severity: 'info', metadata: { decision: 'skip', reason: 'cooldown', minLeft, workspaceId: wsId },
+    });
+    return { sent: false, action: 'skipped', partnerName: null };
+  }
+
+  // ── 3. Hent partnere fra Creator State ──
+  const state = getCreatorState(wsId);
+  const partners = state.partners.activePartners.filter(
+    p => p.affiliateUrl || p.fallbackUrl,
+  );
+  const featured = partners.find(isFeaturedPartner) ?? null;
+
+  // ── 4a. Featured partner — direkte promo ──
+  if (featured) {
+    const url    = featured.affiliateUrl ?? featured.fallbackUrl ?? '';
+    const kode   = featured.rabattkode ? ` (kode: **${featured.rabattkode}**)` : '';
+    const tekst  = featured.beskrivelse
+      ? `🤝 **${featured.navn}** — ${featured.beskrivelse}\n${url}${kode}`
+      : `🤝 **${featured.navn}**\n${url}${kode}`;
+
+    try {
+      await kanal.send(tekst);
+    } catch (e: any) {
+      logSystemEvent({
+        source: 'community_manager', event_type: 'PARTNER_PROMO_SKIPPED',
+        title: `Kunne ikke sende partnerpost: ${e?.message?.slice(0, 80) ?? 'ukjent'}`,
+        severity: 'warning', metadata: { partnerName: featured.navn, reason: 'SEND_ERROR', workspaceId: wsId },
+      });
+      return { sent: false, action: 'skipped', partnerName: featured.navn };
+    }
+
+    dayState.lastPostAt = Date.now();
+
+    logSystemEvent({
+      source: 'community_manager', event_type: 'PARTNER_PROMO_SELECTED',
+      title: `Partnerpost sendt: ${featured.navn} (featured)`,
+      severity: 'info',
+      metadata: { partnerName: featured.navn, featured: true, prioritet: featured.prioritet, kanalId: kanal.id, workspaceId: wsId },
+    });
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_BOT_DECISION',
+      title: `Beslutning: PROMO_FEATURED — ${featured.navn}`,
+      severity: 'info',
+      metadata: { decision: 'promoted', reason: 'featured', partnerName: featured.navn, workspaceId: wsId },
+    });
+
+    trackPartnerExposure({
+      partnerName: featured.navn,
+      platform: 'discord',
+      channelId: kanal.id,
+      source: 'community_rotation_featured',
+    }).catch(() => {});
+
+    return { sent: true, action: 'promoted', partnerName: featured.navn };
+  }
+
+  // ── 4b. Ingen featured + 2+ partnere → poll ──
+  if (partners.length >= 2) {
+    const opts    = partners.slice(0, 4);
+    const desc    = opts.map((p, i) => `${DISCORD_REACTIONS[i]} ${p.navn}`).join('\n');
+    const embed   = new EmbedBuilder()
+      .setColor(0x9b77cf)
+      .setTitle('🤝 Hvilken partner vil du høre om?')
+      .setDescription(`${desc}\n\n*Stem med emoji — vinneren får spotlight i neste post! 🎯*`)
+      .setFooter({ text: `${BOT_BRAND} Partner Intelligence` })
+      .setTimestamp();
+
+    try {
+      const msg = await kanal.send({ embeds: [embed] });
+      for (const emoji of DISCORD_REACTIONS.slice(0, opts.length)) {
+        await msg.react(emoji).catch(() => {});
+        await new Promise(r => setTimeout(r, 300));
+      }
+    } catch {}
+
+    dayState.lastPostAt = Date.now();
+
+    logSystemEvent({
+      source: 'community_manager', event_type: 'PARTNER_POLL_SUGGESTED',
+      title: `Partner-poll sendt — ${partners.length} partnere, ingen featured`,
+      severity: 'info',
+      metadata: { partnerCount: partners.length, opts: opts.map(p => p.navn), kanalId: kanal.id, workspaceId: wsId },
+    });
+    logSystemEvent({
+      source: 'community_manager', event_type: 'COMMUNITY_BOT_DECISION',
+      title: 'Beslutning: POLL — ingen klar featured partner',
+      severity: 'info',
+      metadata: { decision: 'poll', reason: 'no_featured', partnerCount: partners.length, workspaceId: wsId },
+    });
+
+    return { sent: true, action: 'poll', partnerName: null };
+  }
+
+  // ── 4c. Én partner, ingen featured-merking → promoter direkte ──
+  if (partners.length === 1) {
+    const p    = partners[0];
+    const url  = p.affiliateUrl ?? p.fallbackUrl ?? '';
+    const kode = p.rabattkode ? ` (kode: **${p.rabattkode}**)` : '';
+    const tekst = `🤝 **${p.navn}**${p.beskrivelse ? ` — ${p.beskrivelse}` : ''}\n${url}${kode}`;
+
+    try { await kanal.send(tekst); } catch {}
+    dayState.lastPostAt = Date.now();
+
+    logSystemEvent({
+      source: 'community_manager', event_type: 'PARTNER_PROMO_SELECTED',
+      title: `Partnerpost sendt: ${p.navn} (eneste aktive partner)`,
+      severity: 'info',
+      metadata: { partnerName: p.navn, featured: false, kanalId: kanal.id, workspaceId: wsId },
+    });
+    trackPartnerExposure({ partnerName: p.navn, platform: 'discord', channelId: kanal.id, source: 'community_rotation_only' }).catch(() => {});
+    return { sent: true, action: 'promoted', partnerName: p.navn };
+  }
+
+  // ── 4d. Ingen partnere ──
+  logSystemEvent({
+    source: 'community_manager', event_type: 'PARTNER_PROMO_SKIPPED',
+    title: 'Ingen aktive partnere med gyldig URL',
+    severity: 'info', metadata: { reason: 'NO_ACTIVE_PARTNERS', workspaceId: wsId },
+  });
+  logSystemEvent({
+    source: 'community_manager', event_type: 'COMMUNITY_BOT_DECISION',
+    title: 'Beslutning: SKIP — ingen aktive partnere',
+    severity: 'info', metadata: { decision: 'skip', reason: 'no_partners', workspaceId: wsId },
+  });
+  return { sent: false, action: 'skipped', partnerName: null };
 }
 
 // ─── Diagnostics ──────────────────────────────────────────────────────────────

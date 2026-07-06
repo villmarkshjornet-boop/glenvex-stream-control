@@ -105,7 +105,7 @@ export async function getCreatorContext(
       : Promise.resolve({ data: [] as Array<{ avg_viewers: number | null }> }),
     needsPartners
       ? db.from('partners')
-          .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet')
+          .select('id,navn,beskrivelse,affiliate_link,nettadresse,rabattkode,prioritet,featured')
           .eq('aktiv', true)
           .order('prioritet', { ascending: false })
           .limit(20)
@@ -158,6 +158,7 @@ export async function getCreatorContext(
     fallbackUrl: raw.nettadresse?.trim() || null,
     rabattkode: raw.rabattkode ?? null,
     prioritet: raw.prioritet ?? 0,
+    featured: raw.featured ?? false,
   }));
 
   return ctx;
