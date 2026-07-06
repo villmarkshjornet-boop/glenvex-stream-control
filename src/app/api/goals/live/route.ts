@@ -171,9 +171,10 @@ export async function GET(req: NextRequest) {
     !userToken    ? 'missing'  :
     fromSnapshot  ? 'snapshot' : 'ok';
 
-  // followers/subscribers/viewers: always override with live API data when available.
-  // The manuell/source flag only restricts manual types like donations.
+  // Only override from Twitch API when goal source is 'auto'. Manual goals keep their stored value.
   const oppdatert = goals.map(g => {
+    const isManual = g.source === 'manual' || (g.source === undefined && g.manuell === true);
+    if (isManual) return g;
     if (g.type === 'followers')                         return { ...g, gjeldende: followers };
     if (g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
     if (g.type === 'viewers')                           return { ...g, gjeldende: liveViewers };

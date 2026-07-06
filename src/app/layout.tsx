@@ -20,10 +20,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const isOverlay = pathname.startsWith('/overlay');
 
   if (isFullPage || isOverlay) {
+    if (isOverlay) {
+      return (
+        <html lang="no" style={{ margin: 0, padding: 0, background: 'transparent', overflow: 'hidden' }}>
+          <head>
+            <style>{`html,body{background:transparent!important;margin:0;padding:0;overflow:hidden}`}</style>
+          </head>
+          <body style={{ margin: 0, padding: 0, background: 'transparent', overflow: 'hidden' }}>
+            {children}
+          </body>
+        </html>
+      );
+    }
     return (
       <html lang="no">
-        <body style={isOverlay ? { margin: 0, padding: 0, background: 'transparent', overflow: 'hidden' } : undefined}
-              className={isOverlay ? '' : 'bg-g-bg text-g-text'}>
+        <body className="bg-g-bg text-g-text">
           {children}
         </body>
       </html>

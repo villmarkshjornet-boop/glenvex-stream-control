@@ -443,16 +443,14 @@ async function sjekkNyeFollowers() {
       .map((f: any) => f.user_name as string)
       .filter(Boolean);
 
-    // Velkomst i Twitch chat
+    // Velkomst i Twitch chat — branded "Velkommen til gjengen" greeting
     const erLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
     if (erLive && client) {
       const navnListe = nyeNavn.length > 0 ? nyeNavn : Array(Math.min(antallNye, 3)).fill(null).map(() => null as null);
       for (const navn of navnListe) {
-        const tekst = navn
-          ? `${navn} fulgte nettopp ${BOT_BRAND}! Lag én kort, varm velkomst på norsk. Maks 10 ord.`
-          : `Noen nye fulgte ${BOT_BRAND}! Lag én kort velkomst til de nye seerne på norsk. Maks 10 ord.`;
-        const svar = await aiSvar(tekst);
-        const hilsen = svar || (navn ? `@${navn} Takk for follow! Velkommen! PogChamp` : `Takk til alle nye følgere! PogChamp FeelsGoodMan`);
+        const hilsen = navn
+          ? `Velkommen til gjengen, ${navn}! 💚 PogChamp`
+          : `Velkommen til alle nye følgere! 💚 PogChamp`;
         client.say(`#${KANAL}`, hilsen).catch(() => {});
       }
     }
@@ -462,14 +460,15 @@ async function sjekkNyeFollowers() {
     if (!kanalId) return;
 
     if (nyeNavn.length > 0) {
-      const beskrivelse = antallNye === 1
-        ? `**${nyeNavn[0]}** fulgte nettopp ${BOT_BRAND}! Velkommen til familien! 💚`
-        : nyeNavn.map(n => `💚 **${n}**`).join('\n') + (antallNye > nyeNavn.length ? `\n... og ${antallNye - nyeNavn.length} til` : '');
+      const velkomst = antallNye === 1
+        ? `Velkommen til gjengen, **${nyeNavn[0]}**! 💚`
+        : nyeNavn.map(n => `💚 Velkommen til gjengen, **${n}**!`).join('\n') +
+          (antallNye > nyeNavn.length ? `\n... og ${antallNye - nyeNavn.length} til!` : '');
 
       await postTilDiscord(kanalId, {
         embeds: [{
           title: antallNye === 1 ? '💚 Ny følger!' : `💚 ${antallNye} nye følgere!`,
-          description: beskrivelse,
+          description: velkomst,
           color: 0x00e676,
           footer: { text: `${BOT_BRAND} har nå ${nyAntall.toLocaleString()} følgere på Twitch` },
           timestamp: new Date().toISOString(),
@@ -477,7 +476,7 @@ async function sjekkNyeFollowers() {
       });
     } else {
       await postTilDiscord(kanalId, {
-        content: `💚 **${antallNye}** ny${antallNye > 1 ? 'e' : ''} følger${antallNye > 1 ? 'e' : ''}! Totalt: **${nyAntall.toLocaleString()}** på Twitch`,
+        content: `💚 **${antallNye}** ny${antallNye > 1 ? 'e' : ''} følger${antallNye > 1 ? 'e' : ''}! Totalt: **${nyAntall.toLocaleString()}** på Twitch — Velkommen til gjengen! PogChamp`,
       });
     }
   } catch {}
@@ -840,12 +839,28 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
     logBotAgentEvent({ source: 'twitch', event_type: 'sub', username, importance_score: 80, metadata: { type: 'new_sub' } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Ny sub: ${username}`, severity: 'info', metadata: { type: 'new_sub', giver: username, mottaker: username } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Subscriber på ${BOT_BRAND}`, confidence_score: 0.85, metadata: { subscriber: true } }).catch(() => {});
+
+    // Twitch chat hype
     const svar = await aiSvar(`${username} har nettopp subscripet for første gang! Lag en veldig entusiastisk, personlig norsk takkemelding. Maks 2 setninger.`);
     await chatSend(channel, svar || `@${username} TUSEN TAKK for subben! 💜 Du er absolutt en legende! FeelsGoodMan PartyTime`, { trigger: 'sub', username });
+    await chatSend(channel, `LET'S GO chat — vi farmar subs! Hvem er neste?! PogChamp 🔥`, { trigger: 'sub_hype', username });
     _onSubCallback?.(username, (userstate as any)?.['user-id'], (userstate as any)?.['msg-param-sub-plan']).catch(() => {});
 
+    // Discord hype — full embed med sub-farming energi
     await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
-      content: `🌟 **${username}** er nå subscriber! Takk for støtten! FeelsGoodMan`,
+      embeds: [{
+        title: `🌟 NY SUBSCRIBER — ${username}!`,
+        description:
+          `**${username}** subscribet akkurat til ${BOT_BRAND}! 💜\n\n` +
+          `Vi FARMER subs — hvem er neste?! @here kom igjen! PogChamp 🔥`,
+        color: 0x9146ff,
+        fields: [
+          { name: '💜 Subscriber', value: `**${username}**`, inline: true },
+          { name: '🔴 Status', value: 'NY SUB!', inline: true },
+        ],
+        footer: { text: `${BOT_BRAND} • Twitch Sub` },
+        timestamp: new Date().toISOString(),
+      }],
     });
   });
 
@@ -855,9 +870,16 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
     logBotAgentEvent({ source: 'twitch', event_type: 'resub', username, importance_score: 75, metadata: { months } });
     logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_SUB_RECEIVED', title: `Resub: ${username} (${months} mnd)`, severity: 'info', metadata: { type: 'resub', giver: username, mottaker: username, months } });
     upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Lojal subscriber – ${months} måneder`, confidence_score: 0.9, metadata: { subscriber: true, months } }).catch(() => {});
+
+    // Twitch chat
     const svar = await aiSvar(`${username} har hatt sub i ${months} måneder! Takk dem på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} ${months} måneder! Legendarisk lojalitet! PogChamp`, { trigger: 'resub', username, months });
     _onSubCallback?.(username, (userstate as any)?.['user-id'], (userstate as any)?.['msg-param-sub-plan']).catch(() => {});
+
+    // Discord
+    await postTilDiscord(await getSubsKanalId() || chatKanalId(), {
+      content: `💜 **${username}** har hatt sub i **${months} måneder** — lojal legende! 👑 Vi farmer videre! PogChamp`,
+    });
   });
 
   // ─── GIFT SUB ──────────────────────────────────────────────────────────────
@@ -903,9 +925,18 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
     const username = userstate.username ?? 'Noen';
     const bitsNum = typeof bits === 'string' ? parseInt(bits) || 0 : bits;
     logBotAgentEvent({ source: 'twitch', event_type: 'cheer', username, importance_score: Math.min(90, bitsNum / 10), metadata: { bits: bitsNum } });
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_BITS_RECEIVED', title: `${username} cheeret ${bitsNum} bits`, severity: 'info', metadata: { type: 'cheer', username, bits: bitsNum } });
     if (username !== 'Noen') upsertBotMemory({ agent_type: 'twitch', memory_type: 'viewer', key: username.toLowerCase(), summary: `Cheerer bits på ${BOT_BRAND}`, confidence_score: 0.8, metadata: { bits: bitsNum } }).catch(() => {});
+
+    // Twitch chat
     const svar = await aiSvar(`${username} cheeret ${bits} bits! Takk på norsk. Maks 1 setning.`);
     await chatSend(channel, svar || `@${username} ${bits} bits!! Du er gal! PogChamp`, { trigger: 'cheer', username, bits });
+
+    // Discord hype
+    const bitsEmoji = bitsNum >= 1000 ? '🔥💎' : bitsNum >= 500 ? '🔥' : '💎';
+    await postTilDiscord(chatKanalId() || liveKanalId(), {
+      content: `${bitsEmoji} **${username}** cheeret **${bits} bits** til ${BOT_BRAND}! HYPE! PogChamp`,
+    });
   });
 
   // ─── Meldinger ─────────────────────────────────────────────────────────────
