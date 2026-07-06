@@ -24,20 +24,20 @@ interface Goal {
 const DEFAULT_GOALS: Goal[] = [
   { type: 'followers',   label: 'Følgere',     mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', icon: '◈', manuell: false, source: 'auto'   },
   { type: 'subscribers', label: 'Subscribers', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', icon: '★', manuell: false, source: 'auto'   },
+  { type: 'viewers',     label: 'Seere nå',    mal: 50,   gjeldende: 0, aktiv: false, farge: '#00d4ff', icon: '◉', manuell: false, source: 'auto'   },
   { type: 'donations',   label: 'Donasjoner',  mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', icon: '♥', manuell: true,  source: 'manual' },
 ];
-
-const NORMALIZE_TYPE: Record<string, string> = { viewers: 'donations' };
 
 const GOAL_DEFAULTS: Record<string, { icon: string; manuell: boolean; source: 'auto' | 'manual'; farge: string }> = {
   followers:   { icon: '◈', manuell: false, source: 'auto',   farge: '#00ff41' },
   subscribers: { icon: '★', manuell: false, source: 'auto',   farge: '#9b77cf' },
   donations:   { icon: '♥', manuell: true,  source: 'manual', farge: '#ff7b47' },
+  viewers:     { icon: '◉', manuell: false, source: 'auto',   farge: '#00d4ff' },
 };
 
 function normalizeSavedGoals(saved: any[]): Goal[] {
   return saved.map(g => {
-    const type = NORMALIZE_TYPE[g.type] ?? g.type;
+    const type = g.type as string;
     const def  = GOAL_DEFAULTS[type] ?? { icon: '◆', manuell: true, source: 'manual' as const, farge: '#00ff41' };
     // Derive source from manuell if not explicitly set (backward-compat)
     const source: 'auto' | 'manual' = g.source ?? (g.manuell ? 'manual' : def.source);
@@ -60,6 +60,18 @@ async function getFollowers(token: string, broadcasterId: string, clientId: stri
     const data = await res.json() as any;
     return { total: data.total ?? 0, apiOk: true };
   } catch { return { total: 0, apiOk: false }; }
+}
+
+async function getLiveViewers(token: string, broadcasterId: string, clientId: string): Promise<number> {
+  try {
+    const res = await fetch(
+      `https://api.twitch.tv/helix/streams?user_id=${broadcasterId}`,
+      { headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) return 0;
+    const data = await res.json() as any;
+    return data.data?.[0]?.viewer_count ?? 0;
+  } catch { return 0; }
 }
 
 async function getSubscribers(token: string, broadcasterId: string, clientId: string): Promise<{ total: number; canRead: boolean }> {
@@ -128,16 +140,19 @@ export async function GET(req: NextRequest) {
   let canReadSubscribers = false;
   let fromSnapshot       = false;
   let followersApiOk     = false;
+  let liveViewers        = 0;
 
   if (userToken) {
-    const [f, s] = await Promise.all([
+    const [f, s, v] = await Promise.all([
       getFollowers(userToken, broadcasterId, clientId),
       getSubscribers(userToken, broadcasterId, clientId),
+      getLiveViewers(userToken, broadcasterId, clientId),
     ]);
     followers          = f.total;
     followersApiOk     = f.apiOk;
     subscriberTotal    = s.total;
     canReadSubscribers = s.canRead;
+    liveViewers        = v;
   }
 
   // Snapshot fallback if followers API failed or returned 0
@@ -161,6 +176,7 @@ export async function GET(req: NextRequest) {
     const isAuto = g.source === 'auto' || (g.source === undefined && !g.manuell);
     if (isAuto && g.type === 'followers')                         return { ...g, gjeldende: followers };
     if (isAuto && g.type === 'subscribers' && canReadSubscribers) return { ...g, gjeldende: subscriberTotal };
+    if (isAuto && g.type === 'viewers')                           return { ...g, gjeldende: liveViewers };
     return g;
   });
 
@@ -174,7 +190,7 @@ export async function GET(req: NextRequest) {
   return withCache(NextResponse.json({
     connected: true,
     tokenStatus,
-    live: { followers, subscribers: subscriberTotal, canReadSubscribers, harSubData: canReadSubscribers, fromSnapshot },
+    live: { followers, subscribers: subscriberTotal, canReadSubscribers, harSubData: canReadSubscribers, fromSnapshot, viewers: liveViewers },
     goals: oppdatert,
     fx,
   }));

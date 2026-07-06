@@ -21,8 +21,15 @@ export interface OverlayFx {
   numberAnim: boolean;
   slideIn: boolean;
   milestone: boolean;
-  scanInterval: number;   // sekunder mellom scan-linjer
+  scanInterval: number;
   glowIntensity: 'low' | 'medium' | 'high';
+  // new
+  transparent: boolean;    // frameless — no bar background/blur
+  depth3d: boolean;        // 3D perspective tilt + shadow
+  float: boolean;          // subtle floating animation
+  showMs: number;          // ms overlay is visible (default 25000)
+  hiddenMs: number;        // ms overlay is hidden (default 10000)
+  fadeMs: number;          // ms for fade in/out (default 900)
 }
 
 export const DEFAULT_FX: OverlayFx = {
@@ -35,13 +42,19 @@ export const DEFAULT_FX: OverlayFx = {
   milestone: true,
   scanInterval: 7,
   glowIntensity: 'medium',
+  transparent: false,
+  depth3d: false,
+  float: false,
+  showMs: 25_000,
+  hiddenMs: 10_000,
+  fadeMs: 900,
 };
 
 export const PRESETS: Record<OverlayFx['preset'], Partial<OverlayFx>> = {
-  classic:  { glow: false, scan: false, pulse: false, numberAnim: false, slideIn: true,  milestone: false, glowIntensity: 'low'    },
-  neon:     { glow: true,  scan: true,  pulse: true,  numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'medium' },
-  cinematic:{ glow: true,  scan: true,  pulse: false, numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'high'   },
-  minimal:  { glow: false, scan: false, pulse: false, numberAnim: false, slideIn: false, milestone: false, glowIntensity: 'low'    },
+  classic:  { glow: false, scan: false, pulse: false, numberAnim: false, slideIn: true,  milestone: false, glowIntensity: 'low',    transparent: false, depth3d: false, float: false },
+  neon:     { glow: true,  scan: true,  pulse: true,  numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'medium', transparent: false, depth3d: false, float: false },
+  cinematic:{ glow: true,  scan: true,  pulse: false, numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'high',   transparent: false, depth3d: true,  float: false },
+  minimal:  { glow: false, scan: false, pulse: false, numberAnim: false, slideIn: false, milestone: false, glowIntensity: 'low',    transparent: true,  depth3d: false, float: false },
 };
 
 const FARGER: Record<string, string> = {
@@ -96,7 +109,6 @@ function SegBar({ pct, farge, fx, segs = 16, height = 9 }: {
     return () => clearTimeout(t);
   }, [pct]);
 
-  // Scan line trigger
   useEffect(() => {
     if (!fx.scan) return;
     const fire = () => { setScanning(true); setTimeout(() => setScanning(false), 900); };
@@ -129,13 +141,11 @@ function SegBar({ pct, farge, fx, segs = 16, height = 9 }: {
         );
       })}
 
-      {/* Scan line */}
       {fx.scan && (
         <div style={{
           position: 'absolute', top: 0, bottom: 0, width: '40px',
           background: `linear-gradient(90deg, transparent, ${farge}cc, ${farge}, ${farge}cc, transparent)`,
           boxShadow: `0 0 ${12 * mult}px ${farge}`,
-          transition: 'none',
           animation: scanning ? `scanMove 0.9s cubic-bezier(.4,0,.2,1) forwards` : 'none',
           left: '-40px',
           pointerEvents: 'none',
@@ -149,9 +159,7 @@ function SegBar({ pct, farge, fx, segs = 16, height = 9 }: {
 function MilestoneBurst({ farge, show }: { farge: string; show: boolean }) {
   if (!show) return null;
   return (
-    <div style={{
-      position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden',
-    }}>
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
       {Array.from({ length: 12 }, (_, i) => (
         <div key={i} style={{
           position: 'absolute', left: '50%', top: '50%',
@@ -174,18 +182,16 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
   const icon  = goal.icon ?? ICONS[goal.type] ?? '◆';
   const mult  = GLOW_MULT[fx.glowIntensity];
 
-  const [visible, setVisible]     = useState(!fx.slideIn);
+  const [visible, setVisible]         = useState(!fx.slideIn);
   const [celebrating, setCelebrating] = useState(false);
-  const [pulseOn, setPulseOn]     = useState(false);
+  const [pulseOn, setPulseOn]         = useState(false);
 
-  // Slide-in on mount
   useEffect(() => {
     if (!fx.slideIn) return;
     const t = setTimeout(() => setVisible(true), 80 + slideDelay);
     return () => clearTimeout(t);
   }, [fx.slideIn, slideDelay]);
 
-  // Milestone celebrate at 100%
   const prevPct = useRef(pct);
   useEffect(() => {
     if (fx.milestone && pct >= 100 && prevPct.current < 100) {
@@ -195,34 +201,54 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
     prevPct.current = pct;
   }, [pct, fx.milestone]);
 
-  // Pulse animation clock
   useEffect(() => {
     if (!fx.pulse) return;
     const id = setInterval(() => setPulseOn(p => !p), 2200);
     return () => clearInterval(id);
   }, [fx.pulse]);
 
-  const glowBase = fx.glow ? `0 0 ${20 * mult}px ${farge}30, 0 0 ${40 * mult}px ${farge}18` : 'none';
+  const glowBase  = fx.glow ? `0 0 ${20 * mult}px ${farge}30, 0 0 ${40 * mult}px ${farge}18` : 'none';
   const glowPulse = fx.glow && fx.pulse ? `0 0 ${30 * mult}px ${farge}60, 0 0 ${60 * mult}px ${farge}30` : glowBase;
+
+  const bg = fx.transparent
+    ? 'transparent'
+    : 'rgba(4,7,4,0.72)';
+
+  const shadowParts = [
+    fx.transparent ? null : '0 2px 18px rgba(0,0,0,0.55)',
+    fx.transparent ? null : 'inset 0 0 32px rgba(0,0,0,0.25)',
+    pulseOn ? glowPulse : glowBase,
+    fx.depth3d ? `0 8px 24px rgba(0,0,0,0.6), 0 16px 48px rgba(0,0,0,0.3)` : null,
+  ].filter(Boolean).join(', ');
+
+  const depth3dTransform = fx.depth3d
+    ? `perspective(600px) rotateX(3deg) rotateY(-1deg)`
+    : undefined;
 
   return (
     <div style={{
       position: 'relative',
-      background: 'rgba(4,7,4,0.72)',
-      backdropFilter: 'blur(16px)',
-      borderRadius: '5px',
-      borderLeft: `3px solid ${farge}`,
+      background: bg,
+      backdropFilter: fx.transparent ? 'none' : 'blur(16px)',
+      borderRadius: fx.transparent ? '0' : '5px',
+      borderLeft: fx.transparent ? `2px solid ${farge}` : `3px solid ${farge}`,
+      borderBottom: fx.depth3d && !fx.transparent ? `1px solid ${farge}20` : undefined,
       padding: compact ? '7px 10px' : '9px 12px',
-      boxShadow: `0 2px 18px rgba(0,0,0,0.55), inset 0 0 32px rgba(0,0,0,0.25), ${pulseOn ? glowPulse : glowBase}`,
+      boxShadow: shadowParts || 'none',
       opacity: visible ? 1 : 0,
-      transform: visible ? 'translateX(0)' : 'translateX(-18px)',
+      transform: [
+        visible ? undefined : 'translateX(-18px)',
+        depth3dTransform,
+      ].filter(Boolean).join(' ') || undefined,
       transition: `opacity 0.45s ease ${slideDelay}ms, transform 0.45s ease ${slideDelay}ms, box-shadow 1.2s ease`,
+      animation: fx.float ? 'floatY 4s ease-in-out infinite' : undefined,
       overflow: 'hidden',
+      transformOrigin: 'center top',
     }}>
-      {/* Background gradient shimmer */}
-      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(110deg, ${farge}06 0%, transparent 45%)`, pointerEvents: 'none' }} />
+      {!fx.transparent && (
+        <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(110deg, ${farge}06 0%, transparent 45%)`, pointerEvents: 'none' }} />
+      )}
 
-      {/* Top-edge gleam sweep (runs when glow is on) */}
       {fx.glow && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
@@ -233,7 +259,15 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
         }} />
       )}
 
-      {/* Milestone burst */}
+      {fx.depth3d && !fx.transparent && (
+        <div style={{
+          position: 'absolute', bottom: '-6px', left: '4px', right: '4px', height: '6px',
+          background: `linear-gradient(180deg, ${farge}15, transparent)`,
+          filter: 'blur(4px)',
+          pointerEvents: 'none',
+        }} />
+      )}
+
       {fx.milestone && <MilestoneBurst farge={farge} show={celebrating} />}
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: compact ? '5px' : '7px', position: 'relative' }}>
@@ -241,7 +275,9 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
         <span style={{
           fontSize: compact ? '9px' : '10px', fontWeight: 700,
           textTransform: 'uppercase', letterSpacing: '0.08em',
-          color: 'rgba(200,245,200,0.85)', fontFamily: 'monospace', flex: 1,
+          color: fx.transparent ? `${farge}cc` : 'rgba(200,245,200,0.85)',
+          fontFamily: 'monospace', flex: 1,
+          textShadow: fx.transparent && fx.glow ? `0 0 8px ${farge}80` : undefined,
         }}>{goal.label}</span>
         <span style={{
           fontSize: compact ? '16px' : '18px', fontWeight: 900, color: farge, fontFamily: 'monospace', lineHeight: 1,
@@ -249,13 +285,13 @@ export function GoalBarSingle({ goal, fx = DEFAULT_FX, compact = false, slideDel
         }}>
           <AnimNumber val={goal.gjeldende} animate={fx.numberAnim} />
         </span>
-        <span style={{ fontSize: compact ? '9px' : '10px', color: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>
+        <span style={{ fontSize: compact ? '9px' : '10px', color: fx.transparent ? `${farge}60` : 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>
           / {goal.mal.toLocaleString('no-NO')}
         </span>
         <span style={{
           fontSize: compact ? '10px' : '11px', fontWeight: 900,
-          color: pct >= 100 ? farge : 'rgba(255,255,255,0.4)', fontFamily: 'monospace',
-          minWidth: '32px', textAlign: 'right',
+          color: pct >= 100 ? farge : fx.transparent ? `${farge}80` : 'rgba(255,255,255,0.4)',
+          fontFamily: 'monospace', minWidth: '32px', textAlign: 'right',
         }}>{pct}%</span>
       </div>
 
@@ -306,6 +342,11 @@ export function FxStyles() {
         10%  { opacity: 1; }
         90%  { opacity: 1; }
         100% { transform: translateX(220%); opacity: 0; }
+      }
+      @keyframes floatY {
+        0%   { transform: translateY(0px); }
+        50%  { transform: translateY(-5px); }
+        100% { transform: translateY(0px); }
       }
       @keyframes burst0 {
         0%   { transform: rotate(0deg) translateY(0) scale(1); opacity: 1; }

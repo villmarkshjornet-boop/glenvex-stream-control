@@ -19,6 +19,7 @@ import { WhatToDoNow } from '@/components/dashboard/WhatToDoNow';
 import { CommunitySnapshot } from '@/components/dashboard/CommunitySnapshot';
 import { CreatorOSStatus } from '@/components/dashboard/CreatorOSStatus';
 import { CreatorOSHealthCheck } from '@/components/dashboard/CreatorOSHealthCheck';
+import { GoalsWidget } from '@/components/dashboard/GoalsWidget';
 
 export default function Dashboard() {
   const [slow, setSlow]               = useState<SlowData | null>(null);
@@ -118,10 +119,13 @@ export default function Dashboard() {
           {/* 3. WHAT TO DO NOW: primary next-action recommendation */}
           <WhatToDoNow slow={slow} live={live} />
 
-          {/* 4. TWO-COL: Next stream brief (left) + Community snapshot (right) */}
+          {/* 4. TWO-COL + Goals widget */}
           <div className="grid grid-cols-2 gap-6">
             <NextStreamBrief />
-            <CommunitySnapshot />
+            <div className="flex flex-col gap-4">
+              <CommunitySnapshot />
+              <GoalsWidget />
+            </div>
           </div>
 
           {/* 5. STREAM COMPLETION: only when relevant */}

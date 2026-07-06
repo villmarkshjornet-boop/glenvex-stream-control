@@ -20,16 +20,17 @@ interface Goal {
 const FARGER = ['#00ff41', '#9b77cf', '#ff7b47', '#00d4ff', '#ffd700', '#ff4466', '#44ffcc'];
 
 const DEFAULT_GOALS: Goal[] = [
-  { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400,  gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false, source: 'auto'   },
-  { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,   gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false, source: 'auto'   },
-  { type: 'donations',   label: 'Donasjoner',  icon: '♥', mal: 1000, gjeldende: 0, aktiv: false, farge: '#ff7b47', manuell: true,  source: 'manual' },
+  { type: 'followers',   label: 'Følgere',     icon: '◈', mal: 400, gjeldende: 0, aktiv: true,  farge: '#00ff41', manuell: false, source: 'auto'   },
+  { type: 'subscribers', label: 'Subscribers', icon: '★', mal: 10,  gjeldende: 0, aktiv: false, farge: '#9b77cf', manuell: false, source: 'auto'   },
+  { type: 'viewers',     label: 'Seere nå',    icon: '◉', mal: 50,  gjeldende: 0, aktiv: false, farge: '#00d4ff', manuell: false, source: 'auto'   },
+  { type: 'donations',   label: 'Donasjoner',  icon: '♥', mal: 1000,gjeldende: 0, aktiv: false, farge: '#ff7b47', manuell: true,  source: 'manual' },
 ];
 
 /* ─── Segmented bar (settings panel) ─── */
 function SegBar({ pct, farge }: { pct: number; farge: string }) {
   const [r, setR] = useState(0);
   useEffect(() => { const t = setTimeout(() => setR(pct), 250); return () => clearTimeout(t); }, [pct]);
-  const segs = 20;
+  const segs   = 20;
   const filled = Math.round((r / 100) * segs);
   return (
     <div style={{ display: 'flex', gap: '2px', height: '12px' }}>
@@ -52,22 +53,61 @@ function SegBar({ pct, farge }: { pct: number; farge: string }) {
   );
 }
 
+/* ─── Toggle button ─── */
+function Toggle({ active, color, label, onClick }: { active: boolean; color: string; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: '7px',
+      padding: '6px 10px', border: `1px solid ${active ? color + '40' : '#1a2f1a'}`,
+      background: active ? color + '08' : 'transparent',
+      borderRadius: '5px', cursor: 'pointer', transition: 'all 0.18s',
+    }}>
+      <div style={{
+        width: '10px', height: '10px', borderRadius: '2px',
+        background: active ? color : 'transparent',
+        border: `1px solid ${active ? color : '#3a5a3a'}`,
+        flexShrink: 0,
+      }} />
+      <span style={{ fontSize: '11px', color: active ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace' }}>{label}</span>
+    </button>
+  );
+}
+
+/* ─── Slider ─── */
+function FxSlider({ label, value, min, max, step, format, onChange }: {
+  label: string; value: number; min: number; max: number; step: number;
+  format: (v: number) => string; onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>{label}</span>
+        <span style={{ fontSize: '11px', color: '#00ff41', fontFamily: 'monospace', fontWeight: 700 }}>{format(value)}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: '#00ff41', cursor: 'pointer' }}
+      />
+    </div>
+  );
+}
+
 /* ─── Goal card ─── */
-function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub }: {
+function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub, liveViewers }: {
   goal: Goal; index: number;
   onUpdate: (i: number, u: Partial<Goal>) => void;
   onRemove: (i: number) => void;
   onIncrement: (i: number, delta: number) => Promise<void>;
-  liveF: number | null; liveSub: number | null;
+  liveF: number | null; liveSub: number | null; liveViewers: number | null;
 }) {
-  // Derive effective source (backward-compat with old manuell field)
   const effectiveSource: 'auto' | 'manual' =
-    goal.source ??
-    (['followers', 'subscribers'].includes(goal.type) ? 'auto' : 'manual');
+    goal.source ?? (['followers', 'subscribers', 'viewers'].includes(goal.type) ? 'auto' : 'manual');
 
   const gjeldende =
-    effectiveSource === 'auto' && goal.type === 'followers'   && liveF   !== null ? liveF   :
-    effectiveSource === 'auto' && goal.type === 'subscribers' && liveSub !== null ? liveSub :
+    effectiveSource === 'auto' && goal.type === 'followers'   && liveF       !== null ? liveF       :
+    effectiveSource === 'auto' && goal.type === 'subscribers' && liveSub     !== null ? liveSub     :
+    effectiveSource === 'auto' && goal.type === 'viewers'     && liveViewers !== null ? liveViewers :
     goal.gjeldende;
 
   const pct   = goal.mal > 0 ? Math.min(100, Math.round((gjeldende / goal.mal) * 100)) : 0;
@@ -94,7 +134,6 @@ function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub
         <div style={{ width: '3px', background: goal.aktiv ? `linear-gradient(180deg,${goal.farge},${goal.farge}40)` : '#1a2f1a', flexShrink: 0, transition: 'background 0.3s' }} />
         <div style={{ flex: 1, padding: '14px 16px' }}>
 
-          {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: goal.aktiv ? '12px' : '0' }}>
             <button onClick={() => onUpdate(index, { aktiv: !goal.aktiv })} style={{
               width: '18px', height: '18px', borderRadius: '3px', flexShrink: 0,
@@ -139,34 +178,22 @@ function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub
                 </span>
               </div>
 
-              {/* Source selector */}
               <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
-                <button onClick={() => onUpdate(index, { source: 'auto', manuell: false })} style={btnStyle(effectiveSource === 'auto', goal.farge)}>
-                  ● Auto (Twitch)
-                </button>
+                {(['followers', 'subscribers', 'viewers'].includes(goal.type)) && (
+                  <button onClick={() => onUpdate(index, { source: 'auto', manuell: false })} style={btnStyle(effectiveSource === 'auto', goal.farge)}>
+                    ● Auto (Twitch)
+                  </button>
+                )}
                 <button onClick={() => onUpdate(index, { source: 'manual', manuell: true })} style={btnStyle(effectiveSource === 'manual', goal.farge)}>
                   ✎ Manuell
                 </button>
               </div>
 
-              {/* Manual increment controls */}
               {effectiveSource === 'manual' && (
                 <div style={{ display: 'flex', gap: '4px', marginBottom: '10px', alignItems: 'center' }}>
-                  <button
-                    onClick={() => onIncrement(index, -1)}
-                    style={{ ...btnStyle(false, '#ff4466'), padding: '5px 14px', fontSize: '16px' }}
-                  >−</button>
-                  <button
-                    onClick={() => onIncrement(index, 1)}
-                    style={{ ...btnStyle(false, goal.farge), padding: '5px 14px', fontSize: '16px' }}
-                  >+</button>
-                  <button
-                    onClick={() => onIncrement(index, 0)}
-                    title={`Reset til ${goal.startValue ?? 0}`}
-                    style={{ ...btnStyle(false, '#4a6a4a'), padding: '5px 10px', fontSize: '11px', marginLeft: '4px' }}
-                  >↺ Reset</button>
-
-                  {/* resetPolicy inline */}
+                  <button onClick={() => onIncrement(index, -1)} style={{ ...btnStyle(false, '#ff4466'), padding: '5px 14px', fontSize: '16px' }}>−</button>
+                  <button onClick={() => onIncrement(index, 1)} style={{ ...btnStyle(false, goal.farge), padding: '5px 14px', fontSize: '16px' }}>+</button>
+                  <button onClick={() => onIncrement(index, 0)} title={`Reset til ${goal.startValue ?? 0}`} style={{ ...btnStyle(false, '#4a6a4a'), padding: '5px 10px', fontSize: '11px', marginLeft: '4px' }}>↺ Reset</button>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
                     {(['never', 'per_stream', 'daily', 'manual'] as const).map(p => {
                       const labels: Record<string, string> = { never: 'Aldri', per_stream: 'Per stream', daily: 'Daglig', manual: 'Manuelt' };
@@ -186,7 +213,6 @@ function GoalCard({ goal, index, onUpdate, onRemove, onIncrement, liveF, liveSub
                 </div>
               )}
 
-              {/* Edit fields */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
                 <div>
                   <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Tekst / Navn</div>
@@ -277,11 +303,22 @@ function UrlRad({ url, kopiert, onKopier, small }: { url: string; kopiert: boole
   );
 }
 
+/* ─── Section header ─── */
+function SectionHeader({ label, sub }: { label: string; sub?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+      <span style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 700 }}>{label}</span>
+      {sub && <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>{sub}</span>}
+    </div>
+  );
+}
+
 /* ─── Page ─── */
 export default function ViewerGoalsPage() {
   const [goals, setGoals]           = useState<Goal[]>(DEFAULT_GOALS);
   const [liveF, setLiveF]           = useState<number | null>(null);
   const [liveSub, setLiveSub]       = useState<number | null>(null);
+  const [liveViewers, setLiveViewers] = useState<number | null>(null);
   const [canReadSub, setCanReadSub] = useState<boolean | null>(null);
   const [tokenStatus, setToken]     = useState<'ok' | 'missing' | 'snapshot' | null>(null);
   const [overlayUrl, setOverlayUrl] = useState('');
@@ -310,9 +347,7 @@ export default function ViewerGoalsPage() {
       });
       if (res.ok) {
         const data = await res.json() as { gjeldende?: number };
-        if (typeof data.gjeldende === 'number') {
-          updateGoal(index, { gjeldende: data.gjeldende });
-        }
+        if (typeof data.gjeldende === 'number') updateGoal(index, { gjeldende: data.gjeldende });
       }
     } catch {}
   }
@@ -321,12 +356,13 @@ export default function ViewerGoalsPage() {
     setToken(d.tokenStatus ?? null);
     if (d.live) {
       if (typeof d.live.followers === 'number') setLiveF(d.live.followers);
+      if (typeof d.live.viewers   === 'number') setLiveViewers(d.live.viewers);
       setCanReadSub(d.live.canReadSubscribers ?? false);
       if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
     }
     if (d.goals?.length > 0) setGoals(d.goals.map((g: any) => ({
       ...g,
-      icon: g.icon ?? '◆',
+      icon:  g.icon  ?? '◆',
       farge: g.farge ?? '#00ff41',
     })));
     if (d.fx) setFx(prev => ({ ...prev, ...d.fx }));
@@ -336,8 +372,6 @@ export default function ViewerGoalsPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') setOverlayUrl(window.location.origin + '/overlay/goals');
 
-    // Fetch workspace ID first — /api/goals/live is PUBLIC (overlay access), so middleware
-    // never injects x-workspace-id. Must pass ?ws= param explicitly.
     fetch('/api/me/workspace')
       .then(r => r.json())
       .then((d: { id?: string }) => {
@@ -350,7 +384,6 @@ export default function ViewerGoalsPage() {
       .catch(() => {});
   }, []);
 
-  // Re-poll every 30s — workspaceId must be known first
   useEffect(() => {
     if (!workspaceId) return;
     const id = setInterval(() => {
@@ -358,6 +391,7 @@ export default function ViewerGoalsPage() {
         setToken(d.tokenStatus ?? null);
         if (d.live) {
           if (typeof d.live.followers === 'number') setLiveF(d.live.followers);
+          if (typeof d.live.viewers   === 'number') setLiveViewers(d.live.viewers);
           if (d.live.canReadSubscribers) setLiveSub(d.live.subscribers);
         }
         setLast(new Date());
@@ -368,14 +402,14 @@ export default function ViewerGoalsPage() {
 
   const fullOverlayUrl = workspaceId ? `${overlayUrl}?ws=${encodeURIComponent(workspaceId)}` : overlayUrl;
 
-  // Live preview uses goals with current live data merged in
   const previewGoals = goals.map(g => {
-    const src = g.source ?? (['followers', 'subscribers'].includes(g.type) ? 'auto' : 'manual');
+    const src = g.source ?? (['followers', 'subscribers', 'viewers'].includes(g.type) ? 'auto' : 'manual');
     return {
       ...g,
       gjeldende:
-        src === 'auto' && g.type === 'followers'   && liveF   !== null ? liveF   :
-        src === 'auto' && g.type === 'subscribers' && liveSub !== null ? liveSub :
+        src === 'auto' && g.type === 'followers'   && liveF       !== null ? liveF       :
+        src === 'auto' && g.type === 'subscribers' && liveSub     !== null ? liveSub     :
+        src === 'auto' && g.type === 'viewers'     && liveViewers !== null ? liveViewers :
         g.gjeldende,
     };
   });
@@ -421,7 +455,7 @@ export default function ViewerGoalsPage() {
     try {
       const res = await fetch('/api/goals/post', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goals, live: { followers: liveF, subscribers: liveSub } }),
+        body: JSON.stringify({ goals, live: { followers: liveF, subscribers: liveSub, viewers: liveViewers } }),
       });
       const d = await res.json();
       setPostRes(d.ok ? '✓ Postet til Discord' : `✗ ${d.error}`);
@@ -449,33 +483,35 @@ export default function ViewerGoalsPage() {
         )}
       </div>
 
-      {/* Token status */}
       <TokenStatus status={tokenStatus} />
 
       {/* Live stat cards */}
-      {(liveF !== null || liveSub !== null) && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-          <div style={{ background: 'linear-gradient(135deg,#0d1117,#00ff4108)', border: '1px solid #00ff4120', borderRadius: '10px', padding: '14px 18px' }}>
-            <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Følgere nå</div>
-            <div style={{ fontSize: '36px', fontWeight: 900, color: '#00ff41', fontFamily: 'monospace', lineHeight: 1 }}>{(liveF ?? 0).toLocaleString('no-NO')}</div>
-          </div>
-          <div style={{ background: 'linear-gradient(135deg,#0d1117,#9b77cf08)', border: '1px solid #9b77cf20', borderRadius: '10px', padding: '14px 18px' }}>
-            <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '4px' }}>Subscribers nå</div>
-            {liveSub !== null
-              ? <div style={{ fontSize: '36px', fontWeight: 900, color: '#9b77cf', fontFamily: 'monospace', lineHeight: 1 }}>{liveSub.toLocaleString('no-NO')}</div>
-              : <div style={{ fontSize: '11px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>
-                  {canReadSub === false ? 'Krever Affiliate + broadcaster-token' : 'Laster...'}
-                </div>}
-          </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+        <div style={{ background: 'linear-gradient(135deg,#0d1117,#00ff4108)', border: '1px solid #00ff4120', borderRadius: '10px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '10px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Følgere nå</div>
+          <div style={{ fontSize: '30px', fontWeight: 900, color: '#00ff41', fontFamily: 'monospace', lineHeight: 1 }}>{(liveF ?? 0).toLocaleString('no-NO')}</div>
         </div>
-      )}
+        <div style={{ background: 'linear-gradient(135deg,#0d1117,#9b77cf08)', border: '1px solid #9b77cf20', borderRadius: '10px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '10px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Subscribers nå</div>
+          {liveSub !== null
+            ? <div style={{ fontSize: '30px', fontWeight: 900, color: '#9b77cf', fontFamily: 'monospace', lineHeight: 1 }}>{liveSub.toLocaleString('no-NO')}</div>
+            : <div style={{ fontSize: '10px', color: '#3a5a3a', lineHeight: 1.5, marginTop: '4px' }}>
+                {canReadSub === false ? 'Krever Affiliate' : 'Laster...'}
+              </div>}
+        </div>
+        <div style={{ background: 'linear-gradient(135deg,#0d1117,#00d4ff08)', border: '1px solid #00d4ff20', borderRadius: '10px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '10px', color: '#3a5a3a', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '3px' }}>Seere nå</div>
+          <div style={{ fontSize: '30px', fontWeight: 900, color: '#00d4ff', fontFamily: 'monospace', lineHeight: 1 }}>{(liveViewers ?? 0).toLocaleString('no-NO')}</div>
+          {(liveViewers ?? 0) === 0 && <div style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', marginTop: '2px' }}>Ikke live</div>}
+        </div>
+      </div>
 
       {/* Goal cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {goals.map((g, i) => (
           <GoalCard key={g.type + i} goal={g} index={i}
             onUpdate={updateGoal} onRemove={removeGoal} onIncrement={inkrementGoal}
-            liveF={liveF} liveSub={liveSub} />
+            liveF={liveF} liveSub={liveSub} liveViewers={liveViewers} />
         ))}
 
         <button onClick={() => setGoals(prev => [...prev, {
@@ -531,7 +567,7 @@ export default function ViewerGoalsPage() {
           </div>
 
           {/* Preset-velger */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '6px', marginBottom: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '6px', marginBottom: '14px' }}>
             {(['classic','neon','cinematic','minimal'] as const).map(p => (
               <button key={p} onClick={() => lagreFx({ ...DEFAULT_FX, ...PRESETS[p], preset: p })} style={{
                 padding: '7px', border: `1px solid ${fx.preset === p ? '#00ff41' : '#1a2f1a'}`,
@@ -545,8 +581,9 @@ export default function ViewerGoalsPage() {
             ))}
           </div>
 
-          {/* Enkelt-toggles */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          {/* Enkelt-toggles rad 1: effekter */}
+          <div style={{ marginBottom: '8px', fontSize: '10px', color: '#2a4a2a', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Effekter</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '12px' }}>
             {([
               ['glow',       '✦ Glød'],
               ['scan',       '→ Scan-linje'],
@@ -555,25 +592,25 @@ export default function ViewerGoalsPage() {
               ['slideIn',    '◁ Glide inn'],
               ['milestone',  '★ Milepæl-burst'],
             ] as const).map(([key, label]) => (
-              <button key={key} onClick={() => lagreFx({ ...fx, preset: 'custom' as any, [key]: !fx[key as keyof OverlayFx] })} style={{
-                display: 'flex', alignItems: 'center', gap: '7px',
-                padding: '6px 10px', border: `1px solid ${fx[key as keyof OverlayFx] ? '#00ff4140' : '#1a2f1a'}`,
-                background: fx[key as keyof OverlayFx] ? '#00ff4108' : 'transparent',
-                borderRadius: '5px', cursor: 'pointer', transition: 'all 0.18s',
-              }}>
-                <div style={{
-                  width: '10px', height: '10px', borderRadius: '2px',
-                  background: fx[key as keyof OverlayFx] ? '#00ff41' : 'transparent',
-                  border: `1px solid ${fx[key as keyof OverlayFx] ? '#00ff41' : '#3a5a3a'}`,
-                  flexShrink: 0,
-                }} />
-                <span style={{ fontSize: '11px', color: fx[key as keyof OverlayFx] ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace' }}>{label}</span>
-              </button>
+              <Toggle key={key}
+                active={!!fx[key as keyof OverlayFx]}
+                color="#00ff41"
+                label={label}
+                onClick={() => lagreFx({ ...fx, preset: 'custom' as any, [key]: !fx[key as keyof OverlayFx] })}
+              />
             ))}
           </div>
 
+          {/* 3D + transparens + float */}
+          <div style={{ marginBottom: '8px', fontSize: '10px', color: '#2a4a2a', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Utseende</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '12px' }}>
+            <Toggle active={fx.transparent} color="#00d4ff" label="⬜ Transparent" onClick={() => lagreFx({ ...fx, preset: 'custom' as any, transparent: !fx.transparent })} />
+            <Toggle active={fx.depth3d}     color="#9b77cf" label="◧ 3D-dybde"     onClick={() => lagreFx({ ...fx, preset: 'custom' as any, depth3d: !fx.depth3d })} />
+            <Toggle active={fx.float}       color="#ffd700" label="↕ Flytende"     onClick={() => lagreFx({ ...fx, preset: 'custom' as any, float: !fx.float })} />
+          </div>
+
           {/* Glow intensitet + scan interval */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               <div style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '5px' }}>Glow-styrke</div>
               <div style={{ display: 'flex', gap: '4px' }}>
@@ -605,32 +642,69 @@ export default function ViewerGoalsPage() {
           </div>
         </div>
 
+        {/* ── Synlighets-syklus ── */}
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
+          <SectionHeader label="Synlighets-syklus" sub="— fade ut / skjul / fade inn" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <FxSlider
+              label="Synlig"
+              value={fx.showMs ?? 25_000}
+              min={5_000} max={120_000} step={1000}
+              format={v => `${Math.round(v / 1000)}s`}
+              onChange={v => lagreFx({ ...fx, showMs: v })}
+            />
+            <FxSlider
+              label="Skjult"
+              value={fx.hiddenMs ?? 10_000}
+              min={2_000} max={60_000} step={1000}
+              format={v => `${Math.round(v / 1000)}s`}
+              onChange={v => lagreFx({ ...fx, hiddenMs: v })}
+            />
+            <FxSlider
+              label="Fade-varighet"
+              value={fx.fadeMs ?? 900}
+              min={200} max={3_000} step={100}
+              format={v => `${v}ms`}
+              onChange={v => lagreFx({ ...fx, fadeMs: v })}
+            />
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '10px', color: '#2a4a2a', fontFamily: 'monospace' }}>
+            Syklus: synlig {Math.round((fx.showMs ?? 25_000) / 1000)}s → fade {Math.round((fx.fadeMs ?? 900) / 1000)}s → skjult {Math.round((fx.hiddenMs ?? 10_000) / 1000)}s → fade {Math.round((fx.fadeMs ?? 900) / 1000)}s → gjenta
+          </div>
+        </div>
+
         {/* ── Live preview ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
-          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px', fontFamily: 'monospace' }}>
-            Forhåndsvisning — oppdaterer i sanntid
-          </div>
+          <SectionHeader label="Forhåndsvisning" sub="— oppdaterer i sanntid" />
           <div style={{
             borderRadius: '6px', padding: '10px',
-            backgroundImage: 'repeating-conic-gradient(#0e1a0e 0% 25%, #080f08 0% 50%) 0 0 / 14px 14px',
+            backgroundImage: fx.transparent
+              ? 'none'
+              : 'repeating-conic-gradient(#0e1a0e 0% 25%, #080f08 0% 50%) 0 0 / 14px 14px',
+            background: fx.transparent ? '#111827' : undefined,
             border: '1px solid #1a2f1a',
           }}>
             <FxStyles />
             <GoalBarsPreview goals={previewGoals} compact fx={fx} />
           </div>
           <p style={{ fontSize: '11px', color: '#3a5a3a', marginTop: '6px', fontFamily: 'monospace' }}>
-            ↑ Slik ser det ut i OBS over din stream (transparent bakgrunn)
+            {fx.transparent
+              ? '↑ Transparent modus — ingen bakgrunn. Huk av «Transparent bakgrunn» i OBS.'
+              : '↑ Slik ser det ut i OBS over din stream (transparent bakgrunn)'}
           </p>
         </div>
 
         {/* ── Alle mål — felles URL ── */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #1a2f1a' }}>
-          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '8px' }}>
-            Felles URL — alle aktive mål
-          </div>
+          <SectionHeader label="Felles URL" sub="— alle aktive mål" />
           <UrlRad url={fullOverlayUrl} kopiert={kopierteUrls['all'] ?? false} onKopier={() => kopierUrl('all', fullOverlayUrl)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginTop: '8px' }}>
-            {[['Bredde', '380px'], ['Høyde', previewGoals.filter(g=>g.aktiv&&g.mal>0).length > 1 ? `${previewGoals.filter(g=>g.aktiv&&g.mal>0).length * 56}px` : '80px'], ['FPS', '30'], ['Huk av', '«Transparent bakgrunn»']].map(([k, v]) => (
+            {[
+              ['Bredde', '380px'],
+              ['Høyde', previewGoals.filter(g => g.aktiv && g.mal > 0).length > 1 ? `${previewGoals.filter(g => g.aktiv && g.mal > 0).length * 56}px` : '80px'],
+              ['FPS', '30'],
+              ['Huk av', '«Transparent bakgrunn» i OBS'],
+            ].map(([k, v]) => (
               <div key={k} style={{ fontSize: '11px', fontFamily: 'monospace' }}>
                 <span style={{ color: '#3a5a3a' }}>{k}: </span><span style={{ color: '#c8f5c8' }}>{v}</span>
               </div>
@@ -640,19 +714,20 @@ export default function ViewerGoalsPage() {
 
         {/* ── Per-bar URLs ── */}
         <div style={{ padding: '14px 18px' }}>
-          <div style={{ fontSize: '11px', color: '#3a5a3a', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: '10px' }}>
-            Individuelle browser sources — én bar per kilde
-          </div>
+          <SectionHeader label="Individuelle browser sources" sub="— én bar per kilde" />
+          <p style={{ fontSize: '10px', color: '#3a5a3a', fontFamily: 'monospace', marginBottom: '10px' }}>
+            Disse URLene fungerer selv om målet er deaktivert i fellesvisningen.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {previewGoals.filter(g => g.mal > 0).map(g => {
               const url = `${fullOverlayUrl}&goal=${encodeURIComponent(g.type)}`;
               return (
-                <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.aktiv ? (g.farge ?? '#00ff41') : '#2a3a2a'}`, opacity: g.aktiv ? 1 : 0.6 }}>
+                <div key={g.type} style={{ padding: '10px 12px', background: '#0a0e0a', border: `1px solid ${(g.farge ?? '#00ff41')}22`, borderRadius: '7px', borderLeft: `3px solid ${g.aktiv ? (g.farge ?? '#00ff41') : '#3a5a3a'}`, opacity: g.aktiv ? 1 : 0.75 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '11px', color: g.aktiv ? (g.farge ?? '#00ff41') : '#3a5a3a' }}>{g.icon ?? '◆'}</span>
-                      <span style={{ fontSize: '11px', color: g.aktiv ? '#c8f5c8' : '#4a6a4a', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
-                      {!g.aktiv && <span style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', border: '1px solid #2a3a2a', borderRadius: '3px', padding: '1px 4px' }}>DEAKTIVERT</span>}
+                      <span style={{ fontSize: '11px', color: g.aktiv ? '#c8f5c8' : '#5a7a5a', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{g.label}</span>
+                      {!g.aktiv && <span style={{ fontSize: '9px', color: '#3a5a3a', fontFamily: 'monospace', border: '1px solid #2a3a2a', borderRadius: '3px', padding: '1px 4px' }}>kun enkelt-bar</span>}
                     </div>
                     <span style={{ fontSize: '11px', color: '#3a5a3a', fontFamily: 'monospace' }}>380×80px</span>
                   </div>
@@ -666,7 +741,6 @@ export default function ViewerGoalsPage() {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
