@@ -14,7 +14,7 @@
 import { Client, TextChannel, Collection, Message } from 'discord.js';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 const MAX_MELDINGER = 500;
 const MIN_ORD = 3;
 

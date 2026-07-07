@@ -12,7 +12,7 @@
 import { logBotAgentEvent } from './agentLogger';
 import { logSystemEvent } from './systemEvents';
 
-const DEFAULT_WORKSPACE_ID  = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const DEFAULT_WORKSPACE_ID  = process.env.WORKSPACE_ID ?? '';
 const HEARTBEAT_INTERVAL_MS = 2 * 60_000;
 
 // Kan overstyres per-stream av startAudienceTracking for multi-tenant.

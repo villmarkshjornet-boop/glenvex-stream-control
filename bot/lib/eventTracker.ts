@@ -3,7 +3,7 @@ import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'events.json');
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 interface Raid {
   username: string;

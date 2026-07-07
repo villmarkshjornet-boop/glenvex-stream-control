@@ -10,7 +10,7 @@
 
 import OpenAI from 'openai';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 
 export interface CrossPlatformOptions {
   includeTwitch?: boolean;

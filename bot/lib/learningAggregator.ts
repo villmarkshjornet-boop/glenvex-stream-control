@@ -19,7 +19,7 @@ import { upsertBotMemory } from './agentLogger';
 import OpenAI from 'openai';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 let lastRun = 0;
 let lastFeedbackRun = 0;
 let aggrRunCount = 0;

@@ -9,7 +9,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 const POLL_DURATION_MS = 60_000;       // 60 seconds default
 const DISCORD_POLL_DURATION_MS = 300_000; // 5 minutes
 

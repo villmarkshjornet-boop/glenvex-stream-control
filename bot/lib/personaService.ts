@@ -15,7 +15,7 @@ import { selectArchetypeCandidates, getArchetype, archetypeExists, scoreAllArche
 import { XP_PER_LEVEL } from '@/lib/xp';
 import { type PersonaRarity, RARITY_COLOR, rarityFromScore } from '@/lib/rarity';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const REROLL_COIN_COST = COIN_RATES.CARD_REROLL_COST;  // 100 coins
 
 // ── Season ────────────────────────────────────────────────────────────────────

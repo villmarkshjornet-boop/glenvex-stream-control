@@ -10,7 +10,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getCreatorState, CachedPartner } from './creatorState';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
 
 let _sb: SupabaseClient | null = null;
 function getSb(): SupabaseClient | null {

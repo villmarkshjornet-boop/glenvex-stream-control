@@ -346,7 +346,7 @@ export async function GET() {
   if (!dbOk) advarsler.push('KRITISK: Ingen felles database – data deles ikke mellom Railway og Vercel. Sett opp Supabase.');
   if (!process.env.BOT_API_URL) advarsler.push('KRITISK: BOT_API_URL ikke satt – Community Manager, Statistikk og Stream Coach viser ingen data.');
   if (!process.env.SUPABASE_URL) advarsler.push('VIKTIG: Role Rules når ikke boten fordi det ikke finnes en felles database.');
-  if (!process.env.WORKSPACE_ID) advarsler.push('VIKTIG: WORKSPACE_ID ikke satt – Railway-boten (botKanalPreferanser) bruker fallback-ID "glenvex-default". Verifiser at dette matcher Supabase-raden.');
+  if (!process.env.WORKSPACE_ID) advarsler.push('KRITISK: WORKSPACE_ID ikke satt – Railway-boten vil ikke starte (process.exit). Sett WORKSPACE_ID i Railway Variables til din Supabase workspace UUID.');
   if (!process.env.TWITCH_BOT_OAUTH) advarsler.push('VIKTIG: Twitch chat-bot ikke aktiv – ingen automatiske chat-meldinger.');
   if (!process.env.DISCORD_CHAT_CHANNEL_ID) advarsler.push('VIKTIG: DISCORD_CHAT_CHANNEL_ID ikke satt – brukes som fallback for subs, clips og raid-meldinger. Sett kanalpreferanser i dashboardet eller legg til env var.');
   if (!process.env.OPENAI_API_KEY) advarsler.push('ADVARSEL: OPENAI_API_KEY mangler – all AI-generering vil falle tilbake til maler.');

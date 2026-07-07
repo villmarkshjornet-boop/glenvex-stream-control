@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 // Timeouts that trigger recovery (minutes)
 const TIMEOUT_VOD_TRANSCRIBING        = 30;

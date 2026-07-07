@@ -1,6 +1,6 @@
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 export function logApiError(opts: {
   service: string;

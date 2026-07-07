@@ -5,8 +5,6 @@ import OpenAI from 'openai';
 import { logPipeline } from '../jobs/pipelineLogger';
 import type { ContentCopy, ContentHighlight } from '../types';
 
-const WORKSPACE_ID = getWorkspaceId();
-
 export async function genererCopy(
   vodId: string,
   highlight: ContentHighlight,
@@ -86,6 +84,7 @@ Norsk tekst. Engasjerende. Gaming-vibe. Ikke generisk.${twitchUrl ? ` Inkluder a
   for (const { platform, key } of plattformer) {
     const pData = data[key] ?? {};
     const { data: inserted } = await db.from('content_copy').insert({
+      workspace_id: getWorkspaceId(),
       vod_id: vodId,
       highlight_id: highlight.id,
       platform,
@@ -144,10 +143,16 @@ export async function genererCopyForAlle(
   return all;
 }
 
-export async function hentCopyForVod(vodId: string): Promise<ContentCopy[]> {
+export async function hentCopyForVod(vodId: string, workspaceId?: string): Promise<ContentCopy[]> {
   assertContentFactoryEnabled();
   const db = getDb();
   if (!db) return [];
+  const ws = workspaceId ?? getWorkspaceId();
+  // Verify the vod belongs to this workspace before returning its copy data
+  if (ws) {
+    const { data: vod } = await db.from('content_vods').select('id').eq('id', vodId).eq('workspace_id', ws).single();
+    if (!vod) return [];
+  }
   const { data } = await db.from('content_copy').select('*').eq('vod_id', vodId);
   return (data ?? []).map(r => ({
     id: r.id, vodId: r.vod_id, highlightId: r.highlight_id,

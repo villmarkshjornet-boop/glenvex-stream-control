@@ -12,7 +12,7 @@ export function registerTwitchChat(fn: (msg: string) => void): void {
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 function readFile(navn: string): any {
   const file = path.join(DATA_DIR, `${navn}.json`);

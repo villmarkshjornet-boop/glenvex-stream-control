@@ -1337,7 +1337,7 @@ async function hentBotContext(): Promise<{ jokes: string[]; topics: string[] }> 
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!sbUrl || !sbKey) return { jokes: [], topics: [] };
   try {
-    const wid = encodeURIComponent(process.env.WORKSPACE_ID || 'glenvex-default');
+    const wid = encodeURIComponent(process.env.WORKSPACE_ID || '');
     const r = await fetch(
       `${sbUrl}/rest/v1/ai_agent_memory?workspace_id=eq.${wid}&memory_type=in.(joke,topic)&order=occurrence_count.desc&limit=10&select=memory_type,summary`,
       { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } },

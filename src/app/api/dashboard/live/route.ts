@@ -144,6 +144,7 @@ export async function GET() {
   if (!db) return NextResponse.json({ error: 'Supabase ikke tilkoblet' }, { status: 500 });
 
   const ws = getWorkspaceId();
+  if (!ws) return NextResponse.json({ error: 'Ingen workspace — logg inn på nytt', code: 'NO_WORKSPACE' }, { status: 401 });
   const cutoff7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
   const cutoff1h = new Date(Date.now() - 60 * 60_000).toISOString();
   const cutoff24h = new Date(Date.now() - 24 * 3600_000).toISOString();
@@ -151,7 +152,7 @@ export async function GET() {
   const cutoff30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   // ── Parallelle Supabase-kall ──────────────────────────────────────────────
-  const [vodsRes, highlightsRes, contentCopyRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners, liveAgentTipsRes, pollEventsRes] = await Promise.all([
+  const [vodsRes, highlightsRes, insightsRes, workspaceRes, systemEventsRes, subsystemEventsRes, decisionsRes, aiMemoryRes, aiEventsCountRes, streamHistoryRes, partners, liveAgentTipsRes, pollEventsRes] = await Promise.all([
     db.from('content_vods')
       .select('id,title,status,created_at,current_step,progress_percent,error_message,status_message,updated_at')
       .eq('workspace_id', ws)
@@ -160,16 +161,10 @@ export async function GET() {
 
     db.from('content_highlights')
       .select('id,vod_id,title,clip_status,clip_url,vertical_clip_url,thumbnail_status,thumbnail_reject_count,thumbnail_error,thumbnail_ctr_score,published_at,updated_at,created_at')
+      .eq('workspace_id', ws)
       .gt('created_at', cutoff7d)
       .order('created_at', { ascending: false })
       .limit(300),
-
-    // Copy/caption-tekst for klippene over – brukes til å sjekke at det faktisk finnes en
-    // ekte caption før et klipp regnes som "klart for publisering" (BUG 5).
-    db.from('content_copy')
-      .select('highlight_id,discord_post,tittel,caption')
-      .gt('created_at', cutoff7d)
-      .limit(500),
 
     db.from('ai_agent_insights')
       .select('title,summary,confidence_score,created_at')
@@ -259,7 +254,18 @@ export async function GET() {
     ? `AI lærte: ${lastClosedPoll.total_votes > 0 ? Math.round((lastClosedPoll.options?.find((o: any) => o.label === lastClosedPoll.winner)?.twitchVotes + lastClosedPoll.options?.find((o: any) => o.label === lastClosedPoll.winner)?.discordVotes || 0) / lastClosedPoll.total_votes * 100) : 0}% valgte "${lastClosedPoll.winner}" på spørsmålet "${lastClosedPoll.question}"`
     : null;
   const highlights: any[]    = highlightsRes.data ?? [];
-  const contentCopy: any[] = contentCopyRes.data ?? [];
+
+  // content_copy has no workspace_id column — fetch only for this workspace's highlight IDs
+  // to avoid cross-tenant caption data leaking into the Action Center.
+  let contentCopy: any[] = [];
+  if (highlights.length > 0) {
+    const highlightIds = highlights.map((h: any) => h.id);
+    const { data: copyData } = await db.from('content_copy')
+      .select('highlight_id,discord_post,tittel,caption')
+      .in('highlight_id', highlightIds)
+      .limit(500);
+    contentCopy = copyData ?? [];
+  }
   const captionByHighlight = new Set<string>(
     contentCopy
       .filter(c => c.discord_post?.trim() || c.tittel?.trim() || c.caption?.trim())

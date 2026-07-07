@@ -8,7 +8,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { logSystemEvent } from './systemEvents';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const TRADE_TTL_HOURS = 24;
 
 function getSb() {

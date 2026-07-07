@@ -648,7 +648,7 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
         // Phase 4+6: real-time state from Creator State (avgViewers30d cached at stream start)
         const _brainStream = getBrainState().stream;
         const decision = await decidePromotion({
-          workspaceId: process.env.WORKSPACE_ID ?? 'glenvex-default',
+          workspaceId: process.env.WORKSPACE_ID ?? '',
           game: _brainStream.game ?? '',
           viewerCount: _brainStream.viewerCount ?? 0,
           historicalAvgViewers: _brainStream.avgViewers30d ?? 0,
@@ -1135,7 +1135,7 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
 
 export function sendTwitchPromoToChat(msg: string): void {
   void (async () => {
-    const workspaceId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const workspaceId = process.env.WORKSPACE_ID ?? '';
     const gate = await canPostToTwitch(workspaceId, 'partner_promo');
     if (!gate.allowed) {
       console.log(`[PostGate] Blocked Twitch post: ${gate.reason} — ${gate.detail}`);
@@ -1176,7 +1176,7 @@ export function getChatMsgsLastMinute(): number {
 export function sendTwitchChatMessage(msg: string): void {
   if (!client) return;
   void (async () => {
-    const workspaceId = process.env.WORKSPACE_ID ?? 'glenvex-default';
+    const workspaceId = process.env.WORKSPACE_ID ?? '';
     const gate = await canPostToTwitch(workspaceId, 'system');
     if (!gate.allowed) {
       console.log(`[PostGate] Blocked Twitch post: ${gate.reason} — ${gate.detail}`);

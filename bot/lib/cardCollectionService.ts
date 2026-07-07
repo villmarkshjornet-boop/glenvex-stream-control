@@ -11,7 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 const SEASON       = process.env.PERSONA_SEASON ?? 'season_1';
 
 function getSb() {

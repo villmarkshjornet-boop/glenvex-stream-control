@@ -15,7 +15,7 @@ function getSb() {
 }
 
 const FILE = path.join(process.cwd(), 'data', 'members.json');
-const WORKSPACE_ID = process.env.WORKSPACE_ID ?? 'glenvex-default';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 export interface MemberProfile {
   id: string;
