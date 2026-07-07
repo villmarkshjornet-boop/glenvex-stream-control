@@ -4,18 +4,19 @@
 
 ALTER TABLE content_copy ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 
--- Backfill from content_highlights (most rows have highlight_id)
-UPDATE content_copy cc
-SET workspace_id = ch.workspace_id
-FROM content_highlights ch
-WHERE cc.highlight_id = ch.id
-  AND cc.workspace_id IS NULL;
-
--- Backfill from content_vods for any remaining rows
+-- Backfill via direct vod_id FK (content_highlights has no workspace_id column)
 UPDATE content_copy cc
 SET workspace_id = cv.workspace_id
 FROM content_vods cv
 WHERE cc.vod_id = cv.id
+  AND cc.workspace_id IS NULL;
+
+-- Backfill remaining rows via highlight → vod chain
+UPDATE content_copy cc
+SET workspace_id = cv.workspace_id
+FROM content_highlights ch
+JOIN content_vods cv ON ch.vod_id = cv.id
+WHERE cc.highlight_id = ch.id
   AND cc.workspace_id IS NULL;
 
 CREATE INDEX IF NOT EXISTS content_copy_workspace_id_idx ON content_copy(workspace_id);
