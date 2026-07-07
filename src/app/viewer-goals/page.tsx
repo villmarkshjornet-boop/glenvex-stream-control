@@ -567,8 +567,8 @@ export default function ViewerGoalsPage() {
           </div>
 
           {/* Preset-velger */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '6px', marginBottom: '14px' }}>
-            {(['classic','neon','cinematic','minimal'] as const).map(p => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginBottom: '14px' }}>
+            {(['classic','neon','cinematic','minimal','ghost'] as const).map(p => (
               <button key={p} onClick={() => lagreFx({ ...DEFAULT_FX, ...PRESETS[p], preset: p })} style={{
                 padding: '7px', border: `1px solid ${fx.preset === p ? '#00ff41' : '#1a2f1a'}`,
                 background: fx.preset === p ? '#00ff4112' : 'transparent',
@@ -576,7 +576,7 @@ export default function ViewerGoalsPage() {
                 fontSize: '11px', fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase',
                 cursor: 'pointer', letterSpacing: '0.06em', transition: 'all 0.2s',
               }}>
-                {p === 'classic' ? 'Classic' : p === 'neon' ? '⚡ Neon' : p === 'cinematic' ? '🎬 Cinematic' : '○ Minimal'}
+                {p === 'classic' ? 'Classic' : p === 'neon' ? '⚡ Neon' : p === 'cinematic' ? '🎬 Cinematic' : p === 'minimal' ? '○ Minimal' : '◌ Ghost'}
               </button>
             ))}
           </div>

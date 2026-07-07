@@ -27,13 +27,26 @@ const cooldowns = new Map<string, number>();
 
 // Log + send til Twitch-chat
 async function chatSend(channel: string, message: string, context?: Record<string, any>): Promise<void> {
-  client?.say(channel, message).catch(() => {});
-  logSystemEvent({
-    source: 'twitch_bot',
-    event_type: 'BOT_CHAT_MESSAGE',
-    title: message.slice(0, 100),
-    severity: 'info',
-    metadata: { channel, message: message.slice(0, 500), ...context },
+  if (!client) {
+    logSystemEvent({ source: 'twitch_bot', event_type: 'TWITCH_CHAT_SEND_FAILED', title: 'chatSend: klient ikke tilkoblet', severity: 'warning', metadata: { channel, ...context } });
+    return;
+  }
+  client.say(channel, message).then(() => {
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'BOT_CHAT_MESSAGE',
+      title: message.slice(0, 100),
+      severity: 'info',
+      metadata: { channel, message: message.slice(0, 500), ...context },
+    });
+  }).catch((err: any) => {
+    logSystemEvent({
+      source: 'twitch_bot',
+      event_type: 'TWITCH_CHAT_SEND_FAILED',
+      title: `Twitch chat send feilet: ${String(err?.message ?? err).slice(0, 100)}`,
+      severity: 'error',
+      metadata: { channel, error: String(err?.message ?? err), ...context },
+    });
   });
 }
 
@@ -445,13 +458,13 @@ async function sjekkNyeFollowers() {
 
     // Velkomst i Twitch chat — branded "Velkommen til gjengen" greeting
     const erLive = await isTwitchLive(process.env.WORKSPACE_ID ?? '').catch(() => false);
-    if (erLive && client) {
+    if (erLive) {
       const navnListe = nyeNavn.length > 0 ? nyeNavn : Array(Math.min(antallNye, 3)).fill(null).map(() => null as null);
       for (const navn of navnListe) {
         const hilsen = navn
           ? `Velkommen til gjengen, ${navn}! 💚 PogChamp`
           : `Velkommen til alle nye følgere! 💚 PogChamp`;
-        client.say(`#${KANAL}`, hilsen).catch(() => {});
+        await chatSend(`#${KANAL}`, hilsen, { trigger: 'new_follower', follower: navn ?? undefined });
       }
     }
 

@@ -14,7 +14,7 @@ export interface GoalBar {
 }
 
 export interface OverlayFx {
-  preset: 'classic' | 'neon' | 'cinematic' | 'minimal';
+  preset: 'classic' | 'neon' | 'cinematic' | 'minimal' | 'ghost';
   glow: boolean;
   scan: boolean;
   pulse: boolean;
@@ -55,6 +55,8 @@ export const PRESETS: Record<OverlayFx['preset'], Partial<OverlayFx>> = {
   neon:     { glow: true,  scan: true,  pulse: true,  numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'medium', transparent: false, depth3d: false, float: false },
   cinematic:{ glow: true,  scan: true,  pulse: false, numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'high',   transparent: false, depth3d: true,  float: false },
   minimal:  { glow: false, scan: false, pulse: false, numberAnim: false, slideIn: false, milestone: false, glowIntensity: 'low',    transparent: true,  depth3d: false, float: false },
+  // ghost = full neon effects on a transparent background — for OBS overlays
+  ghost:    { glow: true,  scan: true,  pulse: true,  numberAnim: true,  slideIn: true,  milestone: true,  glowIntensity: 'medium', transparent: true,  depth3d: false, float: true  },
 };
 
 const FARGER: Record<string, string> = {

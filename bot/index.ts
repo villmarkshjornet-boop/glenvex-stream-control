@@ -155,6 +155,8 @@ const postedeClips = new Set<string>();
 let sisteStatsukeNr = -1;
 let sisteRyddUke = -1;
 let _lastOfflineProcessed: string | null = null; // stream ID — guards offline block from re-firing on cache expiry
+const _notifiedStreamIds = new Set<string>(); // in-memory guard — prevents race condition when Supabase cache lags behind file
+let _pollManagerStartedForStreamId: string | null = null; // prevents duplicate poll manager on same stream
 
 // Kanaler som aldri skal slettes automatisk
 const BESKYTTEDE_KANALER = [
@@ -411,7 +413,8 @@ const SB_SETTINGS_TTL = 5 * 60_000;
 async function getSettingsFresh() {
   const file = getSettings();
   if (Date.now() - _sbSettingsTs < SB_SETTINGS_TTL && _sbSettings) {
-    return { ...file, ..._sbSettings };
+    // File wins over stale cache — recent saveSettings() calls must not be overwritten
+    return { ..._sbSettings, ...file };
   }
   try {
     const sbUrl = process.env.SUPABASE_URL;
@@ -427,7 +430,8 @@ async function getSettingsFresh() {
         if (data?.[0]?.settings_json) {
           _sbSettings = data[0].settings_json;
           _sbSettingsTs = Date.now();
-          return { ...file, ..._sbSettings };
+          // File wins — local saveSettings() always takes priority over DB snapshot
+          return { ..._sbSettings, ...file };
         }
       }
     }
@@ -463,7 +467,7 @@ async function checkLive() {
       } catch {}
     }
 
-    if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId) {
+    if (stream.isLive && stream.id && stream.id !== settings.lastNotifiedStreamId && !_notifiedStreamIds.has(stream.id)) {
       if (await getPauseLiveVarsler().catch(() => false)) return;
 
       logSystemEvent({
@@ -562,6 +566,7 @@ async function checkLive() {
       }
 
       saveSettings({ lastNotifiedStreamId: stream.id });
+      _notifiedStreamIds.add(stream.id); // immediate in-memory guard (file merge-order fix is the root cause, this is belt-and-suspenders)
       // Also persist to DB so bot picks it up correctly after a Railway container restart
       const _botDb = getBotDb();
       const _botWsId = process.env.WORKSPACE_ID ?? '';
@@ -602,7 +607,10 @@ async function checkLive() {
       const wsId = process.env.WORKSPACE_ID ?? '';
       const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
       startLiveAgent(stream.id, twitchLogin, wsId);
-      startPollManagerForStream(stream.id, wsId, Date.now());
+      if (_pollManagerStartedForStreamId !== stream.id) {
+        _pollManagerStartedForStreamId = stream.id;
+        startPollManagerForStream(stream.id, wsId, Date.now());
+      }
     } else if (stream.isLive && stream.id) {
       // Gjenopprett session hvis boten restartet mens stream var live
       if (!getActiveSession()) {
@@ -614,7 +622,10 @@ async function checkLive() {
         const wsId = process.env.WORKSPACE_ID ?? '';
         const twitchLogin = process.env.TWITCH_USERNAME ?? process.env.TWITCH_CHANNEL ?? '';
         startLiveAgent(stream.id, twitchLogin, wsId);
-        startPollManagerForStream(stream.id, wsId, new Date(stream.startedAt ?? Date.now()).getTime());
+        if (_pollManagerStartedForStreamId !== stream.id) {
+          _pollManagerStartedForStreamId = stream.id;
+          startPollManagerForStream(stream.id, wsId, new Date(stream.startedAt ?? Date.now()).getTime());
+        }
       }
       updateSession(stream.viewerCount ?? 0);
       onViewerUpdate(stream.viewerCount ?? 0);
@@ -622,6 +633,7 @@ async function checkLive() {
       // Guard: skip if we already processed this offline event (prevents re-firing when settings cache expires)
       if (_lastOfflineProcessed !== settings.lastNotifiedStreamId) {
         _lastOfflineProcessed = settings.lastNotifiedStreamId;
+        _pollManagerStartedForStreamId = null;
         saveSettings({ lastNotifiedStreamId: null });
         // Clear lastNotifiedStreamId in Supabase so it doesn't re-trigger on next cache expiry
         const _offlineDb = getBotDb();
