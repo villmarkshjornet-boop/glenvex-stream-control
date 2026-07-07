@@ -23,11 +23,13 @@ CREATE INDEX IF NOT EXISTS content_copy_workspace_id_idx ON content_copy(workspa
 -- Enable RLS and add policy matching other content tables
 ALTER TABLE content_copy ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "service_role_all_content_copy"
+DROP POLICY IF EXISTS "service_role_all_content_copy" ON content_copy;
+CREATE POLICY "service_role_all_content_copy"
   ON content_copy FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "user_own_workspace_content_copy"
+DROP POLICY IF EXISTS "user_own_workspace_content_copy" ON content_copy;
+CREATE POLICY "user_own_workspace_content_copy"
   ON content_copy FOR ALL TO authenticated
   USING      (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'))
   WITH CHECK (workspace_id = (auth.jwt() -> 'user_metadata' ->> 'workspace_id'));
