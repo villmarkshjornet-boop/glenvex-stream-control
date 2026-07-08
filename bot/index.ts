@@ -17,7 +17,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, getProaktivMeldingAsync, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken, runTwitchNativePoll } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -262,7 +262,9 @@ function startPollManagerForStream(streamId: string, workspaceId: string, stream
       workspaceId,
       streamId,
       streamStartedAt,
+      brandName: BOT_BRAND,
       chatMsgsPerMin: getChatMsgsLastMinute,
+      twitchNativePoll: (q, choices, dur) => runTwitchNativePoll(workspaceId, q, choices, dur),
       sendTwitchChat: (msg) => { sendTwitchChatMessage(msg); },
       onChatMessage:  (h) => onTwitchChatMessage(h),
       offChatMessage: (h) => offTwitchChatMessage(h),
@@ -302,7 +304,9 @@ function startPollManagerForStream(streamId: string, workspaceId: string, stream
       workspaceId,
       streamId,
       streamStartedAt,
+      brandName: BOT_BRAND,
       chatMsgsPerMin: getChatMsgsLastMinute,
+      twitchNativePoll: (q, choices, dur) => runTwitchNativePoll(workspaceId, q, choices, dur),
       sendTwitchChat: (msg) => { sendTwitchChatMessage(msg); },
       onChatMessage:  (h) => onTwitchChatMessage(h),
       offChatMessage: (h) => offTwitchChatMessage(h),

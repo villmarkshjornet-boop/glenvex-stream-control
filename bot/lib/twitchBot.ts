@@ -1208,3 +1208,107 @@ export function onTwitchChatMessage(handler: (username: string, message: string)
 export function offTwitchChatMessage(handler: (username: string, message: string) => void): void {
   _externalChatHandlers.delete(handler);
 }
+
+// ─── Native Twitch Poll (REST API — does NOT require chat client) ─────────────
+
+/**
+ * Creates a native Twitch poll using /helix/polls.
+ * Requires channel:manage:polls scope on the broadcaster token.
+ * Returns vote counts in the same order as `choices`, or null on failure.
+ */
+export async function runTwitchNativePoll(
+  workspaceId: string,
+  question: string,
+  choices: string[],
+  durationSec: number,
+): Promise<number[] | null> {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  if (!clientId) return null;
+
+  const token = await getBroadcasterUserToken(workspaceId).catch(() => null);
+  if (!token) return null;
+
+  const broadcasterId = await getBroadcasterId().catch(() => null);
+  if (!broadcasterId) return null;
+
+  // Twitch poll choice titles max 25 chars
+  const trimmedChoices = choices.map(c => c.slice(0, 25));
+
+  try {
+    const createRes = await fetch('https://api.twitch.tv/helix/polls', {
+      method: 'POST',
+      headers: {
+        'Client-ID': clientId,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        broadcaster_id: broadcasterId,
+        title: question.slice(0, 60),
+        choices: trimmedChoices.map(t => ({ title: t })),
+        duration: Math.min(1800, Math.max(15, durationSec)),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+
+    if (!createRes?.ok) {
+      const errBody = await createRes?.text().catch(() => '');
+      logSystemEvent({
+        source: 'twitch_bot', event_type: 'TWITCH_NATIVE_POLL_FAILED',
+        title: `Native Twitch poll feilet (create): HTTP ${createRes?.status ?? 'network_error'}`,
+        severity: 'warning',
+        metadata: { workspaceId, question, status: createRes?.status, error: errBody?.slice(0, 200) },
+      });
+      return null;
+    }
+
+    const createData = await createRes.json() as { data: Array<{ id: string }> };
+    const pollId = createData.data?.[0]?.id;
+    if (!pollId) return null;
+
+    logSystemEvent({
+      source: 'twitch_bot', event_type: 'TWITCH_NATIVE_POLL_STARTED',
+      title: `Native Twitch poll startet: "${question.slice(0, 60)}"`,
+      severity: 'info',
+      metadata: { workspaceId, pollId, question, choices: trimmedChoices, durationSec },
+    });
+
+    // Wait for poll to finish
+    await new Promise(r => setTimeout(r, durationSec * 1000 + 2_000));
+
+    const getRes = await fetch(
+      `https://api.twitch.tv/helix/polls?broadcaster_id=${broadcasterId}&id=${pollId}`,
+      {
+        headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    ).catch(() => null);
+
+    if (!getRes?.ok) return null;
+
+    const getData = await getRes.json() as { data: Array<{ choices: Array<{ title: string; votes: number }> }> };
+    const pollData = getData.data?.[0];
+    if (!pollData) return null;
+
+    const votes = trimmedChoices.map(label =>
+      pollData.choices.find(c => c.title === label)?.votes ?? 0
+    );
+
+    logSystemEvent({
+      source: 'twitch_bot', event_type: 'TWITCH_NATIVE_POLL_RESULT',
+      title: `Native Twitch poll ferdig: "${question.slice(0, 60)}"`,
+      severity: 'info',
+      metadata: { workspaceId, pollId, question, results: pollData.choices.map(c => ({ label: c.title, votes: c.votes })) },
+    });
+
+    return votes;
+  } catch (err: any) {
+    logSystemEvent({
+      source: 'twitch_bot', event_type: 'TWITCH_NATIVE_POLL_FAILED',
+      title: `Native Twitch poll kastet feil: ${String(err?.message ?? err).slice(0, 100)}`,
+      severity: 'warning',
+      metadata: { workspaceId, question, error: String(err?.message ?? err) },
+    });
+    return null;
+  }
+}

@@ -21,8 +21,8 @@ import { logSystemEvent, completeMission } from './systemEvents';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CHECK_INTERVAL_MS          = 5 * 60_000;   // Evaluate every 5 minutes
-const POLL_COOLDOWN_MS           = 35 * 60_000;  // Max 1 poll per 35 minutes
-const MIN_STREAM_DURATION_MS     = 5 * 60_000;   // Don't poll first 5 minutes
+const POLL_COOLDOWN_MS           = 65 * 60_000;  // Max 1 poll per 65 minutes (~3 polls per 4h stream)
+const MIN_STREAM_DURATION_MS     = 15 * 60_000;  // Don't poll first 15 minutes
 const TWITCH_POLL_DURATION_MS    = 90_000;        // 90 second Twitch poll
 const DISCORD_POLL_DURATION_MS   = 5 * 60_000;   // 5 minute Discord poll
 const DISCORD_REACTIONS          = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
@@ -34,16 +34,14 @@ type PollType =
   | 'CONTENT_TYPE'
   | 'PARTNER_FIT'
   | 'GIVEAWAY_CHECK'
-  | 'STREAM_DIRECTION'
-  | 'DISCORD_GROWTH';
+  | 'STREAM_DIRECTION';
 
 const POLL_TYPE_ROTATION: PollType[] = [
-  'GAME_PREFERENCE',
-  'CONTENT_TYPE',
   'STREAM_DIRECTION',
-  'PARTNER_FIT',
+  'CONTENT_TYPE',
+  'GAME_PREFERENCE',
   'GIVEAWAY_CHECK',
-  'DISCORD_GROWTH',
+  'PARTNER_FIT',
 ];
 
 interface PollOption {
@@ -68,8 +66,11 @@ export interface PollManagerConfig {
   workspaceId:      string;
   streamId:         string;
   streamStartedAt:  number;
+  brandName?:       string;
   chatMsgsPerMin:   () => number;    // getter for current chat rate
-  // Twitch
+  // Twitch native poll (channel:manage:polls) — preferred over chat text poll
+  twitchNativePoll?: (question: string, choices: string[], durationSec: number) => Promise<number[] | null>;
+  // Twitch chat fallback (used if twitchNativePoll not provided or returns null)
   sendTwitchChat:   (msg: string) => void;
   onChatMessage:    (handler: (username: string, msg: string) => void) => void;
   offChatMessage:   (handler: (username: string, msg: string) => void) => void;
@@ -353,7 +354,7 @@ export class PollManager {
       if (type === this.lastPollType) return { type, score: -1, reason: 'Same as last poll this session', blocked: true };
       if (type === 'GAME_PREFERENCE' && ctx.recentGames.length < 2) return { type, score: -1, reason: 'Not enough recent games', blocked: true };
       if (type === 'PARTNER_FIT' && ctx.activePartners.length < 2) return { type, score: -1, reason: 'Not enough active partners', blocked: true };
-      if (chatDead && type === 'DISCORD_GROWTH') return { type, score: -1, reason: 'Chat dead, skip DISCORD_GROWTH', blocked: true };
+      if (chatDead && type === 'PARTNER_FIT') return { type, score: -1, reason: 'Chat dead, skip PARTNER_FIT', blocked: true };
 
       // 48h exact-match dedup
       const preview = this.buildPoll(type, ctx);
@@ -489,12 +490,6 @@ export class PollManager {
           reason: 'Gir community medbestemmelse over stream-retning',
         };
 
-      case 'DISCORD_GROWTH':
-        return {
-          question: 'Vil du ha mer aktivitet i Discord?',
-          options: ['Ja, absolutt!', 'Nei, bra sånn', 'Bare ved events', 'Hva er Discord?'],
-          reason: 'Kartlegger Discord-engasjement og vekstpotensial',
-        };
     }
   }
 
@@ -517,7 +512,7 @@ export class PollManager {
 
     // Run Twitch + Discord in parallel — each fails independently
     const [twitchResult, discordResult] = await Promise.allSettled([
-      this.runTwitchChatPoll(options),
+      this.runTwitchPoll(question, options),
       this.runDiscordReactionPoll(question, options),
     ]);
 
@@ -594,17 +589,37 @@ export class PollManager {
     });
   }
 
-  // ─── Twitch chat poll ────────────────────────────────────────────────────────
+  // ─── Twitch poll — native API first, chat text fallback ─────────────────────
 
-  private runTwitchChatPoll(options: PollOption[]): Promise<number[]> {
+  private async runTwitchPoll(question: string, options: PollOption[]): Promise<number[]> {
+    const durationSec = Math.round(TWITCH_POLL_DURATION_MS / 1000);
+
+    // Prefer native Twitch poll (shows in stream overlay, no chat required)
+    if (this.cfg.twitchNativePoll) {
+      try {
+        const votes = await this.cfg.twitchNativePoll(
+          question,
+          options.map(o => o.label),
+          durationSec,
+        );
+        if (votes) {
+          logSystemEvent({
+            workspaceId: this.cfg.workspaceId, source: 'poll_manager', event_type: 'POLL_POSTED_TWITCH',
+            title: 'Native Twitch poll startet via REST API', severity: 'info',
+            metadata: { streamId: this.cfg.streamId, question, options: options.map(o => o.label) },
+          });
+          return votes;
+        }
+      } catch {}
+    }
+
+    // Fallback: text poll in chat
     return new Promise<number[]>((resolve) => {
-      const voteCounts   = new Array(options.length).fill(0) as number[];
-      const votedUsers   = new Set<string>();
-      const optLines     = options.map((o, i) => `${i + 1}) ${o.label}`).join(' | ');
-      const durationSek  = Math.round(TWITCH_POLL_DURATION_MS / 1000);
+      const voteCounts = new Array(options.length).fill(0) as number[];
+      const votedUsers = new Set<string>();
+      const optLines   = options.map((o, i) => `${i + 1}) ${o.label}`).join(' | ');
 
-      const pollMsg = `📊 ${options[0].label !== undefined ? '' : ''}Poll: Svar med tall! ${optLines} (${durationSek}s)`;
-      this.cfg.sendTwitchChat(`📊 Poll: ${optLines} — Svar med tall! (${durationSek}s)`);
+      this.cfg.sendTwitchChat(`📊 Poll: ${optLines} — Svar med tall! (${durationSec}s)`);
 
       const handler = (username: string, msg: string) => {
         const idx = parseInt(msg.trim(), 10) - 1;
@@ -618,8 +633,8 @@ export class PollManager {
 
       logSystemEvent({
         workspaceId: this.cfg.workspaceId, source: 'poll_manager', event_type: 'POLL_POSTED_TWITCH',
-        title: 'Poll postet til Twitch chat', severity: 'info',
-        metadata: { streamId: this.cfg.streamId, options: options.map(o => o.label) },
+        title: 'Poll postet til Twitch chat (tekst-fallback)', severity: 'info',
+        metadata: { streamId: this.cfg.streamId, question, options: options.map(o => o.label) },
       });
 
       setTimeout(() => {
@@ -644,7 +659,7 @@ export class PollManager {
       title: `📊 ${question}`,
       description: `${description}\n\nAvstemningen stenger om ${Math.round(DISCORD_POLL_DURATION_MS / 60_000)} minutter.`,
       color: 0x00e676,
-      footer: { text: 'Stem med emoji under! GLENVEX Poll' },
+      footer: { text: `Stem med emoji under! ${this.cfg.brandName ?? 'Community'} Poll` },
       timestamp: new Date().toISOString(),
     };
 

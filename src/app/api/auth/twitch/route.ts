@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'user:read:email moderator:read:followers channel:read:subscriptions chat:read chat:edit');
+  url.searchParams.set('scope', 'user:read:email moderator:read:followers channel:read:subscriptions chat:read chat:edit channel:manage:polls');
   url.searchParams.set('state', encoded);
   url.searchParams.set('force_verify', 'true');
 
