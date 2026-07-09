@@ -198,7 +198,7 @@ export async function generateSubCard(params: GenerateSubCardParams): Promise<Su
   try {
     const { data: existing } = await sb
       .from('community_cards')
-      .select('id')
+      .select('id, card_image_url')
       .eq('workspace_id', workspaceId)
       .eq('user_id', discordId)
       .eq('card_type', 'sub')
@@ -206,18 +206,24 @@ export async function generateSubCard(params: GenerateSubCardParams): Promise<Su
       .maybeSingle();
 
     if (existing) {
+      const existingId = (existing as any).id as string;
+      // If card exists but has no image, backfill the image now
+      if (!(existing as any).card_image_url) {
+        const imageUrl = await generateAndStoreSubCardImage({
+          sb, workspaceId, discordId, displayName, twitchUsername,
+          tierLabel, subTier: subTier ?? '1000',
+        });
+        if (imageUrl) {
+          await sb.from('community_cards').update({ card_image_url: imageUrl }).eq('id', existingId);
+        }
+      }
       logSystemEvent({
         workspaceId,
         source:     'sub_card',
         event_type: 'SUB_CARD_SKIPPED_ALREADY_EXISTS',
         title:      `Sub-kort finnes allerede for ${displayName} — hoppet over`,
         severity:   'info',
-        metadata:   {
-          discordId,
-          twitchUsername,
-          existingCardId: (existing as any).id as string,
-          workspaceId,
-        },
+        metadata:   { discordId, twitchUsername, existingCardId: existingId, workspaceId },
       });
       return { ok: false, reason: 'already_exists' };
     }
@@ -269,19 +275,77 @@ export async function generateSubCard(params: GenerateSubCardParams): Promise<Su
 
   const cardId = (card as any).id as string;
 
+  // ── 3. Generer og lagre kortbilde ─────────────────────────────────────────
+  const imageUrl = await generateAndStoreSubCardImage({
+    sb, workspaceId, discordId, displayName, twitchUsername, tierLabel, subTier: subTier ?? '1000',
+  });
+  if (imageUrl) {
+    await sb.from('community_cards').update({ card_image_url: imageUrl }).eq('id', cardId);
+  }
+
   logSystemEvent({
     workspaceId,
     source:     'sub_card',
     event_type: 'SUB_CARD_GENERATED',
     title:      `Sub-kort generert for ${displayName} (${twitchUsername}) — ${tierLabel}`,
     severity:   'info',
-    metadata:   { discordId, twitchUsername, cardId, tierLabel, workspaceId },
+    metadata:   { discordId, twitchUsername, cardId, tierLabel, workspaceId, hasImage: !!imageUrl },
   });
 
-  // ── 3. Post til Discord ───────────────────────────────────────────────────
-  await postSubCardEmbed({ workspaceId, discordId, displayName, twitchUsername, tierLabel, cardId });
+  // ── 4. Post til Discord ───────────────────────────────────────────────────
+  await postSubCardEmbed({ workspaceId, discordId, displayName, twitchUsername, tierLabel, cardId, imageUrl });
 
   return { ok: true, reason: 'generated', cardId };
+}
+
+// ── Sub-kort bildegenering ────────────────────────────────────────────────────
+
+async function generateAndStoreSubCardImage(p: {
+  sb:            ReturnType<typeof getSb>;
+  workspaceId:   string;
+  discordId:     string;
+  displayName:   string;
+  twitchUsername:string;
+  tierLabel:     string;
+  subTier:       string;
+}): Promise<string | null> {
+  const { sb, workspaceId, discordId, displayName, twitchUsername, subTier } = p;
+  if (!sb) return null;
+
+  const baseUrl = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+  if (!baseUrl) return null;
+
+  try {
+    const imgUrl = new URL(`${baseUrl}/api/cards/sub-card-image`);
+    imgUrl.searchParams.set('displayName',    displayName);
+    imgUrl.searchParams.set('twitchUsername', twitchUsername);
+    imgUrl.searchParams.set('tier',           subTier);
+
+    const res = await fetch(imgUrl.toString(), { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+
+    const buf      = Buffer.from(await res.arrayBuffer());
+    const bucket   = 'persona-cards';
+    const filePath = `${workspaceId}/${discordId}/sub-card.png`;
+
+    const doUpload = async () =>
+      (sb as any).storage.from(bucket).upload(filePath, buf, { contentType: 'image/png', upsert: true });
+
+    let { error } = await doUpload();
+    if (error) {
+      const msg = (error.message ?? '').toLowerCase();
+      if (msg.includes('not found') || msg.includes('does not exist')) {
+        try { await (sb as any).storage.createBucket(bucket, { public: true }); } catch {}
+        ({ error } = await doUpload());
+      }
+      if (error) return null;
+    }
+
+    const { data } = (sb as any).storage.from(bucket).getPublicUrl(filePath);
+    return (data?.publicUrl ?? null) as string | null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Discord embed ─────────────────────────────────────────────────────────────
@@ -293,11 +357,13 @@ interface PostParams {
   twitchUsername: string;
   tierLabel:      string;
   cardId:         string;
+  imageUrl:       string | null;
 }
 
 async function postSubCardEmbed(p: PostParams): Promise<void> {
   const channelId = await loadCardDropChannelId(p.workspaceId);
   if (!channelId) {
+    // no channel configured — silently skip Discord post but card is in DB
     logSystemEvent({
       workspaceId: p.workspaceId,
       source:      'sub_card',
@@ -318,23 +384,22 @@ async function postSubCardEmbed(p: PostParams): Promise<void> {
   const token = botToken();
   if (!token) return;
 
-  // Mythic-nivå visuell, Twitch-lilla ramme
-  const embed = {
+  const embed: Record<string, unknown> = {
     title:       `\u{1F49C} ${p.displayName} er nå Twitch Sub!`,
     description: `**${p.twitchUsername}** har koblet sin Twitch-konto og er subscriber!\n` +
                  `Et eksklusivt **SUB-kort** er lagt til i samlingen.\n` +
                  `Bruk \`/minekort\` for å se det.`,
     color:       SUB_COLOR,
     fields: [
-      { name: 'Rarity',   value: '⭐ Sub',         inline: true },
-      { name: 'Klasse',   value: 'Subscriber',          inline: true },
-      { name: 'Tier',     value: p.tierLabel,           inline: true },
-      { name: 'Korttype', value: 'TWITCH SUB',          inline: true },
-      { name: 'Discord',  value: `<@${p.discordId}>`,  inline: true },
-      { name: 'Twitch',   value: p.twitchUsername,      inline: true },
+      { name: 'Rarity',   value: '⭐ Sub',              inline: true },
+      { name: 'Klasse',   value: 'Subscriber',           inline: true },
+      { name: 'Tier',     value: p.tierLabel,            inline: true },
+      { name: 'Discord',  value: `<@${p.discordId}>`,   inline: true },
+      { name: 'Twitch',   value: p.twitchUsername,       inline: true },
     ],
     footer:    { text: 'Kortet er lagt til i din samling' },
     timestamp: new Date().toISOString(),
+    ...(p.imageUrl ? { image: { url: p.imageUrl } } : {}),
   };
 
   try {
