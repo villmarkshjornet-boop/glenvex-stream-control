@@ -1,36 +1,36 @@
-import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getWorkspaceId } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
 // POST /api/cards/sub-images/backfill
-// Generates and stores card_image_url for all sub cards that lack one.
-// Called from admin UI or after first deploy of sub card image support.
-export async function POST() {
-  const h           = headers();
-  const userId      = h.get('x-user-id');
-  const workspaceId = getWorkspaceId();
-
-  if (!userId) return NextResponse.json({ error: 'Ikke innlogget' }, { status: 401 });
-
+// Generates and stores card_image_url for sub cards.
+// ?force=true also re-generates cards that already have a URL (fixes broken images).
+export async function POST(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'DB ikke tilgjengelig' }, { status: 500 });
 
-  // Find all sub cards with no card_image_url
-  const { data: cards, error } = await db
+  const workspaceId = getWorkspaceId();
+  const force       = new URL(req.url).searchParams.get('force') === 'true';
+
+  let query = db
     .from('community_cards')
-    .select('id, user_id, metadata, rarity')
+    .select('id, user_id, metadata, rarity, card_image_url')
     .eq('workspace_id', workspaceId)
-    .eq('card_type', 'sub')
-    .is('card_image_url', null);
+    .eq('card_type', 'sub');
+
+  if (!force) {
+    query = query.is('card_image_url', null) as typeof query;
+  }
+
+  const { data: cards, error } = await query;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!cards?.length) return NextResponse.json({ ok: true, updated: 0, message: 'Ingen sub-kort mangler bilde' });
+  if (!cards?.length) return NextResponse.json({ ok: true, updated: 0, message: 'Ingen sub-kort uten bilde funnet' });
 
   const baseUrl = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
-  if (!baseUrl) return NextResponse.json({ error: 'APP_URL ikke konfigurert (GLENVEX_OAUTH_BASE)' }, { status: 500 });
+  if (!baseUrl) return NextResponse.json({ error: 'Base URL ikke konfigurert (GLENVEX_OAUTH_BASE)' }, { status: 500 });
 
   const bucket = 'persona-cards';
   let updated  = 0;
@@ -38,10 +38,10 @@ export async function POST() {
 
   for (const card of cards) {
     try {
-      const meta          = (card.metadata as Record<string, string> | null) ?? {};
-      const displayName   = meta.displayName   ?? meta.twitchUsername ?? card.user_id;
+      const meta           = (card.metadata as Record<string, string> | null) ?? {};
+      const displayName    = meta.displayName    ?? meta.twitchUsername ?? card.user_id;
       const twitchUsername = meta.twitchUsername ?? '';
-      const subTier       = meta.subTier        ?? '1000';
+      const subTier        = meta.subTier        ?? '1000';
 
       const imgEndpoint = new URL(`${baseUrl}/api/cards/sub-card-image`);
       imgEndpoint.searchParams.set('displayName',    displayName);
