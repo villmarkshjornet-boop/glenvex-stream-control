@@ -244,11 +244,11 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
 
   try {
     const { createClient } = require('@supabase/supabase-js');
-    // Node.js < 22 has no native WebSocket — must pass ws explicitly (same as systemEvents.ts)
-    const ws = require('ws');
+    // Node.js < 22 has no native WebSocket — must pass ws package explicitly (same as systemEvents.ts)
+    const WebSocketImpl = require('ws');
     const sb = createClient(sbUrl, sbKey, {
       auth: { persistSession: false, autoRefreshToken: false },
-      realtime: { transport: ws },
+      realtime: { transport: WebSocketImpl },
     });
 
     // Primary lookup: workspaces.id (TEXT PK — must match exactly)
