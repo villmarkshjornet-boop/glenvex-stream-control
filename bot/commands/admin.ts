@@ -291,7 +291,6 @@ export const adminCommand = {
 
       const broadcasterToken = await getBroadcasterUserToken();
       if (!broadcasterToken) {
-        // Build a diagnostic message so the user knows exactly what to fix
         const hasSbUrl  = !!(process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL);
         const hasSbKey  = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
         const hasTwId   = !!process.env.TWITCH_CLIENT_ID;
@@ -299,20 +298,36 @@ export const adminCommand = {
         const hasWsId   = !!process.env.WORKSPACE_ID;
         const lines = [
           `❌ Broadcaster-token ikke tilgjengelig. Diagnostikk:`,
-          `• WORKSPACE_ID: ${hasWsId ? '✅' : '❌ mangler'}`,
+          `• WORKSPACE_ID: ${hasWsId ? `✅ (${process.env.WORKSPACE_ID})` : '❌ mangler'}`,
           `• SUPABASE_URL: ${hasSbUrl ? '✅' : '❌ mangler'}`,
           `• SUPABASE_SERVICE_ROLE_KEY: ${hasSbKey ? '✅' : '❌ mangler'}`,
           `• TWITCH_CLIENT_ID: ${hasTwId ? '✅' : '❌ mangler'}`,
           `• TWITCH_CLIENT_SECRET: ${hasTwSec ? '✅' : '❌ mangler'}`,
         ];
+
+        // Pull the most recent TWITCH_AUTH_ERROR from system_events for a direct error message
+        if (hasSbUrl && hasSbKey && hasWsId) {
+          try {
+            const { data: recentErrors } = await db
+              .from('system_events')
+              .select('title, created_at, metadata')
+              .eq('event_type', 'TWITCH_AUTH_ERROR')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (recentErrors) {
+              const ts = new Date(recentErrors.created_at as string).toLocaleTimeString('nb-NO');
+              lines.push(`• Siste feil (${ts}): ${recentErrors.title}`);
+              const meta = recentErrors.metadata as Record<string, unknown> | null;
+              if (meta?.actualId) lines.push(`  → Faktisk workspace UUID: ${meta.actualId}`);
+              if (meta?.validateStatus) lines.push(`  → Token validate HTTP: ${meta.validateStatus}`);
+              if (meta?.scopes) lines.push(`  → Scopes: ${(meta.scopes as string[]).join(', ')}`);
+            }
+          } catch {}
+        }
+
         if (hasSbUrl && hasSbKey && hasTwId && hasTwSec && hasWsId) {
-          lines.push(`• Alle env-vars OK — token i DB mangler, utløpt eller mangler scope.`);
-          lines.push(`  → Se Railway-logg for "[getBroadcasterUserToken]" — nøyaktig årsak er logget der.`);
-          lines.push(`  → Hvis "ikke funnet i DB": WORKSPACE_ID="${process.env.WORKSPACE_ID}" matcher ikke workspaces.id.`);
-          lines.push(`    Gå til Supabase → SQL: SELECT id, twitch_channel_name FROM workspaces;`);
-          lines.push(`    Sett WORKSPACE_ID i Railway til faktisk id-verdi.`);
-          lines.push(`  → Hvis "twitch_access_token mangler": Gå til Innstillinger → Koble Twitch på nytt.`);
-          lines.push(`  → Hvis "mangler scope": Koble til Twitch på nytt — be om channel:read:subscriptions.`);
+          lines.push(`• Fix: Innstillinger → Koble til Twitch på nytt (krever channel:read:subscriptions scope).`);
         }
         await interaction.editReply({ content: lines.join('\n') });
         return;

@@ -352,11 +352,12 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
 
     if (refreshRes?.ok) {
       const tokens = await refreshRes.json() as { access_token: string; refresh_token?: string };
+      // Use ws.id (actual UUID PK) — wsId may be a slug like "glenvex" that doesn't match workspaces.id
       await sb.from('workspaces').update({
         twitch_access_token:  tokens.access_token,
         ...(tokens.refresh_token ? { twitch_refresh_token: tokens.refresh_token } : {}),
         updated_at: new Date().toISOString(),
-      }).eq('id', wsId);
+      }).eq('id', ws.id);
 
       _cachedBroadcasterToken = tokens.access_token;
       _cachedBroadcasterTokenAt = Date.now();
@@ -365,7 +366,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
         event_type: 'TWITCH_TOKEN_REFRESHED',
         title: 'Twitch broadcaster token auto-refreshed og lagret',
         severity: 'info',
-        metadata: { workspaceId: wsId },
+        metadata: { workspaceId: ws.id, envWsId: wsId },
       });
       return _cachedBroadcasterToken;
     }
