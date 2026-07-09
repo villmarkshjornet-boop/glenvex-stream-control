@@ -17,7 +17,7 @@ import { getStreamInfo, getBroadcasterId, getTopClips, getChannelStats } from '@
 import { postLiveEmbed } from '@/lib/discord';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { generateChatReply, getProaktivMelding, getProaktivMeldingAsync, isOnCooldown, setCooldown, ChatReply } from './lib/aiPersonality';
-import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken, runTwitchNativePoll } from './lib/twitchBot';
+import { startTwitchBot, setOnSubCallback, setOnLinkVerifiedCallback, setOnChatConnectedCallback, sendTwitchPromoToChat, sendTwitchChatMessage, onTwitchChatMessage, offTwitchChatMessage, getChatMsgsLastMinute, getBroadcasterUserToken, runTwitchNativePoll } from './lib/twitchBot';
 import { startClipWorker } from './lib/clipWorker';
 import { byggSocialsEmbed } from './commands/socials';
 import { topRaids, topGiftSubs } from './lib/eventTracker';
@@ -2384,6 +2384,7 @@ client.once('clientReady', () => {
   addLog('success', `Discord bot startet: ${client.user?.tag}`, 'OK');
 
   setOnSubCallback(tildelTwitchSubRolle);
+  setOnChatConnectedCallback(() => runSubCardBackfill('chat_connected'));
   setOnLinkVerifiedCallback(async (discordId, twitchUserId, twitchUsername, hasStoredSub) => {
     const wsId = process.env.WORKSPACE_ID ?? '';
     console.log(`[LINKTWITCH_VERIFY_STARTED] discordId=${discordId} twitchUserId=${twitchUserId} twitchUsername=${twitchUsername}`);
@@ -2538,25 +2539,33 @@ client.once('clientReady', () => {
   });
   sikkerAdminTilGkarlsen().catch(() => {});
 
-  // Retroaktiv sub-kort-scan: 3 min etter oppstart.
-  // Sjekker alle nåværende Twitch-subs mot Helix og genererer manglende sub-kort
-  // for Discord-brukere som allerede har koblet Twitch-kontoen.
-  setTimeout(async () => {
+  // Sub-kort backfill — kjøres ved oppstart + periodisk hvert 2. time.
+  // Fanger opp subs som koblet Twitch ETTER siste restart, eller der TMI-eventet ble misset.
+  async function runSubCardBackfill(trigger: string): Promise<void> {
     try {
       const token = await getBroadcasterUserToken();
       if (!token) {
         logSystemEvent({ workspaceId: WORKSPACE_ID, source: 'sub_card', event_type: 'SUB_CARD_BACKFILL_ERROR',
-          title: 'Backfill hoppet over: ingen broadcaster-token tilgjengelig', severity: 'warning', metadata: {} });
+          title: `Backfill hoppet over (${trigger}): ingen broadcaster-token`, severity: 'warning', metadata: { trigger } });
         return;
       }
       const { checked, generated } = await backfillSubCards(WORKSPACE_ID, token);
-      if (generated > 0 || checked > 0) {
-        addLog('success', `Sub-kort backfill: ${generated} nye kort generert (${checked} subs sjekket)`, 'OK');
+      logSystemEvent({ workspaceId: WORKSPACE_ID, source: 'sub_card', event_type: 'SUB_CARD_BACKFILL_COMPLETE',
+        title: `Sub-kort backfill (${trigger}): ${generated} nye kort, ${checked} subs sjekket`,
+        severity: generated > 0 ? 'info' : 'info',
+        metadata: { trigger, checked, generated } });
+      if (generated > 0) {
+        addLog('success', `Sub-kort backfill (${trigger}): ${generated} nye kort generert (${checked} subs sjekket)`, 'OK');
       }
     } catch (e: any) {
-      console.error('[SUB_BACKFILL] Feil ved startup backfill:', e?.message);
+      console.error(`[SUB_BACKFILL] Feil (${trigger}):`, e?.message);
     }
-  }, 3 * 60_000);
+  }
+
+  // Første kjøring 3 min etter oppstart (vent på at token-cache er klar)
+  setTimeout(() => runSubCardBackfill('startup'), 3 * 60_000);
+  // Periodisk kjøring hvert 2. time — fanger nye subs som koblet Twitch mellom restarts
+  setInterval(() => runSubCardBackfill('periodic'), 2 * 60 * 60_000);
 
   const statusKanal = STATUS_KANAL_ID ? client.channels.cache.get(STATUS_KANAL_ID) as TextChannel | undefined : undefined;
   if (statusKanal) {

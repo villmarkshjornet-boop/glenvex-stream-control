@@ -58,6 +58,13 @@ export function setOnSubCallback(cb: OnSubCb): void {
   _onSubCallback = cb;
 }
 
+// Callback som index.ts setter for å kjøre sub-kort backfill straks etter TMI-tilkobling
+type OnChatConnectedCb = () => void;
+let _onChatConnectedCallback: OnChatConnectedCb | null = null;
+export function setOnChatConnectedCallback(cb: OnChatConnectedCb): void {
+  _onChatConnectedCallback = cb;
+}
+
 // Callback som index.ts setter for å behandle verifiserte Discord ↔ Twitch-koblinger
 // hasStoredSub: true hvis verifyLinkCode fant en lagret sub (unlinked_subs eller tw_-rad)
 type LinkVerifiedCb = (discordId: string, twitchUserId: string, twitchUsername: string, hasStoredSub: boolean) => void;
@@ -623,6 +630,8 @@ export async function startTwitchBot({ skipEnvOauth = false }: { skipEnvOauth?: 
     for (const ch of externalChannelHandlers.keys()) {
       client!.join(ch).catch(() => {});
     }
+    // Trigger sub-kort backfill etter 60s — fanger subs som koblet Twitch mens boten var offline
+    setTimeout(() => { try { _onChatConnectedCallback?.(); } catch {} }, 60_000);
     // Start følger-polling etter 30s (vent på at broadcaster ID er klart)
     setTimeout(() => {
       sjekkNyeFollowers();
