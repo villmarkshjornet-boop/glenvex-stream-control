@@ -207,12 +207,9 @@ export async function generateSubCard(params: GenerateSubCardParams): Promise<Su
 
     if (existing) {
       const existingId = (existing as any).id as string;
-      // If card exists but has no image, backfill the image now
+      // If card exists but has no image, backfill the URL now
       if (!(existing as any).card_image_url) {
-        const imageUrl = await generateAndStoreSubCardImage({
-          sb, workspaceId, discordId, displayName, twitchUsername,
-          tierLabel, subTier: subTier ?? '1000',
-        });
+        const imageUrl = buildSubCardImageUrl(displayName, twitchUsername, subTier ?? '1000');
         if (imageUrl) {
           await sb.from('community_cards').update({ card_image_url: imageUrl }).eq('id', existingId);
         }
@@ -300,6 +297,25 @@ export async function generateSubCard(params: GenerateSubCardParams): Promise<Su
 
 // ── Sub-kort bildegenering ────────────────────────────────────────────────────
 
+function buildSubCardImageUrl(displayName: string, twitchUsername: string, subTier: string): string | null {
+  // APP_URL = the web app's public base URL (e.g. https://glenvex-stream-control-production.up.railway.app)
+  // Falls back to GLENVEX_OAUTH_BASE or NEXT_PUBLIC_BASE_URL if APP_URL is not set.
+  const baseUrl = (
+    process.env.APP_URL ??
+    process.env.GLENVEX_OAUTH_BASE ??
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    ''
+  ).replace(/\/$/, '');
+  if (!baseUrl) return null;
+
+  const url = new URL(`${baseUrl}/api/cards/sub-card-image`);
+  url.searchParams.set('displayName',    displayName);
+  url.searchParams.set('twitchUsername', twitchUsername);
+  url.searchParams.set('tier',           subTier);
+  return url.toString();
+}
+
+// kept for future use (pre-generate + upload flow)
 async function generateAndStoreSubCardImage(p: {
   sb:            ReturnType<typeof getSb>;
   workspaceId:   string;
@@ -309,43 +325,9 @@ async function generateAndStoreSubCardImage(p: {
   tierLabel:     string;
   subTier:       string;
 }): Promise<string | null> {
-  const { sb, workspaceId, discordId, displayName, twitchUsername, subTier } = p;
-  if (!sb) return null;
-
-  const baseUrl = (process.env.GLENVEX_OAUTH_BASE ?? process.env.NEXT_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
-  if (!baseUrl) return null;
-
-  try {
-    const imgUrl = new URL(`${baseUrl}/api/cards/sub-card-image`);
-    imgUrl.searchParams.set('displayName',    displayName);
-    imgUrl.searchParams.set('twitchUsername', twitchUsername);
-    imgUrl.searchParams.set('tier',           subTier);
-
-    const res = await fetch(imgUrl.toString(), { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-
-    const buf      = Buffer.from(await res.arrayBuffer());
-    const bucket   = 'persona-cards';
-    const filePath = `${workspaceId}/${discordId}/sub-card.png`;
-
-    const doUpload = async () =>
-      (sb as any).storage.from(bucket).upload(filePath, buf, { contentType: 'image/png', upsert: true });
-
-    let { error } = await doUpload();
-    if (error) {
-      const msg = (error.message ?? '').toLowerCase();
-      if (msg.includes('not found') || msg.includes('does not exist')) {
-        try { await (sb as any).storage.createBucket(bucket, { public: true }); } catch {}
-        ({ error } = await doUpload());
-      }
-      if (error) return null;
-    }
-
-    const { data } = (sb as any).storage.from(bucket).getPublicUrl(filePath);
-    return (data?.publicUrl ?? null) as string | null;
-  } catch {
-    return null;
-  }
+  // Prefer a simple dynamic URL — Discord and the web app can both fetch it on demand.
+  // Falls back to null if APP_URL is not configured (web-app backfill endpoint will fix it later).
+  return buildSubCardImageUrl(p.displayName, p.twitchUsername, p.subTier);
 }
 
 // ── Discord embed ─────────────────────────────────────────────────────────────
