@@ -1702,6 +1702,47 @@ function SettingsTab() {
           {cardDropSaving ? 'Lagrer...' : 'Lagre kortkanal'}
         </button>
       </div>
+
+      <SubCardImageBackfill />
+    </div>
+  );
+}
+
+function SubCardImageBackfill() {
+  const [status, setStatus] = React.useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [result, setResult] = React.useState<string | null>(null);
+
+  async function run() {
+    setStatus('running');
+    setResult(null);
+    try {
+      const res  = await fetch('/api/cards/sub-images/backfill', { method: 'POST' });
+      const data = await res.json() as { ok?: boolean; updated?: number; failed?: number; total?: number; message?: string; error?: string };
+      if (data.ok) {
+        setResult(data.message ?? `✅ ${data.updated} kort oppdatert${data.failed ? `, ${data.failed} feilet` : ''} (av ${data.total} totalt)`);
+        setStatus('done');
+      } else {
+        setResult(`❌ ${data.error ?? 'Ukjent feil'}`);
+        setStatus('error');
+      }
+    } catch (e: any) {
+      setResult(`❌ ${(e as Error)?.message ?? 'Nettverksfeil'}`);
+      setStatus('error');
+    }
+  }
+
+  return (
+    <div className="mt-4 p-3 bg-g-bg border border-g-border rounded-lg space-y-2">
+      <p className="text-[11px] font-bold text-g-text">Sub-kort bilder</p>
+      <p className="text-[10px] text-g-muted">Generer manglende kortbilder for alle Twitch Sub-kort.</p>
+      <button
+        onClick={run}
+        disabled={status === 'running'}
+        className="px-4 py-2 text-[10px] font-bold bg-purple-500/10 border border-purple-500/30 text-purple-400 rounded-lg hover:bg-purple-500/20 transition-all disabled:opacity-50"
+      >
+        {status === 'running' ? 'Genererer...' : 'Generer sub-kort bilder'}
+      </button>
+      {result && <p className="text-[10px] text-g-muted">{result}</p>}
     </div>
   );
 }
