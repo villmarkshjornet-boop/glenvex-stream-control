@@ -12,7 +12,7 @@ import { getCommunitySettings } from '../lib/botKanalPreferanser';
 import { WORKSPACE_ID, getBotDb } from '../lib/supabase';
 import { generateSubCard } from '../lib/subCardService';
 import { logSystemEvent } from '../lib/systemEvents';
-import { getBroadcasterUserToken } from '../lib/twitchBot';
+import { getBroadcasterUserToken, getLastBroadcasterTokenError } from '../lib/twitchBot';
 import { getBroadcasterId } from '@/lib/twitch';
 
 const BADGE_CHOICES = [
@@ -296,39 +296,17 @@ export const adminCommand = {
         const hasTwId   = !!process.env.TWITCH_CLIENT_ID;
         const hasTwSec  = !!process.env.TWITCH_CLIENT_SECRET;
         const hasWsId   = !!process.env.WORKSPACE_ID;
+        const specificError = getLastBroadcasterTokenError();
         const lines = [
-          `❌ Broadcaster-token ikke tilgjengelig. Diagnostikk:`,
+          `❌ Broadcaster-token ikke tilgjengelig.`,
           `• WORKSPACE_ID: ${hasWsId ? `✅ (${process.env.WORKSPACE_ID})` : '❌ mangler'}`,
           `• SUPABASE_URL: ${hasSbUrl ? '✅' : '❌ mangler'}`,
           `• SUPABASE_SERVICE_ROLE_KEY: ${hasSbKey ? '✅' : '❌ mangler'}`,
           `• TWITCH_CLIENT_ID: ${hasTwId ? '✅' : '❌ mangler'}`,
           `• TWITCH_CLIENT_SECRET: ${hasTwSec ? '✅' : '❌ mangler'}`,
+          `• Årsak: ${specificError ?? 'ukjent — sjekk Railway-logg for [getBroadcasterUserToken]'}`,
+          `• Fix: Innstillinger → Koble til Twitch på nytt.`,
         ];
-
-        // Pull the most recent TWITCH_AUTH_ERROR from system_events for a direct error message
-        if (hasSbUrl && hasSbKey && hasWsId) {
-          try {
-            const { data: recentErrors } = await db
-              .from('system_events')
-              .select('title, created_at, metadata')
-              .eq('event_type', 'TWITCH_AUTH_ERROR')
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            if (recentErrors) {
-              const ts = new Date(recentErrors.created_at as string).toLocaleTimeString('nb-NO');
-              lines.push(`• Siste feil (${ts}): ${recentErrors.title}`);
-              const meta = recentErrors.metadata as Record<string, unknown> | null;
-              if (meta?.actualId) lines.push(`  → Faktisk workspace UUID: ${meta.actualId}`);
-              if (meta?.validateStatus) lines.push(`  → Token validate HTTP: ${meta.validateStatus}`);
-              if (meta?.scopes) lines.push(`  → Scopes: ${(meta.scopes as string[]).join(', ')}`);
-            }
-          } catch {}
-        }
-
-        if (hasSbUrl && hasSbKey && hasTwId && hasTwSec && hasWsId) {
-          lines.push(`• Fix: Innstillinger → Koble til Twitch på nytt (krever channel:read:subscriptions scope).`);
-        }
         await interaction.editReply({ content: lines.join('\n') });
         return;
       }

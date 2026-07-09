@@ -212,8 +212,12 @@ let forrigeFollowerAntall = -1;
 // We read twitch_access_token from Supabase and auto-refresh via twitch_refresh_token on 401.
 let _cachedBroadcasterToken: string | null = null;
 let _cachedBroadcasterTokenAt: number | null = null;
+let _lastBroadcasterTokenError: string | null = null;
+
+export function getLastBroadcasterTokenError(): string | null { return _lastBroadcasterTokenError; }
 
 export async function getBroadcasterUserToken(workspaceId?: string): Promise<string | null> {
+  _lastBroadcasterTokenError = null;
   const TOKEN_TTL_MS = 3.5 * 60 * 60 * 1000; // 3.5 hours — Twitch tokens expire ~4h
   if (_cachedBroadcasterToken && _cachedBroadcasterTokenAt && (Date.now() - _cachedBroadcasterTokenAt) < TOKEN_TTL_MS) {
     return _cachedBroadcasterToken;
@@ -274,6 +278,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
     }
 
     if (dbError || !ws) {
+      _lastBroadcasterTokenError = `Workspace "${wsId}" ikke funnet i DB`;
       console.error(`[getBroadcasterUserToken] DB lookup feilet for wsId="${wsId}":`, dbError?.message ?? 'no row returned');
       logSystemEvent({
         source: 'twitch_bot',
@@ -286,6 +291,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
     }
 
     if (!ws.twitch_access_token) {
+      _lastBroadcasterTokenError = 'twitch_access_token er null i DB — koble til Twitch på nytt';
       console.error(`[getBroadcasterUserToken] wsId="${wsId}" row found but twitch_access_token is null — user must reconnect Twitch in settings`);
       logSystemEvent({
         source: 'twitch_bot',
@@ -308,6 +314,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
       const validateData = await testRes.json().catch(() => null) as { scopes?: string[] } | null;
       const scopes = validateData?.scopes ?? [];
       if (scopes.length > 0 && !scopes.includes('channel:read:subscriptions')) {
+        _lastBroadcasterTokenError = `Token mangler scope channel:read:subscriptions. Har: ${scopes.join(', ')}`;
         console.warn(`[getBroadcasterUserToken] Token valid but missing scope "channel:read:subscriptions". Has: ${scopes.join(', ')}`);
         logSystemEvent({
           source: 'twitch_bot',
@@ -327,6 +334,7 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
     console.warn(`[getBroadcasterUserToken] Token validation failed (HTTP ${validateStatus}) — attempting refresh`);
 
     if (!ws.twitch_refresh_token) {
+      _lastBroadcasterTokenError = `Token utløpt (HTTP ${validateStatus}) og ingen refresh_token i DB`;
       console.error(`[getBroadcasterUserToken] Token expired and no refresh_token stored for wsId="${wsId}"`);
       logSystemEvent({
         source: 'twitch_bot',
@@ -374,15 +382,17 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
     // Refresh failed — log the specific error from Twitch
     let refreshErrBody = '';
     try { refreshErrBody = await refreshRes?.text() ?? ''; } catch {}
-    console.error(`[getBroadcasterUserToken] Token refresh failed HTTP ${refreshRes?.status ?? 'network_error'}: ${refreshErrBody.slice(0, 200)}`);
+    const refreshStatus = refreshRes?.status ?? 'network_error';
+    _lastBroadcasterTokenError = `Token refresh feilet HTTP ${refreshStatus}: ${refreshErrBody.slice(0, 120)}`;
+    console.error(`[getBroadcasterUserToken] Token refresh failed HTTP ${refreshStatus}: ${refreshErrBody.slice(0, 200)}`);
     logSystemEvent({
       source: 'twitch_bot',
       event_type: 'TWITCH_AUTH_ERROR',
-      title: 'Twitch token refresh feilet — koble til Twitch på nytt i innstillinger',
+      title: `Twitch token refresh feilet (HTTP ${refreshStatus}) — koble til Twitch på nytt i innstillinger`,
       severity: 'critical',
       metadata: {
         workspaceId: wsId,
-        refreshStatus: refreshRes?.status ?? 'network_error',
+        refreshStatus,
         refreshError: refreshErrBody.slice(0, 200),
       },
     });
