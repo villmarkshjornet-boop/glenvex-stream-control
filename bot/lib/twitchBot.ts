@@ -396,7 +396,8 @@ export async function getBroadcasterUserToken(workspaceId?: string): Promise<str
         refreshError: refreshErrBody.slice(0, 200),
       },
     });
-  } catch (err) {
+  } catch (err: any) {
+    _lastBroadcasterTokenError = `Uventet exception: ${err?.message ?? String(err)}`;
     console.error('[getBroadcasterUserToken] Unexpected error:', err);
   }
   return null;
