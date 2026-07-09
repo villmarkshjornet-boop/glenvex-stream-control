@@ -1709,8 +1709,8 @@ function SettingsTab() {
 }
 
 function SubCardImageBackfill() {
-  const [status, setStatus] = React.useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [result, setResult] = React.useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [result, setResult] = useState<string | null>(null);
 
   async function run() {
     setStatus('running');
@@ -1725,8 +1725,8 @@ function SubCardImageBackfill() {
         setResult(`❌ ${data.error ?? 'Ukjent feil'}`);
         setStatus('error');
       }
-    } catch (e: any) {
-      setResult(`❌ ${(e as Error)?.message ?? 'Nettverksfeil'}`);
+    } catch (err: unknown) {
+      setResult(`❌ ${(err instanceof Error) ? err.message : 'Nettverksfeil'}`);
       setStatus('error');
     }
   }
