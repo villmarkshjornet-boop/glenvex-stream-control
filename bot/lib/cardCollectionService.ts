@@ -42,6 +42,8 @@ export interface CollectionCard {
   card_image_url: string | null;
   card_number:   number | null;
   season:        string;
+  season_id:     string | null;
+  season_name:   string | null;
   source:        CardSource;
   is_active:     boolean;
   is_tradeable:  boolean;
@@ -61,11 +63,39 @@ interface AddCardParams {
   imageUrl?:    string | null;
   cardNumber?:  number;
   season?:      string;
+  seasonId?:    string | null;
+  seasonName?:  string | null;
   source:       CardSource;
   isActive?:    boolean;
   isTradeable?: boolean;
   stats?:       Record<string, number>;
   metadata?:    Record<string, unknown>;
+}
+
+// ── Active Season ─────────────────────────────────────────────────────────────
+
+export interface ActiveSeason {
+  id:          string;
+  name:        string;
+  description: string;
+  style_ref:   string;
+}
+
+export async function getActiveSeason(): Promise<ActiveSeason | null> {
+  const sb = getSb();
+  if (!sb) return null;
+  try {
+    const { data } = await sb
+      .from('card_seasons')
+      .select('id, name, description, style_ref')
+      .eq('workspace_id', WORKSPACE_ID)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+    return data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Core operations ───────────────────────────────────────────────────────────
@@ -96,6 +126,8 @@ export async function addCardToCollection(p: AddCardParams): Promise<CollectionC
       card_image_url: p.imageUrl     ?? null,
       card_number:   p.cardNumber    ?? null,
       season:        p.season        ?? SEASON,
+      season_id:     p.seasonId      ?? null,
+      season_name:   p.seasonName    ?? null,
       source:        p.source,
       is_active:     p.isActive      ?? false,
       is_tradeable:  p.isTradeable   ?? true,

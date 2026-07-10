@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import type { MemberProfile } from './memberTracker';
 import { ALLE_BADGES } from './memberTracker';
 import { spendCoins, COIN_RATES } from './coinService';
-import { addCardToCollection } from './cardCollectionService';
+import { addCardToCollection, getActiveSeason, type ActiveSeason } from './cardCollectionService';
 import { renderPersonaCard } from './cardRenderer';
 import { logSystemEvent } from './systemEvents';
 import { callChatCompletion, callImageGeneration } from './openaiWrapper';
@@ -217,7 +217,7 @@ function defaultStats(): PersonaStats {
 
 // ── GPT-generering av persona (V2) ───────────────────────────────────────────
 
-async function genererPersonaJson(member: MemberProfile, rarity: PersonaRarity, openai: OpenAI): Promise<PersonaCard | null> {
+async function genererPersonaJson(member: MemberProfile, rarity: PersonaRarity, openai: OpenAI, activeSeason: ActiveSeason | null): Promise<PersonaCard | null> {
   const badgeStr    = member.badges.slice(-5).join(', ') || 'ingen ennå';
   const rarityHint  =
     rarity === 'Mythic'    ? 'MYTHIC — ekstremt sjelden. Lag en legendarisk, episk karakter. Gå ALL IN!'
@@ -302,7 +302,16 @@ Svar KUN med JSON (ingen annen tekst):
     "lederskap": 0-100
   },
   "imagePrompt": "english sentence about character vibes, no real face, trading card art"
-}`;
+}${activeSeason ? `
+
+AKTIV SESONG: ${activeSeason.name}
+${activeSeason.description}
+${activeSeason.style_ref ? `Stil-referanse: ${activeSeason.style_ref}` : ''}
+
+VIKTIG: Sesongen ENDRER IKKE avatarens identitet.
+Bevar: ansikt, klesfarger (der mulig), hårfasong, tilbehør og personlighet.
+Sesongen LEGGER TIL: miljø, bakgrunn, rustning, utstyr, lyssetting og stemning.
+Ikke gjenskapte copyrightbeskyttede karakterer — fang atmosfæren.` : ''}`;
 
   try {
     const res = await callChatCompletion(
@@ -535,7 +544,7 @@ interface PersonaImageContext {
   rarityVisual:       { frame: string; colors: string; mood: string; fx: string };
 }
 
-function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImageContext {
+function byggPersonaContext(card: PersonaCard, displayName: string, activeSeason: ActiveSeason | null = null): PersonaImageContext {
   const s = card.stats;
 
   // Personality from top stats
@@ -591,7 +600,9 @@ function byggPersonaContext(card: PersonaCard, displayName: string): PersonaImag
     environment,
     archetypeCharacter,
     archetypeEffects,
-    season:             SEASON_SUFFIX,
+    season:             activeSeason
+      ? `${activeSeason.name}: ${activeSeason.style_ref || activeSeason.description.slice(0, 200)}`
+      : SEASON_SUFFIX,
     rarityVisual:       RARITY_VISUAL[card.rarity],
   };
 }
@@ -832,12 +843,13 @@ function byggArtStylePrompt(ctx: PersonaImageContext, avatarDescription: string)
 // ── Image generation — gpt-image-1 primary, DALL-E 3 fallback ────────────────
 
 async function genererBilde(
-  card:        PersonaCard,
-  avatarBuf:   Buffer | null,
-  openai:      OpenAI,
-  displayName: string,
+  card:         PersonaCard,
+  avatarBuf:    Buffer | null,
+  openai:       OpenAI,
+  displayName:  string,
+  activeSeason: ActiveSeason | null = null,
 ): Promise<Buffer | null> {
-  const personaCtx = byggPersonaContext(card, displayName);
+  const personaCtx = byggPersonaContext(card, displayName, activeSeason);
 
   // ── Classify avatar: real human vs illustration/logo/character ────────────
   let avatarType: AvatarClassification = { type: 'art', description: 'avatar character' };
@@ -1090,8 +1102,9 @@ export async function genererPersona(
   }
 
   const openai           = new OpenAI({ apiKey });
+  const activeSeason     = await getActiveSeason();
   const rarity           = trekkSjeldenhet(member);
-  const card             = await genererPersonaJson(member, rarity, openai);
+  const card             = await genererPersonaJson(member, rarity, openai, activeSeason);
   if (!card) return { feil: 'AI klarte ikke å generere persona. Prøv igjen om litt.' };
 
   // Download Discord avatar for identity-based transformation
@@ -1099,7 +1112,7 @@ export async function genererPersona(
 
   // Generate image via gpt-image-1 (edit=avatar-based, generate=fallback)
   const displayName = member.displayName || member.username;
-  const imageBuf    = await genererBilde(card, avatarBuf, openai, displayName);
+  const imageBuf    = await genererBilde(card, avatarBuf, openai, displayName, activeSeason);
 
   // Upload to Supabase Storage → persistent URL (never expires)
   let imageUrl: string | null = null;
@@ -1120,6 +1133,8 @@ export async function genererPersona(
     archetype:   card.archetype,
     imageUrl,
     season:      SEASON,
+    seasonId:    activeSeason?.id   ?? null,
+    seasonName:  activeSeason?.name ?? null,
     source:      rerollCount > 1 ? 'reroll' : 'generated',
     isActive:    true,
     isTradeable: true,
