@@ -6,6 +6,24 @@ import { type PersonaRarity, RARITY_COLOR, rarityFromScore } from '@/lib/rarity'
 
 export const dynamic = 'force-dynamic';
 
+interface ActiveSeason {
+  id:          string;
+  name:        string;
+  description: string;
+  style_ref:   string;
+}
+
+async function getActiveSeason(db: any, wsId: string): Promise<ActiveSeason | null> {
+  const { data } = await db
+    .from('card_seasons')
+    .select('id, name, description, style_ref')
+    .eq('workspace_id', wsId)
+    .eq('is_active', true)
+    .limit(1)
+    .single();
+  return data ?? null;
+}
+
 const RARITY_VISUAL: Record<PersonaRarity, string> = {
   Common:    'dark steel military frame, high-contrast black and silver, veteran warrior with earned scars',
   Rare:      'cerulean blue crystal frame glowing from within, electric blue and cobalt, elemental power barely contained',
@@ -31,7 +49,7 @@ const ARCHETYPE_LIST = [
   'Trickster', 'Oracle', 'Crusader', 'Phantom', 'Artificer', 'Champion',
 ];
 
-function byggPrompt(m: any, rarity: PersonaRarity): string {
+function byggPrompt(m: any, rarity: PersonaRarity, season: ActiveSeason | null): string {
   const badgeStr  = ((m.badges ?? []) as string[]).slice(-5).join(', ') || 'ingen';
   const rarityHint =
     rarity === 'Mythic'    ? 'MYTHIC — transcendent power. Gå ALL IN!'
@@ -58,7 +76,25 @@ SJELDENHET: ${rarityHint}
 
 ARCHETYPE — velg én: ${ARCHETYPE_LIST.join(', ')}
 (Skriv nøyaktig som vist. Stats skal speile data: mye meldinger → høy activity/chaos, mye voice → høy community.)
+${season ? `
+AKTIV SESONG
+Sesong navn: ${season.name}
+${season.description}
+${season.style_ref ? `Stil-referanse: ${season.style_ref}` : ''}
 
+VIKTIG: Sesongen ENDRER IKKE avatarens identitet. Bevar:
+• Ansikt og generell utseende
+• Klesfarger (der mulig)
+• Hårfasong og tilbehør
+• Personlighet fra aktivitetsdataene
+
+Sesongen LEGGER TIL:
+• Miljø og bakgrunn
+• Rustning, utstyr, rekvisitter
+• Lyssetting og atmosfære
+• Komposisjon og stemning
+Ikke gjenskapte copyrightbeskyttede karakterer — fang atmosfæren.
+` : ''}
 Svar KUN med JSON (ingen annen tekst):
 {
   "title": "THE [NOKO EPISK I STORE BOKSTAVER]",
@@ -74,10 +110,10 @@ Svar KUN med JSON (ingen annen tekst):
 }`;
 }
 
-async function genererJson(m: any, rarity: PersonaRarity, openai: OpenAI) {
+async function genererJson(m: any, rarity: PersonaRarity, openai: OpenAI, season: ActiveSeason | null) {
   const res = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: byggPrompt(m, rarity) }],
+    messages: [{ role: 'user', content: byggPrompt(m, rarity, season) }],
     temperature: 0.9,
     max_tokens: 900,
     response_format: { type: 'json_object' },
@@ -98,8 +134,8 @@ async function genererJson(m: any, rarity: PersonaRarity, openai: OpenAI) {
   };
 }
 
-async function genererBilde(card: Awaited<ReturnType<typeof genererJson>>, openai: OpenAI): Promise<Buffer | null> {
-  const prompt = `Premium collector trading card illustration. Character: ${card.archetype} — ${card.class}. ${card.imagePrompt}. Visual style: ${RARITY_VISUAL[card.rarity]}. Portrait orientation tall card. Rich dramatic environment. GLENVEX cyberpunk gaming aesthetic, neon green energy. No text. No watermarks. No logos. AAA quality.`;
+async function genererBilde(card: Awaited<ReturnType<typeof genererJson>>, openai: OpenAI, season: ActiveSeason | null): Promise<Buffer | null> {
+  const prompt = `Premium collector trading card illustration. Character: ${card.archetype} — ${card.class}. ${card.imagePrompt}. Visual style: ${RARITY_VISUAL[card.rarity]}. Portrait orientation tall card. Rich dramatic environment. GLENVEX cyberpunk gaming aesthetic, neon green energy.${season ? ` Active season theme: ${season.name}. ${season.style_ref || season.description.slice(0, 200)}. Preserve character identity.` : ''} No text. No watermarks. No logos. AAA quality.`;
   try {
     const res = await openai.images.generate({
       model:   'dall-e-3',
@@ -141,6 +177,8 @@ export async function POST(req: Request) {
   const wsId = getWorkspaceId();
   const db   = getDb();
   if (!db) return NextResponse.json({ ok: false, error: 'DB ikke tilgjengelig' }, { status: 500 });
+
+  const activeSeason = await getActiveSeason(db, wsId);
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ ok: false, error: 'OPENAI_API_KEY mangler' }, { status: 500 });
@@ -196,13 +234,13 @@ export async function POST(req: Request) {
 
   let card: Awaited<ReturnType<typeof genererJson>>;
   try {
-    card = await genererJson(member, rarity, openai);
+    card = await genererJson(member, rarity, openai, activeSeason);
   } catch (e: any) {
     console.error('[personas/generate] GPT feilet:', e?.message, e?.stack);
     return NextResponse.json({ ok: false, error: 'AI-generering feilet' }, { status: 500 });
   }
 
-  const imageBuf = await genererBilde(card, openai);
+  const imageBuf = await genererBilde(card, openai, activeSeason);
   const imageUrl = imageBuf ? await uploadBilde(imageBuf, wsId, discordId, db, season) : null;
 
   const now = new Date().toISOString();
@@ -224,6 +262,8 @@ export async function POST(req: Request) {
     stats:              card.stats,
     image_prompt:       card.imagePrompt,
     image_url:          imageUrl,
+    season_id:          activeSeason?.id   ?? null,
+    season_name:        activeSeason?.name ?? null,
     xp_cost:            0,
     reroll_count:       rerollCount,
     generator_version:  'v3-admin',
