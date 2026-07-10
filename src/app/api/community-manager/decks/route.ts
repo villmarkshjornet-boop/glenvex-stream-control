@@ -110,6 +110,7 @@ export async function GET() {
           source:         (c.source         ?? 'generated') as string,
           is_active:      !!c.is_active,
           is_tradeable:   c.is_tradeable !== false,
+          metadata:       (c.metadata       ?? null) as Record<string, string> | null,
           created_at:     c.created_at    as string,
         })),
       };

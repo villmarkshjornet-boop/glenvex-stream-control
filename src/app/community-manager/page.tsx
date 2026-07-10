@@ -35,16 +35,16 @@ interface CardEntry {
   metadata?: Record<string, string> | null;
 }
 
-function getCardImageUrl(card: CardEntry): string | null {
-  if (card.card_image_url) return card.card_image_url;
+function getCardImageUrl(card: { card_type: string; card_image_url: string | null; display_name?: string; metadata?: Record<string, string> | null }): string | null {
+  // Sub cards: always use dynamic endpoint — stored URL may point to stale/broken storage
   if (card.card_type === 'sub') {
     const m = card.metadata ?? {};
-    const displayName    = m.displayName    ?? m.twitchUsername ?? card.display_name;
+    const displayName    = m.displayName    ?? m.twitchUsername ?? card.display_name ?? 'Subscriber';
     const twitchUsername = m.twitchUsername ?? '';
     const tier           = m.subTier        ?? '1000';
     return `/api/cards/sub-card-image?displayName=${encodeURIComponent(displayName)}&twitchUsername=${encodeURIComponent(twitchUsername)}&tier=${encodeURIComponent(tier)}`;
   }
-  return null;
+  return card.card_image_url;
 }
 
 interface SeasonEntry {
@@ -1183,6 +1183,7 @@ interface DeckCard {
   source: string;
   is_active: boolean;
   is_tradeable: boolean;
+  metadata?: Record<string, string> | null;
   created_at: string;
 }
 
