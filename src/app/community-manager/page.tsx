@@ -30,6 +30,17 @@ interface CardEntry {
   card_image_url: string | null; card_number: number | null;
   source: string; is_active: boolean; is_tradeable: boolean;
   created_at: string;
+  season_id?: string | null;
+  season_name?: string | null;
+}
+
+interface SeasonEntry {
+  id:          string;
+  name:        string;
+  description: string;
+  style_ref:   string;
+  is_active:   boolean;
+  created_at:  string;
 }
 
 interface MemberOverview {
@@ -808,6 +819,8 @@ function KortTab() {
   const [selectedCard, setSelectedCard]   = useState<CardEntry | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<CardEntry | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [seasonFilter, setSeasonFilter]   = useState<string | null>(null);
+  const [availableSeasons, setAvailableSeasons] = useState<Array<{ id: string, name: string }>>([]);
 
   const loadCards = useCallback(() => {
     setCardsLoading(true);
@@ -818,7 +831,16 @@ function KortTab() {
     if (cardFilter === 'active') params.set('active', 'true');
     fetch(`/api/community-manager/cards?${params}`)
       .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
-      .then(d => { setCards(d.cards ?? []); })
+      .then(d => {
+        setCards(d.cards ?? []);
+        const seasonMap = new Map<string, { id: string; name: string }>();
+        (d.cards ?? []).forEach((c: CardEntry) => {
+          if (c.season_id && c.season_name) {
+            seasonMap.set(c.season_id, { id: c.season_id, name: c.season_name });
+          }
+        });
+        setAvailableSeasons(Array.from(seasonMap.values()));
+      })
       .catch(e => setCardsError(e.message ?? 'Feil ved lasting'))
       .finally(() => setCardsLoading(false));
   }, [cardSort, cardSearch, cardFilter]);
@@ -847,11 +869,12 @@ function KortTab() {
     setActionLoading(null);
   };
 
-  const sorted = [...cards].sort((a, b) => {
+  const sortedAll = [...cards].sort((a, b) => {
     if (cardSort === 'rarity') return (RARITY_RANK[a.rarity as keyof typeof RARITY_RANK] ?? 99) - (RARITY_RANK[b.rarity as keyof typeof RARITY_RANK] ?? 99);
     if (cardSort === 'title') return a.title.localeCompare(b.title);
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
+  const sorted = seasonFilter ? sortedAll.filter(c => c.season_id === seasonFilter) : sortedAll;
 
   return (
     <div className="space-y-4">
@@ -865,6 +888,19 @@ function KortTab() {
             {f === 'all' ? 'Alle' : f === 'active' ? '★ Aktive' : f}
           </button>
         ))}
+        {availableSeasons.length > 0 && (
+          <>
+            <button onClick={() => setSeasonFilter(null)} className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all ${!seasonFilter ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' : 'border-g-border text-g-muted hover:text-g-text'}`}>
+              Alle sesonger
+            </button>
+            {availableSeasons.map(s => (
+              <button key={s.id} onClick={() => setSeasonFilter(s.id)}
+                className={`px-2.5 py-1.5 rounded text-[10px] font-bold border transition-all ${seasonFilter === s.id ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' : 'border-g-border text-g-muted hover:text-g-text'}`}>
+                🎴 {s.name}
+              </button>
+            ))}
+          </>
+        )}
         <div className="flex-1" />
         <input value={cardSearch} onChange={e => setCardSearch(e.target.value)}
           placeholder="Søk kort eller bruker..."
@@ -1015,6 +1051,12 @@ function KortTab() {
                     <p className="text-g-text font-bold">#{String(selectedCard.card_number).padStart(3, '0')}</p>
                   </div>
                 )}
+                <div className="bg-g-bg border border-g-border rounded-lg p-2">
+                  <p className="text-g-muted">Sesong</p>
+                  <p className={`font-bold ${selectedCard.season_name ? 'text-purple-400' : 'text-g-text'}`}>
+                    {selectedCard.season_name ?? 'Standard'}
+                  </p>
+                </div>
               </div>
               {/* Status badges */}
               <div className="flex gap-2">
@@ -1519,6 +1561,14 @@ function SettingsTab() {
   });
   const [cardDropSaving, setCardDropSaving] = useState(false);
 
+  const [seasons, setSeasons]             = useState<SeasonEntry[]>([]);
+  const [seasonsLoading, setSeasonsLoading] = useState(false);
+  const [createOpen, setCreateOpen]       = useState(false);
+  const [newName, setNewName]             = useState('');
+  const [newDesc, setNewDesc]             = useState('');
+  const [newStyleRef, setNewStyleRef]     = useState('');
+  const [seasonSaving, setSeasonSaving]   = useState(false);
+
   useEffect(() => {
     fetch('/api/community-manager/personas/settings')
       .then(r => r.json())
@@ -1529,6 +1579,40 @@ function SettingsTab() {
       .then(d => { if (d.settings) setCardDropSettings(d.settings as CardDropSettings); })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setSeasonsLoading(true);
+    fetch('/api/seasons')
+      .then(r => r.json())
+      .then(d => setSeasons(d.seasons ?? []))
+      .catch(() => {})
+      .finally(() => setSeasonsLoading(false));
+  }, []);
+
+  async function toggleSeason(id: string, currentlyActive: boolean) {
+    await fetch(`/api/seasons/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: !currentlyActive }),
+    });
+    const d = await fetch('/api/seasons').then(r => r.json());
+    setSeasons(d.seasons ?? []);
+  }
+
+  async function createSeason() {
+    if (!newName.trim()) return;
+    setSeasonSaving(true);
+    await fetch('/api/seasons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName, description: newDesc, style_ref: newStyleRef }),
+    });
+    setCreateOpen(false);
+    setNewName(''); setNewDesc(''); setNewStyleRef('');
+    const d = await fetch('/api/seasons').then(r => r.json());
+    setSeasons(d.seasons ?? []);
+    setSeasonSaving(false);
+  }
 
   const saveSettings = async () => {
     setSettingsSaving(true);
@@ -1704,6 +1788,116 @@ function SettingsTab() {
         >
           {cardDropSaving ? 'Lagrer...' : 'Lagre kortkanal'}
         </button>
+      </div>
+
+      {/* ── Sesonger ──────────────────────────── */}
+      <div className="mt-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-black text-g-text uppercase tracking-widest">Sesonger</p>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="px-2.5 py-1 text-[9px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all"
+          >
+            + Opprett sesong
+          </button>
+        </div>
+
+        {/* Active season indicator */}
+        {(() => {
+          const active = seasons.find(s => s.is_active);
+          return (
+            <div className="flex items-center gap-2 px-3 py-2 bg-g-bg border border-g-border rounded-lg">
+              <span className="text-[9px] text-g-muted uppercase tracking-widest">Aktiv:</span>
+              {active
+                ? <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">{active.name}</span>
+                : <span className="text-[10px] font-bold text-g-muted">Standard</span>
+              }
+            </div>
+          );
+        })()}
+
+        {/* Season list */}
+        {seasonsLoading && <p className="text-[10px] text-g-muted">Laster...</p>}
+        {!seasonsLoading && seasons.length === 0 && (
+          <p className="text-[10px] text-g-muted">Ingen sesonger opprettet ennå. Standard modus er aktiv.</p>
+        )}
+        <div className="space-y-1.5">
+          {seasons.map(s => (
+            <div key={s.id} className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+              s.is_active
+                ? 'bg-purple-500/10 border-purple-500/30'
+                : 'bg-g-bg border-g-border hover:border-g-border/80'
+            }`}
+              onClick={() => toggleSeason(s.id, s.is_active)}
+            >
+              <div className={`mt-0.5 w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                s.is_active ? 'bg-purple-500 border-purple-500' : 'border-g-border'
+              }`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-g-text">{s.name}</p>
+                {s.description && <p className="text-[9px] text-g-muted mt-0.5 line-clamp-2">{s.description}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Create season modal */}
+        {createOpen && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="bg-g-card border border-g-border rounded-2xl w-full max-w-lg overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-g-border">
+                <h3 className="font-black text-g-text text-sm">Opprett sesong</h3>
+                <button onClick={() => setCreateOpen(false)} className="text-g-muted hover:text-g-text text-xl">×</button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold text-g-muted uppercase tracking-widest block mb-1">Sesong navn</label>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Sesong 1 – Sand: Raiders of Sophie"
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-g-muted uppercase tracking-widest block mb-1">AI Beskrivelse</label>
+                  <textarea
+                    value={newDesc}
+                    onChange={e => setNewDesc(e.target.value)}
+                    rows={5}
+                    placeholder={"Alle samlekort skal være inspirert av ...\nKort skal inneholde ...\nKarakter skal forbli gjenkjennelige fra Twitch-avataren."}
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50 resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-g-muted uppercase tracking-widest block mb-1">Stil-referanse <span className="text-g-muted font-normal normal-case">(valgfritt)</span></label>
+                  <textarea
+                    value={newStyleRef}
+                    onChange={e => setNewStyleRef(e.target.value)}
+                    rows={2}
+                    placeholder="Inspirert av Sand: Raiders of Sophie — ørken, sandstormer, sci-fi, varme farger, episke landskap."
+                    className="w-full bg-g-bg border border-g-border rounded-lg px-3 py-2 text-xs text-g-text outline-none focus:border-g-green/50 resize-none"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setCreateOpen(false)}
+                    className="flex-1 px-4 py-2 text-[10px] font-bold border border-g-border text-g-muted rounded-lg hover:text-g-text transition-all"
+                  >
+                    Avbryt
+                  </button>
+                  <button
+                    onClick={createSeason}
+                    disabled={seasonSaving || !newName.trim()}
+                    className="flex-1 px-4 py-2 text-[10px] font-bold bg-g-green/10 border border-g-green/30 text-g-green rounded-lg hover:bg-g-green/20 transition-all disabled:opacity-50"
+                  >
+                    {seasonSaving ? 'Lagrer...' : 'Lagre sesong'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
     </div>
