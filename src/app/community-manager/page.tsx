@@ -968,7 +968,7 @@ function KortTab() {
       )}
 
       {/* Sub-kort bilde backfill */}
-      <SubCardImageBackfill />
+      <SubCardImageBackfill onSuccess={loadCards} />
 
       {/* Card detail drawer/modal */}
       {selectedCard && (
@@ -1710,7 +1710,7 @@ function SettingsTab() {
   );
 }
 
-function SubCardImageBackfill() {
+function SubCardImageBackfill({ onSuccess }: { onSuccess?: () => void }) {
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<string | null>(null);
 
@@ -1725,6 +1725,7 @@ function SubCardImageBackfill() {
         const errDetail = data.errors?.length ? ` — Feil: ${data.errors.join(' | ')}` : '';
         setResult(data.message ?? `✅ ${data.updated} oppdatert${data.failed ? `, ${data.failed} feilet` : ''} (av ${data.total})${errDetail}`);
         setStatus(data.failed ? 'error' : 'done');
+        if ((data.updated ?? 0) > 0) onSuccess?.();
       } else {
         setResult(`❌ ${data.error ?? 'Ukjent feil'}`);
         setStatus('error');
