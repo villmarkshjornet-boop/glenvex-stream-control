@@ -28,6 +28,7 @@ const PUBLIC_PATHS = [
   '/overlay',            // OBS Browser Source — no session required
   '/api/goals/live',     // public read-only goal data for overlay
   '/api/debug/session',  // diagnostic endpoint — public so it works when not logged in
+  '/api/cards/sub-card-image', // parameterised PNG generator — no DB/session needed
 ];
 
 // OAuth start routes: authenticated (not public) but must NOT redirect to /onboarding
