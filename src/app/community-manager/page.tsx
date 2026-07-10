@@ -1720,10 +1720,11 @@ function SubCardImageBackfill() {
     try {
       const url  = force ? '/api/cards/sub-images/backfill?force=true' : '/api/cards/sub-images/backfill';
       const res  = await fetch(url, { method: 'POST' });
-      const data = await res.json() as { ok?: boolean; updated?: number; failed?: number; total?: number; message?: string; error?: string };
+      const data = await res.json() as { ok?: boolean; updated?: number; failed?: number; total?: number; message?: string; error?: string; errors?: string[] };
       if (data.ok) {
-        setResult(data.message ?? `✅ ${data.updated} kort oppdatert${data.failed ? `, ${data.failed} feilet` : ''} (av ${data.total} totalt)`);
-        setStatus('done');
+        const errDetail = data.errors?.length ? ` — Feil: ${data.errors.join(' | ')}` : '';
+        setResult(data.message ?? `✅ ${data.updated} oppdatert${data.failed ? `, ${data.failed} feilet` : ''} (av ${data.total})${errDetail}`);
+        setStatus(data.failed ? 'error' : 'done');
       } else {
         setResult(`❌ ${data.error ?? 'Ukjent feil'}`);
         setStatus('error');

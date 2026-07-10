@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
   const bucket = 'persona-cards';
   let updated  = 0;
-  let failed   = 0;
+  const errors: string[] = [];
 
   for (const card of cards) {
     try {
@@ -48,33 +48,46 @@ export async function POST(req: NextRequest) {
       imgEndpoint.searchParams.set('twitchUsername', twitchUsername);
       imgEndpoint.searchParams.set('tier',           subTier);
 
-      const res = await fetch(imgEndpoint.toString(), { signal: AbortSignal.timeout(12_000) });
-      if (!res.ok) { failed++; continue; }
+      const imgRes = await fetch(imgEndpoint.toString(), { signal: AbortSignal.timeout(15_000) });
+      if (!imgRes.ok) {
+        const body = await imgRes.text().catch(() => '');
+        errors.push(`img-fetch HTTP ${imgRes.status}: ${body.slice(0, 200)}`);
+        continue;
+      }
 
-      const buf      = Buffer.from(await res.arrayBuffer());
+      const buf      = Buffer.from(await imgRes.arrayBuffer());
       const filePath = `${workspaceId}/${card.user_id}/sub-card.png`;
 
       const doUpload = async () => db.storage.from(bucket).upload(filePath, buf, { contentType: 'image/png', upsert: true });
       let { error: upErr } = await doUpload();
       if (upErr) {
         const msg = (upErr.message ?? '').toLowerCase();
-        if (msg.includes('not found') || msg.includes('does not exist')) {
+        if (msg.includes('not found') || msg.includes('does not exist') || msg.includes('bucket')) {
           try { await db.storage.createBucket(bucket, { public: true }); } catch {}
           ({ error: upErr } = await doUpload());
         }
-        if (upErr) { failed++; continue; }
+        if (upErr) {
+          errors.push(`upload: ${upErr.message}`);
+          continue;
+        }
       }
 
       const { data: urlData } = db.storage.from(bucket).getPublicUrl(filePath);
       const publicUrl = urlData?.publicUrl ?? null;
-      if (!publicUrl) { failed++; continue; }
+      if (!publicUrl) { errors.push('getPublicUrl returnerte null'); continue; }
 
       await db.from('community_cards').update({ card_image_url: publicUrl }).eq('id', card.id);
       updated++;
-    } catch {
-      failed++;
+    } catch (e: unknown) {
+      errors.push(`exception: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  return NextResponse.json({ ok: true, updated, failed, total: cards.length });
+  return NextResponse.json({
+    ok: true,
+    updated,
+    failed: errors.length,
+    total: cards.length,
+    errors,
+  });
 }
