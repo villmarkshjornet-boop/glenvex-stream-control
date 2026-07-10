@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
     is_tradeable:   c.is_tradeable !== false,
     season_id:      (c.season_id   ?? null) as string | null,
     season_name:    (c.season_name ?? null) as string | null,
+    metadata:       (c.metadata    ?? null) as Record<string, string> | null,
     created_at:     c.created_at as string,
   }));
 

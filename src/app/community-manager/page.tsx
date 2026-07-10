@@ -32,6 +32,19 @@ interface CardEntry {
   created_at: string;
   season_id?: string | null;
   season_name?: string | null;
+  metadata?: Record<string, string> | null;
+}
+
+function getCardImageUrl(card: CardEntry): string | null {
+  if (card.card_image_url) return card.card_image_url;
+  if (card.card_type === 'sub') {
+    const m = card.metadata ?? {};
+    const displayName    = m.displayName    ?? m.twitchUsername ?? card.display_name;
+    const twitchUsername = m.twitchUsername ?? '';
+    const tier           = m.subTier        ?? '1000';
+    return `/api/cards/sub-card-image?displayName=${encodeURIComponent(displayName)}&twitchUsername=${encodeURIComponent(twitchUsername)}&tier=${encodeURIComponent(tier)}`;
+  }
+  return null;
 }
 
 interface SeasonEntry {
@@ -967,14 +980,14 @@ function KortTab() {
               className={`relative bg-g-card border rounded-xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-all shadow-lg group ${RARITY_GLOW_CLASSES[card.rarity as keyof typeof RARITY_GLOW_CLASSES] ?? 'border-g-border'}`}>
               {/* Card image */}
               <div className="aspect-[3/4] relative">
-                {card.card_image_url ? (
-                  <img src={card.card_image_url} alt={card.title}
+                {(() => { const imgUrl = getCardImageUrl(card); return imgUrl ? (
+                  <img src={imgUrl} alt={card.title}
                     className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full bg-g-bg flex items-center justify-center">
                     <span className="text-4xl opacity-20">🎴</span>
                   </div>
-                )}
+                ); })()}
                 {/* Active badge */}
                 {card.is_active && (
                   <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-g-green rounded-full flex items-center justify-center shadow-lg shadow-g-green/30">
@@ -1017,8 +1030,8 @@ function KortTab() {
             </div>
             <div className="p-4 space-y-4">
               {/* Image */}
-              {selectedCard.card_image_url && (
-                <img src={selectedCard.card_image_url} alt={selectedCard.title}
+              {getCardImageUrl(selectedCard) && (
+                <img src={getCardImageUrl(selectedCard)!} alt={selectedCard.title}
                   className="w-full max-h-64 object-contain rounded-xl border border-g-border" />
               )}
               {/* Info grid */}
@@ -1430,9 +1443,9 @@ function DeckDrawer({
                   >
                     {/* Image area */}
                     <div className="relative aspect-[3/4] bg-g-bg flex-shrink-0">
-                      {card.card_image_url ? (
+                      {getCardImageUrl(card) ? (
                         <img
-                          src={card.card_image_url}
+                          src={getCardImageUrl(card)!}
                           alt={card.title}
                           className="w-full h-full object-cover"
                         />
