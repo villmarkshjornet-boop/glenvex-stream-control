@@ -135,12 +135,12 @@ export default function Sidebar() {
   const isDashboard = pathname === '/';
 
   return (
-    <aside className="w-52 min-h-screen bg-g-sidebar border-r border-g-border/60 flex flex-col flex-shrink-0 pt-4">
+    <aside className="w-52 min-h-screen bg-[#0a0d10] border-r border-zinc-800/60 flex flex-col flex-shrink-0 pt-4">
 
       {/* Logo */}
       <Link
         href="/"
-        className="px-4 pb-4 border-b border-g-border/40 mb-4 block hover:bg-white/[0.02] transition-colors"
+        className="px-4 pb-4 border-b border-zinc-800/40 mb-4 block hover:bg-white/[0.02] transition-colors"
       >
         <div
           className="text-sm font-bold tracking-widest text-g-green uppercase"
@@ -148,7 +148,7 @@ export default function Sidebar() {
         >
           GLENVEX
         </div>
-        <div className="text-[11px] text-g-muted tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
+        <div className="text-[11px] text-zinc-500 tracking-[0.3em] uppercase mt-0.5">Creator OS</div>
       </Link>
 
       {/* Nav */}
@@ -159,8 +159,8 @@ export default function Sidebar() {
           href="/"
           className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
             isDashboard
-              ? 'bg-g-green/10 text-g-green border-r-2 border-g-green'
-              : 'text-g-muted/70 hover:text-g-text hover:bg-white/[0.03]'
+              ? 'bg-emerald-500/10 text-emerald-400 rounded-lg'
+              : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/50'
           }`}
         >
           <LayoutGrid size={16} className="flex-shrink-0 w-4 h-4" />
@@ -180,10 +180,10 @@ export default function Sidebar() {
                 <button
                   onClick={() => toggle(group.id)}
                   className={`w-full flex items-center justify-between transition-all group ${
-                    isActive ? 'text-g-green/70' : 'text-g-muted/60 hover:text-g-muted'
+                    isActive ? 'text-emerald-500/60' : 'text-zinc-600 hover:text-zinc-400'
                   }`}
                 >
-                  <span className="text-[11px] font-semibold uppercase tracking-widest">{group.label}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{group.label}</span>
                   <span className={`text-[11px] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>›</span>
                 </button>
               </div>
@@ -200,8 +200,8 @@ export default function Sidebar() {
                         href={item.href}
                         className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
                           active
-                            ? 'bg-g-green/10 text-g-green border-r-2 border-g-green'
-                            : 'text-g-muted/70 hover:text-g-text hover:bg-white/[0.03]'
+                            ? 'bg-emerald-500/10 text-emerald-400 rounded-lg'
+                            : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/50'
                         }`}
                       >
                         <Icon size={16} className="flex-shrink-0 w-4 h-4" />
@@ -217,10 +217,10 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer status */}
-      <div className="px-4 py-3 border-t border-g-border/40 mt-auto">
+      <div className="px-4 py-3 bg-[#0a0d10] border-t border-zinc-800/40 mt-auto">
         <Link href="/innstillinger#helse" className="flex items-center gap-2 group">
-          <span className="w-2 h-2 rounded-full bg-g-green flex-shrink-0 pulse-live" />
-          <p className="text-[11px] text-g-muted/50 group-hover:text-g-muted transition-colors tracking-widest uppercase">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0 pulse-live" />
+          <p className="text-[11px] text-zinc-600 group-hover:text-zinc-400 transition-colors tracking-widest uppercase">
             System Online
           </p>
         </Link>
