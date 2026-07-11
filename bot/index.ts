@@ -1296,6 +1296,13 @@ async function sjekkGoals() {
 async function delSocialsSubtilt() {
   const [aktiv, pauseDiscord] = await Promise.all([getAktiv().catch(() => true), getPauseDiscord().catch(() => false)]);
   if (!aktiv || pauseDiscord) return;
+
+  const communitySettings = await getCommunitySettings().catch(() => null);
+  if (communitySettings?.socialsPostAktiv === false) return;
+
+  const intervalMs = (communitySettings?.socialsIntervalTimer ?? 8) * 60 * 60_000;
+  if (_sistePromoPost > 0 && Date.now() - _sistePromoPost < intervalMs) return;
+
   const kanal = await finnChatKanal();
   if (!kanal) return;
 
@@ -1329,12 +1336,14 @@ async function delSocialsSubtilt() {
 
   await discordSend(kanal, { embeds: [embed] }, { trigger: 'socials_promo' });
   addToMemory({ type: 'socials', innhold: 'delt sosiale lenker' });
+  _sistePromoPost = Date.now();
 }
 
 // Roterer mellom: partner → stream → community → partner → ...
 let proaktivRunde = 0;
 let _discordPromoerDenneStream = 0;
 let _discordSistePartnerPromo = 0;
+let _sistePromoPost = 0; // epoch ms of last delSocialsSubtilt send
 
 async function hentBotContext(): Promise<{ jokes: string[]; topics: string[] }> {
   const sbUrl = process.env.SUPABASE_URL;
@@ -1562,6 +1571,8 @@ async function sendProaktivMelding() {
       await sendStreamInfoMelding(chatKanal);
     } else {
       // Community-melding → chat
+      const cm = await getCommunitySettings().catch(() => null);
+      if (cm?.proaktivCommunityAktiv === false) return;
       const chatKanal = await finnChatKanal();
       if (!chatKanal) return;
       const melding = await getProaktivMeldingAsync(process.env.WORKSPACE_ID ?? '');

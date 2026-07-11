@@ -206,6 +206,9 @@ export interface CommunitySettings {
   xpMinMeldingslengde: number;
   rankRoles: RankRoles;
   badgeRoles: BadgeRoles;
+  socialsPostAktiv: boolean;
+  socialsIntervalTimer: number;   // hours between automatic socials posts
+  proaktivCommunityAktiv: boolean;
 }
 
 const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
@@ -221,6 +224,9 @@ const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   xpMinMeldingslengde: 4,
   rankRoles: {},
   badgeRoles: {},
+  socialsPostAktiv: true,
+  socialsIntervalTimer: 8,
+  proaktivCommunityAktiv: true,
 };
 
 let _communitySettingsCache: CommunitySettings | null = null;

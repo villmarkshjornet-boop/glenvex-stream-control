@@ -35,14 +35,54 @@ interface CardEntry {
   metadata?: Record<string, string> | null;
 }
 
+function buildSubCardSvg(displayName: string, twitchUsername: string, tier: string): string {
+  const tierLabel = tier === '3000' ? 'TIER 3' : tier === '2000' ? 'TIER 2' : 'TIER 1';
+  const tierColor = tier === '3000' ? '#FFD700' : tier === '2000' ? '#C0C0C0' : '#9146FF';
+  const twLine = twitchUsername
+    ? `<text x="200" y="342" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#9146FF" font-weight="600">twitch.tv/${twitchUsername}</text>`
+    : '';
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560" viewBox="0 0 400 560">',
+    '<defs>',
+    '<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0%" stop-color="#0D0D1A"/>',
+    '<stop offset="50%" stop-color="#1A0929"/>',
+    '<stop offset="100%" stop-color="#0D0D1A"/>',
+    '</linearGradient>',
+    '<radialGradient id="gl" cx="50%" cy="25%" r="55%">',
+    '<stop offset="0%" stop-color="#9146FF" stop-opacity="0.22"/>',
+    '<stop offset="100%" stop-color="#9146FF" stop-opacity="0"/>',
+    '</radialGradient>',
+    '</defs>',
+    '<rect width="400" height="560" rx="16" fill="url(#bg)" stroke="#9146FF" stroke-width="2"/>',
+    '<rect width="400" height="560" rx="16" fill="url(#gl)"/>',
+    `<text x="200" y="46" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" fill="#9146FF" font-weight="700" letter-spacing="3">GLENVEX COMMUNITY</text>`,
+    `<text x="200" y="74" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" fill="white" font-weight="900" letter-spacing="1">TWITCH SUB</text>`,
+    '<circle cx="200" cy="220" r="64" fill="#1A0929" stroke="rgba(145,70,255,0.5)" stroke-width="2"/>',
+    '<text x="200" y="248" text-anchor="middle" font-size="58">&#11088;</text>',
+    `<text x="200" y="316" text-anchor="middle" font-family="system-ui,sans-serif" font-size="26" fill="white" font-weight="800">${displayName}</text>`,
+    twLine,
+    `<rect x="120" y="380" width="160" height="30" rx="15" fill="none" stroke="${tierColor}" stroke-opacity="0.5"/>`,
+    `<text x="200" y="400" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" fill="${tierColor}" font-weight="700" letter-spacing="2">${tierLabel}</text>`,
+    '<line x1="20" y1="436" x2="380" y2="436" stroke="rgba(145,70,255,0.3)" stroke-width="1"/>',
+    '<text x="28" y="460" font-family="system-ui,sans-serif" font-size="8" fill="#666" letter-spacing="1">RARITY</text>',
+    '<text x="28" y="476" font-family="system-ui,sans-serif" font-size="11" fill="#9146FF" font-weight="700">Sub</text>',
+    '<text x="200" y="460" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#666" letter-spacing="1">TYPE</text>',
+    '<text x="200" y="476" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" fill="white" font-weight="600">Subscriber</text>',
+    `<text x="372" y="460" text-anchor="end" font-family="system-ui,sans-serif" font-size="8" fill="#666" letter-spacing="1">TIER</text>`,
+    `<text x="372" y="476" text-anchor="end" font-family="system-ui,sans-serif" font-size="11" fill="${tierColor}" font-weight="700">${tierLabel}</text>`,
+    '</svg>',
+  ].join('');
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
 function getCardImageUrl(card: { card_type: string; card_image_url: string | null; display_name?: string; metadata?: Record<string, string> | null }): string | null {
-  // Sub cards: always use dynamic endpoint — stored URL may point to stale/broken storage
   if (card.card_type === 'sub') {
     const m = card.metadata ?? {};
-    const displayName    = m.displayName    ?? m.twitchUsername ?? card.display_name ?? 'Subscriber';
+    const displayName    = m.displayName ?? m.twitchUsername ?? card.display_name ?? 'Subscriber';
     const twitchUsername = m.twitchUsername ?? '';
-    const tier           = m.subTier        ?? '1000';
-    return `/api/cards/sub-card-image?displayName=${encodeURIComponent(displayName)}&twitchUsername=${encodeURIComponent(twitchUsername)}&tier=${encodeURIComponent(tier)}`;
+    const tier           = m.subTier ?? '1000';
+    return buildSubCardSvg(displayName, twitchUsername, tier);
   }
   return card.card_image_url;
 }

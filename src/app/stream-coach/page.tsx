@@ -270,6 +270,162 @@ function ViewerRoster({ viewers, topChattters }: { viewers: ViewerEntry[]; topCh
   );
 }
 
+// ── Coach Tips ────────────────────────────────────────────────────────────────
+
+interface CoachTip {
+  id:             string;
+  stream_id:      string;
+  tip_text:       string;
+  tip_category:   string;
+  sort_order:     number;
+  is_executed:    boolean;
+  executed_at:    string | null;
+  outcome:        'positive' | 'negative' | 'pending' | null;
+  metrics_before: Record<string, unknown> | null;
+  metrics_after:  Record<string, unknown> | null;
+  created_at:     string;
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  viewers:   'Seertall',
+  chat:      'Chat',
+  retention: 'Retention',
+  growth:    'Vekst',
+  community: 'Community',
+  general:   'Generelt',
+};
+
+function CoachTips({
+  streamId,
+  score,
+  game,
+  toppInsikt,
+  avgViewers,
+  chatMessages,
+}: {
+  streamId:     string;
+  score?:       { total: number; breakdown: Record<string, number> } | null;
+  game?:        string;
+  toppInsikt?:  string;
+  avgViewers?:  number;
+  chatMessages?: number;
+}) {
+  const [tips, setTips]       = useState<CoachTip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    // First try to load existing tips
+    fetch(`/api/stream-coach/tips?streamId=${encodeURIComponent(streamId)}`)
+      .then(r => r.json())
+      .then(async (d: { tips: CoachTip[] }) => {
+        if (cancelled) return;
+        if (d.tips.length > 0) {
+          setTips(d.tips);
+          setLoading(false);
+          return;
+        }
+        // Generate tips if none exist yet
+        const genRes = await fetch('/api/stream-coach/tips', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ streamId, game, score, toppInsikt, avgViewers, chatMessages }),
+        });
+        const gen: { tips: CoachTip[] } = await genRes.json();
+        if (!cancelled) {
+          setTips(gen.tips ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [streamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function toggleExecuted(tip: CoachTip) {
+    setSaving(s => ({ ...s, [tip.id]: true }));
+    const next = !tip.is_executed;
+    await fetch(`/api/stream-coach/tips/${tip.id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ isExecuted: next }),
+    });
+    setTips(prev => prev.map(t => t.id === tip.id ? { ...t, is_executed: next, executed_at: next ? new Date().toISOString() : null } : t));
+    setSaving(s => ({ ...s, [tip.id]: false }));
+  }
+
+  const outcomeIcon = (tip: CoachTip) => {
+    if (!tip.is_executed) return null;
+    if (tip.outcome === 'positive') return <span className="text-g-green text-xs font-semibold">✓ Slår ut positivt!</span>;
+    if (tip.outcome === 'negative') return <span className="text-red-400 text-xs font-semibold">Ingen tydelig effekt — prøv noe annet</span>;
+    if (tip.outcome === 'pending')  return <span className="text-yellow-400 text-xs">Følger med på effekt...</span>;
+    return <span className="text-g-muted text-xs">Utført — følger opp ved neste stream</span>;
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-g-card border border-g-border rounded-2xl p-5 animate-pulse space-y-3">
+        <div className="h-3 bg-g-border rounded w-1/3" />
+        {[1, 2, 3].map(i => <div key={i} className="h-16 bg-g-border/50 rounded-xl" />)}
+      </div>
+    );
+  }
+
+  if (tips.length === 0) return null;
+
+  return (
+    <div className="bg-g-card border border-yellow-500/20 rounded-2xl p-5">
+      <h2 className="text-xs font-semibold tracking-widest uppercase text-yellow-400 mb-4 pb-3 border-b border-g-border/40">
+        Anbefalte tiltak — 3 konkrete steg
+      </h2>
+      <div className="space-y-3">
+        {tips.map((tip, i) => (
+          <div
+            key={tip.id}
+            className={`flex items-start gap-4 px-4 py-3.5 rounded-xl border transition-all ${
+              tip.is_executed
+                ? 'border-g-green/30 bg-g-green/5'
+                : 'border-g-border bg-g-bg'
+            }`}
+          >
+            <span className="text-yellow-400 font-mono font-bold text-sm flex-shrink-0 mt-0.5">{i + 1}.</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="text-[10px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded bg-g-border text-g-muted">
+                  {CATEGORY_LABELS[tip.tip_category] ?? tip.tip_category}
+                </span>
+              </div>
+              <p className={`text-sm leading-relaxed ${tip.is_executed ? 'text-g-muted line-through' : 'text-g-text'}`}>
+                {tip.tip_text}
+              </p>
+              {tip.is_executed && (
+                <div className="mt-1.5">{outcomeIcon(tip)}</div>
+              )}
+            </div>
+            <button
+              onClick={() => toggleExecuted(tip)}
+              disabled={saving[tip.id]}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                tip.is_executed
+                  ? 'border-g-green/40 bg-g-green/10 text-g-green hover:bg-g-green/20'
+                  : 'border-g-border text-g-muted hover:border-g-green/40 hover:text-g-green hover:bg-g-green/5'
+              } disabled:opacity-50`}
+            >
+              {saving[tip.id] ? '...' : tip.is_executed ? '✓ Utført' : 'Marker utført'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-g-muted/60 mt-3 leading-relaxed">
+        Marker tipsene som utført. Vi følger med på om de gir effekt i neste stream — positive tiltak noteres og gjentas.
+      </p>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function StreamCoachInner() {
@@ -287,10 +443,41 @@ function StreamCoachInner() {
     fetch(url).then(r => r.json()).then((d: CoachReport) => {
       setData(d);
       setLoading(false);
+
+      // Outcome tracking: if we're loading a new stream, check if previous stream's
+      // executed tips need an outcome evaluation based on the new stream's metrics.
+      if (d.history && d.history.length >= 2 && d.selectedStream) {
+        const curIdx  = d.history.findIndex(h => h.id === (streamId ?? d.selectedStream?.id));
+        const prevStream = d.history[curIdx + 1]; // older stream
+        if (prevStream) {
+          evaluatePreviousTips(prevStream.stream_id ?? prevStream.id, d.selectedStream);
+        }
+      }
     }).catch(() => setLoading(false));
   }
 
-  useEffect(() => { load(initialStreamId ?? undefined); }, [initialStreamId]);
+  function evaluatePreviousTips(prevStreamId: string, curStream: StreamSummary) {
+    fetch(`/api/stream-coach/tips?streamId=${encodeURIComponent(prevStreamId)}`)
+      .then(r => r.json())
+      .then((d: { tips: CoachTip[] }) => {
+        const pending = (d.tips ?? []).filter(t => t.is_executed && !t.outcome);
+        for (const tip of pending) {
+          const before = tip.metrics_before as Record<string, number> | null;
+          const prevAvg = Number(before?.avgViewers ?? 0);
+          const curAvg  = curStream.avg_viewers ?? 0;
+          const outcome: 'positive' | 'negative' = curAvg > prevAvg * 1.1 ? 'positive' : 'negative';
+          const metricsAfter = { avgViewers: curAvg, chatMessages: curStream.chat_messages, score: undefined };
+          fetch(`/api/stream-coach/tips/${tip.id}`, {
+            method:  'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ outcome, metricsAfter }),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
+
+  useEffect(() => { load(initialStreamId ?? undefined); }, [initialStreamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectStream(streamId: string) {
     setSelectedId(streamId);
@@ -433,6 +620,18 @@ function StreamCoachInner() {
                     )}
                   </div>
                 </div>
+              )}
+
+              {/* Actionable tips with outcome tracking */}
+              {s && (
+                <CoachTips
+                  streamId={s.stream_id ?? s.id}
+                  score={score}
+                  game={s.game}
+                  toppInsikt={data.analyse?.toppInsikt}
+                  avgViewers={s.avg_viewers}
+                  chatMessages={s.chat_messages}
+                />
               )}
 
               {/* Score breakdown */}

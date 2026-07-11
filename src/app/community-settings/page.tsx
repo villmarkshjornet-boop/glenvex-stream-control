@@ -23,6 +23,9 @@ interface CommunitySettings {
   rewardRoles: RewardRole[];
   xpCooldownSek: number;
   xpMinMeldingslengde: number;
+  socialsPostAktiv: boolean;
+  socialsIntervalTimer: number;
+  proaktivCommunityAktiv: boolean;
 }
 
 const DEFAULTS: CommunitySettings = {
@@ -36,6 +39,9 @@ const DEFAULTS: CommunitySettings = {
   rewardRoles: [],
   xpCooldownSek: 60,
   xpMinMeldingslengde: 4,
+  socialsPostAktiv: true,
+  socialsIntervalTimer: 8,
+  proaktivCommunityAktiv: true,
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -360,6 +366,36 @@ export default function CommunitySettingsPage() {
           max={10}
           unit="poster"
           onChange={v => update('maxBotPostsPerDay', v)}
+        />
+      </div>
+
+      {/* Section: Bot promotions */}
+      <div className="bg-g-card border border-g-border rounded-2xl p-6">
+        <p className="text-xs font-semibold tracking-widest uppercase text-g-muted mb-3">Bot-promotering</p>
+        <p className="text-[11px] text-g-muted mb-4 leading-relaxed">
+          Kontroller hvor ofte boten poster automatiske «Bli med i fellesskapet»-meldinger og sosiale lenker.
+          Skru av eller øk intervallet for å redusere støy.
+        </p>
+        <Toggle
+          label="Sosiale medier-post aktiv"
+          description="Boten poster periodisk en embed med lenker til alle sosiale kanaler."
+          value={settings.socialsPostAktiv}
+          onChange={v => update('socialsPostAktiv', v)}
+        />
+        <NumberInput
+          label="Intervall — sosiale medier"
+          description="Minste antall timer mellom automatiske sosiale-lenke-poster."
+          value={settings.socialsIntervalTimer}
+          min={1}
+          max={168}
+          unit="timer"
+          onChange={v => update('socialsIntervalTimer', v)}
+        />
+        <Toggle
+          label="Proaktiv community-melding aktiv"
+          description="Boten sender automatiske «Bli med»-meldinger i chat-kanalen (annen hver proaktiv-runde)."
+          value={settings.proaktivCommunityAktiv}
+          onChange={v => update('proaktivCommunityAktiv', v)}
         />
       </div>
 
